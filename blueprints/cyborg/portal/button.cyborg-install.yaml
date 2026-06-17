@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/cyborg/new
+          path: /marketplace/openstack-system/cyborg/new
   resourcesRefs:
     items: []

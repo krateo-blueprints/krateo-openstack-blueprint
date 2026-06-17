@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/gnocchi/new
+          path: /marketplace/openstack-system/gnocchi/new
   resourcesRefs:
     items: []

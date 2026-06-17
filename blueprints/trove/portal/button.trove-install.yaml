@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/trove/new
+          path: /marketplace/openstack-system/trove/new
   resourcesRefs:
     items: []

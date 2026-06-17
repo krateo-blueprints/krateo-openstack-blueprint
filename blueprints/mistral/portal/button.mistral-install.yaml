@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/mistral/new
+          path: /marketplace/openstack-system/mistral/new
   resourcesRefs:
     items: []

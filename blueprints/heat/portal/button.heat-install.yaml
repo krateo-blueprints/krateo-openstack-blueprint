@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/heat/new
+          path: /marketplace/openstack-system/heat/new
   resourcesRefs:
     items: []

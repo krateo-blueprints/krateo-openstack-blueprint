@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/skyline/new
+          path: /marketplace/openstack-system/skyline/new
   resourcesRefs:
     items: []

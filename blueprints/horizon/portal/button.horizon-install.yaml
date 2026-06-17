@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/horizon/new
+          path: /marketplace/openstack-system/horizon/new
   resourcesRefs:
     items: []

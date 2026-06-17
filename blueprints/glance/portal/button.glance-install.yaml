@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/glance/new
+          path: /marketplace/openstack-system/glance/new
   resourcesRefs:
     items: []

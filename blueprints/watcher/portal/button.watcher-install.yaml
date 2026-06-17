@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/watcher/new
+          path: /marketplace/openstack-system/watcher/new
   resourcesRefs:
     items: []

@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/aodh/new
+          path: /marketplace/openstack-system/aodh/new
   resourcesRefs:
     items: []

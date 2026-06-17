@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/nova/new
+          path: /marketplace/openstack-system/nova/new
   resourcesRefs:
     items: []
