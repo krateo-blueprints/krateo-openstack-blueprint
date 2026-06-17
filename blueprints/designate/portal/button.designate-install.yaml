@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/designate/new
+          path: /marketplace/openstack-system/designate/new
   resourcesRefs:
     items: []

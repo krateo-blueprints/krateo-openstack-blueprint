@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/blazar/new
+          path: /marketplace/openstack-system/blazar/new
   resourcesRefs:
     items: []

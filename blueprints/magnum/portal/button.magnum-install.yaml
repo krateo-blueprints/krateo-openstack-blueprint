@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/magnum/new
+          path: /marketplace/openstack-system/magnum/new
   resourcesRefs:
     items: []

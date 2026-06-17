@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/swift/new
+          path: /marketplace/openstack-system/swift/new
   resourcesRefs:
     items: []

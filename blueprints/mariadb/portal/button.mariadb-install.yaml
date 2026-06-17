@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/mariadb/new
+          path: /marketplace/openstack-system/mariadb/new
   resourcesRefs:
     items: []

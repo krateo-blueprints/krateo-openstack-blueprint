@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/openvswitch/new
+          path: /marketplace/openstack-system/openvswitch/new
   resourcesRefs:
     items: []

@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/manila/new
+          path: /marketplace/openstack-system/manila/new
   resourcesRefs:
     items: []

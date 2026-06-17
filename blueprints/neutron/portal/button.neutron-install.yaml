@@ -15,6 +15,6 @@ spec:
       navigate:
         - id: install
           type: navigate
-          path: /marketplace/neutron/new
+          path: /marketplace/openstack-system/neutron/new
   resourcesRefs:
     items: []
