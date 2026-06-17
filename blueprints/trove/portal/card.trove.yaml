@@ -18,16 +18,16 @@ spec:
       name: fa-database
       color: grey
     tags:
-      - openstack-system
+      - iaas
+      - openstack
+      - private-cloud
     extra: ''
     items: []
     footer:
       - resourceRefId: trove-install
   widgetDataTemplate:
     - forPath: extra
-      expression: '${ "Ready: " + .ready }'
-    - forPath: tags
-      expression: ${ ["openstack-system", .version] }
+      expression: '${ "Ready: " + .ready + (if .version != "—" then " · v" + .version else "" end) }'
     - forPath: icon
       expression: '${ { name: "fa-database", color: (if .ready == "True" then "green" elif .ready == "False" then "orange" else "grey" end) } }'
   resourcesRefs:
