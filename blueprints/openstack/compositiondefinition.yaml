@@ -6,4 +6,4 @@ metadata:
 spec:
   chart:
     url: oci://ghcr.io/braghettos/charts/openstack
-    version: "0.2.0"
+    version: "0.3.2"

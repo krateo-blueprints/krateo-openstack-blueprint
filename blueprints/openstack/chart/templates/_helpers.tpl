@@ -15,12 +15,20 @@
 {{- end -}}
 {{- end -}}
 
+{{/* The bare composition.krateo.io version (e.g. "v0-3-1") derived from chartVersion
+     (crdgen maps version 0.1.1 -> apiVersion v0-1-1). Single source of truth so
+     osh.apiVersion and osh.crdExists can never drift on which version they mean. */}}
+{{- define "osh.version" -}}
+{{- $top := index . 0 -}}
+{{- printf "v%s" ($top.Values.chartVersion | toString | replace "." "-") -}}
+{{- end -}}
+
 {{/* The composition.krateo.io apiVersion served by the component CRDs, derived
      from chartVersion (crdgen maps version 0.1.1 -> apiVersion v0-1-1). Keeping
      this in one place means a version bump never strands a hardcoded v0-1-0. */}}
 {{- define "osh.apiVersion" -}}
 {{- $top := index . 0 -}}
-{{- printf "composition.krateo.io/v%s" ($top.Values.chartVersion | toString | replace "." "-") -}}
+{{- printf "composition.krateo.io/%s" (include "osh.version" (list $top)) -}}
 {{- end -}}
 
 {{/* Returns "true" if a Composition of <kind>/<name> reports Ready=True. Guarded by
@@ -31,7 +39,7 @@
 {{- define "osh.ready" -}}
 {{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}
 {{- $r := "" -}}
-{{- if eq (include "osh.crdExists" (list $kind)) "true" -}}
+{{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)))) "true" -}}
 {{- $o := lookup (include "osh.apiVersion" (list $top)) $kind $top.Release.Namespace $name -}}
 {{- if $o -}}{{- range ($o.status.conditions | default list) -}}
 {{- if and (eq .type "Ready") (eq (.status | toString) "True") -}}{{- $r = "true" -}}{{- end -}}
@@ -40,13 +48,22 @@
 {{- $r -}}
 {{- end -}}
 
-{{/* Returns "true" if a generated CRD for <kind> in composition.krateo.io exists.
-     Matched by Kind (not a guessed plural), so pluralization can never bite. */}}
+{{/* Returns "true" if a generated CRD for <kind> in composition.krateo.io exists AND
+     serves the target <version> (e.g. "v0-3-1"). Matched by Kind (not a guessed
+     plural), so pluralization can never bite. Version-aware so that during a
+     chart-version bump - when the CRD still only serves the OLD version - the guard
+     stays false instead of green-lighting a CR at a version nothing serves yet
+     (which would 500 the render: "no matches for kind ... ensure CRDs are installed
+     first"). */}}
 {{- define "osh.crdExists" -}}
-{{- $kind := index . 0 -}}
+{{- $kind := index . 0 -}}{{- $version := index . 1 -}}
 {{- $found := "" -}}
 {{- range (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "").items -}}
-{{- if and (eq .spec.group "composition.krateo.io") (eq .spec.names.kind $kind) -}}{{- $found = "true" -}}{{- end -}}
+{{- if and (eq .spec.group "composition.krateo.io") (eq .spec.names.kind $kind) -}}
+{{- range (.spec.versions | default list) -}}
+{{- if and (eq .name $version) .served -}}{{- $found = "true" -}}{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- $found -}}
 {{- end -}}

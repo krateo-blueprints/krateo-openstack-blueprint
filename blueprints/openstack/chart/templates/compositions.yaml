@@ -5,7 +5,7 @@
 {{- $sel := splitList " " (include "osh.selected" (list $)) }}
 {{- range $c := .Values.components }}
 {{- if has $c.name $sel }}
-{{- $crd := include "osh.crdExists" (list $c.kind) }}
+{{- $crd := include "osh.crdExists" (list $c.kind (include "osh.version" (list $))) }}
 {{- $deps := include "osh.depsReady" (list $ $c.deps $.Values.components) }}
 {{- if and (eq $crd "true") (eq $deps "true") }}
 {{- $ov := (index ($.Values.componentValues | default dict) $c.name) | default dict }}
