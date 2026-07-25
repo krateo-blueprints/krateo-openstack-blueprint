@@ -41,7 +41,7 @@
     "chartVersion": {
       "type": "string",
       "title": "Component chart version",
-      "default": "0.3.0"
+      "default": "0.3.1"
     },
     "componentValues": {
       "type": [
@@ -54,7 +54,7 @@
       "properties": {
         "mariadb": {
           "type": "object",
-          "description": "Overrides for the mariadb Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the mariadb Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -95,7 +95,7 @@
         },
         "memcached": {
           "type": "object",
-          "description": "Overrides for the memcached Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the memcached Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -117,7 +117,7 @@
         },
         "keystone": {
           "type": "object",
-          "description": "Overrides for the keystone Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the keystone Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -271,7 +271,7 @@
         },
         "glance": {
           "type": "object",
-          "description": "Overrides for the glance Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the glance Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -312,7 +312,7 @@
         },
         "horizon": {
           "type": "object",
-          "description": "Overrides for the horizon Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the horizon Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -436,7 +436,7 @@
         },
         "rabbitmq": {
           "type": "object",
-          "description": "Overrides for the rabbitmq Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the rabbitmq Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -477,7 +477,7 @@
         },
         "openvswitch": {
           "type": "object",
-          "description": "Overrides for the openvswitch Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the openvswitch Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -499,7 +499,7 @@
         },
         "placement": {
           "type": "object",
-          "description": "Overrides for the placement Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the placement Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -540,7 +540,7 @@
         },
         "libvirt": {
           "type": "object",
-          "description": "Overrides for the libvirt Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the libvirt Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -562,7 +562,7 @@
         },
         "neutron": {
           "type": "object",
-          "description": "Overrides for the neutron Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the neutron Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -601,7 +601,7 @@
         },
         "nova": {
           "type": "object",
-          "description": "Overrides for the nova Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the nova Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -623,7 +623,7 @@
         },
         "ironic": {
           "type": "object",
-          "description": "Overrides for the ironic Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the ironic Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -733,7 +733,7 @@
         },
         "cinder": {
           "type": "object",
-          "description": "Overrides for the cinder Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the cinder Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -788,7 +788,7 @@
         },
         "heat": {
           "type": "object",
-          "description": "Overrides for the heat Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the heat Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -843,7 +843,7 @@
         },
         "barbican": {
           "type": "object",
-          "description": "Overrides for the barbican Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the barbican Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -884,7 +884,7 @@
         },
         "designate": {
           "type": "object",
-          "description": "Overrides for the designate Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the designate Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -960,7 +960,7 @@
         },
         "octavia": {
           "type": "object",
-          "description": "Overrides for the octavia Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the octavia Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1015,7 +1015,7 @@
         },
         "magnum": {
           "type": "object",
-          "description": "Overrides for the magnum Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the magnum Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1063,7 +1063,7 @@
         },
         "manila": {
           "type": "object",
-          "description": "Overrides for the manila Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the manila Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1125,7 +1125,7 @@
         },
         "mistral": {
           "type": "object",
-          "description": "Overrides for the mistral Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the mistral Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1187,7 +1187,7 @@
         },
         "ceilometer": {
           "type": "object",
-          "description": "Overrides for the ceilometer Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the ceilometer Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1235,7 +1235,7 @@
         },
         "aodh": {
           "type": "object",
-          "description": "Overrides for the aodh Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the aodh Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1297,7 +1297,7 @@
         },
         "cloudkitty": {
           "type": "object",
-          "description": "Overrides for the cloudkitty Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the cloudkitty Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1345,7 +1345,7 @@
         },
         "masakari": {
           "type": "object",
-          "description": "Overrides for the masakari Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the masakari Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1393,7 +1393,7 @@
         },
         "trove": {
           "type": "object",
-          "description": "Overrides for the trove Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the trove Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1448,7 +1448,7 @@
         },
         "watcher": {
           "type": "object",
-          "description": "Overrides for the watcher Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the watcher Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1503,7 +1503,7 @@
         },
         "tacker": {
           "type": "object",
-          "description": "Overrides for the tacker Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the tacker Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1551,7 +1551,7 @@
         },
         "cyborg": {
           "type": "object",
-          "description": "Overrides for the cyborg Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the cyborg Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1599,7 +1599,7 @@
         },
         "blazar": {
           "type": "object",
-          "description": "Overrides for the blazar Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the blazar Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1647,7 +1647,7 @@
         },
         "zaqar": {
           "type": "object",
-          "description": "Overrides for the zaqar Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the zaqar Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1688,7 +1688,7 @@
         },
         "freezer": {
           "type": "object",
-          "description": "Overrides for the freezer Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the freezer Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1729,7 +1729,7 @@
         },
         "skyline": {
           "type": "object",
-          "description": "Overrides for the skyline Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the skyline Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1770,7 +1770,7 @@
         },
         "gnocchi": {
           "type": "object",
-          "description": "Overrides for the gnocchi Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the gnocchi Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1811,7 +1811,7 @@
         },
         "swift": {
           "type": "object",
-          "description": "Overrides for the swift Composition (chart 0.3.0), deep-merged into its spec.",
+          "description": "Overrides for the swift Composition (chart 0.3.1), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",

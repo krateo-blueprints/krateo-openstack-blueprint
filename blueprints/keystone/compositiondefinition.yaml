@@ -6,4 +6,4 @@ metadata:
 spec:
   chart:
     url: oci://ghcr.io/braghettos/charts/keystone
-    version: "0.3.0"
+    version: "0.3.1"

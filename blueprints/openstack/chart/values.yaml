@@ -1,7 +1,7 @@
 # Orchestrator configuration.
 # ociRepo: where the per-component blueprint charts are published.
 ociRepo: oci://ghcr.io/braghettos/charts
-chartVersion: "0.3.0"
+chartVersion: "0.3.1"
 # installDefinitions: also register the component CompositionDefinitions.
 installDefinitions: true
 # profile: "identity" (mariadb,memcached,keystone,glance,horizon) or "full" (adds compute).
