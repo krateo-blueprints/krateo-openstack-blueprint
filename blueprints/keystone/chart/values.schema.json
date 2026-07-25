@@ -17,6 +17,18 @@
             "Never"
           ],
           "default": "IfNotPresent"
+        },
+        "tags": {
+          "type": "object",
+          "title": "Image tag overrides",
+          "description": "Override specific component images (e.g. a keystone image that ships mod_auth_openidc for OIDC federation).",
+          "properties": {
+            "keystone_api": {
+              "type": "string",
+              "title": "Keystone API image",
+              "description": "Full image ref for the keystone-api container, e.g. ghcr.io/braghettos/keystone-oidc:2025.1-ubuntu_jammy."
+            }
+          }
         }
       }
     },
@@ -36,6 +48,105 @@
               "default": 1
             }
           }
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "title": "Network",
+      "description": "External exposure of the Keystone API. The OIDC redirect chain runs through the browser, so Keystone must be reachable at a public HTTPS hostname. NodePort is the low-friction path; production fronts it with an ingress/Gateway that terminates TLS.",
+      "properties": {
+        "api": {
+          "type": "object",
+          "title": "API",
+          "properties": {
+            "node_port": {
+              "type": "object",
+              "title": "NodePort",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "title": "Expose the API on a NodePort",
+                  "default": false
+                },
+                "port": {
+                  "type": "integer",
+                  "title": "Keystone API NodePort",
+                  "minimum": 30000,
+                  "maximum": 32767,
+                  "default": 30500
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "conf": {
+      "type": "object",
+      "title": "OpenStack-Helm conf overrides",
+      "description": "OIDC federation overrides merged into the keystone conf tree. NB: this subtree is intentionally shallow-typed with preserve-unknown-fields on the free-form parts (wsgi_keystone, federation) because the upstream OSH conf tree is large and irregular and does not round-trip cleanly through crdgen (see schema-extension-plan.md, crdgen risk).",
+      "properties": {
+        "keystone": {
+          "type": "object",
+          "properties": {
+            "auth": {
+              "type": "object",
+              "properties": {
+                "methods": {
+                  "type": "string",
+                  "title": "Auth methods",
+                  "description": "e.g. password,token,openid"
+                }
+              }
+            },
+            "openid": {
+              "type": "object",
+              "properties": {
+                "remote_id_attribute": {
+                  "type": "string",
+                  "title": "Remote ID attribute",
+                  "description": "Apache env var carrying the token issuer, e.g. HTTP_OIDC_ISS."
+                }
+              }
+            },
+            "federation": {
+              "type": "object",
+              "title": "Federation",
+              "description": "trusted_dashboard[], sso_callback_template, ... (free-form).",
+              "x-kubernetes-preserve-unknown-fields": true
+            },
+            "auto_provisioning": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "title": "JIT auto-provisioning",
+                  "default": false
+                }
+              }
+            }
+          }
+        },
+        "software": {
+          "type": "object",
+          "properties": {
+            "apache2": {
+              "type": "object",
+              "properties": {
+                "a2enmod": {
+                  "type": "array",
+                  "title": "Apache modules to enable",
+                  "items": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "wsgi_keystone": {
+          "type": "string",
+          "title": "Keystone Apache vhost",
+          "description": "Full Apache vhost template (mod_auth_openidc OIDC RP config + protected federation Locations). Helm-templated (uses helm-toolkit endpoint lookups)."
         }
       }
     }
