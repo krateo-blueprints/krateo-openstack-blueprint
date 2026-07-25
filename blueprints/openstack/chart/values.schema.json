@@ -41,7 +41,7 @@
     "chartVersion": {
       "type": "string",
       "title": "Component chart version",
-      "default": "0.2.0"
+      "default": "0.3.0"
     },
     "componentValues": {
       "type": [
@@ -54,7 +54,7 @@
       "properties": {
         "mariadb": {
           "type": "object",
-          "description": "Overrides for the mariadb Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the mariadb Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -95,7 +95,7 @@
         },
         "memcached": {
           "type": "object",
-          "description": "Overrides for the memcached Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the memcached Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -117,7 +117,7 @@
         },
         "keystone": {
           "type": "object",
-          "description": "Overrides for the keystone Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the keystone Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -132,6 +132,18 @@
                     "Never"
                   ],
                   "default": "IfNotPresent"
+                },
+                "tags": {
+                  "type": "object",
+                  "title": "Image tag overrides",
+                  "description": "Override specific component images (e.g. a keystone image that ships mod_auth_openidc for OIDC federation).",
+                  "properties": {
+                    "keystone_api": {
+                      "type": "string",
+                      "title": "Keystone API image",
+                      "description": "Full image ref for the keystone-api container, e.g. ghcr.io/braghettos/keystone-oidc:2025.1-ubuntu_jammy."
+                    }
+                  }
                 }
               }
             },
@@ -153,12 +165,113 @@
                   }
                 }
               }
+            },
+            "network": {
+              "type": "object",
+              "title": "Network",
+              "description": "External exposure of the Keystone API. The OIDC redirect chain runs through the browser, so Keystone must be reachable at a public HTTPS hostname. NodePort is the low-friction path; production fronts it with an ingress/Gateway that terminates TLS.",
+              "properties": {
+                "api": {
+                  "type": "object",
+                  "title": "API",
+                  "properties": {
+                    "node_port": {
+                      "type": "object",
+                      "title": "NodePort",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "title": "Expose the API on a NodePort",
+                          "default": false
+                        },
+                        "port": {
+                          "type": "integer",
+                          "title": "Keystone API NodePort",
+                          "minimum": 30000,
+                          "maximum": 32767,
+                          "default": 30500
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "conf": {
+              "type": "object",
+              "title": "OpenStack-Helm conf overrides",
+              "description": "OIDC federation overrides merged into the keystone conf tree. NB: this subtree is intentionally shallow-typed with preserve-unknown-fields on the free-form parts (wsgi_keystone, federation) because the upstream OSH conf tree is large and irregular and does not round-trip cleanly through crdgen (see schema-extension-plan.md, crdgen risk).",
+              "properties": {
+                "keystone": {
+                  "type": "object",
+                  "properties": {
+                    "auth": {
+                      "type": "object",
+                      "properties": {
+                        "methods": {
+                          "type": "string",
+                          "title": "Auth methods",
+                          "description": "e.g. password,token,openid"
+                        }
+                      }
+                    },
+                    "openid": {
+                      "type": "object",
+                      "properties": {
+                        "remote_id_attribute": {
+                          "type": "string",
+                          "title": "Remote ID attribute",
+                          "description": "Apache env var carrying the token issuer, e.g. HTTP_OIDC_ISS."
+                        }
+                      }
+                    },
+                    "federation": {
+                      "type": "object",
+                      "title": "Federation",
+                      "description": "trusted_dashboard[], sso_callback_template, ... (free-form).",
+                      "x-kubernetes-preserve-unknown-fields": true
+                    },
+                    "auto_provisioning": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "title": "JIT auto-provisioning",
+                          "default": false
+                        }
+                      }
+                    }
+                  }
+                },
+                "software": {
+                  "type": "object",
+                  "properties": {
+                    "apache2": {
+                      "type": "object",
+                      "properties": {
+                        "a2enmod": {
+                          "type": "array",
+                          "title": "Apache modules to enable",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "wsgi_keystone": {
+                  "type": "string",
+                  "title": "Keystone Apache vhost",
+                  "description": "Full Apache vhost template (mod_auth_openidc OIDC RP config + protected federation Locations). Helm-templated (uses helm-toolkit endpoint lookups)."
+                }
+              }
             }
           }
         },
         "glance": {
           "type": "object",
-          "description": "Overrides for the glance Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the glance Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -199,7 +312,7 @@
         },
         "horizon": {
           "type": "object",
-          "description": "Overrides for the horizon Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the horizon Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -290,12 +403,40 @@
                   }
                 }
               }
+            },
+            "conf": {
+              "type": "object",
+              "title": "OpenStack-Helm conf overrides",
+              "description": "Horizon WebSSO overrides. The auth subtree (sso.* + idp_mapping[]) is irregular, so it is carried with preserve-unknown-fields rather than fully typed (see schema-extension-plan.md, crdgen risk).",
+              "properties": {
+                "horizon": {
+                  "type": "object",
+                  "properties": {
+                    "local_settings": {
+                      "type": "object",
+                      "properties": {
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "auth": {
+                              "type": "object",
+                              "title": "Auth / WebSSO",
+                              "description": "sso.enabled, sso.initial_choice, sso.websso_keystone_url, idp_mapping[].",
+                              "x-kubernetes-preserve-unknown-fields": true
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         },
         "rabbitmq": {
           "type": "object",
-          "description": "Overrides for the rabbitmq Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the rabbitmq Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -336,7 +477,7 @@
         },
         "openvswitch": {
           "type": "object",
-          "description": "Overrides for the openvswitch Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the openvswitch Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -358,7 +499,7 @@
         },
         "placement": {
           "type": "object",
-          "description": "Overrides for the placement Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the placement Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -399,7 +540,7 @@
         },
         "libvirt": {
           "type": "object",
-          "description": "Overrides for the libvirt Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the libvirt Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -421,7 +562,7 @@
         },
         "neutron": {
           "type": "object",
-          "description": "Overrides for the neutron Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the neutron Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -460,7 +601,7 @@
         },
         "nova": {
           "type": "object",
-          "description": "Overrides for the nova Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the nova Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -482,7 +623,7 @@
         },
         "ironic": {
           "type": "object",
-          "description": "Overrides for the ironic Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the ironic Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -592,7 +733,7 @@
         },
         "cinder": {
           "type": "object",
-          "description": "Overrides for the cinder Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the cinder Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -647,7 +788,7 @@
         },
         "heat": {
           "type": "object",
-          "description": "Overrides for the heat Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the heat Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -702,7 +843,7 @@
         },
         "barbican": {
           "type": "object",
-          "description": "Overrides for the barbican Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the barbican Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -743,7 +884,7 @@
         },
         "designate": {
           "type": "object",
-          "description": "Overrides for the designate Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the designate Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -819,7 +960,7 @@
         },
         "octavia": {
           "type": "object",
-          "description": "Overrides for the octavia Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the octavia Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -874,7 +1015,7 @@
         },
         "magnum": {
           "type": "object",
-          "description": "Overrides for the magnum Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the magnum Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -922,7 +1063,7 @@
         },
         "manila": {
           "type": "object",
-          "description": "Overrides for the manila Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the manila Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -984,7 +1125,7 @@
         },
         "mistral": {
           "type": "object",
-          "description": "Overrides for the mistral Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the mistral Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1046,7 +1187,7 @@
         },
         "ceilometer": {
           "type": "object",
-          "description": "Overrides for the ceilometer Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the ceilometer Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1094,7 +1235,7 @@
         },
         "aodh": {
           "type": "object",
-          "description": "Overrides for the aodh Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the aodh Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1156,7 +1297,7 @@
         },
         "cloudkitty": {
           "type": "object",
-          "description": "Overrides for the cloudkitty Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the cloudkitty Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1204,7 +1345,7 @@
         },
         "masakari": {
           "type": "object",
-          "description": "Overrides for the masakari Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the masakari Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1252,7 +1393,7 @@
         },
         "trove": {
           "type": "object",
-          "description": "Overrides for the trove Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the trove Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1307,7 +1448,7 @@
         },
         "watcher": {
           "type": "object",
-          "description": "Overrides for the watcher Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the watcher Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1362,7 +1503,7 @@
         },
         "tacker": {
           "type": "object",
-          "description": "Overrides for the tacker Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the tacker Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1410,7 +1551,7 @@
         },
         "cyborg": {
           "type": "object",
-          "description": "Overrides for the cyborg Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the cyborg Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1458,7 +1599,7 @@
         },
         "blazar": {
           "type": "object",
-          "description": "Overrides for the blazar Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the blazar Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1506,7 +1647,7 @@
         },
         "zaqar": {
           "type": "object",
-          "description": "Overrides for the zaqar Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the zaqar Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1547,7 +1688,7 @@
         },
         "freezer": {
           "type": "object",
-          "description": "Overrides for the freezer Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the freezer Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1588,7 +1729,7 @@
         },
         "skyline": {
           "type": "object",
-          "description": "Overrides for the skyline Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the skyline Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1629,7 +1770,7 @@
         },
         "gnocchi": {
           "type": "object",
-          "description": "Overrides for the gnocchi Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the gnocchi Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",
@@ -1670,7 +1811,7 @@
         },
         "swift": {
           "type": "object",
-          "description": "Overrides for the swift Composition (chart 0.2.0), deep-merged into its spec.",
+          "description": "Overrides for the swift Composition (chart 0.3.0), deep-merged into its spec.",
           "properties": {
             "images": {
               "type": "object",

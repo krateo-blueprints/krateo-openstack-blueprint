@@ -91,6 +91,34 @@
           }
         }
       }
+    },
+    "conf": {
+      "type": "object",
+      "title": "OpenStack-Helm conf overrides",
+      "description": "Horizon WebSSO overrides. The auth subtree (sso.* + idp_mapping[]) is irregular, so it is carried with preserve-unknown-fields rather than fully typed (see schema-extension-plan.md, crdgen risk).",
+      "properties": {
+        "horizon": {
+          "type": "object",
+          "properties": {
+            "local_settings": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "properties": {
+                    "auth": {
+                      "type": "object",
+                      "title": "Auth / WebSSO",
+                      "description": "sso.enabled, sso.initial_choice, sso.websso_keystone_url, idp_mapping[].",
+                      "x-kubernetes-preserve-unknown-fields": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
