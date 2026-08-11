@@ -1,0 +1,30 @@
+# krateo-openstack-blueprint — LLM doc index (pinned: 0.3.2)
+# One line per file; regenerate the pin on release. Read files at the tag that matches the
+# running build: a component chart version is CompositionDefinition.spec.chart.version, and the
+# orchestrator's chartVersion default pins the component charts.
+docs/index.md: the map — what the repo is (one blueprint per OpenStack-Helm chart + an orchestrator umbrella) and links to the whole bundle
+docs/overview.md: the design (one blueprint per chart, why not an umbrella chart), the orchestrator readiness gate, the three planes, the service contract
+docs/usage.md: install the orchestrator (profile/enabled) or the per-component blueprints, access OpenStack and Horizon, the one-namespace rule
+docs/configuration.md: the whole Openstack value surface — profile, enabled, componentValues, serviceContract, contractEmitter
+docs/api.md: the CompositionDefinition CRD, the per-component composition Kinds, the Openstack composition schema + serviceContract v1 schema
+docs/examples.md: index of the runnable manifests under examples/
+docs/release.md: how a tag publishes every blueprints/*/chart to GHCR, plus the per-PR lint gate
+docs/log.md: curated history
+docs/quickstart.md: deploy the umbrella, reconfigure a component via spec.componentValues, then install the kagent SME
+docs/contract-emitter.md: the runtime usage/health emission (CronJobs -> ClickHouse) backing the serviceContract declaration
+docs/kolla-ansible-audit-and-helm-plan.md: the upstream kolla-ansible audit that grounds the distribution-layer design
+docs/medium-openstack-as-a-service.md: the narrative write-up, incl. the two determinism fixes for the Krateo CDC path
+examples/identity-profile/README.md: one Openstack Composition (profile identity) rolling out the identity plane in order, with verify steps
+examples/openstack.yaml: a single Openstack orchestrator Composition (profile identity | full, or spec.enabled)
+examples/01-identity.yaml: the identity plane as one Composition per component
+examples/02-compute.yaml: the compute plane per component plus the extended catalog
+# Source (read at the same tag; the docs above are derived from these):
+README.md: the top-level overview + the blueprint table + install recipes
+blueprints/openstack/compositiondefinition.yaml: the orchestrator's own registration (spec.chart.version = the published umbrella chart)
+blueprints/openstack/chart/Chart.yaml: the orchestrator chart — sequences the per-component blueprints
+blueprints/openstack/chart/values.schema.json: the Openstack composition schema (profile/enabled/componentValues/serviceContract/contractEmitter)
+blueprints/keystone/compositiondefinition.yaml: an example per-component registration
+blueprints/keystone/chart/Chart.yaml: an example per-component blueprint chart (vendors the OpenStack-Helm keystone chart + helm-toolkit)
+hack/gen-componentvalues-schema.py: regenerates the umbrella componentValues schema from the component schemas (CI enforces it is in sync)
+.github/workflows/release-tag.yaml: packages every blueprints/*/chart and pushes each to GHCR on a semver tag
+.github/workflows/lint.yaml: the per-PR gate — determinism, hook-free, schema-in-sync, emitter conformance, lint-docs

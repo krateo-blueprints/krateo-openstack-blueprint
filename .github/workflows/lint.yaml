@@ -6,6 +6,9 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  lint-docs:
+    uses: krateo-platformops/.github/.github/workflows/lint-docs.yaml@main
+
   helm-lint:
     runs-on: ubuntu-latest
     steps:

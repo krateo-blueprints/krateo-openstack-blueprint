@@ -1,6 +1,10 @@
 ---
-title: kolla-ansible exhaustive audit and Helm+Krateo distribution-layer plan
-source: multi-agent audit of openstack/kolla-ansible (74 roles + 4 subsystems)
+type: Architecture
+title: krateo-openstack-blueprint — kolla-ansible audit and Helm+Krateo distribution-layer plan
+description: The exhaustive multi-agent audit of openstack/kolla-ansible (74 roles + 4 subsystems) that grounds the distribution-layer design of these blueprints.
+resource: oci://ghcr.io/krateo-blueprints/charts/openstack
+tags: [openstack, kolla-ansible, audit, architecture, distribution]
+timestamp: 2026-08-11T00:00:00Z
 ---
 
 > Provenance: synthesized from 73 per-role config-derivation contracts + 4 cross-cutting
