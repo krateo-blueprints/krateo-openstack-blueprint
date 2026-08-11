@@ -1,3 +1,12 @@
+---
+type: Architecture
+title: krateo-openstack-blueprint — OpenStack-as-a-Service with Krateo
+description: The narrative write-up of packaging the OpenStack-Helm stack as Krateo blueprints — one Composition rolls out a whole cloud — including the two determinism fixes required for the Krateo CDC path.
+resource: oci://ghcr.io/krateo-blueprints/charts/openstack
+tags: [openstack, narrative, architecture, cdc, determinism]
+timestamp: 2026-08-11T00:00:00Z
+---
+
 ![Krateo loves OpenStack](krateo-loves-openstack.png)
 
 # OpenStack-as-a-Service with Krateo — one Composition, one cloud

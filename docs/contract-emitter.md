@@ -1,3 +1,12 @@
+---
+type: Architecture
+title: krateo-openstack-blueprint — contract emitter
+description: The runtime side of the serviceContract usage/health declaration — CronJobs that poll the OpenStack APIs on the declared intervals and write normalized UsageRecord / health rows to ClickHouse.
+resource: oci://ghcr.io/krateo-blueprints/charts/openstack
+tags: [openstack, contract-emitter, usage, health, clickhouse]
+timestamp: 2026-08-11T00:00:00Z
+---
+
 # Contract emitter — runtime usage & health emission
 
 The umbrella chart's `serviceContract` stanza *declares* what this service

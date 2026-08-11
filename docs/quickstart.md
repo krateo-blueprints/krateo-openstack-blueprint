@@ -1,3 +1,12 @@
+---
+type: Runbook
+title: krateo-openstack-blueprint — quickstart
+description: The happy path — deploy the Openstack umbrella Composition, reconfigure a component via spec.componentValues, then optionally install the openstack-blueprint-expert kagent SME.
+resource: oci://ghcr.io/krateo-blueprints/charts/openstack
+tags: [openstack, quickstart, orchestrator, kagent]
+timestamp: 2026-08-11T00:00:00Z
+---
+
 # Quickstart — deploy the umbrella, then install the kagent SME
 
 Stand up a whole OpenStack install from **one** `Openstack` Composition (the
