@@ -5,5 +5,5 @@ metadata:
   namespace: openstack-system
 spec:
   chart:
-    url: oci://ghcr.io/braghettos/charts/keystone
+    url: oci://ghcr.io/krateo-blueprints/charts/keystone
     version: "0.3.1"

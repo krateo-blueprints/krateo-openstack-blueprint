@@ -1,6 +1,6 @@
 # Orchestrator configuration.
 # ociRepo: where the per-component blueprint charts are published.
-ociRepo: oci://ghcr.io/braghettos/charts
+ociRepo: oci://ghcr.io/krateo-blueprints/charts
 chartVersion: "0.3.2"
 # installDefinitions: also register the component CompositionDefinitions.
 installDefinitions: true

@@ -17,7 +17,7 @@ home: https://krateo.io
 icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
 keywords: [openstack, orchestrator, umbrella]
 sources:
-  - https://github.com/braghettos/krateo-openstack-blueprint
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint
 annotations:
   krateo.io/category: application
   krateo.io/maturity: stable

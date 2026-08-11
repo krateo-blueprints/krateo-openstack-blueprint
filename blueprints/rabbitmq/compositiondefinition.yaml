@@ -5,5 +5,5 @@ metadata:
   namespace: openstack-system
 spec:
   chart:
-    url: oci://ghcr.io/braghettos/charts/rabbitmq
+    url: oci://ghcr.io/krateo-blueprints/charts/rabbitmq
     version: "0.2.0"

@@ -108,7 +108,7 @@ curated `values.schema.json` drives each Composition CRD.
   Keystone `baremetal` catalog registration come up; **actually provisioning a node requires real
   hardware** — a node on the provisioning L2 with the PXE NIC (default `ironic-pxe`) labelled
   `openstack-control-plane=enabled`, plus BMCs. Pairs with the
-  [`openstack-ironic-operator-kog`](https://github.com/braghettos/openstack-ironic-operator-kog) KOG
+  [`openstack-ironic-operator-kog`](https://github.com/krateo-blueprints/openstack-ironic-operator-kog) KOG
   operator, which drives the Ironic API to enrol/provision nodes as Kubernetes CRs.
 
 ## Install
@@ -196,5 +196,5 @@ kubectl -n openstack run osclient --rm -it --restart=Never \
 
 `.github/workflows/release-tag.yaml` packages every `blueprints/*/chart` and pushes each to GHCR
 on a semver tag (`git tag 0.1.0 && git push origin 0.1.0` →
-`oci://ghcr.io/braghettos/charts/<component>:0.1.0`). `.github/workflows/lint.yaml`
+`oci://ghcr.io/krateo-blueprints/charts/<component>:0.1.0`). `.github/workflows/lint.yaml`
 runs `helm lint` + `helm template` on every chart per PR.

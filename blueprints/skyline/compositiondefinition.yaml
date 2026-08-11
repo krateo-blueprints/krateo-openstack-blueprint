@@ -5,5 +5,5 @@ metadata:
   namespace: openstack-system
 spec:
   chart:
-    url: oci://ghcr.io/braghettos/charts/skyline
+    url: oci://ghcr.io/krateo-blueprints/charts/skyline
     version: "0.2.0"
