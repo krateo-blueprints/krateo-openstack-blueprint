@@ -1,11 +1,12 @@
+# Packages every chart in this repo and publishes each to the GitHub Container Registry as an OCI
+# Helm artifact on every semver tag. Shape-agnostic: it discovers charts by locating each Chart.yaml
+# (skipping vendored subcharts under charts/), so it works regardless of the repo's directory layout.
+#
+# Charts opt into versioning with the CHART_VERSION placeholder in Chart.yaml, which the git tag
+# replaces at publish time. Pushing tag "0.1.0" publishes each chart <name> as:
+#   oci://ghcr.io/<owner>/charts/<name>:0.1.0
 name: release-tag
 
-# Packages every per-component blueprint chart under blueprints/*/chart and
-# publishes each to the GitHub Container Registry as an OCI Helm artifact on every
-# semver tag.
-#
-# Pushing tag "0.1.0" publishes, for each component:
-#   oci://ghcr.io/<owner>/charts/openstack-<component>:0.1.0
 on:
   push:
     tags: ["[0-9]+.[0-9]+.[0-9]+"]
@@ -34,12 +35,18 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
 
-      - name: Package and push each blueprint chart
+      - name: Package and push every chart
         run: |
-          for d in blueprints/*/chart; do
-            sed -i "s/CHART_VERSION/${VERSION}/g" "$d/Chart.yaml"
-            name=$(grep -E '^name:' "$d/Chart.yaml" | awk '{print $2}')
-            helm package "$d" --destination .
+          set -euo pipefail
+          find . -type f -name Chart.yaml -not -path '*/charts/*' -print0 | while IFS= read -r -d '' cf; do
+            dir=$(dirname "$cf")
+            name=$(awk '/^name:/{print $2; exit}' "$cf")
+            echo "::group::${name} (${dir})"
+            # Stamp the CHART_VERSION placeholder, and pin the package version to the tag either way.
+            sed -i "s/CHART_VERSION/${VERSION}/g" "$cf"
+            helm dependency update "$dir" 2>/dev/null || true
+            helm package "$dir" --version "${VERSION}" --destination .
             helm push "${name}-${VERSION}.tgz" "${OCI_REPO}"
             echo "Published ${OCI_REPO}/${name}:${VERSION}"
+            echo "::endgroup::"
           done
