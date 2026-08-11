@@ -8,7 +8,7 @@ is strictly typed against the component's REAL Composition schema (a component c
 values ARE its Composition spec). `required` is stripped recursively because
 componentValues is a PARTIAL override (a deep-merge), not a full values document.
 
-Adapted from braghettos/installer hack/gen-componentvalues-schema.py. Difference: this
+Adapted from krateo-blueprints/installer hack/gen-componentvalues-schema.py. Difference: this
 repo VENDORS the component charts, so each schema is read from blueprints/<name>/chart/
 (authoritative, offline) rather than `helm pull`ed; the pinned version is the single
 umbrella `chartVersion`. Re-run on every release / whenever a component schema changes.
