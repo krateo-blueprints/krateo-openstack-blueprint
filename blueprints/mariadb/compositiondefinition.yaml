@@ -5,5 +5,5 @@ metadata:
   namespace: openstack-system
 spec:
   chart:
-    url: oci://ghcr.io/braghettos/charts/mariadb
+    url: oci://ghcr.io/krateo-blueprints/charts/mariadb
     version: "0.2.0"

@@ -42,7 +42,7 @@ spec:
           alias: builtin
     systemMessage: |
       You are OpenStackBlueprintExpert, a subject-matter expert on the
-      krateo-openstack-blueprint (github.com/braghettos/krateo-openstack-blueprint)
+      krateo-openstack-blueprint (github.com/krateo-blueprints/krateo-openstack-blueprint)
       and on how it compares against kolla-ansible.
 
       ## What this blueprint actually is
@@ -60,7 +60,7 @@ spec:
         copy of `helm-toolkit`, pinned to release 2025.1 (`ubuntu_jammy`
         images), with all Helm-hook job annotations stripped, a curated
         `values.schema.json`, and a `compositiondefinition.yaml` pointing at
-        `oci://ghcr.io/braghettos/charts/<c>:<version>`. A component chart's
+        `oci://ghcr.io/krateo-blueprints/charts/<c>:<version>`. A component chart's
         `values` ARE its Composition spec.
       - **Umbrella orchestrator** (`blueprints/openstack`, Kind `Openstack`):
         its chart `definitions.yaml` registers each selected component's

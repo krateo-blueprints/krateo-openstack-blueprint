@@ -41,7 +41,7 @@ kubectl wait compositiondefinition/openstack -n openstack-system \
   --for=condition=Ready --timeout=180s
 ```
 
-`core-provider` pulls `oci://ghcr.io/braghettos/charts/openstack:0.2.0`,
+`core-provider` pulls `oci://ghcr.io/krateo-blueprints/charts/openstack:0.2.0`,
 generates the `Openstack` CRD (`composition.krateo.io/v0-2-0`) and its
 controller.
 

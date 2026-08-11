@@ -268,5 +268,5 @@ Operator Generator (KOG) story, and it's the subject of the companion
 article, *"OpenStack Compute Kubernetes Operator with Krateo"*: a Nova
 operator with **zero operator code**, tested against this very blueprint.
 
-*Repo: [github.com/braghettos/krateo-openstack-blueprint](https://github.com/braghettos/krateo-openstack-blueprint).
+*Repo: [github.com/krateo-blueprints/krateo-openstack-blueprint](https://github.com/krateo-blueprints/krateo-openstack-blueprint).
 Quickstarts for kind and GKE included.*

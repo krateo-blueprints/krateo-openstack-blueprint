@@ -5,5 +5,5 @@ metadata:
   namespace: openstack-system
 spec:
   chart:
-    url: oci://ghcr.io/braghettos/charts/memcached
+    url: oci://ghcr.io/krateo-blueprints/charts/memcached
     version: "0.2.0"

@@ -36,7 +36,7 @@
       "type": "string",
       "title": "OCI chart repository",
       "description": "Registry path holding the per-component blueprint charts (openstack-<component>).",
-      "default": "oci://ghcr.io/braghettos/charts"
+      "default": "oci://ghcr.io/krateo-blueprints/charts"
     },
     "chartVersion": {
       "type": "string",

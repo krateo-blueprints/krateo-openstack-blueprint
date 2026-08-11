@@ -5,5 +5,5 @@ metadata:
   namespace: openstack-system
 spec:
   chart:
-    url: oci://ghcr.io/braghettos/charts/libvirt
+    url: oci://ghcr.io/krateo-blueprints/charts/libvirt
     version: "0.2.0"
