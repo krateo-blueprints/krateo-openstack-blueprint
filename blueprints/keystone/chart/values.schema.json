@@ -26,7 +26,7 @@
             "keystone_api": {
               "type": "string",
               "title": "Keystone API image",
-              "description": "Full image ref for the keystone-api container, e.g. ghcr.io/braghettos/keystone-oidc:2025.1-ubuntu_jammy."
+              "description": "Full image ref for the keystone-api container, e.g. ghcr.io/krateo-blueprints/keystone-oidc:2025.1-ubuntu_jammy."
             }
           }
         }
