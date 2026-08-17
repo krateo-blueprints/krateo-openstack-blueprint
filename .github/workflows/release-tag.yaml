@@ -44,6 +44,17 @@ jobs:
             echo "::group::${name} (${dir})"
             # Stamp the CHART_VERSION placeholder, and pin the package version to the tag either way.
             sed -i "s/CHART_VERSION/${VERSION}/g" "$cf"
+            # Also stamp values.yaml and values.schema.json. The openstack umbrella references its
+            # OWN version there to pull its component charts, and the schema default becomes the
+            # generated CRD's default — so a literal left unstamped makes every component 404 while
+            # the composition still reports Ready=True. Harmless where the placeholder is absent.
+            # `if` rather than `[ -f ] && ...`: under `set -e` a false test would abort the
+            # whole release for any chart that simply has no values.schema.json.
+            for extra in "$dir/values.yaml" "$dir/values.schema.json"; do
+              if [ -f "$extra" ]; then
+                sed -i "s/CHART_VERSION/${VERSION}/g" "$extra"
+              fi
+            done
             helm dependency update "$dir" 2>/dev/null || true
             helm package "$dir" --version "${VERSION}" --destination .
             helm push "${name}-${VERSION}.tgz" "${OCI_REPO}"
