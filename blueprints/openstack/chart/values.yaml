@@ -1,7 +1,10 @@
 # Orchestrator configuration.
 # ociRepo: where the per-component blueprint charts are published.
 ociRepo: oci://ghcr.io/krateo-blueprints/charts
-chartVersion: "0.3.2"
+# Substituted from the git tag by release-tag.yaml, exactly like Chart.yaml. This is the
+# umbrella's SELF-reference: it pulls its own component charts at this version, so a
+# hand-maintained literal drifts from the tag and every component silently 404s.
+chartVersion: "CHART_VERSION"
 # installDefinitions: also register the component CompositionDefinitions.
 installDefinitions: true
 # profile: "identity" (mariadb,memcached,keystone,glance,horizon) or "full" (adds compute).
