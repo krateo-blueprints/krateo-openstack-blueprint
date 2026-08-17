@@ -758,8 +758,20 @@ manifests:
   certificates: false
   configmap_bin: true
   configmap_etc: true
-  cron_credential_rotate: true
-  cron_fernet_rotate: true
+  # Disabled deliberately, for two independent reasons.
+  # 1. Correctness: this stack provisions fernet keys ONCE (csso-keystone-fernet) and
+  #    must not churn them. A rotation CronJob wiping/rotating fernet keys has already
+  #    caused Keystone to return 500 on every token request in this deployment.
+  # 2. Readiness: a CronJob has no readiness and these two never fire on a fresh child
+  #    (schedules 0 */12 * * * and 0 0 1 * *). The composition counts them as unready
+  #    children, so the keystone Composition never reaches Ready=True — and the
+  #    openstack umbrella renders a component only once its dependencies are Ready.
+  #    Result: Glance and Horizon were never created at all. Observed live 2026-08-17
+  #    as "2 of 52 managed children are not ready", with every workload and Job healthy.
+  # Re-enable only alongside a readiness model that does not treat a not-yet-fired
+  # CronJob as unready, and a fernet strategy that tolerates rotation.
+  cron_credential_rotate: false
+  cron_fernet_rotate: false
   deployment_api: true
   ingress_api: true
   job_bootstrap: true
