@@ -1,0 +1,22 @@
+# Resolve every chart and image reference against its registry — SCHEDULE-ONLY.
+#
+# This repo has hundreds of image references (vendored upstream OpenStack images), so
+# resolving them all on every PR would be slow and rate-limit-prone. Instead it runs weekly
+# and on demand: a report that catches a pin drifting to a deleted/absent tag without gating
+# every change. Same check as the per-PR preflight in smaller repos; different trigger.
+name: preflight-refs
+on:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Resolve every chart and image reference
+        run: python3 hack/preflight-refs.py .

@@ -6,4 +6,4 @@ metadata:
 spec:
   chart:
     url: oci://ghcr.io/krateo-blueprints/charts/keystone
-    version: "0.3.1"
+    version: CHART_VERSION
