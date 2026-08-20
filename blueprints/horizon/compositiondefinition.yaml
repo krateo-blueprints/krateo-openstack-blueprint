@@ -6,4 +6,4 @@ metadata:
 spec:
   chart:
     url: oci://ghcr.io/krateo-blueprints/charts/horizon
-    version: "0.3.0"
+    version: CHART_VERSION

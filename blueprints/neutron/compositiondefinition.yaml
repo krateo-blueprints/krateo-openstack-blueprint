@@ -6,4 +6,4 @@ metadata:
 spec:
   chart:
     url: oci://ghcr.io/krateo-blueprints/charts/neutron
-    version: "0.2.0"
+    version: CHART_VERSION
