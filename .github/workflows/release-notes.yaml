@@ -27,6 +27,14 @@ jobs:
     permissions:
       contents: write # the release body and the CHANGELOG commit
       id-token: write # claude-code-action's GitHub App auth; the reusable cannot grant itself this
-    secrets: inherit  # CLAUDE_CODE_OAUTH_TOKEN, and the optional Slack/feed credentials
+    # EXPLICIT, NOT `inherit`. `secrets: inherit` carries nothing across an ORGANISATION
+    # boundary, and this reusable lives in krateo-platformops while this repo does not. The
+    # symptom was silent: HAVE_CRED evaluated false, the job skipped every step and still
+    # reported success, so three orgs looked identical and only one was working. Named
+    # passing reads this org's own secrets, which is what crosses.
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      RELEASE_FEED_TOKEN: ${{ secrets.RELEASE_FEED_TOKEN }}
+      SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
     with:
       tag: ${{ github.event.inputs.tag || '' }}
