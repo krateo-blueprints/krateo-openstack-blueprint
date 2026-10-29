@@ -1,17 +1,38 @@
 {{- /*
-Capabilities with enforcement=abac additionally render a Kyverno
-ClusterPolicy carrying the declared CEL rule (RBAC grants the verb; the
-policy enforces the attribute/conditional part at admission). Rendered only
-when Kyverno is installed so the chart stays installable without it.
+Capabilities with enforcement=abac carry a CEL rule that RBAC cannot express: RBAC authorizes
+on verb + resource and never sees the object's contents, so a condition like "profile=full
+requires an approval annotation" has to be enforced at admission.
+
+Rendered as a built-in ValidatingAdmissionPolicy rather than a Kyverno ClusterPolicy. The rule
+is already plain CEL, and admissionregistration.k8s.io/v1 is a core API (GA since 1.30), so:
+
+  - no third-party dependency, and nothing to install before the guard works
+  - the guard CANNOT silently disappear. This file previously opened with
+    `{{- if .Capabilities.APIVersions.Has "kyverno.io/v1" }}`, so on a cluster without Kyverno
+    it rendered NOTHING -- a security guard that failed open, with no signal that it was absent
+  - kyverno.io/v1 ClusterPolicy is deprecated; this avoids a migration rather than performing one
+
+matchConstraints is derived from the capability's own `rules` (apiGroups/resources/verbs) rather
+than from `abac.match.kinds`, because ValidatingAdmissionPolicy matches on plural resources and
+the rules already carry them -- no Kind-to-plural guessing.
 */ -}}
-{{- if .Capabilities.APIVersions.Has "kyverno.io/v1" }}
 {{- range .Values.serviceContract.capabilities }}
 {{- if eq .enforcement "abac" }}
+{{- $name := printf "%s-%s" $.Values.serviceContract.service.name .name }}
+{{- $ops := list }}
+{{- range .rules }}
+  {{- range .verbs }}
+    {{- if eq . "create" }}{{- $ops = append $ops "CREATE" }}
+    {{- else if or (eq . "update") (eq . "patch") }}{{- $ops = append $ops "UPDATE" }}
+    {{- else if eq . "delete" }}{{- $ops = append $ops "DELETE" }}
+    {{- end }}
+  {{- end }}
+{{- end }}
 ---
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
 metadata:
-  name: {{ printf "%s-%s" $.Values.serviceContract.service.name .name }}
+  name: {{ $name }}
   labels:
     krateo.io/capability: "true"
     app.kubernetes.io/name: {{ $.Values.serviceContract.service.name }}
@@ -20,22 +41,38 @@ metadata:
     krateo.io/title: {{ .title | quote }}
     krateo.io/enforcement: {{ .enforcement | quote }}
 spec:
-  validationFailureAction: Enforce
-  background: false
-  rules:
-    - name: {{ .name }}
-      match:
-        any:
-          - resources:
-              kinds:
-                {{- toYaml .abac.match.kinds | nindent 16 }}
-      validate:
-        cel:
-          expressions:
-            - expression: {{ .abac.celExpression | quote }}
-              {{- with .abac.message }}
-              message: {{ . | quote }}
-              {{- end }}
-{{- end }}
+  # Fail: an evaluation error denies the request. The point of this guard is that it cannot be
+  # absent, so it must not be bypassable by making it error either.
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      {{- range .rules }}
+      - apiGroups:
+          {{- toYaml .apiGroups | nindent 10 }}
+        apiVersions:
+          - "*"
+        operations:
+          {{- toYaml ($ops | uniq | sortAlpha) | nindent 10 }}
+        resources:
+          {{- toYaml .resources | nindent 10 }}
+      {{- end }}
+  validations:
+    - expression: {{ .abac.celExpression | quote }}
+      {{- with .abac.message }}
+      message: {{ . | quote }}
+      {{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    krateo.io/capability: "true"
+    app.kubernetes.io/name: {{ $.Values.serviceContract.service.name }}
+    app.kubernetes.io/managed-by: {{ $.Release.Service }}
+spec:
+  policyName: {{ $name }}
+  validationActions:
+    - Deny
 {{- end }}
 {{- end }}
