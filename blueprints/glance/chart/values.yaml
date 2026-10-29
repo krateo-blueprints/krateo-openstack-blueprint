@@ -1,6 +1,24 @@
-# Vendored from opendev.org/openstack/openstack-helm at 2026.2.0,
-# with this repo's policy overrides re-applied. Image pins come from upstream.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Default values for glance.
+# This is a YAML-formatted file.
+# Declare name/value pairs to be passed into your templates.
+# name: value
+
+# radosgw, rbd, swift or pvc
+---
 storage: pvc
+
 labels:
   api:
     node_selector_key: openstack-control-plane
@@ -11,7 +29,9 @@ labels:
   test:
     node_selector_key: openstack-control-plane
     node_selector_value: enabled
+
 release_group: null
+
 images:
   tags:
     test: docker.io/xrally/xrally-openstack:2.0.0
@@ -25,15 +45,17 @@ images:
     ks_endpoints: quay.io/airshipit/openstack-client:2026.2-ubuntu_resolute
     rabbit_init: docker.io/rabbitmq:4.3.5-management
     glance_api: quay.io/airshipit/glance:2026.2-ubuntu_resolute
+    # Bootstrap image requires curl
     bootstrap: quay.io/airshipit/openstack-client:2026.2-ubuntu_resolute
     dep_check: quay.io/airshipit/kubernetes-entrypoint:latest-ubuntu_noble
     image_repo_sync: docker.io/docker:17.07.0
-  pull_policy: IfNotPresent
+  pull_policy: "IfNotPresent"
   local_registry:
     active: false
     exclude:
-    - dep_check
-    - image_repo_sync
+      - dep_check
+      - image_repo_sync
+
 bootstrap:
   enabled: true
   ks_user: admin
@@ -42,24 +64,30 @@ bootstrap:
     images:
       cirros:
         id: null
-        name: Cirros 0.6.2 64-bit
-        source_url: http://download.cirros-cloud.net/0.6.2/
-        image_file: cirros-0.6.2-x86_64-disk.img
+        name: "Cirros 0.6.2 64-bit"
+        source_url: "http://download.cirros-cloud.net/0.6.2/"
+        image_file: "cirros-0.6.2-x86_64-disk.img"
         min_disk: 1
         image_type: qcow2
         container_format: bare
         private: true
         properties:
-          os_distro: cirros
+          # NOTE: If you want to restrict hypervisor type for this image,
+          # uncomment this and write specific hypervisor type.
+          # hypervisor_type: "qemu"
+          os_distro: "cirros"
+
 ceph_client:
   configmap: ceph-etc
   user_secret_name: pvc-ceph-client-key
+
 network_policy:
   glance:
     ingress:
-    - {}
+      - {}
     egress:
-    - {}
+      - {}
+
 conf:
   software:
     rbd:
@@ -68,29 +96,29 @@ conf:
     run_tempest: false
     tests:
       GlanceImages.create_and_delete_image:
-      - args:
-          container_format: bare
-          disk_format: qcow2
-          image_location: http://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args:
+            container_format: bare
+            disk_format: qcow2
+            image_location: http://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       GlanceImages.create_and_list_image:
-      - args:
-          container_format: bare
-          disk_format: qcow2
-          image_location: http://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args:
+            container_format: bare
+            disk_format: qcow2
+            image_location: http://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
   ceph:
     monitors: []
     admin_keyring: null
@@ -168,108 +196,77 @@ conf:
     filter:http_proxy_to_wsgi:
       paste.filter_factory: oslo_middleware:HTTPProxyToWSGI.factory
   policy: {}
-  glance_sudoers: '# This sudoers file supports rootwrap for both Kolla and LOCI Images.
-
+  glance_sudoers: |
+    # This sudoers file supports rootwrap for both Kolla and LOCI Images.
     Defaults !requiretty
-
     Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:/var/lib/openstack/bin:/var/lib/kolla/venv/bin"
-
     glance ALL = (root) NOPASSWD: /var/lib/kolla/venv/bin/glance-rootwrap /etc/glance/rootwrap.conf *, /var/lib/openstack/bin/glance-rootwrap /etc/glance/rootwrap.conf *
-
-    '
-  rootwrap: '# Configuration for glance-rootwrap
-
+  rootwrap: |
+    # Configuration for glance-rootwrap
     # This file should be owned by (and only-writable by) the root user
 
-
     [DEFAULT]
-
-    # List of directories to load filter definitions from (separated by '','').
-
+    # List of directories to load filter definitions from (separated by ',').
     # These directories MUST all be only writeable by root !
-
     filters_path=/etc/glance/rootwrap.d,/usr/share/glance/rootwrap
 
-
     # List of directories to search executables in, in case filters do not
-
-    # explicitely specify a full path (separated by '','')
-
+    # explicitely specify a full path (separated by ',')
     # If not specified, defaults to system PATH environment variable.
-
     # These directories MUST all be only writeable by root !
-
     exec_dirs=/sbin,/usr/sbin,/bin,/usr/bin,/usr/local/bin,/usr/local/sbin,/var/lib/openstack/bin,/var/lib/kolla/venv/bin
 
-
     # Enable logging to syslog
-
     # Default value is False
-
     use_syslog=False
 
-
     # Which syslog facility to use.
-
     # Valid values include auth, authpriv, syslog, local0, local1...
-
-    # Default value is ''syslog''
-
+    # Default value is 'syslog'
     syslog_log_facility=syslog
 
-
     # Which messages to log.
-
     # INFO means log all usage
-
     # ERROR means only log unsuccessful attempts
-
     syslog_log_level=ERROR
-
-    '
   rootwrap_filters:
     glance_cinder_store:
       pods:
-      - api
-      content: '# glance-rootwrap command filters for glance cinder store
-
+        - api
+      content: |
+        # glance-rootwrap command filters for glance cinder store
         # This file should be owned by (and only-writable by) the root user
 
-
         [Filters]
-
         # cinder store driver
-
         disk_chown: RegExpFilter, chown, root, chown, \d+, /dev/(?!.*/\.\.).*
 
-
         # os-brick library commands
-
         # os_brick.privileged.run_as_root oslo.privsep context
-
         # This line ties the superuser privs with the config files, context name,
-
         # and (implicitly) the actual python code invoked.
-
         privsep-rootwrap: RegExpFilter, privsep-helper, root, privsep-helper, --config-file, /etc/(?!\.\.).*, --privsep_context, os_brick.privileged.default, --privsep_sock_path, /tmp/.*
 
-
         chown: CommandFilter, chown, root
-
         mount: CommandFilter, mount, root
-
         umount: CommandFilter, umount, root
-
-        '
   glance:
     DEFAULT:
       log_config_append: /etc/glance/logging.conf
+      # NOTE(portdirect): the bind port should not be defined, and is manipulated
+      # via the endpoints section.
       bind_port: null
+      # Also the number of glance-api uWSGI processes, each serving one
+      # request at a time. Image transfers hold a process for as long as
+      # they last, so one process makes every other request wait behind
+      # them.
       workers: 2
       enable_v1_api: false
     oslo_middleware:
       enable_proxy_headers_parsing: true
     barbican:
+      # NOTE: auth_endpoint and barbican_region_name are populated from
+      # endpoints.identity when empty
       auth_endpoint: null
       barbican_endpoint_type: internal
       barbican_region_name: null
@@ -281,6 +278,9 @@ conf:
       memcache_security_strategy: ENCRYPT
       service_type: image
     glance_store:
+      # Since 2024.1 this section must contain the only key 'default_backend'.
+      # Other keys should be defined in the corresponding per-backend sections.
+      # This is for backward compatibility.
       filesystem_store_datadir: /var/lib/glance/images
       cinder_catalog_info: volumev3::internalURL
       rbd_store_chunk_size: 8
@@ -296,6 +296,9 @@ conf:
       swift_store_endpoint_type: internalURL
     file:
       filesystem_store_datadir: /var/lib/glance/images
+    # These two sections os_glance_tasks_store and os_glance_staging_store
+    # are mandatory. Glance will be unable to delete images from if these
+    # two are not properly configured.
     os_glance_tasks_store:
       filesystem_store_datadir: /var/lib/glance/tmp/os_glance_tasks_store
     os_glance_staging_store:
@@ -317,14 +320,24 @@ conf:
       flavor: keystone
     database:
       max_retries: -1
-      connection: ''
+      # -- Database connection URI. When empty the URI is auto-generated
+      ## from endpoints.oslo_db. Set to null to disable auto-generation,
+      ## e.g. when using an operator such as mariadb-operator that supplies
+      ## the connection string via a mounted configuration snippet.
+      connection: ""
     oslo_concurrency:
       lock_path: /var/lock
     oslo_messaging_notifications:
       driver: noop
     oslo_messaging_rabbit:
       rabbit_ha_queues: false
+      # -- Durable queues are required by RabbitMQ 4.x, which denies
+      ## transient non-exclusive queues by default. Also valid on 3.x.
       amqp_durable_queues: true
+      # -- Quorum queues, which RabbitMQ 4.x requires: it denies transient
+      ## non-exclusive queues, and oslo.messaging declares its reply and fanout
+      ## queues that way unless the transient ones are quorum too.
+      ## amqp_durable_queues alone only covers the RPC and notification queues.
       rabbit_quorum_queue: true
       rabbit_transient_quorum_queue: true
       use_queue_manager: true
@@ -336,25 +349,25 @@ conf:
   logging:
     loggers:
       keys:
-      - root
-      - glance
+        - root
+        - glance
     handlers:
       keys:
-      - stdout
-      - stderr
-      - 'null'
+        - stdout
+        - stderr
+        - "null"
     formatters:
       keys:
-      - context
-      - default
+        - context
+        - default
     logger_root:
       level: WARNING
       handlers:
-      - stdout
+        - stdout
     logger_glance:
       level: INFO
       handlers:
-      - stdout
+        - stdout
       qualname: glance
       propagate: 0
     logger_amqp:
@@ -391,10 +404,10 @@ conf:
       formatter: context
     formatter_context:
       class: oslo_log.formatters.ContextFormatter
-      datefmt: '%Y-%m-%d %H:%M:%S'
+      datefmt: "%Y-%m-%d %H:%M:%S"
     formatter_default:
-      format: '%(message)s'
-      datefmt: '%Y-%m-%d %H:%M:%S'
+      format: "%(message)s"
+      datefmt: "%Y-%m-%d %H:%M:%S"
   api_audit_map:
     DEFAULT:
       target_endpoint_type: None
@@ -405,56 +418,42 @@ conf:
       members: member
       tags: tag
     service_endpoints:
-      image: service/storage/image
-  swift_store: '[{{ .Values.conf.glance.glance_store.default_swift_reference }}]
-
+      image: 'service/storage/image'
+  swift_store: |
+    [{{ .Values.conf.glance.glance_store.default_swift_reference }}]
     {{- if eq .Values.storage "radosgw" }}
-
     auth_version = 1
-
     auth_address = {{ tuple "ceph_object_store" "public" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" }}
-
     user = {{ .Values.endpoints.ceph_object_store.auth.glance.username }}:swift
-
     key = {{ .Values.endpoints.ceph_object_store.auth.glance.password }}
-
     {{- else }}
-
     user = {{ .Values.endpoints.identity.auth.glance.project_name }}:{{ .Values.endpoints.identity.auth.glance.username }}
-
     key = {{ .Values.endpoints.identity.auth.glance.password }}
-
     auth_address = {{ tuple "identity" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" }}
-
     user_domain_name = {{ .Values.endpoints.identity.auth.glance.user_domain_name }}
-
     project_domain_name = {{ .Values.endpoints.identity.auth.glance.project_domain_name }}
-
     auth_version = 3
-
     # NOTE(portdirect): https://bugs.launchpad.net/glance-store/+bug/1620999
-
     project_domain_id =
-
     user_domain_id =
-
     {{- end -}}
-
-    '
   rabbitmq:
+    # NOTE(rk760n): adding rmq policy to set an expiration time on notification queues
     policies:
-    - vhost: glance
-      name: ha_ttl_glance
-      definition:
-        message-ttl: 70000
-      priority: 0
-      apply-to: all
-      pattern: ^(?!(amq\.|reply_)).*
+      - vhost: "glance"
+        name: "ha_ttl_glance"
+        definition:
+          # 70s
+          message-ttl: 70000
+        priority: 0
+        apply-to: all
+        pattern: '^(?!(amq\.|reply_)).*'
   glance_api_uwsgi:
     uwsgi:
-      add-header: 'Connection: close'
+      add-header: "Connection: close"
       buffer-size: 65535
-      chunked-input-limit: '4194304'
+      # Must exceed glanceclient's 1 MiB chunks; quoted to avoid 4.194304e+06.
+      chunked-input-limit: "4194304"
       die-on-term: true
       enable-threads: true
       exit-on-reload: false
@@ -463,115 +462,123 @@ conf:
       log-x-forwarded-for: true
       master: true
       need-app: true
-      procname-prefix-spaced: 'glance-api:'
+      procname-prefix-spaced: "glance-api:"
       route-user-agent: '^kube-probe.* donotlog:'
       thunder-lock: true
       worker-reload-mercy: 80
       module: glance.wsgi.api:application
       stats: 0.0.0.0:1717
       stats-http: true
+
 network:
   api:
+    # Pod port the Service routes to; null => Kubernetes uses the Service port.
+    # A deployment override sets this (e.g. 443) to point at a TLS sidecar.
     target_port: null
     external_policy_local: false
     node_port:
       enabled: false
       port: 30092
+
 volume:
   class_name: standard
   size: 2Gi
   accessModes:
-  - ReadWriteOnce
+    - ReadWriteOnce
+
 volume_staging:
   class_name: general
   size: 2Gi
   accessModes:
-  - ReadWriteOnce
+    - ReadWriteOnce
+
 dependencies:
   dynamic:
     common:
       local_image_registry:
         jobs:
-        - glance-image-repo-sync
+          - glance-image-repo-sync
         services:
-        - endpoint: node
-          service: local_image_registry
+          - endpoint: node
+            service: local_image_registry
   static:
     api:
       jobs:
-      - glance-storage-init
-      - glance-db-sync
-      - glance-rabbit-init
-      - glance-ks-user
-      - glance-ks-endpoints
+        - glance-storage-init
+        - glance-db-sync
+        - glance-rabbit-init
+        - glance-ks-user
+        - glance-ks-endpoints
       services:
-      - endpoint: internal
-        service: oslo_db
-      - endpoint: internal
-        service: identity
-      - endpoint: internal
-        service: oslo_messaging
+        - endpoint: internal
+          service: oslo_db
+        - endpoint: internal
+          service: identity
+        - endpoint: internal
+          service: oslo_messaging
     bootstrap:
       jobs: null
       services:
-      - endpoint: internal
-        service: identity
-      - endpoint: internal
-        service: image
+        - endpoint: internal
+          service: identity
+        - endpoint: internal
+          service: image
     clean:
       jobs: null
     db_drop:
       services:
-      - endpoint: internal
-        service: oslo_db
+        - endpoint: internal
+          service: oslo_db
     db_init:
       services:
-      - endpoint: internal
-        service: oslo_db
+        - endpoint: internal
+          service: oslo_db
     db_sync:
       jobs:
-      - glance-db-init
+        - glance-db-init
       services:
-      - endpoint: internal
-        service: oslo_db
+        - endpoint: internal
+          service: oslo_db
     ks_endpoints:
       jobs:
-      - glance-ks-service
+        - glance-ks-service
       services:
-      - endpoint: internal
-        service: identity
+        - endpoint: internal
+          service: identity
     ks_service:
       services:
-      - endpoint: internal
-        service: identity
+        - endpoint: internal
+          service: identity
     ks_user:
       services:
-      - endpoint: internal
-        service: identity
+        - endpoint: internal
+          service: identity
     rabbit_init:
       services:
-      - endpoint: internal
-        service: oslo_messaging
+        - endpoint: internal
+          service: oslo_messaging
     storage_init:
       jobs:
-      - glance-ks-user
+        - glance-ks-user
       services: null
     metadefs_load:
       jobs:
-      - glance-db-sync
+        - glance-db-sync
       services: null
     tests:
       services:
-      - endpoint: internal
-        service: oslo_db
-      - endpoint: internal
-        service: identity
-      - endpoint: internal
-        service: image
+        - endpoint: internal
+          service: oslo_db
+        - endpoint: internal
+          service: identity
+        - endpoint: internal
+          service: image
     image_repo_sync:
       services:
-      - endpoint: internal
-        service: local_image_registry
+        - endpoint: internal
+          service: local_image_registry
+
+# Names of secrets used by bootstrap and environmental checks
 secrets:
   identity:
     admin: glance-keystone-admin
@@ -584,15 +591,29 @@ secrets:
     admin: glance-rabbitmq-admin
     glance: glance-rabbitmq-user
   tls:
+    # Client certificate this chart presents for all mTLS backend connections
+    # (MariaDB and RabbitMQ). Separate from the MariaDB and RabbitMQ server certs.
     client:
       glance: glance-client
+    # CA bundle this chart trusts for OUTBOUND TLS calls (keystone). Null by
+    # default -> no CA is mounted and REQUESTS_CA_BUNDLE is left unset. A
+    # deployment override points this at a cert-manager CA-only secret carrying
+    # just ca.crt (no private key); it is mounted at
+    # /etc/ssl/certs/openstack-helm.crt. Assumes every server cert is signed by
+    # this single CA. The chart stays TLS-agnostic -- server certs and the nginx
+    # TLS sidecar live in the override.
     ca: null
   oci_image_registry:
     glance: glance-oci-image-registry
+
+# typically overridden by environmental
 identity:
   openrc:
     exclude_vars: []
     extra_vars: []
+
+# values, but should include all endpoints
+# required by this chart
 endpoints:
   cluster_domain_suffix: cluster.local
   local_image_registry:
@@ -668,6 +689,13 @@ endpoints:
       public: glance
     host_fqdn_override:
       default: null
+      # NOTE(portdirect): this chart supports TLS for fqdn over-ridden public
+      # endpoints using the following format:
+      # public:
+      #   host: null
+      #   tls:
+      #     crt: null
+      #     key: null
     path:
       default: null
       healthcheck: /healthcheck
@@ -697,6 +725,11 @@ endpoints:
         default: 3306
   oslo_cache:
     auth:
+      # NOTE(portdirect): this is used to define the value for keystone
+      # authtoken cache encryption key, if not set it will be populated
+      # automatically with a random value, but to take advantage of
+      # this feature all services should be set to use the same key,
+      # and memcache service.
       memcache_secret_key: glanceXmemcacheXXsecretXXkeyX0000000000000000000000000000000000
     hosts:
       default: memcached
@@ -776,7 +809,7 @@ endpoints:
       default: null
     path:
       default: null
-    scheme: http
+    scheme: 'http'
     port:
       service:
         default: 24224
@@ -789,6 +822,13 @@ endpoints:
       public: horizon
     host_fqdn_override:
       default: null
+      # NOTE(portdirect): this chart supports TLS for fqdn over-ridden public
+      # endpoints using the following format:
+      # public:
+      #   host: null
+      #   tls:
+      #     crt: null
+      #     key: null
     path:
       default: null
     scheme:
@@ -798,6 +838,8 @@ endpoints:
       web:
         default: 80
         public: 443
+  # NOTE(tp6510): these endpoints allow for things like DNS lookups and ingress
+  # They are using to enable the Egress K8s network policy.
   kube_dns:
     namespace: kube-system
     name: kubernetes-dns
@@ -812,7 +854,12 @@ endpoints:
       dns:
         default: 53
         protocol: UDP
+
 pod:
+  # -- Extra sidecar containers and volumes to inject into the glance-api
+  ## Deployment. Used e.g. by values_overrides/glance/tls-gateway-and-sidecar.yaml
+  ## to add an nginx TLS-terminating sidecar. Keyed per component.
+  ## The entries are rendered through tpl, so they can reference values.
   extraContainers:
     glance_api: []
   extraVolumes:
@@ -878,9 +925,9 @@ pod:
     glance:
       enabled: false
       tolerations:
-      - key: node-role.kubernetes.io/control-plane
-        operator: Exists
-        effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
   useHostNetwork:
     api: false
   mounts:
@@ -898,6 +945,9 @@ pod:
       glance_db_sync:
         volumeMounts: null
         volumes: null
+  # -- This allows users to add Kubernetes Projected Volumes to be mounted at /etc/glance/glance.conf.d/
+  ## This is a list of projected volume source objects for each deployment/statefulset/daemonset/cronjob
+  ## https://kubernetes.io/docs/concepts/storage/projected-volumes/
   etcSources:
     glance_api: []
     glance_db_sync: []
@@ -928,6 +978,8 @@ pod:
             timeoutSeconds: 5
         liveness:
           enabled: true
+          # uwsgi stats socket (conf.glance_api_uwsgi.uwsgi.stats); served
+          # by the master, so it answers even when every worker is busy.
           port: 1717
           params:
             initialDelaySeconds: 5
@@ -937,95 +989,130 @@ pod:
     enabled: false
     api:
       requests:
-        memory: 128Mi
-        cpu: 100m
+        memory: "128Mi"
+        cpu: "100m"
       limits:
-        memory: 1024Mi
+        memory: "1024Mi"
     jobs:
       storage_init:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       metadefs_load:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       db_sync:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       db_init:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       db_drop:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       ks_user:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       ks_service:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       ks_endpoints:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       rabbit_init:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       bootstrap:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       tests:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       image_repo_sync:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
+
 tls:
   oslo_messaging: false
   oslo_db: false
+
 rabbitmq_topology:
+  # -- API group of the RabbitMQ topology custom resources this chart renders
+  ## when manifests.rabbitmq_topology is enabled. Either group works: the
+  ## resources are the same, only who reconciles them differs.
+  ##   rabbitmq.osh.openstack.org -- the rabbitmq chart's own topology
+  ##                                 controller
+  ##                                 (manifests.deployment_topology_controller)
+  ##   rabbitmq.com               -- the upstream messaging-topology-operator,
+  ##                                 which must then be deployed separately,
+  ##                                 along with a RabbitmqCluster named after
+  ##                                 endpoints.oslo_messaging.hosts.default for
+  ##                                 rabbitmqClusterReference to resolve to
   api_group: rabbitmq.osh.openstack.org
+
 mariadb_db:
+  # -- API group of the MariaDB custom resources this chart renders when
+  ## manifests.mariadb_db is enabled. Either group works: the resources are
+  ## the same, only who reconciles them differs.
+  ##   mariadb.osh.openstack.org -- the mariadb chart's own db controller
+  ##                                (manifests.deployment_db_controller)
+  ##   k8s.mariadb.com           -- the upstream mariadb-operator, which must
+  ##                                then be deployed separately
+  ## With k8s.mariadb.com and tls.oslo_db enabled, use mariadb-operator 0.37.0
+  ## or newer. User.spec.require was added in that release, so older operators
+  ## drop it and create accounts without REQUIRE X509.
   api_group: mariadb.osh.openstack.org
-  mariadb_ref: ''
+  # -- Name of the MariaDB resource the Database, User, Grant and Connection
+  ## attach to through mariaDbRef. When empty it is the oslo_db default host,
+  ## which only works if the MariaDB resource shares its name with the service
+  ## clients connect through. Set it when they differ, such as a MariaDB named
+  ## mariadb served by a mariadb-primary service.
+  mariadb_ref: ""
+  # -- Secret holding the password of the glance database account.
+  ## The User and Connection resources read it from here.
   password_secret:
+    # -- Render the secret from endpoints.oslo_db.auth.glance.password. Set
+    ## to false to use a secret that already exists, so the password does not
+    ## need to be passed as a Helm value.
     create: true
     name: glance-db-password
     key: password
+
 manifests:
   configmap_bin: true
   configmap_etc: true
@@ -1033,10 +1120,18 @@ manifests:
   job_bootstrap: true
   job_clean: true
   job_db_init: true
+  # -- Render the MariaDB Database/User/Grant/Connection custom resources
+  ## reconciled by the mariadb chart's db controller, instead of running the
+  ## db-init job. Mutually exclusive with job_db_init.
   mariadb_db: false
   job_db_sync: true
   job_db_drop: false
   job_image_repo_sync: true
+  # -- Declare this chart's keystone user, roles and catalog entry as custom
+  ## resources reconciled by the keystone chart's identity controller, instead
+  ## of running the ks_user, ks_service and ks_endpoints jobs. Those three must
+  ## be disabled: both paths write the same user's password and race on the
+  ## same catalog entry.
   identity_entities: false
   job_ks_endpoints: true
   job_ks_service: true
@@ -1049,11 +1144,28 @@ manifests:
   pvc_images: true
   pvc_tmp: true
   network_policy: false
+  # -- Declare this chart's messaging vhost, account and permissions
+  ## as RabbitMQ custom resources reconciled by the rabbitmq chart's
+  ## topology controller, instead of running the rabbit_init job. The
+  ## two are mutually exclusive.
   rabbitmq_topology: false
   secret_db: true
   secret_keystone: true
   secret_rabbitmq: true
   secret_registry: true
   service_api: true
+
+# NOTE: This is for enable helm resource-policy to keep glance-images PVC.
+# set keep_pvc: true when allow helm resource-policy to keep for PVC.
+# This will requires mannual delete for PVC.
+# set keep_pvc: false when disallow helm resource-policy to keep for PVC.
+# This will allow helm to delete the PVC.
 keep_pvc: true
+
+# -- Extra K8s manifests to deploy. Either a list or a map of manifests.
+## Note: Supports use of custom Helm templates
+## Note: Helm replaces (instead of merging) list values when several values
+## files are combined, so if you need to define extraObjects in more than one
+## overrides file, use the map form and make sure the keys are unique across
+## those files. With the list form only the last file takes effect.
 extraObjects: {}

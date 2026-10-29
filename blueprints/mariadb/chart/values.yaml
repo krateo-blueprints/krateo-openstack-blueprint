@@ -1,6 +1,23 @@
-# Vendored from opendev.org/openstack/openstack-helm at 2026.2.0,
-# with this repo's policy overrides re-applied. Image pins come from upstream.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Default values for mariadb.
+# This is a YAML-formatted file.
+# Declare name/value pairs to be passed into your templates.
+# name: value
+
+---
 release_group: null
+
 images:
   tags:
     mariadb: quay.io/airshipit/mariadb:latest-ubuntu_noble
@@ -14,12 +31,13 @@ images:
     scripted_test: quay.io/airshipit/mariadb:latest-ubuntu_noble
     mariadb_controller: quay.io/airshipit/mariadb:latest-ubuntu_noble
     mariadb_db_controller: quay.io/airshipit/mariadb:latest-ubuntu_noble
-  pull_policy: IfNotPresent
+  pull_policy: "IfNotPresent"
   local_registry:
     active: false
     exclude:
-    - dep_check
-    - image_repo_sync
+      - dep_check
+      - image_repo_sync
+
 labels:
   server:
     node_selector_key: openstack-control-plane
@@ -39,6 +57,7 @@ labels:
   db_controller:
     node_selector_key: openstack-control-plane
     node_selector_value: enabled
+
 pod:
   env:
     mariadb_controller:
@@ -47,8 +66,12 @@ pod:
       MARIADB_CONTROLLER_PYKUBE_REQUEST_TIMEOUT: 60
     mariadb_db_controller:
       MARIADB_DB_CONTROLLER_DEBUG: 0
+      # -- Delay between reconcile sweeps of the custom resources
       MARIADB_DB_CONTROLLER_RECONCILE_INTERVAL: 10
+      # -- How often to re-apply SQL for resources whose desired state has not
+      ## changed, repairing drift caused by changes made outside the controller
       MARIADB_DB_CONTROLLER_FULL_RESYNC_INTERVAL: 1800
+      # -- Retry delay for a resource that does not set spec.retryInterval
       MARIADB_DB_CONTROLLER_ERROR_BACKOFF: 10
       MARIADB_DB_CONTROLLER_PYKUBE_REQUEST_TIMEOUT: 60
       MARIADB_DB_CONTROLLER_DB_CONNECT_TIMEOUT: 10
@@ -148,7 +171,7 @@ pod:
           readOnlyRootFilesystem: true
           capabilities:
             drop:
-            - ALL
+              - ALL
     cluster_wait:
       pod:
         runAsUser: 65534
@@ -158,7 +181,7 @@ pod:
           allowPrivilegeEscalation: false
           capabilities:
             drop:
-            - ALL
+              - ALL
   affinity:
     anti:
       type:
@@ -171,12 +194,13 @@ pod:
     mariadb:
       enabled: false
       tolerations:
-      - key: node-role.kubernetes.io/control-plane
-        operator: Exists
-        effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
   replicas:
     server: 1
     controller: 1
+    # -- Must stay at 1: the controller does no leader election
     db_controller: 1
   lifecycle:
     upgrades:
@@ -196,97 +220,100 @@ pod:
     enabled: false
     server:
       requests:
-        memory: 128Mi
-        cpu: 100m
+        memory: "128Mi"
+        cpu: "100m"
       limits:
-        memory: 1024Mi
+        memory: "1024Mi"
     controller:
       requests:
-        memory: 128Mi
-        cpu: 100m
+        memory: "128Mi"
+        cpu: "100m"
       limits:
-        memory: 1024Mi
+        memory: "1024Mi"
     db_controller:
       requests:
-        memory: 128Mi
-        cpu: 100m
+        memory: "128Mi"
+        cpu: "100m"
       limits:
-        memory: 1024Mi
+        memory: "1024Mi"
     jobs:
       tests:
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
       prometheus_create_mysql_user:
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
       image_repo_sync:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       mariadb_backup:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       ks_user:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
+
 dependencies:
   dynamic:
     common:
       local_image_registry:
         jobs:
-        - mariadb-image-repo-sync
+          - mariadb-image-repo-sync
         services:
-        - endpoint: node
-          service: local_image_registry
+          - endpoint: node
+            service: local_image_registry
   static:
     mariadb_backup:
       jobs:
-      - mariadb-ks-user
+        - mariadb-ks-user
       services:
-      - endpoint: internal
-        service: oslo_db
+        - endpoint: internal
+          service: oslo_db
     prometheus_create_mysql_user:
       services:
-      - endpoint: internal
-        service: oslo_db
+        - endpoint: internal
+          service: oslo_db
     image_repo_sync:
       services:
-      - endpoint: internal
-        service: local_image_registry
+        - endpoint: internal
+          service: local_image_registry
     tests:
       services:
-      - endpoint: internal
-        service: oslo_db
+        - endpoint: internal
+          service: oslo_db
     controller:
       services: null
     db_controller:
       jobs:
-      - mariadb-cluster-wait
+        - mariadb-cluster-wait
       services:
-      - endpoint: internal
-        service: oslo_db
+        - endpoint: internal
+          service: oslo_db
     cluster_wait:
       services:
-      - endpoint: internal
-        service: oslo_db
+        - endpoint: internal
+          service: oslo_db
 volume:
+  # this value is used for single pod deployments of mariadb to prevent losing all data
+  # if the pod is restarted
   use_local_path_for_single_pod_cluster:
     enabled: true
-    host_path: /tmp/mysql-data
+    host_path: "/tmp/mysql-data"
   chown_on_start: true
   enabled: false
   class_name: general
@@ -295,6 +322,7 @@ volume:
     enabled: true
     class_name: general
     size: 5Gi
+
 jobs:
   cluster_wait:
     clusterCheckWait: 30
@@ -305,24 +333,32 @@ jobs:
     backoffLimit: 87600
     activeDeadlineSeconds: 3600
   mariadb_backup:
+    # activeDeadlineSeconds == 0 means no deadline
     activeDeadlineSeconds: 0
     backoffLimit: 6
-    cron: 0 0 * * *
+    cron: "0 0 * * *"
     history:
       success: 3
       failed: 1
   ks_user:
+    # activeDeadlineSeconds == 0 means no deadline
     activeDeadlineSeconds: 0
     backoffLimit: 6
+
 conf:
   tests:
+    # This may either be:
+    # * direct: which will hit the backends directly via a k8s service ip
+    # Note, deadlocks and failure are to be expected with concurrency if
+    # hitting the `direct` endpoint.
     endpoint: internal
+    # This is a list of tuning params passed to mysqlslap:
     params:
-    - --auto-generate-sql
-    - --concurrency=100
-    - --number-of-queries=1000
-    - --number-char-cols=1
-    - --number-int-cols=1
+      - --auto-generate-sql
+      - --concurrency=100
+      - --number-of-queries=1000
+      - --number-char-cols=1
+      - --number-int-cols=1
   mariadb_server:
     setup_wait:
       iteration: 30
@@ -332,9 +368,9 @@ conf:
     base_path: /var/backup
     validateData:
       ageOffset: 120
-    mysqldump_options: '--single-transaction --quick --add-drop-database --add-drop-table --add-locks --databases
-
-      '
+    mysqldump_options: >
+      --single-transaction --quick --add-drop-database
+      --add-drop-table --add-locks --databases
     days_to_keep: 3
     remote_backup:
       enabled: false
@@ -356,255 +392,151 @@ conf:
   galera:
     cluster_leader_ttl: 60
   database:
-    mysql_histfile: /dev/null
-    my: '[mysqld]
-
+    mysql_histfile: "/dev/null"
+    my: |
+      [mysqld]
       datadir=/var/lib/mysql
-
       basedir=/usr
-
       ignore-db-dirs=lost+found
 
-
       [client-server]
-
       !includedir /etc/mysql/conf.d/
-
-      '
-    00_base: '[mysqld]
-
+    00_base: |
+      [mysqld]
       # Charset
-
       character_set_server=utf8
-
       collation_server=utf8_general_ci
-
       skip-character-set-client-handshake
 
-
       # Logging
-
       slow_query_log=off
-
       slow_query_log_file=/var/log/mysql/mariadb-slow.log
-
       log_warnings=2
 
-
       # General logging has huge performance penalty therefore is disabled by default
-
       general_log=off
-
       general_log_file=/var/log/mysql/mariadb-error.log
 
-
       long_query_time=3
-
       log_queries_not_using_indexes=on
 
-
       # Networking
-
       bind_address=0.0.0.0
-
       port={{ tuple "oslo_db" "direct" "mysql" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
 
-
       # When a client connects, the server will perform hostname resolution,
-
       # and when DNS is slow, establishing the connection will become slow as well.
-
       # It is therefore recommended to start the server with skip-name-resolve to
-
       # disable all DNS lookups. The only limitation is that the GRANT statements
-
       # must then use IP addresses only.
-
       skip_name_resolve
 
-
       # Tuning
-
       user=mysql
-
       max_allowed_packet=256M
-
       open_files_limit=10240
-
       max_connections=8192
-
       max-connect-errors=1000000
 
-
       # General security settings
-
       # Reference: https://dev.mysql.com/doc/mysql-security-excerpt/8.0/en/general-security-issues.html
-
-      # secure_file_priv is set to ''/home'' because it is read-only, which will
-
+      # secure_file_priv is set to '/home' because it is read-only, which will
       # disable this feature completely.
-
       secure_file_priv=/home
-
       local_infile=0
-
       symbolic_links=0
-
       sql_mode="STRICT_ALL_TABLES,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION"
 
 
-
       ## Generally, it is unwise to set the query cache to be larger than 64-128M
-
       ## as the costs associated with maintaining the cache outweigh the performance
-
       ## gains.
-
       ## The query cache is a well known bottleneck that can be seen even when
-
       ## concurrency is moderate. The best option is to disable it from day 1
-
       ## by setting query_cache_size=0 (now the default on MySQL 5.6)
-
       ## and to use other ways to speed up read queries: good indexing, adding
-
       ## replicas to spread the read load or using an external cache.
-
       query_cache_size=0
-
       query_cache_type=0
 
-
       sync_binlog=0
-
       thread_cache_size=16
-
       table_open_cache=2048
-
       table_definition_cache=1024
 
-
       #
-
       # InnoDB
-
       #
-
       # The buffer pool is where data and indexes are cached: having it as large as possible
-
       # will ensure you use memory and not disks for most read operations.
-
       # Typical values are 50..75% of available RAM.
-
       # TODO(tomasz.paszkowski): This needs to by dynamic based on available RAM.
-
       innodb_buffer_pool_size=1024M
-
       innodb_doublewrite=0
-
       innodb_file_format=Barracuda
-
       innodb_file_per_table=1
-
       innodb_flush_method=O_DIRECT
-
       innodb_io_capacity=500
-
       innodb_locks_unsafe_for_binlog=1
-
       innodb_log_file_size=128M
-
       innodb_old_blocks_time=1000
-
       innodb_read_io_threads=8
-
       innodb_write_io_threads=8
 
-
       # Clustering
-
       binlog_format=ROW
-
       default-storage-engine=InnoDB
-
       innodb_autoinc_lock_mode=2
-
       innodb_flush_log_at_trx_commit=2
-
       wsrep_cluster_name={{ tuple "oslo_db" "direct" . | include "helm-toolkit.endpoints.hostname_namespaced_endpoint_lookup" | replace "." "_" }}
-
       wsrep_on=1
-
       wsrep_provider=/usr/lib/galera/libgalera_smm.so
-
       wsrep_provider_options="evs.suspect_timeout=PT30S; gmcast.peer_timeout=PT15S; gmcast.listen_addr=tcp://0.0.0.0:{{ tuple "oslo_db" "direct" "wsrep" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}"
-
       wsrep_slave_threads=12
-
       wsrep_sst_auth={{ .Values.endpoints.oslo_db.auth.sst.username }}:{{ .Values.endpoints.oslo_db.auth.sst.password }}
-
       wsrep_sst_method=mariabackup
 
-
       {{ if .Values.manifests.certificates }}
-
       # TLS
-
       ssl_ca=/etc/mysql/certs/ca.crt
-
       ssl_key=/etc/mysql/certs/tls.key
-
       ssl_cert=/etc/mysql/certs/tls.crt
-
       # tls_version = TLSv1.2,TLSv1.3
-
       {{ end }}
-
 
 
       [mysqldump]
-
       max-allowed-packet=16M
 
-
       [client]
-
       default_character_set=utf8
-
       protocol=tcp
-
       port={{ tuple "oslo_db" "direct" "mysql" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-
       {{ if .Values.manifests.certificates }}
-
       # TLS
-
       ssl_ca=/etc/mysql/certs/ca.crt
-
       ssl_key=/etc/mysql/certs/tls.key
-
       ssl_cert=/etc/mysql/certs/tls.crt
-
       # tls_version = TLSv1.2,TLSv1.3
-
       ssl-verify-server-cert
-
       {{ end }}
 
-      '
     config_override: null
-    99_force: '[mysqld]
-
+    # Any configuration here will override the base config.
+    # config_override: |-
+    #   [mysqld]
+    #   wsrep_slave_threads=1
+    99_force: |
+      [mysqld]
       datadir=/var/lib/mysql
-
       tmpdir=/tmp
 
-      '
 monitoring:
   prometheus:
     enabled: false
     mysqld_exporter:
       scrape: true
+
 secrets:
   identity:
     admin: keystone-admin-user
@@ -618,10 +550,15 @@ secrets:
       server:
         public: mariadb-tls-server
         internal: mariadb-tls-direct
+
+# typically overridden by environmental
 identity:
   openrc:
     exclude_vars: []
     extra_vars: []
+
+# values, but should include all endpoints
+# required by this chart
 endpoints:
   cluster_domain_suffix: cluster.local
   local_image_registry:
@@ -662,7 +599,7 @@ endpoints:
     path:
       default: null
     scheme:
-      default: http
+      default: 'http'
     port:
       api:
         default: 9090
@@ -676,7 +613,7 @@ endpoints:
     path:
       default: /metrics
     scheme:
-      default: http
+      default: 'http'
     port:
       metrics:
         default: 9104
@@ -733,6 +670,8 @@ endpoints:
     namespace: openstack
     auth:
       admin:
+        # Auth URL of null indicates local authentication
+        # HTK will form the URL unless specified here
         auth_url: null
         region_name: RegionOne
         username: admin
@@ -741,6 +680,8 @@ endpoints:
         user_domain_name: default
         project_domain_name: default
       mariadb:
+        # Auth URL of null indicates local authentication
+        # HTK will form the URL unless specified here
         auth_url: null
         role: admin
         region_name: RegionOne
@@ -757,29 +698,34 @@ endpoints:
     path:
       default: /v3
     scheme:
-      default: http
+      default: 'http'
     port:
       api:
         default: 80
         internal: 5000
+
 network:
   mariadb: {}
   mariadb_discovery: {}
   mariadb_master: {}
+
 network_policy:
   mariadb:
     ingress:
-    - {}
+      - {}
     egress:
-    - {}
+      - {}
   prometheus-mysql-exporter:
     ingress:
-    - {}
+      - {}
     egress:
-    - {}
+      - {}
+
 manifests:
   certificates: false
   configmap_bin: true
+  # -- Deploy the Database/User/Grant/Connection custom resource definitions
+  ## reconciled by the mariadb-db-controller deployment. Inert on their own.
   crds: true
   configmap_etc: true
   configmap_services_tcp: true
@@ -806,7 +752,18 @@ manifests:
   service: true
   statefulset: true
   deployment_controller: true
+  # -- Deploy the controller reconciling the Database/User/Grant/Connection
+  ## custom resources. Off by default: enabling it adds a pod, RBAC and a new
+  ## configmap-bin key, which changes the bin configmap hash and therefore
+  ## rolls the galera statefulset on upgrade.
   deployment_db_controller: false
   service_master: true
   job_cluster_wait: false
+
+# -- Extra K8s manifests to deploy. Either a list or a map of manifests.
+## Note: Supports use of custom Helm templates
+## Note: Helm replaces (instead of merging) list values when several values
+## files are combined, so if you need to define extraObjects in more than one
+## overrides file, use the map form and make sure the keys are unique across
+## those files. With the list form only the last file takes effect.
 extraObjects: {}

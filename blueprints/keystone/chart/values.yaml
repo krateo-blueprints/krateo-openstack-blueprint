@@ -1,5 +1,21 @@
-# Vendored from opendev.org/openstack/openstack-helm at 2026.2.0,
-# with this repo's policy overrides re-applied. Image pins come from upstream.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Default values for keystone.
+# This is a YAML-formatted file.
+# Declare name/value pairs to be passed into your templates.
+# name: value
+
+---
 labels:
   api:
     node_selector_key: openstack-control-plane
@@ -13,7 +29,9 @@ labels:
   test:
     node_selector_key: openstack-control-plane
     node_selector_value: enabled
+
 release_group: null
+
 images:
   tags:
     bootstrap: quay.io/airshipit/openstack-client:2026.2-ubuntu_resolute
@@ -33,18 +51,27 @@ images:
     identity_controller: quay.io/airshipit/openstack-client:2026.2-ubuntu_resolute
     dep_check: quay.io/airshipit/kubernetes-entrypoint:latest-ubuntu_noble
     image_repo_sync: docker.io/docker:17.07.0
-  pull_policy: IfNotPresent
+  pull_policy: "IfNotPresent"
   local_registry:
     active: false
     exclude:
-    - dep_check
-    - image_repo_sync
+      - dep_check
+      - image_repo_sync
+
 bootstrap:
   enabled: true
   ks_user: admin
-  script: "# admin needs the admin role for the default domain\nopenstack role add \\\n      --user=\"${OS_USERNAME}\" \\\n      --domain=\"${OS_DEFAULT_DOMAIN}\" \\\n      \"admin\"\n"
+  script: |
+    # admin needs the admin role for the default domain
+    openstack role add \
+          --user="${OS_USERNAME}" \
+          --domain="${OS_DEFAULT_DOMAIN}" \
+          "admin"
+
 network:
   api:
+    # Pod port the Service routes to; null => Kubernetes uses the Service port.
+    # A deployment override sets this (e.g. 443) to point at a TLS sidecar.
     target_port: null
     external_policy_local: false
     node_port:
@@ -54,88 +81,98 @@ network:
     node_port:
       enabled: false
       port: 30357
+
 dependencies:
   dynamic:
     common:
       local_image_registry:
         jobs:
-        - keystone-image-repo-sync
+          - keystone-image-repo-sync
         services:
-        - endpoint: node
-          service: local_image_registry
+          - endpoint: node
+            service: local_image_registry
     rabbit_init:
       services:
-      - service: oslo_messaging
-        endpoint: internal
+        - service: oslo_messaging
+          endpoint: internal
   static:
     api:
       jobs:
-      - keystone-db-sync
-      - keystone-credential-setup
-      - keystone-fernet-setup
+        - keystone-db-sync
+        - keystone-credential-setup
+        - keystone-fernet-setup
       services:
-      - endpoint: internal
-        service: oslo_cache
-      - endpoint: internal
-        service: oslo_db
+        - endpoint: internal
+          service: oslo_cache
+        - endpoint: internal
+          service: oslo_db
     bootstrap:
       jobs:
-      - keystone-domain-manage
+        - keystone-domain-manage
       services:
-      - endpoint: internal
-        service: identity
+        - endpoint: internal
+          service: identity
     credential_rotate:
       jobs:
-      - keystone-credential-setup
+        - keystone-credential-setup
     credential_setup: null
     credential_cleanup:
       services:
-      - endpoint: internal
-        service: oslo_db
+        - endpoint: internal
+          service: oslo_db
     db_drop:
       services:
-      - endpoint: internal
-        service: oslo_db
+        - endpoint: internal
+          service: oslo_db
     db_init:
       services:
-      - endpoint: internal
-        service: oslo_db
+        - endpoint: internal
+          service: oslo_db
     db_sync:
       jobs:
-      - keystone-db-init
-      - keystone-credential-setup
-      - keystone-fernet-setup
+        - keystone-db-init
+        - keystone-credential-setup
+        - keystone-fernet-setup
       services:
-      - endpoint: internal
-        service: oslo_db
+        - endpoint: internal
+          service: oslo_db
     domain_manage:
       services:
-      - endpoint: internal
-        service: identity
+        - endpoint: internal
+          service: identity
     identity_controller:
       services:
-      - endpoint: internal
-        service: identity
+        - endpoint: internal
+          service: identity
     fernet_rotate:
       jobs:
-      - keystone-fernet-setup
+        - keystone-fernet-setup
     fernet_setup: null
     tests:
       services:
-      - endpoint: internal
-        service: identity
+        - endpoint: internal
+          service: identity
     image_repo_sync:
       services:
-      - endpoint: internal
-        service: local_image_registry
+        - endpoint: internal
+          service: local_image_registry
+
 pod:
   env:
     identity_controller:
       IDENTITY_CONTROLLER_DEBUG: 0
+      # -- Delay between reconcile sweeps of the custom resources
       IDENTITY_CONTROLLER_RECONCILE_INTERVAL: 10
+      # -- How often to re-apply resources whose desired state has not changed,
+      ## repairing drift caused by changes made outside the controller
       IDENTITY_CONTROLLER_FULL_RESYNC_INTERVAL: 1800
+      # -- Retry delay for a resource that does not set spec.retryInterval
       IDENTITY_CONTROLLER_ERROR_BACKOFF: 10
       IDENTITY_CONTROLLER_REQUEST_TIMEOUT: 60
+  # -- Extra sidecar containers and volumes to inject into the keystone-api
+  ## Deployment. Used e.g. by values_overrides/keystone/tls-gateway-and-sidecar.yaml
+  ## to add an nginx TLS-terminating sidecar. Keyed per component.
+  ## The entries are rendered through tpl, so they can reference values.
   extraContainers:
     keystone_api: []
   extraVolumes:
@@ -209,9 +246,9 @@ pod:
     keystone:
       enabled: false
       tolerations:
-      - key: node-role.kubernetes.io/control-plane
-        operator: Exists
-        effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
   mounts:
     keystone_db_init:
       init_container: null
@@ -268,6 +305,9 @@ pod:
       keystone_domain_manage:
         volumeMounts: null
         volumes: null
+  # -- This allows users to add Kubernetes Projected Volumes to be mounted at /etc/keystone/keystone.conf.d/
+  ## This is a list of projected volume source objects for each deployment/statefulset/daemonset/cronjob
+  ## https://kubernetes.io/docs/concepts/storage/projected-volumes/
   etcSources:
     keystone_db_sync: []
     keystone_api: []
@@ -278,6 +318,7 @@ pod:
     keystone_domain_manage: []
   replicas:
     api: 1
+    # -- Must stay at 1: the controller does no leader election
     identity_controller: 1
   lifecycle:
     upgrades:
@@ -297,95 +338,95 @@ pod:
     enabled: false
     api:
       requests:
-        memory: 128Mi
-        cpu: 100m
+        memory: "128Mi"
+        cpu: "100m"
       limits:
-        memory: 1024Mi
+        memory: "1024Mi"
     identity_controller:
       requests:
-        memory: 128Mi
-        cpu: 100m
+        memory: "128Mi"
+        cpu: "100m"
       limits:
-        memory: 1024Mi
+        memory: "1024Mi"
     jobs:
       bootstrap:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       domain_manage:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       db_init:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       db_sync:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       db_drop:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       rabbit_init:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       tests:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       fernet_setup:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       fernet_rotate:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       credential_setup:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       credential_rotate:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       credential_cleanup:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
       image_repo_sync:
         requests:
-          memory: 128Mi
-          cpu: 100m
+          memory: "128Mi"
+          cpu: "100m"
         limits:
-          memory: 1024Mi
+          memory: "1024Mi"
   probes:
     api:
       api:
@@ -406,7 +447,12 @@ jobs:
     user: keystone
     group: keystone
   fernet_rotate:
-    cron: 0 */12 * * *
+    # NOTE(rk760n): key rotation frequency, token expiration, active keys, and allow_expired_window should statisfy the formula
+    # max_active_keys = ((token_expiration + allow_expired_window) / rotation_frequency) + 2
+    # As expiration is 12h, max_active_keys is 7 and allow_expired_window is 48h by default,
+    # rotation_frequency need to be adjusted
+    # 12 hours
+    cron: "0 */12 * * *"
     user: keystone
     group: keystone
     history:
@@ -416,144 +462,89 @@ jobs:
     user: keystone
     group: keystone
   credential_rotate:
-    cron: 0 0 1 * *
+    # monthly
+    cron: "0 0 1 * *"
     migrate_wait: 120
     user: keystone
     group: keystone
     history:
       success: 3
       failed: 1
+
 network_policy:
   keystone:
     ingress:
-    - {}
+      - {}
     egress:
-    - {}
+      - {}
+
 conf:
-  security: '#
-
+  security: |
+    #
     # Disable access to the entire file system except for the directories that
-
     # are explicitly allowed later.
-
     #
-
     # This currently breaks the configurations that come with some web application
-
     # Debian packages.
-
     #
-
     #<Directory />
-
     #   AllowOverride None
-
     #   Require all denied
-
     #</Directory>
 
-
     # Changing the following options will not really affect the security of the
-
     # server, but might make attacks slightly more difficult in some cases.
 
-
     #
-
     # ServerTokens
-
     # This directive configures what you return as the Server HTTP response
-
-    # Header. The default is ''Full'' which sends information about the OS-Type
-
+    # Header. The default is 'Full' which sends information about the OS-Type
     # and compiled in modules.
-
     # Set to one of:  Full | OS | Minimal | Minor | Major | Prod
-
     # where Full conveys the most information, and Prod the least.
-
     ServerTokens Prod
 
-
     #
-
     # Optionally add a line containing the server version and virtual host
-
     # name to server-generated pages (internal error documents, FTP directory
-
     # listings, mod_status and mod_info output etc., but not CGI generated
-
     # documents or custom error documents).
-
     # Set to "EMail" to also include a mailto: link to the ServerAdmin.
-
     # Set to one of:  On | Off | EMail
-
     ServerSignature Off
 
-
     #
-
     # Allow TRACE method
-
     #
-
     # Set to "extended" to also reflect the request body (only for testing and
-
     # diagnostic purposes).
-
     #
-
     # Set to one of:  On | Off | extended
-
     TraceEnable Off
 
-
     #
-
     # Forbid access to version control directories
-
     #
-
     # If you use version control systems in your document root, you should
-
     # probably deny access to their directories. For example, for subversion:
-
     #
-
     #<DirectoryMatch "/\.svn">
-
     #   Require all denied
-
     #</DirectoryMatch>
 
-
     #
-
     # Setting this header will prevent MSIE from interpreting files as something
-
     # else than declared by the content type in the HTTP headers.
-
     # Requires mod_headers to be enabled.
-
     #
-
     #Header set X-Content-Type-Options: "nosniff"
 
-
     #
-
     # Setting this header will prevent other sites from embedding pages from this
-
     # site as frames. This defends against clickjacking attacks.
-
     # Requires mod_headers to be enabled.
-
     #
-
     #Header set X-Frame-Options: "sameorigin"
-
-    '
   software:
     apache2:
       binary: apache2
@@ -567,8 +558,11 @@ conf:
     DEFAULT:
       log_config_append: /etc/keystone/logging.conf
       max_token_size: 255
+      # NOTE(rk760n): if you need auth notifications to be sent, uncomment it
+      # notification_opt_out: ""
     token:
       provider: fernet
+      # 12 hours
       expiration: 43200
     identity:
       domain_specific_drivers_enabled: true
@@ -580,7 +574,11 @@ conf:
       key_repository: /etc/keystone/credential-keys/
     database:
       max_retries: -1
-      connection: ''
+      # -- Database connection URI. When empty the URI is auto-generated
+      ## from endpoints.oslo_db. Set to null to disable auto-generation,
+      ## e.g. when using an operator such as mariadb-operator that supplies
+      ## the connection string via a mounted configuration snippet.
+      connection: ""
     cache:
       enabled: true
       backend: dogpile.cache.memcached
@@ -588,7 +586,13 @@ conf:
       driver: noop
     oslo_messaging_rabbit:
       rabbit_ha_queues: false
+      # -- Durable queues are required by RabbitMQ 4.x, which denies
+      ## transient non-exclusive queues by default. Also valid on 3.x.
       amqp_durable_queues: true
+      # -- Quorum queues, which RabbitMQ 4.x requires: it denies transient
+      ## non-exclusive queues, and oslo.messaging declares its reply and fanout
+      ## queues that way unless the transient ones are quorum too.
+      ## amqp_durable_queues alone only covers the RPC and notification queues.
       rabbit_quorum_queue: true
       rabbit_transient_quorum_queue: true
       use_queue_manager: true
@@ -601,228 +605,304 @@ conf:
     oslo_concurrency:
       lock_path: /var/lock
     security_compliance:
+      # NOTE(vdrok): The following two options have effect only for SQL backend
       lockout_failure_attempts: 5
       lockout_duration: 1800
+  # NOTE(lamt) We can leverage multiple domains with different
+  # configurations as outlined in
+  # https://docs.openstack.org/keystone/pike/admin/identity-domain-specific-config.html.
+  # A sample of the value override can be found in sample file:
+  # tools/overrides/example/keystone_domain_config.yaml
+  # ks_domains:
   policy: {}
   access_rules: {}
   rabbitmq:
+    # NOTE(rk760n): adding rmq policy to set an expiration time on notification queues
     policies:
-    - vhost: keystone
-      name: ha_ttl_keystone
-      definition:
-        message-ttl: 70000
-      priority: 0
-      apply-to: all
-      pattern: ^(?!(amq\.|reply_)).*
+      - vhost: "keystone"
+        name: "ha_ttl_keystone"
+        definition:
+          # 70s
+          message-ttl: 70000
+        priority: 0
+        apply-to: all
+        pattern: '^(?!(amq\.|reply_)).*'
   rally_tests:
     run_tempest: false
     tests:
       KeystoneBasic.add_and_remove_user_role:
-      - runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.authenticate_user_and_validate_token:
-      - args: {}
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args: {}
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_add_and_list_user_roles:
-      - runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_and_delete_ec2credential:
-      - runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_and_list_ec2credentials:
-      - runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_and_delete_role:
-      - runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_and_delete_service:
-      - args:
-          description: test_description
-          service_type: Rally_test_type
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args:
+            description: test_description
+            service_type: Rally_test_type
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_and_get_role:
-      - args: {}
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args: {}
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_and_list_services:
-      - args:
-          description: test_description
-          service_type: Rally_test_type
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args:
+            description: test_description
+            service_type: Rally_test_type
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_and_list_tenants:
-      - args: {}
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args: {}
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_and_list_users:
-      - args: {}
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args: {}
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_delete_user:
-      - args: {}
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args: {}
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_tenant:
-      - args: {}
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args: {}
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_tenant_with_users:
-      - args:
-          users_per_tenant: 1
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args:
+            users_per_tenant: 1
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_update_and_delete_tenant:
-      - args: {}
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args: {}
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_user:
-      - args: {}
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args: {}
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_user_set_enabled_and_delete:
-      - args:
-          enabled: true
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
-      - args:
-          enabled: false
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args:
+            enabled: true
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
+        - args:
+            enabled: false
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.create_user_update_password:
-      - args: {}
-        runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
+        - args: {}
+          runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
       KeystoneBasic.get_entities:
-      - runner:
-          concurrency: 1
-          times: 1
-          type: constant
-        sla:
-          failure_rate:
-            max: 0
-  mpm_event: "<IfModule mpm_event_module>\n  ServerLimit         1024\n  StartServers        32\n  MinSpareThreads     32\n  MaxSpareThreads     256\n  ThreadsPerChild     25\n  MaxRequestsPerChild 128\n  ThreadLimit         720\n</IfModule>\n"
-  wsgi_script: "import threading\n\nfrom keystone.server import wsgi\n\napplication = None\nlock = threading.Lock()\nwith lock:\n    if application is None:\n        application = wsgi.initialize_public_application()\n"
-  wsgi_keystone: "{{- $portInt := tuple \"identity\" \"service\" \"api\" $ | include \"helm-toolkit.endpoints.endpoint_port_lookup\" }}\nListen 0.0.0.0:{{ $portInt }}\n\nLogFormat \"%h %l %u %t \\\"%r\\\" %>s %b \\\"%{Referer}i\\\" \\\"%{User-Agent}i\\\"\" combined\nLogFormat \"%{X-Forwarded-For}i %l %u %t \\\"%r\\\" %>s %b \\\"%{Referer}i\\\" \\\"%{User-Agent}i\\\"\" proxy\n\nSetEnvIf X-Forwarded-For \"^.*\\..*\\..*\\..*\" forwarded\nCustomLog /dev/stdout combined env=!forwarded\nCustomLog /dev/stdout proxy env=forwarded\nErrorLogFormat \"%{cu}t %M\"\nErrorLog /dev/stdout\n\n<VirtualHost *:{{ $portInt }}>\n    WSGIDaemonProcess keystone-public processes=1 threads=1 user=keystone group=keystone display-name=%{GROUP}\n    WSGIProcessGroup keystone-public\n    WSGIScriptAlias / /var/www/cgi-bin/keystone/wsgi.py\n    WSGIApplicationGroup %{GLOBAL}\n    WSGIPassAuthorization On\n    ErrorLogFormat \"%{cu}t %M\"\n    ErrorLog /dev/stdout\n\n    SetEnvIf X-Forwarded-For \"^.*\\..*\\..*\\..*\" forwarded\n    CustomLog /dev/stdout combined env=!forwarded\n    CustomLog /dev/stdout proxy env=forwarded\n</VirtualHost>\n"
-  sso_callback_template: "<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\">\n  <head>\n    <title>Keystone WebSSO redirect</title>\n  </head>\n  <body>\n     <form id=\"sso\" name=\"sso\" action=\"$host\" method=\"post\">\n       Please wait...\n       <br/>\n       <input type=\"hidden\" name=\"token\" id=\"token\" value=\"$token\"/>\n       <noscript>\n         <input type=\"submit\" name=\"submit_no_javascript\" id=\"submit_no_javascript\"\n            value=\"If your JavaScript is disabled, please click to continue\"/>\n       </noscript>\n     </form>\n     <script type=\"text/javascript\">\n       window.onload = function() {\n         document.forms['sso'].submit();\n       }\n     </script>\n  </body>\n</html>\n"
+        - runner:
+            concurrency: 1
+            times: 1
+            type: constant
+          sla:
+            failure_rate:
+              max: 0
+  mpm_event: |
+    <IfModule mpm_event_module>
+      ServerLimit         1024
+      StartServers        32
+      MinSpareThreads     32
+      MaxSpareThreads     256
+      ThreadsPerChild     25
+      MaxRequestsPerChild 128
+      ThreadLimit         720
+    </IfModule>
+  # -- WSGIScriptAlias for apache2. Copied from keystone/wsgi/api.py
+  ## apache cannot load a module and the path can change depending on python version
+  wsgi_script: |
+    import threading
+
+    from keystone.server import wsgi
+
+    application = None
+    lock = threading.Lock()
+    with lock:
+        if application is None:
+            application = wsgi.initialize_public_application()
+  wsgi_keystone: |
+    {{- $portInt := tuple "identity" "service" "api" $ | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+    Listen 0.0.0.0:{{ $portInt }}
+
+    LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" combined
+    LogFormat "%{X-Forwarded-For}i %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" proxy
+
+    SetEnvIf X-Forwarded-For "^.*\..*\..*\..*" forwarded
+    CustomLog /dev/stdout combined env=!forwarded
+    CustomLog /dev/stdout proxy env=forwarded
+    ErrorLogFormat "%{cu}t %M"
+    ErrorLog /dev/stdout
+
+    <VirtualHost *:{{ $portInt }}>
+        WSGIDaemonProcess keystone-public processes=1 threads=1 user=keystone group=keystone display-name=%{GROUP}
+        WSGIProcessGroup keystone-public
+        WSGIScriptAlias / /var/www/cgi-bin/keystone/wsgi.py
+        WSGIApplicationGroup %{GLOBAL}
+        WSGIPassAuthorization On
+        ErrorLogFormat "%{cu}t %M"
+        ErrorLog /dev/stdout
+
+        SetEnvIf X-Forwarded-For "^.*\..*\..*\..*" forwarded
+        CustomLog /dev/stdout combined env=!forwarded
+        CustomLog /dev/stdout proxy env=forwarded
+    </VirtualHost>
+  sso_callback_template: |
+    <!DOCTYPE html>
+    <html xmlns="http://www.w3.org/1999/xhtml">
+      <head>
+        <title>Keystone WebSSO redirect</title>
+      </head>
+      <body>
+         <form id="sso" name="sso" action="$host" method="post">
+           Please wait...
+           <br/>
+           <input type="hidden" name="token" id="token" value="$token"/>
+           <noscript>
+             <input type="submit" name="submit_no_javascript" id="submit_no_javascript"
+                value="If your JavaScript is disabled, please click to continue"/>
+           </noscript>
+         </form>
+         <script type="text/javascript">
+           window.onload = function() {
+             document.forms['sso'].submit();
+           }
+         </script>
+      </body>
+    </html>
   logging:
     loggers:
       keys:
-      - root
-      - keystone
+        - root
+        - keystone
     handlers:
       keys:
-      - stdout
-      - stderr
-      - 'null'
+        - stdout
+        - stderr
+        - "null"
     formatters:
       keys:
-      - context
-      - default
+        - context
+        - default
     logger_root:
       level: WARNING
       handlers:
-      - stdout
+        - stdout
     logger_keystone:
       level: INFO
       handlers:
-      - stdout
+        - stdout
       qualname: keystone
       propagate: 0
     logger_amqp:
@@ -859,10 +939,12 @@ conf:
       formatter: context
     formatter_context:
       class: oslo_log.formatters.ContextFormatter
-      datefmt: '%Y-%m-%d %H:%M:%S'
+      datefmt: "%Y-%m-%d %H:%M:%S"
     formatter_default:
-      format: '%(message)s'
-      datefmt: '%Y-%m-%d %H:%M:%S'
+      format: "%(message)s"
+      datefmt: "%Y-%m-%d %H:%M:%S"
+
+# Names of secrets used by bootstrap and environmental checks
 secrets:
   identity:
     admin: keystone-keystone-admin
@@ -879,15 +961,29 @@ secrets:
       api:
         public: keystone-tls-public
         internal: keystone-tls-api
+    # Client certificate Keystone presents for all mTLS backend connections
+    # (MariaDB and RabbitMQ). This is a dedicated client certificate, separate
+    # from the MariaDB and RabbitMQ server certificates.
     client:
       keystone: keystone-client
+    # CA bundle this chart trusts for OUTBOUND TLS calls. Null by default -> no
+    # CA is mounted. A deployment override points this at a cert-manager CA-only
+    # secret carrying just ca.crt (no private key); it is mounted at
+    # /etc/ssl/certs/openstack-helm.crt. The identity controller reads it to
+    # verify the Keystone API it reconciles against, the same key the ks jobs in
+    # the consumer charts mount.
     ca: null
   oci_image_registry:
     keystone: keystone-oci-image-registry
+
+# typically overridden by environmental
 identity:
   openrc:
     exclude_vars: []
     extra_vars: []
+
+# values, but should include all endpoints
+# required by this chart
 endpoints:
   cluster_domain_suffix: cluster.local
   local_image_registry:
@@ -943,6 +1039,13 @@ endpoints:
       internal: keystone-api
     host_fqdn_override:
       default: null
+      # NOTE(portdirect): this chart supports TLS for fqdn over-ridden public
+      # endpoints using the following format:
+      # public:
+      #   host: null
+      #   tls:
+      #     crt: null
+      #     key: null
     path:
       default: /v3
       healthcheck: /healthcheck
@@ -952,6 +1055,8 @@ endpoints:
     port:
       api:
         default: 80
+        # NOTE(portdirect): to retain portability across images, and allow
+        # running under a unprivileged user simply, we default to a port > 1000.
         internal: 5000
         service: 5000
   oslo_db:
@@ -1008,6 +1113,14 @@ endpoints:
     auth:
       client:
         tls:
+          # NOTE(lamt): Specify a CA value here will place a LDAPS certificate at
+          # /etc/certs/tls.ca.  To ensure keystone uses LDAPS, the
+          # following key will need to be overrided under section [ldap] or the
+          # correct domain-specific setting, else it will not be enabled:
+          #
+          #   use_tls: true
+          #   tls_req_cert: allow # Valid values: demand, never, allow
+          #   tls_cacertfile: /etc/certs/tls.ca # abs path to the CA cert
           ca: null
   fluentd:
     namespace: null
@@ -1018,12 +1131,14 @@ endpoints:
       default: null
     path:
       default: null
-    scheme: http
+    scheme: 'http'
     port:
       service:
         default: 24224
       metrics:
         default: 24220
+  # NOTE(tp6510): these endpoints allow for things like DNS lookups and ingress
+  # They are using to enable the Egress K8s network policy.
   kube_dns:
     namespace: kube-system
     name: kubernetes-dns
@@ -1038,23 +1153,64 @@ endpoints:
       dns:
         default: 53
         protocol: UDP
+
 tls:
   identity: false
   oslo_messaging: false
   oslo_db: false
+
 rabbitmq_topology:
+  # -- API group of the RabbitMQ topology custom resources this chart renders
+  ## when manifests.rabbitmq_topology is enabled. Either group works: the
+  ## resources are the same, only who reconciles them differs.
+  ##   rabbitmq.osh.openstack.org -- the rabbitmq chart's own topology
+  ##                                 controller
+  ##                                 (manifests.deployment_topology_controller)
+  ##   rabbitmq.com               -- the upstream messaging-topology-operator,
+  ##                                 which must then be deployed separately,
+  ##                                 along with a RabbitmqCluster named after
+  ##                                 endpoints.oslo_messaging.hosts.default for
+  ##                                 rabbitmqClusterReference to resolve to
   api_group: rabbitmq.osh.openstack.org
+
 mariadb_db:
+  # -- API group of the MariaDB custom resources this chart renders when
+  ## manifests.mariadb_db is enabled. Either group works: the resources are
+  ## the same, only who reconciles them differs.
+  ##   mariadb.osh.openstack.org -- the mariadb chart's own db controller
+  ##                                (manifests.deployment_db_controller)
+  ##   k8s.mariadb.com           -- the upstream mariadb-operator, which must
+  ##                                then be deployed separately
+  ## With k8s.mariadb.com and tls.oslo_db enabled, use mariadb-operator 0.37.0
+  ## or newer. User.spec.require was added in that release, so older operators
+  ## drop it and create accounts without REQUIRE X509.
   api_group: mariadb.osh.openstack.org
-  mariadb_ref: ''
+  # -- Name of the MariaDB resource the Database, User, Grant and Connection
+  ## attach to through mariaDbRef. When empty it is the oslo_db default host,
+  ## which only works if the MariaDB resource shares its name with the service
+  ## clients connect through. Set it when they differ, such as a MariaDB named
+  ## mariadb served by a mariadb-primary service.
+  mariadb_ref: ""
+  # -- Secret holding the password of the keystone database account.
+  ## The User and Connection resources read it from here.
   password_secret:
+    # -- Render the secret from endpoints.oslo_db.auth.keystone.password. Set
+    ## to false to use a secret that already exists, so the password does not
+    ## need to be passed as a Helm value.
     create: true
     name: keystone-db-password
     key: password
+
 manifests:
   configmap_bin: true
   configmap_etc: true
+  # -- Deploy the Domain/Project/Role/Group/User/RoleAssignment/Service/
+  ## Endpoint
+  ## custom resource definitions reconciled by the identity-controller
+  ## deployment. Inert on their own.
   crds: true
+  # -- Deploy the controller reconciling those custom resources. Off by
+  ## default: enabling it adds a pod, RBAC and a new configmap-bin key.
   deployment_identity_controller: false
   cron_credential_rotate: false
   cron_fernet_rotate: false
@@ -1063,6 +1219,9 @@ manifests:
   job_credential_cleanup: false
   job_credential_setup: true
   job_db_init: true
+  # -- Render the MariaDB Database/User/Grant/Connection custom resources
+  ## reconciled by the mariadb chart's db controller, instead of running the
+  ## db-init job. Mutually exclusive with job_db_init.
   mariadb_db: false
   job_db_sync: true
   job_db_drop: false
@@ -1073,10 +1232,21 @@ manifests:
   pdb_api: true
   pod_rally_test: false
   network_policy: false
+  # -- Declare this chart's messaging vhost, account and permissions
+  ## as RabbitMQ custom resources reconciled by the rabbitmq chart's
+  ## topology controller, instead of running the rabbit_init job. The
+  ## two are mutually exclusive.
   rabbitmq_topology: false
   secret_db: true
   secret_keystone: true
   secret_rabbitmq: false
   secret_registry: true
   service_api: true
+
+# -- Extra K8s manifests to deploy. Either a list or a map of manifests.
+## Note: Supports use of custom Helm templates
+## Note: Helm replaces (instead of merging) list values when several values
+## files are combined, so if you need to define extraObjects in more than one
+## overrides file, use the map form and make sure the keys are unique across
+## those files. With the list form only the last file takes effect.
 extraObjects: {}
