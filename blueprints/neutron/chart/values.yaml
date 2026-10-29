@@ -1907,8 +1907,8 @@ images:
     neutron_ovn_vpn: quay.io/airshipit/neutron:2026.1-ubuntu_noble
     neutron_rpc_server: quay.io/airshipit/neutron:2025.1-ubuntu_jammy
     neutron_server: quay.io/airshipit/neutron:2025.1-ubuntu_jammy
-    neutron_sriov_agent: quay.io/airshipit/neutron:stein-18.04-sriov
-    neutron_sriov_agent_init: quay.io/airshipit/neutron:stein-18.04-sriov
+    neutron_sriov_agent: quay.io/airshipit/neutron:2025.1-ubuntu_jammy
+    neutron_sriov_agent_init: quay.io/airshipit/neutron:2025.1-ubuntu_jammy
     rabbit_init: docker.io/rabbitmq:3.13-management
     test: docker.io/xrally/xrally-openstack:2.0.0
 jobs:

@@ -29,16 +29,16 @@ labels:
 
 images:
   tags:
-    bootstrap: quay.io/airshipit/swift:2025.1-ubuntu_jammy
-    test: quay.io/airshipit/swift:2025.1-ubuntu_jammy
+    bootstrap: quay.io/airshipit/swift:2025.1-ubuntu_noble
+    test: quay.io/airshipit/swift:2025.1-ubuntu_noble
     dep_check: quay.io/airshipit/kubernetes-entrypoint:latest-ubuntu_noble
-    swift_proxy: quay.io/airshipit/swift:2025.1-ubuntu_jammy
-    swift_account: quay.io/airshipit/swift:2025.1-ubuntu_jammy
-    swift_container: quay.io/airshipit/swift:2025.1-ubuntu_jammy
-    swift_object: quay.io/airshipit/swift:2025.1-ubuntu_jammy
-    swift_storage: quay.io/airshipit/swift:2025.1-ubuntu_jammy
-    swift_storage_init: quay.io/airshipit/swift:2025.1-ubuntu_jammy
-    swift_ring_builder: quay.io/airshipit/swift:2025.1-ubuntu_jammy
+    swift_proxy: quay.io/airshipit/swift:2025.1-ubuntu_noble
+    swift_account: quay.io/airshipit/swift:2025.1-ubuntu_noble
+    swift_container: quay.io/airshipit/swift:2025.1-ubuntu_noble
+    swift_object: quay.io/airshipit/swift:2025.1-ubuntu_noble
+    swift_storage: quay.io/airshipit/swift:2025.1-ubuntu_noble
+    swift_storage_init: quay.io/airshipit/swift:2025.1-ubuntu_noble
+    swift_ring_builder: quay.io/airshipit/swift:2025.1-ubuntu_noble
     ks_user: quay.io/airshipit/heat:2025.1-ubuntu_jammy
     ks_service: quay.io/airshipit/heat:2025.1-ubuntu_jammy
     ks_endpoints: quay.io/airshipit/heat:2025.1-ubuntu_jammy
