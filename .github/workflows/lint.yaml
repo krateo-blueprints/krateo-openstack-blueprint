@@ -3,6 +3,12 @@ name: lint
 # Lints and renders every chart on pull requests, and validates that each chart's values.yaml
 # satisfies its values.schema.json. Shape-agnostic: charts are discovered by locating each
 # Chart.yaml (skipping vendored subcharts under charts/), so it works for any repo layout.
+#
+# The two checks differ in authority, deliberately. Rendering a real chart can fail for reasons
+# that are nobody's bug (values it cannot guess, private dependencies), so the render job only
+# warns. Validating a chart's defaults against its own schema needs neither, so values-schema
+# gates: issue #53 was a schema violation that the render job had already surfaced, as one more
+# warning among the dependency noise, and it reached main anyway.
 on:
   pull_request:
     paths:
@@ -12,6 +18,27 @@ on:
 jobs:
   lint-docs:
     uses: krateo-platformops/.github/.github/workflows/lint-docs.yaml@main
+
+  values-schema:
+    # Gating. A chart whose own defaults violate its own schema cannot be installed at all:
+    # Helm validates values before it renders, so `helm install` of the blueprint fails and
+    # chart-inspector answers 500. See hack/validate-values-schema.py for why it renders a
+    # throwaway chart rather than the real one.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Every chart's defaults must satisfy its own schema
+        run: python3 hack/validate-values-schema.py .
 
   lint:
     runs-on: ubuntu-latest
