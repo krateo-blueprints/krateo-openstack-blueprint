@@ -12,7 +12,7 @@ on:
     tags: ["[0-9]+.[0-9]+.[0-9]+"]
 
 permissions:
-  contents: read
+  contents: write # the CompositionDefinition release assets
   packages: write
 
 jobs:
@@ -78,3 +78,32 @@ jobs:
             echo "Published ${OCI_REPO}/${name}:${VERSION}"
             echo "::endgroup::"
           done
+
+      - name: Publish the stamped CompositionDefinitions as release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The CompositionDefinitions committed to the repo carry the CHART_VERSION placeholder by
+          # design -- #50 moved them off hardcoded versions that had drifted to a release never
+          # published. But the docs tell a reader to `kubectl apply` them, and a placeholder is not
+          # a version, so the documented path could not work from a clean checkout. The stamped
+          # copies are the installable artifact, so publish them where the docs can point at them:
+          # /releases/latest/download/ never goes stale and keeps the version out of the docs.
+          mkdir -p dist
+          while IFS= read -r -d '' cd; do
+            comp=$(basename "$(dirname "$cd")")
+            cp "$cd" "dist/compositiondefinition-${comp}.yaml"
+          done < <(find blueprints -type f -name compositiondefinition.yaml -not -path '*/charts/*' -print0)
+          echo "prepared $(ls dist | wc -l | tr -d ' ') CompositionDefinition asset(s)"
+
+          # release-notes creates the GitHub release for this same tag, so it may not exist yet.
+          # Create it idempotently rather than ordering two tag-triggered workflows against each
+          # other: whichever gets there first wins and the other falls through to the upload.
+          for _ in 1 2 3 4 5 6; do
+            gh release view "${VERSION}" >/dev/null 2>&1 && break
+            gh release create "${VERSION}" --title "${VERSION}" --notes "" >/dev/null 2>&1 && break
+            sleep 10
+          done
+          gh release view "${VERSION}" >/dev/null   # no release by now is a real failure
+          gh release upload "${VERSION}" dist/*.yaml --clobber

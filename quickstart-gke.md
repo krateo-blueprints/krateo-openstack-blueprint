@@ -35,7 +35,7 @@ helm upgrade --install core-provider krateo/core-provider \
 
 kubectl create namespace openstack-system
 for c in mariadb memcached keystone glance horizon rabbitmq placement openvswitch libvirt nova neutron; do
-  kubectl apply -f blueprints/$c/compositiondefinition.yaml
+  kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/compositiondefinition-$c.yaml
 done
 ```
 
@@ -47,7 +47,7 @@ No image pre-loading is needed — GKE nodes are amd64, so the OpenStack images 
 dependency order):
 
 ```sh
-kubectl apply -f blueprints/openstack/compositiondefinition.yaml
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/compositiondefinition-openstack.yaml
 kubectl wait compositiondefinition/openstack -n openstack-system --for=condition=Ready --timeout=180s
 kubectl create namespace openstack
 sed 's/profile: identity/profile: full/' examples/openstack.yaml | kubectl apply -f -

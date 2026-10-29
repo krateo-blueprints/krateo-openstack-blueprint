@@ -26,7 +26,7 @@ tools/kind-load-images.sh openstack         # Apple Silicon only
 
 ```sh
 kubectl create namespace openstack-system
-kubectl apply -f blueprints/openstack/compositiondefinition.yaml
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/compositiondefinition-openstack.yaml
 kubectl wait compositiondefinition/openstack -n openstack-system --for=condition=Ready --timeout=180s
 
 kubectl create namespace openstack
@@ -43,7 +43,7 @@ kubectl get openstackmariadb,openstackmemcached,openstackkeystone,openstackglanc
 kubectl -n openstack rollout status deploy/keystone-api --timeout=600s
 ```
 
-> Prefer the per-component path instead? Register `blueprints/<c>/compositiondefinition.yaml` for
+> Prefer the per-component path instead? Register `https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/compositiondefinition-<c>.yaml` for
 > mariadb, memcached, keystone, glance, horizon and `kubectl apply -f examples/01-identity.yaml`.
 
 > If you re-publish a changed chart under the **same** version, restart the analyzers so the CDC
