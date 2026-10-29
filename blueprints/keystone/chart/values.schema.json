@@ -135,7 +135,7 @@
               "type": "object",
               "properties": {
                 "a2enmod": {
-                  "type": "array",
+                  "type": ["array", "null"],
                   "title": "Apache modules to enable",
                   "items": { "type": "string" }
                 }
