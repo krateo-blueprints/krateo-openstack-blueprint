@@ -15,9 +15,16 @@ Compositions. Compute (Nova/VMs) is **not** possible on kind — see [`quickstar
 kind create cluster --config tools/kind-openstack.yaml
 kubectl label --overwrite nodes --all openstack-control-plane=enabled
 
-helm repo add krateo https://charts.krateo.io && helm repo update
-helm upgrade --install core-provider krateo/core-provider \
-  --version 1.0.0 -n krateo-system --create-namespace --wait
+# core-provider is installed from its OCI chart, not charts.krateo.io: that repo still
+# serves chart 1.0.0 / appVersion 1.0.0, an old release published under the pre-rename
+# org (krateoplatformops). On 1.0.0 a CompositionDefinition whose chart cannot be read
+# reports nothing at all -- empty status, no conditions, no CRD -- so an install failure
+# is indistinguishable from an install still working. Fixed from 2.13.39 onward.
+OCI=oci://ghcr.io/krateo-platformops/charts
+helm upgrade --install core-provider-crds $OCI/core-provider-crds \
+  --version 2.13.41 -n krateo-system --create-namespace --wait
+helm upgrade --install core-provider $OCI/core-provider \
+  --version 2.13.41 -n krateo-system --wait
 
 tools/kind-load-images.sh openstack         # Apple Silicon only
 ```
@@ -30,7 +37,9 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 kubectl wait compositiondefinition/openstack -n openstack-system --for=condition=Ready --timeout=180s
 
 kubectl create namespace openstack
-kubectl apply -f examples/openstack.yaml          # Kind: Openstack, profile: identity
+# The in-tree examples carry a COMPOSITION_API_VERSION placeholder; the release publishes them
+# stamped to the apiVersion that release actually serves.
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-openstack.yaml
 ```
 
 The orchestrator registers the component CompositionDefinitions and emits each component
@@ -44,7 +53,7 @@ kubectl -n openstack rollout status deploy/keystone-api --timeout=600s
 ```
 
 > Prefer the per-component path instead? Register `https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/compositiondefinition-<c>.yaml` for
-> mariadb, memcached, keystone, glance, horizon and `kubectl apply -f examples/01-identity.yaml`.
+> mariadb, memcached, keystone, glance, horizon and `kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-01-identity.yaml`.
 
 > If you re-publish a changed chart under the **same** version, restart the analyzers so the CDC
 > RBAC/chart cache is refreshed:

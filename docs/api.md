@@ -44,7 +44,8 @@ true` (the default).
 ## Per-component composition Kinds
 
 Every component chart is named after its OpenStack service, so its derived Kind is the
-PascalCase of that name in `composition.krateo.io/v0-2-0`:
+PascalCase of that name, in the group version derived from the chart version (chart `0.3.8`
+-> `composition.krateo.io/v0-3-8`):
 
 | Kind | Component | Tier |
 | --- | --- | --- |
@@ -89,7 +90,7 @@ Each component Composition's `spec` is the curated chart values for that compone
 common shapes). `spec: {}` uses the validated defaults.
 
 ```yaml
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/v0-3-8   # derived from the chart version; read it from the cluster
 kind: Keystone
 metadata:
   name: keystone

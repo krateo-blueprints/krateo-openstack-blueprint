@@ -40,6 +40,33 @@ jobs:
       - name: Every chart's defaults must satisfy its own schema
         run: python3 hack/validate-values-schema.py .
 
+  examples-apiversion:
+    # Gating. core-provider derives the served group version from the chart version, so a literal
+    # `composition.krateo.io/vX-Y-Z` in an example is correct for exactly one release and wrong
+    # for every other. They had drifted to v0-2-0, a chart version no longer published under this
+    # org, which made the quickstart's final `kubectl apply` impossible on a fresh cluster -- and
+    # nothing objected, because an example is not rendered, linted or installed by CI.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Examples must not pin a literal composition apiVersion
+        run: |
+          set -uo pipefail
+          bad=$(grep -rnE 'composition\.krateo\.io/v[0-9]+-[0-9]+-[0-9]+' examples/ || true)
+          if [ -n "$bad" ]; then
+            echo "$bad" | sed 's/^/  /'
+            echo
+            echo "Examples must carry composition.krateo.io/COMPOSITION_API_VERSION, which the"
+            echo "release stamps from the tag and publishes as a release asset. A literal version"
+            echo "here is wrong for every release but one."
+            exit 1
+          fi
+          missing=$(grep -rLl COMPOSITION_API_VERSION examples/*.yaml 2>/dev/null || true)
+          [ -n "$missing" ] && { echo "no placeholder in: $missing"; exit 1; }
+          echo "every example defers its apiVersion to the release stamp"
+
   chart-deps:
     # Gating. Every chart declares helm-toolkit at a file:// path; before charts/helm-toolkit was
     # shared, that path did not exist on a clean clone and resolution had never once succeeded --

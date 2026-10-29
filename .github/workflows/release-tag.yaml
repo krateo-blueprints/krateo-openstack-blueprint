@@ -79,7 +79,7 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Publish the stamped CompositionDefinitions as release assets
+      - name: Publish the stamped CompositionDefinitions and example Compositions as release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -96,6 +96,23 @@ jobs:
             cp "$cd" "dist/compositiondefinition-${comp}.yaml"
           done < <(find blueprints -type f -name compositiondefinition.yaml -not -path '*/charts/*' -print0)
           echo "prepared $(ls dist | wc -l | tr -d ' ') CompositionDefinition asset(s)"
+
+          # The example Compositions carry COMPOSITION_API_VERSION for the same reason the CDs
+          # carry CHART_VERSION: core-provider derives the served group version from the chart
+          # version (0.3.8 -> v0-3-8, full major.minor.patch), so any literal in the tree is wrong
+          # for every release but one. These were pinned to v0-2-0 -- a version dead under the
+          # current org -- so `kubectl apply -f examples/openstack.yaml` could not work at all.
+          API_VERSION="v${VERSION//./-}"
+          echo "stamping examples with composition.krateo.io/${API_VERSION}"
+          for ex in examples/*.yaml; do
+            [ -f "$ex" ] || continue
+            sed "s/COMPOSITION_API_VERSION/${API_VERSION}/g" "$ex" > "dist/example-$(basename "$ex")"
+          done
+          if grep -rl COMPOSITION_API_VERSION dist/ >/dev/null 2>&1; then
+            echo "placeholder survived stamping in: $(grep -rl COMPOSITION_API_VERSION dist/)" >&2
+            exit 1
+          fi
+          echo "prepared $(ls dist/example-* 2>/dev/null | wc -l | tr -d ' ') example asset(s)"
 
           # release-notes creates the GitHub release for this same tag, so it may not exist yet.
           # Create it idempotently rather than ordering two tag-triggered workflows against each

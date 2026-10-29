@@ -2,42 +2,42 @@
 # amd64 cluster with the Open vSwitch kernel module (e.g. Ubuntu GKE nodes) and node
 # labels (openstack-compute-node/openvswitch/l3-agent=enabled). See quickstart-gke.md.
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Rabbitmq
 metadata:
   name: rabbitmq
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Placement
 metadata:
   name: placement
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Openvswitch
 metadata:
   name: openvswitch
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Libvirt
 metadata:
   name: libvirt
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Neutron
 metadata:
   name: neutron
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Nova
 metadata:
   name: nova
@@ -48,7 +48,7 @@ spec: {}
 # hostNetwork). The conductor needs a node on the provisioning network with the PXE NIC
 # (default ironic-pxe) labelled openstack-control-plane=enabled; without real hardware the
 # api + Keystone registration come up but the conductor/provisioning path needs real infra.
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Ironic
 metadata:
   name: ironic
@@ -58,7 +58,7 @@ spec: {}
 # Block storage. Requires a volume backend (LVM/Ceph/NFS) on the nodes; the API +
 # scheduler + Keystone registration come up without one, but volume create needs
 # real storage. Backup (object store) is disabled by default.
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Cinder
 metadata:
   name: cinder
@@ -67,7 +67,7 @@ spec: {}
 ---
 # Orchestration (stacks). Two services (orchestration + cloudformation). Its jobs
 # bootstrap a stack domain + heat_domain_admin in Keystone; no extra infra needed.
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Heat
 metadata:
   name: heat
@@ -77,140 +77,140 @@ spec: {}
 # Key manager (secrets/certificates store). The simple_crypto KEK defaults to a
 # well-known value - override conf.barbican.simple_crypto_plugin.kek for production
 # (it must never change once secrets are stored, or they become undecryptable).
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Barbican
 metadata:
   name: barbican
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Designate
 metadata:
   name: designate
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Octavia
 metadata:
   name: octavia
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Magnum
 metadata:
   name: magnum
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Manila
 metadata:
   name: manila
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Mistral
 metadata:
   name: mistral
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Ceilometer
 metadata:
   name: ceilometer
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Aodh
 metadata:
   name: aodh
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Cloudkitty
 metadata:
   name: cloudkitty
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Masakari
 metadata:
   name: masakari
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Trove
 metadata:
   name: trove
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Watcher
 metadata:
   name: watcher
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Tacker
 metadata:
   name: tacker
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Cyborg
 metadata:
   name: cyborg
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Blazar
 metadata:
   name: blazar
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Zaqar
 metadata:
   name: zaqar
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Freezer
 metadata:
   name: freezer
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Skyline
 metadata:
   name: skyline
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Gnocchi
 metadata:
   name: gnocchi
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Swift
 metadata:
   name: swift
