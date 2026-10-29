@@ -10,7 +10,7 @@ timestamp: 2026-08-11T00:00:00Z
 # Configuration
 
 Everything below is the `spec` of an `Openstack` Composition (Kind `Openstack`,
-`composition.krateo.io/v0-2-0`), fully typed by the orchestrator chart's
+`composition.krateo.io/v<chart-version-with-dashes>`), fully typed by the orchestrator chart's
 `blueprints/openstack/chart/values.schema.json`. The per-component blueprints have their
 own, smaller schemas; the orchestrator's `componentValues` mirrors them.
 

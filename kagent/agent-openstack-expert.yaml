@@ -140,7 +140,8 @@ spec:
          and delete the stale CompositionDefinition. Fresh clusters are
          unaffected (no cache yet).
       2. **`chartVersion` drives the composition apiVersion.** `osh.apiVersion`
-         maps `chartVersion` 0.2.0 -> `composition.krateo.io/v0-2-0`. The
+         maps `chartVersion` 0.3.8 -> `composition.krateo.io/v0-3-8`, full major.minor.patch, so a
+         patch bump moves the served apiVersion. The
          component CRDs are crdgen'd at that same version. A STALE
          `chartVersion` default in the umbrella `values.schema.json` (the CRD
          field default K8s applies when the spec omits it) overrides the chart

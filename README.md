@@ -56,7 +56,7 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 
 # ...then one Composition rolls out a whole install in dependency order.
 kubectl create namespace openstack
-kubectl apply -f examples/openstack.yaml         # Kind: Openstack, spec.profile: identity | full
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-openstack.yaml
 ```
 
 `profile: identity` brings up MariaDB+Memcached+Keystone+Glance+Horizon; `profile: full`
@@ -69,8 +69,8 @@ kubectl create namespace openstack-system
 for c in mariadb memcached keystone glance horizon; do
   kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/compositiondefinition-$c.yaml; done
 kubectl create namespace openstack
-kubectl apply -f examples/01-identity.yaml       # one Composition per component
-# kubectl apply -f examples/02-compute.yaml      # compute plane (GKE)
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-01-identity.yaml
+# kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-02-compute.yaml   # compute plane (GKE)
 ```
 
 Full install paths and how to access OpenStack/Horizon: [docs/usage.md](docs/usage.md).
@@ -81,7 +81,7 @@ For anything between the profiles, set **`spec.enabled`** to an explicit compone
 overrides `profile` and is expanded to its **transitive dependency closure**:
 
 ```yaml
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/v0-3-8   # derived from the chart version (0.3.8 -> v0-3-8)
 kind: Openstack
 metadata:
   name: openstack

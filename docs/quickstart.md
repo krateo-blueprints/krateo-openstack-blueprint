@@ -34,8 +34,13 @@ helm repo update
 helm upgrade --install cert-manager jetstack/cert-manager -n cert-manager \
   --create-namespace --set crds.enabled=true --wait
 
-helm upgrade --install core-provider krateo/core-provider \
-  --version 1.0.0 -n krateo-system --create-namespace --wait
+# Not charts.krateo.io: it still serves 1.0.0, which reports an unreadable chart as an
+# empty status rather than a failure. See quickstart-kind.md.
+OCI=oci://ghcr.io/krateo-platformops/charts
+helm upgrade --install core-provider-crds $OCI/core-provider-crds \
+  --version 2.13.41 -n krateo-system --create-namespace --wait
+helm upgrade --install core-provider $OCI/core-provider \
+  --version 2.13.41 -n krateo-system --wait
 ```
 
 ## 1. Register the orchestrator blueprint
@@ -50,9 +55,21 @@ kubectl wait compositiondefinition/openstack -n openstack-system \
   --for=condition=Ready --timeout=180s
 ```
 
-`core-provider` pulls `oci://ghcr.io/krateo-blueprints/charts/openstack:0.2.0`,
-generates the `Openstack` CRD (`composition.krateo.io/v0-2-0`) and its
-controller.
+`core-provider` pulls `oci://ghcr.io/krateo-blueprints/charts/openstack` at the version the
+CompositionDefinition pins, and generates the `Openstack` CRD and its controller. The CRD's group
+version is derived from that chart version, so chart `0.3.8` serves
+`composition.krateo.io/v0-3-8`.
+
+> **The `apiVersion` tracks the chart version.** core-provider derives the served group
+> version from the chart's own version by replacing dots with dashes, so chart `0.3.8`
+> serves `composition.krateo.io/v0-3-8` and a *patch* bump moves it. Never hardcode it --
+> read it from the cluster, or use the stamped Compositions published with each release:
+> 
+> ```sh
+> kubectl get crd openstacks.composition.krateo.io \
+>   -o jsonpath='{.spec.versions[?(@.served==true)].name}'
+> ```
+
 
 ## 2. Deploy one OpenStack install
 
@@ -67,14 +84,14 @@ One `Openstack` Composition = one install. Pick the scope with `spec`:
 
 ```sh
 kubectl create namespace openstack
-kubectl apply -f examples/openstack.yaml      # spec.profile: identity
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-openstack.yaml
 ```
 
 Or deploy a precise subset — e.g. just Heat and everything it depends on:
 
 ```sh
 kubectl apply -f - <<'EOF'
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/v0-3-8   # see the note above; chart 0.3.8 -> v0-3-8
 kind: Openstack
 metadata:
   name: openstack

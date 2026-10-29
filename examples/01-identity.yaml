@@ -2,35 +2,35 @@
 # They self-order via OpenStack-Helm's kubernetes-entrypoint dep-checks.
 # Apply: kubectl create ns openstack && kubectl apply -f examples/01-identity.yaml
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Mariadb
 metadata:
   name: mariadb
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Memcached
 metadata:
   name: memcached
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Keystone
 metadata:
   name: keystone
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Glance
 metadata:
   name: glance
   namespace: openstack
 spec: {}
 ---
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Horizon
 metadata:
   name: horizon

@@ -17,7 +17,7 @@ order. This is exactly [`examples/openstack.yaml`](../openstack.yaml) with the d
 ## Manifest
 
 ```yaml
-apiVersion: composition.krateo.io/v0-2-0
+apiVersion: composition.krateo.io/<served-version>   # e.g. v0-3-8 for chart 0.3.8
 kind: Openstack
 metadata:
   name: openstack
@@ -66,3 +66,14 @@ Horizon logs in as `admin` / `password` (domain `Default`) on its NodePort (`310
   [../../docs/configuration.md](../../docs/configuration.md).
 - To drive the components individually instead, see [../01-identity.yaml](../01-identity.yaml)
   and [../02-compute.yaml](../02-compute.yaml).
+
+> The `apiVersion` is derived from the chart version by replacing dots with dashes, so a
+> patch bump moves it. Read the served value rather than hardcoding it:
+> 
+> ```sh
+> kubectl get crd openstacks.composition.krateo.io \
+>   -o jsonpath='{.spec.versions[?(@.served==true)].name}'
+> ```
+> 
+> Or use the stamped Compositions published with each release:
+> `https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-openstack.yaml`

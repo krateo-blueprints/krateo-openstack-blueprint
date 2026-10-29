@@ -20,6 +20,10 @@ namespace (the `CompositionDefinition`s go in `openstack-system`).
 
 ## Manifests
 
+> These files are **templates**: their `apiVersion` is `composition.krateo.io/COMPOSITION_API_VERSION`,
+> stamped at release time and published as `example-*.yaml` release assets. Apply the asset, not
+> the file in the tree.
+
 - [examples/openstack.yaml](../examples/openstack.yaml) — a single `Openstack` orchestrator
   Composition. Set `spec.profile` (`identity` | `full`) or `spec.enabled` to an explicit
   component list. This is the manifest the walkthrough above uses.

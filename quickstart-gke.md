@@ -30,8 +30,13 @@ helm repo add jetstack https://charts.jetstack.io
 helm repo add krateo https://charts.krateo.io && helm repo update
 helm upgrade --install cert-manager jetstack/cert-manager -n cert-manager \
   --create-namespace --set crds.enabled=true --wait
-helm upgrade --install core-provider krateo/core-provider \
-  --version 1.0.0 -n krateo-system --create-namespace --wait
+# Not charts.krateo.io: it still serves 1.0.0, which reports an unreadable chart as an
+# empty status rather than a failure. See quickstart-kind.md.
+OCI=oci://ghcr.io/krateo-platformops/charts
+helm upgrade --install core-provider-crds $OCI/core-provider-crds \
+  --version 2.13.41 -n krateo-system --create-namespace --wait
+helm upgrade --install core-provider $OCI/core-provider \
+  --version 2.13.41 -n krateo-system --wait
 
 kubectl create namespace openstack-system
 for c in mariadb memcached keystone glance horizon rabbitmq placement openvswitch libvirt nova neutron; do
@@ -50,15 +55,16 @@ dependency order):
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/compositiondefinition-openstack.yaml
 kubectl wait compositiondefinition/openstack -n openstack-system --for=condition=Ready --timeout=180s
 kubectl create namespace openstack
-sed 's/profile: identity/profile: full/' examples/openstack.yaml | kubectl apply -f -
+curl -sfL https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-openstack.yaml \
+  | sed 's/profile: identity/profile: full/' | kubectl apply -f -
 ```
 
 **Or the per-component Composition sets** (register the component CompositionDefinitions from step 2 first):
 
 ```sh
 kubectl create namespace openstack
-kubectl apply -f examples/01-identity.yaml      # mariadb, memcached, keystone, glance, horizon
-kubectl apply -f examples/02-compute.yaml       # rabbitmq, placement, ovs, libvirt, nova, neutron
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-01-identity.yaml
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-02-compute.yaml
 ```
 
 The compute Compositions inherit the validated defaults: Nova `virt_type: qemu`, Neutron single-node
