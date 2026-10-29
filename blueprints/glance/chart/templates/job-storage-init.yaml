@@ -62,7 +62,6 @@ spec:
 {{ tuple $envAll "glance" "storage-init" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
       annotations:
 {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
-{{ dict "envAll" $envAll "podName" "glance-storage-init" "containerNames" (list "init" "glance-storage-init" ) | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 8 }}
     spec:
       serviceAccountName: {{ $serviceAccountName }}
 {{ dict "envAll" $envAll "application" "storage_init" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
@@ -135,7 +134,7 @@ spec:
             {{- if eq .Values.storage "swift" }}
             - name: SWIFT_TMPURL_KEY
               value: {{ .Values.endpoints.object_store.auth.glance.tmpurlkey | quote }}
-{{- with $env := dict "ksUserSecret" $envAll.Values.secrets.identity.glance "useCA" .Values.manifests.certificates }}
+{{- with $env := dict "ksUserSecret" $envAll.Values.secrets.identity.glance "useCA" (not (empty .Values.secrets.tls.ca)) "envAll" $envAll }}
 {{- include "helm-toolkit.snippets.keystone_openrc_env_vars" $env | indent 12 }}
 {{- end }}
             {{ end }}
@@ -162,7 +161,7 @@ spec:
               readOnly: true
             {{ end }}
             {{ end }}
-{{- dict "enabled" .Values.manifests.certificates "name" .Values.secrets.tls.image.api.internal | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
+{{- dict "enabled" (not (empty .Values.secrets.tls.ca)) "name" .Values.secrets.tls.ca | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
       volumes:
         - name: pod-tmp
           emptyDir: {}
@@ -183,5 +182,5 @@ spec:
             secretName: {{ .Values.ceph_client.user_secret_name }}
         {{ end }}
         {{ end }}
-{{- dict "enabled" .Values.manifests.certificates "name" .Values.secrets.tls.image.api.internal | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
+{{- dict "enabled" (not (empty .Values.secrets.tls.ca)) "name" .Values.secrets.tls.ca | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
 {{- end }}

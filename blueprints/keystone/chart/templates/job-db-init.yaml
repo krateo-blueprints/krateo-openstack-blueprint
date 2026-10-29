@@ -17,8 +17,8 @@ limitations under the License.
 
 {{- if .Values.manifests.job_db_init }}
 {{- $dbInitJob := dict "envAll" . "serviceName" "keystone" "jobAnnotations" (include "metadata.annotations.job.db_init" . | fromYaml) -}}
-{{- if and .Values.manifests.certificates .Values.endpoints.oslo_db.auth.admin.secret.tls.internal -}}
-{{- $_ := set $dbInitJob "dbAdminTlsSecret" .Values.endpoints.oslo_db.auth.admin.secret.tls.internal -}}
+{{- if and .Values.tls.oslo_db .Values.secrets.tls.client.keystone -}}
+{{- $_ := set $dbInitJob "dbAdminTlsSecret" .Values.secrets.tls.client.keystone -}}
 {{- end -}}
 {{- if .Values.pod.tolerations.keystone.enabled -}}
 {{- $_ := set $dbInitJob "tolerationsEnabled" true -}}

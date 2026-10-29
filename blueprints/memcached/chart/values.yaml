@@ -1,6 +1,5 @@
-# Full OpenStack-Helm memcached defaults with the blueprint's validated overrides applied
-# (2025.1-ubuntu_jammy images, single-replica, Krateo-CDC-friendly). A small curated
-# subset is overridable per Composition (see values.schema.json).
+# Vendored from opendev.org/openstack/openstack-helm at 2026.2.0,
+# with this repo's policy overrides re-applied. Image pins come from upstream.
 conf:
   memcached:
     max_connections: 8192
@@ -17,101 +16,131 @@ dependencies:
         - endpoint: node
           service: local_image_registry
   static:
+    memcached:
+      jobs: null
     image_repo_sync:
       services:
       - endpoint: internal
         service: local_image_registry
-    memcached:
-      jobs: null
+secrets:
+  oci_image_registry:
+    memcached: memcached-oci-image-registry-key
 endpoints:
   cluster_domain_suffix: cluster.local
-  kube_dns:
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: kube-dns
-    name: kubernetes-dns
-    namespace: kube-system
-    path:
-      default: null
-    port:
-      dns:
-        default: 53
-        protocol: UDP
-      dns_tcp:
-        default: 53
-    scheme: http
   local_image_registry:
-    host_fqdn_override:
-      default: null
+    name: docker-registry
+    namespace: docker-registry
     hosts:
       default: localhost
       internal: docker-registry
       node: localhost
-    name: docker-registry
-    namespace: docker-registry
+    host_fqdn_override:
+      default: null
     port:
       registry:
         node: 5000
   oci_image_registry:
+    name: oci-image-registry
+    namespace: oci-image-registry
     auth:
       enabled: false
       memcached:
-        password: password
         username: memcached
-    host_fqdn_override:
-      default: null
+        password: password
     hosts:
       default: localhost
-    name: oci-image-registry
-    namespace: oci-image-registry
+    host_fqdn_override:
+      default: null
     port:
       registry:
         default: null
   oslo_cache:
+    namespace: null
     host_fqdn_override:
       default: null
     hosts:
       default: memcached
-    namespace: null
     port:
       memcache:
         default: 11211
-extraObjects: []
+  kube_dns:
+    namespace: kube-system
+    name: kubernetes-dns
+    hosts:
+      default: kube-dns
+    host_fqdn_override:
+      default: null
+    path:
+      default: null
+    scheme: http
+    port:
+      dns_tcp:
+        default: 53
+      dns:
+        default: 53
+        protocol: UDP
+network:
+  memcached: {}
+network_policy:
+  memcached:
+    ingress:
+    - {}
+    egress:
+    - {}
 images:
+  pull_policy: IfNotPresent
+  tags:
+    dep_check: quay.io/airshipit/kubernetes-entrypoint:latest-ubuntu_noble
+    memcached: quay.io/airshipit/memcached:1.6.32
+    image_repo_sync: quay.io/airshipit/docker:27.5.0
   local_registry:
     active: false
     exclude:
     - dep_check
     - image_repo_sync
-  pull_policy: IfNotPresent
-  tags:
-    dep_check: quay.io/airshipit/kubernetes-entrypoint:latest-ubuntu_noble
-    image_repo_sync: quay.io/airshipit/docker:27.5.0
-    memcached: quay.io/airshipit/memcached:1.6.32
 labels:
   server:
     node_selector_key: openstack-control-plane
     node_selector_value: enabled
 manifests:
   configmap_bin: true
+  statefulset: true
   job_image_repo_sync: true
   network_policy: false
-  secret_registry: true
   service: true
-  statefulset: true
+  secret_registry: true
 memcached:
   extraContainers: []
   extraServicePorts: []
-network:
-  memcached: {}
-network_policy:
-  memcached:
-    egress:
-    - {}
-    ingress:
-    - {}
 pod:
+  security_context:
+    server:
+      pod:
+        runAsUser: 65534
+        runAsNonRoot: true
+        fsGroup: 65534
+      container:
+        memcached:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+  probes:
+    memcached:
+      memcached:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 5
+        liveness:
+          enabled: true
+          params:
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 10
   affinity:
     anti:
       topologyKey:
@@ -120,73 +149,38 @@ pod:
         default: requiredDuringSchedulingIgnoredDuringExecution
       weight:
         default: 10
+  tolerations:
+    memcached:
+      enabled: false
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
   lifecycle:
-    termination_grace_period:
-      memcached:
-        timeout: 30
     upgrades:
       deployments:
         pod_replacement_strategy: RollingUpdate
         revision_history: 3
         rolling_update:
           max_unavailable: 1
-  probes:
-    memcached:
+    termination_grace_period:
       memcached:
-        liveness:
-          enabled: true
-          params:
-            initialDelaySeconds: 10
-            periodSeconds: 15
-            timeoutSeconds: 10
-        readiness:
-          enabled: true
-          params:
-            initialDelaySeconds: 0
-            periodSeconds: 10
-            timeoutSeconds: 5
+        timeout: 30
   replicas:
     server: 1
   resources:
     enabled: false
-    jobs:
-      image_repo_sync:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
-        requests:
-          cpu: 100m
-          memory: 128Mi
     memcached:
       limits:
-        cpu: 2000m
         memory: 1024Mi
       requests:
         cpu: 500m
         memory: 128Mi
-  security_context:
-    server:
-      container:
-        memcached:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - ALL
-          readOnlyRootFilesystem: true
-      pod:
-        fsGroup: 65534
-        runAsNonRoot: true
-        runAsUser: 65534
-  tolerations:
-    memcached:
-      enabled: false
-      tolerations:
-      - effect: NoSchedule
-        key: node-role.kubernetes.io/master
-        operator: Exists
-      - effect: NoSchedule
-        key: node-role.kubernetes.io/control-plane
-        operator: Exists
-secrets:
-  oci_image_registry:
-    memcached: memcached-oci-image-registry-key
+    jobs:
+      image_repo_sync:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 1024Mi
+extraObjects: {}

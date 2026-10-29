@@ -12,12 +12,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- if and .Values.manifests.ingress_api .Values.network.dashboard.ingress.public }}
+{{- if .Values.manifests.pvc_tmp }}
 {{- $envAll := . }}
-{{- $ingressOpts := dict "envAll" $envAll "backendService" "dashboard" "backendServiceType" "dashboard" "backendPort" "web" -}}
-{{- $secretName := $envAll.Values.secrets.tls.dashboard.dashboard.internal -}}
-{{- if and .Values.manifests.certificates $secretName -}}
-{{- $_ := set $ingressOpts "certIssuer" .Values.endpoints.dashboard.host_fqdn_override.default.tls.issuerRef.name -}}
-{{- end -}}
-{{ $ingressOpts | include "helm-toolkit.manifests.ingress" }}
+{{- if eq .Values.storage "pvc" }}
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: glance-tmp
+  {{- if .Values.keep_pvc }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  accessModes: {{ .Values.volume_staging.accessModes }}
+  resources:
+    requests:
+      storage: {{ .Values.volume_staging.size }}
+  storageClassName: {{ .Values.volume_staging.class_name }}
+{{- end }}
 {{- end }}

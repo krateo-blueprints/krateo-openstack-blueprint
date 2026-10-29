@@ -12,7 +12,7 @@
 
 ---
 apiVersion: v2
-appVersion: "2025.1"
+appVersion: "2026.2"
 description: OpenStack-Helm Glance
 name: glance
 type: application

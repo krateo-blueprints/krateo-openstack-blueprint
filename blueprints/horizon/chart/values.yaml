@@ -1,542 +1,60 @@
-# Full OpenStack-Helm horizon defaults with the blueprint's validated overrides applied
-# (2025.1-ubuntu_jammy images, single-replica, Krateo-CDC-friendly). A small curated
-# subset is overridable per Composition (see values.schema.json).
+# Vendored from opendev.org/openstack/openstack-helm at 2026.2.0,
+# with this repo's policy overrides re-applied. Image pins come from upstream.
+images:
+  tags:
+    db_init: quay.io/airshipit/openstack-client:2026.2-ubuntu_resolute
+    horizon_db_sync: quay.io/airshipit/horizon:2026.2-ubuntu_resolute
+    db_drop: quay.io/airshipit/openstack-client:2026.2-ubuntu_resolute
+    horizon: quay.io/airshipit/horizon:2026.2-ubuntu_resolute
+    test: quay.io/airshipit/osh-selenium:latest-ubuntu_noble
+    dep_check: quay.io/airshipit/kubernetes-entrypoint:latest-ubuntu_noble
+    image_repo_sync: docker.io/docker:17.07.0
+  pull_policy: IfNotPresent
+  local_registry:
+    active: false
+    exclude:
+    - dep_check
+    - image_repo_sync
+selenium_v4: true
+release_group: null
+labels:
+  dashboard:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+  job:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+  test:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+network:
+  dashboard:
+    target_port: null
+    service:
+      type: NodePort
+  external_policy_local: false
+  node_port:
+    enabled: true
+    port: 31000
 conf:
+  software:
+    apache2:
+      binary: apache2
+      start_parameters: -DFOREGROUND
+      site_dir: /etc/apache2/sites-available
+      conf_dir: /etc/apache2/conf-available
+      mods_dir: /etc/apache2/mods-available
+      a2enmod:
+      - headers
+      - rewrite
+      a2dismod:
+      - status
   horizon:
-    apache: "LogFormat \"%h %l %u %t \\\"%r\\\" %>s %b \\\"%{Referer}i\\\" \\\"%{User-Agent}i\\\
-      \"\" combined\nLogFormat \"%{X-Forwarded-For}i %l %u %t \\\"%r\\\" %>s %b \\\
-      \"%{Referer}i\\\" \\\"%{User-Agent}i\\\"\" proxy\n\nSetEnvIf X-Forwarded-For\
-      \ \"^.*\\..*\\..*\\..*\" forwarded\nCustomLog /dev/stdout combined env=!forwarded\n\
-      CustomLog /dev/stdout proxy env=forwarded\n\n<VirtualHost *:{{ tuple \"dashboard\"\
-      \ \"internal\" \"web\" . | include \"helm-toolkit.endpoints.endpoint_port_lookup\"\
-      \ }}>\n    WSGIApplicationGroup %{GLOBAL}\n    WSGIScriptReloading On\n    WSGIDaemonProcess\
-      \ horizon-http processes=5 threads=1 user=horizon group=horizon display-name=%{GROUP}\n\
-      \    WSGIProcessGroup horizon-http\n    WSGIScriptAlias / /var/www/cgi-bin/horizon/django.wsgi\n\
-      \    WSGIPassAuthorization On\n    RewriteEngine on\n    RewriteCond %{REQUEST_METHOD}\
-      \ !^(POST|PUT|GET|DELETE|PATCH)\n    RewriteRule .* - [F]\n\n    <Location \"\
-      /\">\n        Require all granted\n    </Location>\n\n    Alias /static /var/www/html/horizon\n\
-      \    <Location \"/static\">\n        SetHandler static\n    </Location>\n\n\
-      \    ErrorLogFormat \"%{cu}t %M\"\n    ErrorLog /dev/stdout\n    TransferLog\
-      \ /dev/stdout\n\n    SetEnvIf X-Forwarded-For \"^.*\\..*\\..*\\..*\" forwarded\n\
-      \    CustomLog /dev/stdout combined env=!forwarded\n    CustomLog /dev/stdout\
-      \ proxy env=forwarded\n</Virtualhost>\n"
     branding:
-      favicon: null
       logo: null
       logo_splash: null
-    custom_panels: {}
-    extra_panels:
-    - heat_dashboard
-    - neutron_taas_dashboard
-    local_settings:
-      config:
-        allowed_hosts:
-        - '*'
-        auth:
-          idp_mapping:
-          - idp: myidp1
-            label: Acme Corporation - OpenID Connect
-            name: acme_oidc
-            protocol: oidc
-          - idp: myidp2
-            label: Acme Corporation - SAML2
-            name: acme_saml2
-            protocol: saml2
-          sso:
-            enabled: false
-            initial_choice: credentials
-        cache_backend: django.core.cache.backends.memcached.PyMemcacheCache
-        csrf_cookie_httponly: 'False'
-        csrf_cookie_secure: 'False'
-        csrf_trusted_origins: []
-        debug: 'False'
-        disable_password_reveal: 'True'
-        disallow_iframe_embed: 'False'
-        enable_pwd_validator: false
-        endpoint_type: internalURL
-        enforce_password_check: 'True'
-        horizon_images_upload_mode: legacy
-        horizon_secret_key: 9aee62c0-5253-4a86-b189-e0fb71fa503c
-        keystone_default_domain: Default
-        keystone_domains:
-          Default: Default
-          example_domain: example
-        keystone_multidomain_dropdown: 'False'
-        keystone_multidomain_support: 'True'
-        log_level: DEBUG
-        openstack_api_versions:
-          container_infra: '1.10'
-        openstack_cinder_features:
-          enable_backup: 'True'
-        openstack_enable_password_retrieve: 'False'
-        openstack_neutron_network:
-          enable_distributed_router: 'False'
-          enable_fip_topology_check: 'True'
-          enable_firewall: 'True'
-          enable_ha_router: 'False'
-          enable_ipv6: 'True'
-          enable_lb: 'True'
-          enable_quotas: 'True'
-          enable_router: 'True'
-          enable_vpn: 'True'
-        password_autocomplete: 'False'
-        pwd_validator_help_text: '_("Your password must be at least eight (8) characters
-          in length and must include characters from at least two (2) of these groupings:
-          alpha, numeric, and special characters.")'
-        pwd_validator_regex: (?=.*[a-zA-Z])(?=.*\d).{8,}|(?=.*\d)(?=.*\W).{8,}|(?=.*\W)(?=.*[a-zA-Z]).{8,}
-        raw: {}
-        secure_proxy_ssl_header: false
-        session_cookie_httponly: 'False'
-        session_cookie_secure: 'False'
-        session_engine: django.contrib.sessions.backends.cache
-        show_openrc_file: 'True'
-        ssl_no_verify: 'True'
-        use_ssl: 'False'
-      template: "import os\n\nfrom django.utils.translation import gettext_lazy as\
-        \ _\n\nfrom openstack_dashboard import exceptions\n\nDEBUG = {{ .Values.conf.horizon.local_settings.config.debug\
-        \ }}\nTEMPLATE_DEBUG = DEBUG\n\nCOMPRESS_OFFLINE = True\nCOMPRESS_CSS_HASHING_METHOD\
-        \ = \"hash\"\n\n# WEBROOT is the location relative to Webserver root\n# should\
-        \ end with a slash.\nWEBROOT = '/'\n# LOGIN_URL = WEBROOT + 'auth/login/'\n\
-        # LOGOUT_URL = WEBROOT + 'auth/logout/'\n#\n# LOGIN_REDIRECT_URL can be used\
-        \ as an alternative for\n# HORIZON_CONFIG.user_home, if user_home is not set.\n\
-        # Do not set it to '/home/', as this will cause circular redirect loop\n#\
-        \ LOGIN_REDIRECT_URL = WEBROOT\n\n# Required for Django 1.5.\n# If horizon\
-        \ is running in production (DEBUG is False), set this\n# with the list of\
-        \ host/domain names that the application can serve.\n# For more information\
-        \ see:\n# https://docs.djangoproject.com/en/dev/ref/settings/#allowed-hosts\n\
-        ALLOWED_HOSTS = [{{ include \"helm-toolkit.utils.joinListWithCommaAndSingleQuotes\"\
-        \ .Values.conf.horizon.local_settings.config.allowed_hosts }},'%s' % (os.environ.get(\"\
-        MY_POD_IP\"))]\n\n# Set SSL proxy settings:\n# For Django 1.4+ pass this header\
-        \ from the proxy after terminating the SSL,\n# and don't forget to strip it\
-        \ from the client's request.\n# For more information see:\n# https://docs.djangoproject.com/en/1.4/ref/settings/#secure-proxy-ssl-header\n\
-        #SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTOCOL', 'https')\n# https://docs.djangoproject.com/en/1.5/ref/settings/#secure-proxy-ssl-header\n\
-        {{- if .Values.conf.horizon.local_settings.config.secure_proxy_ssl_header\
-        \ }}\nSECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')\n{{- end\
-        \ }}\n\n# If Horizon is being served through SSL, then uncomment the following\
-        \ two\n# settings to better secure the cookies from security exploits\nUSE_SSL\
-        \ = {{ .Values.conf.horizon.local_settings.config.use_ssl }}\nCSRF_COOKIE_SECURE\
-        \ = {{ .Values.conf.horizon.local_settings.config.csrf_cookie_secure }}\n\
-        CSRF_COOKIE_HTTPONLY = {{ .Values.conf.horizon.local_settings.config.csrf_cookie_httponly\
-        \ }}\nSESSION_COOKIE_SECURE = {{ .Values.conf.horizon.local_settings.config.session_cookie_secure\
-        \ }}\n\nSESSION_COOKIE_HTTPONLY = {{ .Values.conf.horizon.local_settings.config.session_cookie_httponly\
-        \ }}\n\n# https://docs.djangoproject.com/en/dev/ref/settings/#csrf-trusted-origins\n\
-        CSRF_TRUSTED_ORIGINS = [{{ include \"helm-toolkit.utils.joinListWithCommaAndSingleQuotes\"\
-        \ .Values.conf.horizon.local_settings.config.csrf_trusted_origins }}]\n\n\
-        # Overrides for OpenStack API versions. Use this setting to force the\n# OpenStack\
-        \ dashboard to use a specific API version for a given service API.\n# Versions\
-        \ specified here should be integers or floats, not strings.\n# NOTE: The version\
-        \ should be formatted as it appears in the URL for the\n# service API. For\
-        \ example, The identity service APIs have inconsistent\n# use of the decimal\
-        \ point, so valid options would be 2.0 or 3.\n#OPENSTACK_API_VERSIONS = {\n\
-        #    \"data-processing\": 1.1,\n#    \"identity\": 3,\n#    \"volume\": 2,\n\
-        #}\n\nOPENSTACK_API_VERSIONS = {\n    \"identity\": 3,\n    \"container-infra\"\
-        : \"{{ .Values.conf.horizon.local_settings.config.openstack_api_versions.container_infra\
-        \ }}\"\n}\n\n# Set this to True if running on multi-domain model. When this\
-        \ is enabled, it\n# will require user to enter the Domain name in addition\
-        \ to username for login.\nOPENSTACK_KEYSTONE_MULTIDOMAIN_SUPPORT = {{ .Values.conf.horizon.local_settings.config.keystone_multidomain_support\
-        \ }}\nOPENSTACK_KEYSTONE_DOMAIN_DROPDOWN = {{ .Values.conf.horizon.local_settings.config.keystone_multidomain_dropdown\
-        \ }}\n{{- $multiDomainDropdown := eq (lower .Values.conf.horizon.local_settings.config.keystone_multidomain_dropdown)\
-        \ \"true\" }}\n{{- if $multiDomainDropdown }}\nOPENSTACK_KEYSTONE_DOMAIN_CHOICES\
-        \ = (\n{{- range $key, $label := .Values.conf.horizon.local_settings.config.keystone_domains\
-        \ }}\n    ('{{ $key }}', _('{{ $label }}')),\n{{- end }}\n)\n{{- end }}\n\n\
-        # Overrides the default domain used when running on single-domain model\n\
-        # with Keystone V3. All entities will be created in the default domain.\n\
-        OPENSTACK_KEYSTONE_DEFAULT_DOMAIN = '{{ .Values.conf.horizon.local_settings.config.keystone_default_domain\
-        \ }}'\n\n# Set Console type:\n# valid options are \"AUTO\"(default), \"VNC\"\
-        , \"SPICE\", \"RDP\", \"SERIAL\" or None\n# Set to None explicitly if you\
-        \ want to deactivate the console.\n#CONSOLE_TYPE = \"AUTO\"\n\n# Default OpenStack\
-        \ Dashboard configuration.\nHORIZON_CONFIG = {\n    'user_home': 'openstack_dashboard.views.get_user_home',\n\
-        \    'ajax_queue_limit': 10,\n    'auto_fade_alerts': {\n        'delay':\
-        \ 3000,\n        'fade_duration': 1500,\n        'types': ['alert-success',\
-        \ 'alert-info']\n    },\n    'help_url': \"http://docs.openstack.org\",\n\
-        \    'exceptions': {'recoverable': exceptions.RECOVERABLE,\n             \
-        \      'not_found': exceptions.NOT_FOUND,\n                   'unauthorized':\
-        \ exceptions.UNAUTHORIZED},\n    'modal_backdrop': 'static',\n    'angular_modules':\
-        \ [],\n    'js_files': [],\n    'js_spec_files': [],\n}\n\n{{- if .Values.conf.horizon.local_settings.config.enable_pwd_validator\
-        \ }}\n# Specify a regular expression to validate user passwords.\nHORIZON_CONFIG[\"\
-        password_validator\"] = {\n    \"regex\": '{{ .Values.conf.horizon.local_settings.config.pwd_validator_regex\
-        \ }}',\n    \"help_text\": {{ .Values.conf.horizon.local_settings.config.pwd_validator_help_text\
-        \ }},\n}\n{{- end }}\n\n# Disable simplified floating IP address management\
-        \ for deployments with\n# multiple floating IP pools or complex network requirements.\n\
-        #HORIZON_CONFIG[\"simple_ip_management\"] = False\n\n# Turn off browser autocompletion\
-        \ for forms including the login form and\n# the database creation workflow\
-        \ if so desired.\nHORIZON_CONFIG[\"password_autocomplete\"] = '{{ .Values.conf.horizon.local_settings.config.password_autocomplete\
-        \ }}'\n\n# Setting this to True will disable the reveal button for password\
-        \ fields,\n# including on the login form.\nHORIZON_CONFIG[\"disable_password_reveal\"\
-        ] = {{ .Values.conf.horizon.local_settings.config.disable_password_reveal\
-        \ }}\n\nLOCAL_PATH = '/tmp'\n\n# Set custom secret key:\n# You can either\
-        \ set it to a specific value or you can let horizon generate a\n# default\
-        \ secret key that is unique on this machine, e.i. regardless of the\n# amount\
-        \ of Python WSGI workers (if used behind Apache+mod_wsgi): However,\n# there\
-        \ may be situations where you would want to set this explicitly, e.g.\n# when\
-        \ multiple dashboard instances are distributed on different machines\n# (usually\
-        \ behind a load-balancer). Either you have to make sure that a session\n#\
-        \ gets all requests routed to the same dashboard instance or you set the same\n\
-        # SECRET_KEY for all of them.\nSECRET_KEY='{{ .Values.conf.horizon.local_settings.config.horizon_secret_key\
-        \ }}'\n\nCACHES = {\n    'default': {\n        'BACKEND': '{{ .Values.conf.horizon.local_settings.config.cache_backend\
-        \ }}',\n        'LOCATION': '{{ tuple \"oslo_cache\" \"internal\" \"memcache\"\
-        \ . | include \"helm-toolkit.endpoints.host_and_port_endpoint_uri_lookup\"\
-        \ }}',\n    }\n}\nDATABASES = {\n    'default': {\n        # Database configuration\
-        \ here\n        'ENGINE': 'django.db.backends.mysql',\n        'NAME': '{{\
-        \ .Values.endpoints.oslo_db.path | base }}',\n        'USER': '{{ .Values.endpoints.oslo_db.auth.horizon.username\
-        \ }}',\n        'PASSWORD': '{{ .Values.endpoints.oslo_db.auth.horizon.password\
-        \ }}',\n        'HOST': '{{ tuple \"oslo_db\" \"internal\" . | include \"\
-        helm-toolkit.endpoints.hostname_fqdn_endpoint_lookup\" }}',\n        'default-character-set':\
-        \ 'utf8',\n        {{- if .Values.manifests.certificates }}\n        'OPTIONS':{\n\
-        \            'ssl': {\n                'ca': '/etc/mysql/certs/ca.crt',\n\
-        \                'cert': '/etc/mysql/certs/tls.crt',\n                'key':\
-        \ '/etc/mysql/certs/tls.key'\n            }\n        },\n        {{- end }}\n\
-        \        'PORT': '{{ tuple \"oslo_db\" \"internal\" \"mysql\" . | include\
-        \ \"helm-toolkit.endpoints.endpoint_port_lookup\" }}'\n    }\n}\nSESSION_ENGINE\
-        \ = '{{ .Values.conf.horizon.local_settings.config.session_engine }}'\n\n\
-        # Send email to the console by default\nEMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'\n\
-        # Or send them to /dev/null\n#EMAIL_BACKEND = 'django.core.mail.backends.dummy.EmailBackend'\n\
-        \n# Configure these for your outgoing email host\n#EMAIL_HOST = 'smtp.my-company.com'\n\
-        #EMAIL_PORT = 25\\\\\n#EMAIL_HOST_USER = 'djangomail'\n#EMAIL_HOST_PASSWORD\
-        \ = 'top-secret!'\n\n# For multiple regions uncomment this configuration,\
-        \ and add (endpoint, title).\n#AVAILABLE_REGIONS = [\n#    ('http://cluster1.example.com:5000/v2.0',\
-        \ 'cluster1'),\n#    ('http://cluster2.example.com:5000/v2.0', 'cluster2'),\n\
-        #]\n\nOPENSTACK_KEYSTONE_URL = \"{{ tuple \"identity\" \"internal\" \"api\"\
-        \ . | include \"helm-toolkit.endpoints.keystone_endpoint_uri_lookup\" }}\"\
-        \nOPENSTACK_KEYSTONE_DEFAULT_ROLE = \"member\"\n\n# This setting specifies\
-        \ the name of the header with remote IP address. If not present,\n# then REMOTE_ADDR\
-        \ header is used. The commom value for this setting is HTTP_X_REAL_IP\n# or\
-        \ HTTP_X_FORWARDED_FORx\nSECURE_PROXY_ADDR_HEADER = 'HTTP_X_FORWARDED_FOR'\n\
-        \n{{- if .Values.conf.horizon.local_settings.config.auth.sso.enabled }}\n\
-        # Enables keystone web single-sign-on if set to True.\nWEBSSO_ENABLED = True\n\
-        \n# Determines which authentication choice to show as default.\nWEBSSO_INITIAL_CHOICE\
-        \ = \"{{ .Values.conf.horizon.local_settings.config.auth.sso.initial_choice\
-        \ }}\"\n\n{{- if .Values.conf.horizon.local_settings.config.auth.sso.websso_keystone_url\
-        \ }}\n# The full auth URL for the Keystone endpoint used for web single-sign-on\
-        \ authentication.\nWEBSSO_KEYSTONE_URL = \"{{ .Values.conf.horizon.local_settings.config.auth.sso.websso_keystone_url\
-        \ }}\"\n{{- end }}\n\n# The list of authentication mechanisms\n# which include\
-        \ keystone federation protocols.\n# Current supported protocol IDs are 'saml2'\
-        \ and 'oidc'\n# which represent SAML 2.0, OpenID Connect respectively.\n#\
-        \ Do not remove the mandatory credentials mechanism.\nWEBSSO_CHOICES = (\n\
-        \    (\"credentials\", _(\"Keystone Credentials\")),\n  {{- range $i, $sso\
-        \ := .Values.conf.horizon.local_settings.config.auth.idp_mapping }}\n    ({{\
-        \ $sso.name | quote }}, {{ $sso.label | quote }}),\n  {{- end }}\n)\n\nWEBSSO_IDP_MAPPING\
-        \ = {\n  {{- range $i, $sso := .Values.conf.horizon.local_settings.config.auth.idp_mapping\
-        \ }}\n    {{ $sso.name | quote}}: ({{ $sso.idp | quote }}, {{ $sso.protocol\
-        \ | quote }}),\n  {{- end }}\n}\n\n{{- end }}\n\n# Disable SSL certificate\
-        \ checks (useful for self-signed certificates):\nOPENSTACK_SSL_NO_VERIFY =\
-        \ {{ .Values.conf.horizon.local_settings.config.ssl_no_verify }}\n\n{{- if\
-        \ .Values.manifests.certificates }}\n# The CA certificate to use to verify\
-        \ SSL connections\nOPENSTACK_SSL_CACERT = '/etc/openstack-dashboard/certs/ca.crt'\n\
-        {{- end }}\n\n# The OPENSTACK_KEYSTONE_BACKEND settings can be used to identify\
-        \ the\n# capabilities of the auth backend for Keystone.\n# If Keystone has\
-        \ been configured to use LDAP as the auth backend then set\n# can_edit_user\
-        \ to False and name to 'ldap'.\n#\n# TODO(tres): Remove these once Keystone\
-        \ has an API to identify auth backend.\nOPENSTACK_KEYSTONE_BACKEND = {\n \
-        \   'name': 'native',\n    'can_edit_user': True,\n    'can_edit_group': True,\n\
-        \    'can_edit_project': True,\n    'can_edit_domain': True,\n    'can_edit_role':\
-        \ True,\n}\n\n# Setting this to True, will add a new \"Retrieve Password\"\
-        \ action on instance,\n# allowing Admin session password retrieval/decryption.\n\
-        OPENSTACK_ENABLE_PASSWORD_RETRIEVE = {{ .Values.conf.horizon.local_settings.config.openstack_enable_password_retrieve\
-        \ }}\n# Controls whether the keystone openrc file is accessible from the user\
-        \ menu and the api access panel.\nSHOW_OPENRC_FILE = {{ .Values.conf.horizon.local_settings.config.show_openrc_file\
-        \ }}\n# The Launch Instance user experience has been significantly enhanced.\n\
-        # You can choose whether to enable the new launch instance experience,\n#\
-        \ the legacy experience, or both. The legacy experience will be removed\n\
-        # in a future release, but is available as a temporary backup setting to ensure\n\
-        # compatibility with existing deployments. Further development will not be\n\
-        # done on the legacy experience. Please report any problems with the new\n\
-        # experience via the StoryBoard tracking system.\n#\n# Toggle LAUNCH_INSTANCE_LEGACY_ENABLED\
-        \ and LAUNCH_INSTANCE_NG_ENABLED to\n# determine the experience to enable.\
-        \  Set them both to true to enable\n# both.\n#LAUNCH_INSTANCE_LEGACY_ENABLED\
-        \ = True\n#LAUNCH_INSTANCE_NG_ENABLED = False\n\n# The Xen Hypervisor has\
-        \ the ability to set the mount point for volumes\n# attached to instances\
-        \ (other Hypervisors currently do not). Setting\n# can_set_mount_point to\
-        \ True will add the option to set the mount point\n# from the UI.\nOPENSTACK_HYPERVISOR_FEATURES\
-        \ = {\n    'can_set_mount_point': False,\n    'can_set_password': False,\n\
-        }\n\n# The OPENSTACK_CINDER_FEATURES settings can be used to enable optional\n\
-        # services provided by cinder that is not exposed by its extension API.\n\
-        OPENSTACK_CINDER_FEATURES = {\n    'enable_backup': {{ .Values.conf.horizon.local_settings.config.openstack_cinder_features.enable_backup\
-        \ }},\n}\n\n# The OPENSTACK_NEUTRON_NETWORK settings can be used to enable\
-        \ optional\n# services provided by neutron. Options currently available are\
-        \ load\n# balancer service, security groups, quotas, VPN service.\nOPENSTACK_NEUTRON_NETWORK\
-        \ = {\n    'enable_router': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_router\
-        \ }},\n    'enable_quotas': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_quotas\
-        \ }},\n    'enable_ipv6': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_ipv6\
-        \ }},\n    'enable_distributed_router': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_distributed_router\
-        \ }},\n    'enable_ha_router': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_ha_router\
-        \ }},\n    'enable_lb': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_lb\
-        \ }},\n    'enable_firewall': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_firewall\
-        \ }},\n    'enable_vpn': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_vpn\
-        \ }},\n    'enable_fip_topology_check': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_fip_topology_check\
-        \ }},\n\n    # The profile_support option is used to detect if an external\
-        \ router can be\n    # configured via the dashboard. When using specific plugins\
-        \ the\n    # profile_support can be turned on if needed.\n    'profile_support':\
-        \ None,\n    #'profile_support': 'cisco',\n\n    # Set which provider network\
-        \ types are supported. Only the network types\n    # in this list will be\
-        \ available to choose from when creating a network.\n    # Network types include\
-        \ local, flat, vlan, gre, and vxlan.\n    'supported_provider_types': ['*'],\n\
-        \n    # Set which VNIC types are supported for port binding. Only the VNIC\n\
-        \    # types in this list will be available to choose from when creating a\n\
-        \    # port.\n    # VNIC types include 'normal', 'macvtap' and 'direct'.\n\
-        \    'supported_vnic_types': ['*']\n}\n\n# The OPENSTACK_IMAGE_BACKEND settings\
-        \ can be used to customize features\n# in the OpenStack Dashboard related\
-        \ to the Image service, such as the list\n# of supported image formats.\n\
-        #OPENSTACK_IMAGE_BACKEND = {\n#    'image_formats': [\n#        ('', _('Select\
-        \ format')),\n#        ('aki', _('AKI - Amazon Kernel Image')),\n#       \
-        \ ('ami', _('AMI - Amazon Machine Image')),\n#        ('ari', _('ARI - Amazon\
-        \ Ramdisk Image')),\n#        ('docker', _('Docker')),\n#        ('iso', _('ISO\
-        \ - Optical Disk Image')),\n#        ('ova', _('OVA - Open Virtual Appliance')),\n\
-        #        ('qcow2', _('QCOW2 - QEMU Emulator')),\n#        ('raw', _('Raw')),\n\
-        #        ('vdi', _('VDI - Virtual Disk Image')),\n#        ('vhd', ('VHD -\
-        \ Virtual Hard Disk')),\n#        ('vmdk', _('VMDK - Virtual Machine Disk')),\n\
-        #    ]\n#}\n\n# The IMAGE_CUSTOM_PROPERTY_TITLES settings is used to customize\
-        \ the titles for\n# image custom property attributes that appear on image\
-        \ detail pages.\nIMAGE_CUSTOM_PROPERTY_TITLES = {\n    \"architecture\": _(\"\
-        Architecture\"),\n    \"kernel_id\": _(\"Kernel ID\"),\n    \"ramdisk_id\"\
-        : _(\"Ramdisk ID\"),\n    \"image_state\": _(\"Euca2ools state\"),\n    \"\
-        project_id\": _(\"Project ID\"),\n    \"image_type\": _(\"Image Type\"),\n\
-        }\n\n# The IMAGE_RESERVED_CUSTOM_PROPERTIES setting is used to specify which\
-        \ image\n# custom properties should not be displayed in the Image Custom Properties\n\
-        # table.\nIMAGE_RESERVED_CUSTOM_PROPERTIES = []\n\n# Set to 'legacy' or 'direct'\
-        \ to allow users to upload images to glance via\n# Horizon server. When enabled,\
-        \ a file form field will appear on the create\n# image form. If set to 'off',\
-        \ there will be no file form field on the create\n# image form. See documentation\
-        \ for deployment considerations.\nHORIZON_IMAGES_UPLOAD_MODE = '{{ .Values.conf.horizon.local_settings.config.horizon_images_upload_mode\
-        \ }}'\n\n# OPENSTACK_ENDPOINT_TYPE specifies the endpoint type to use for\
-        \ the endpoints\n# in the Keystone service catalog. Use this setting when\
-        \ Horizon is running\n# external to the OpenStack environment. The default\
-        \ is 'publicURL'.\nOPENSTACK_ENDPOINT_TYPE = \"{{ .Values.conf.horizon.local_settings.config.endpoint_type\
-        \ }}\"\n\n# SECONDARY_ENDPOINT_TYPE specifies the fallback endpoint type to\
-        \ use in the\n# case that OPENSTACK_ENDPOINT_TYPE is not present in the endpoints\n\
-        # in the Keystone service catalog. Use this setting when Horizon is running\n\
-        # external to the OpenStack environment. The default is None.  This\n# value\
-        \ should differ from OPENSTACK_ENDPOINT_TYPE if used.\nSECONDARY_ENDPOINT_TYPE\
-        \ = \"publicURL\"\n\n# The number of objects (Swift containers/objects or\
-        \ images) to display\n# on a single page before providing a paging element\
-        \ (a \"more\" link)\n# to paginate results.\nAPI_RESULT_LIMIT = 1000\nAPI_RESULT_PAGE_SIZE\
-        \ = 20\n\n# The size of chunk in bytes for downloading objects from Swift\n\
-        SWIFT_FILE_TRANSFER_CHUNK_SIZE = 512 * 1024\n\n# Specify a maximum number\
-        \ of items to display in a dropdown.\nDROPDOWN_MAX_ITEMS = 30\n\n# The timezone\
-        \ of the server. This should correspond with the timezone\n# of your entire\
-        \ OpenStack installation, and hopefully be in UTC.\nTIME_ZONE = \"UTC\"\n\n\
-        # When launching an instance, the menu of available flavors is\n# sorted by\
-        \ RAM usage, ascending. If you would like a different sort order,\n# you can\
-        \ provide another flavor attribute as sorting key. Alternatively, you\n# can\
-        \ provide a custom callback method to use for sorting. You can also provide\n\
-        # a flag for reverse sort. For more info, see\n# http://docs.python.org/2/library/functions.html#sorted\n\
-        #CREATE_INSTANCE_FLAVOR_SORT = {\n#    'key': 'name',\n#     # or\n#    'key':\
-        \ my_awesome_callback_method,\n#    'reverse': False,\n#}\n\n# Set this to\
-        \ True to display an 'Admin Password' field on the Change Password\n# form\
-        \ to verify that it is indeed the admin logged-in who wants to change\n# the\
-        \ password.\nENFORCE_PASSWORD_CHECK = {{ .Values.conf.horizon.local_settings.config.enforce_password_check\
-        \ }}\n\n# Modules that provide /auth routes that can be used to handle different\
-        \ types\n# of user authentication. Add auth plugins that require extra route\
-        \ handling to\n# this list.\n#AUTHENTICATION_URLS = [\n#    'openstack_auth.urls',\n\
-        #]\n\n# The Horizon Policy Enforcement engine uses these values to load per\
-        \ service\n# policy rule files. The content of these files should match the\
-        \ files the\n# OpenStack services are using to determine role based access\
-        \ control in the\n# target installation.\n\n# Path to directory containing\
-        \ policy.yaml files\nPOLICY_FILES_PATH = '/etc/openstack-dashboard'\n# Map\
-        \ of local copy of service policy files\n#POLICY_FILES = {\n#    'identity':\
-        \ 'keystone_policy.yaml',\n#    'compute': 'nova_policy.yaml',\n#    'volume':\
-        \ 'cinder_policy.yaml',\n#    'image': 'glance_policy.yaml',\n#    'orchestration':\
-        \ 'heat_policy.yaml',\n#    'network': 'neutron_policy.yaml',\n#}\n\n# Trove\
-        \ user and database extension support. By default support for\n# creating\
-        \ users and databases on database instances is turned on.\n# To disable these\
-        \ extensions set the permission here to something\n# unusable such as [\"\
-        !\"].\n# TROVE_ADD_USER_PERMS = []\n# TROVE_ADD_DATABASE_PERMS = []\n\n# Change\
-        \ this patch to the appropriate static directory containing\n# two files:\
-        \ _variables.scss and _styles.scss\n#CUSTOM_THEME_PATH = 'static/themes/default'\n\
-        \nLOGGING = {\n    'version': 1,\n    # When set to True this will disable\
-        \ all logging except\n    # for loggers specified in this configuration dictionary.\
-        \ Note that\n    # if nothing is specified here and disable_existing_loggers\
-        \ is True,\n    # django.db.backends will still log unless it is disabled\
-        \ explicitly.\n    'disable_existing_loggers': False,\n    'handlers': {\n\
-        \        'null': {\n            'level': 'DEBUG',\n            'class': 'logging.NullHandler',\n\
-        \        },\n        'console': {\n            # Set the level to \"DEBUG\"\
-        \ for verbose output logging.\n            'level': 'INFO',\n            'class':\
-        \ 'logging.StreamHandler',\n        },\n    },\n    'loggers': {\n       \
-        \ # Logging from django.db.backends is VERY verbose, send to null\n      \
-        \  # by default.\n        'django.db.backends': {\n            'handlers':\
-        \ ['null'],\n            'propagate': False,\n        },\n        'requests':\
-        \ {\n            'handlers': ['null'],\n            'propagate': False,\n\
-        \        },\n        'horizon': {\n            'handlers': ['console'],\n\
-        \            'level': '{{ .Values.conf.horizon.local_settings.config.log_level\
-        \ }}',\n            'propagate': False,\n        },\n        'openstack_dashboard':\
-        \ {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level\
-        \ }}',\n            'propagate': False,\n        },\n        'novaclient':\
-        \ {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level\
-        \ }}',\n            'propagate': False,\n        },\n        'cinderclient':\
-        \ {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level\
-        \ }}',\n            'propagate': False,\n        },\n        'glanceclient':\
-        \ {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level\
-        \ }}',\n            'propagate': False,\n        },\n        'neutronclient':\
-        \ {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level\
-        \ }}',\n            'propagate': False,\n        },\n        'heatclient':\
-        \ {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level\
-        \ }}',\n            'propagate': False,\n        },\n        'troveclient':\
-        \ {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level\
-        \ }}',\n            'propagate': False,\n        },\n        'swiftclient':\
-        \ {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level\
-        \ }}',\n            'propagate': False,\n        },\n        'openstack_auth':\
-        \ {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level\
-        \ }}',\n            'propagate': False,\n        },\n        'nose.plugins.manager':\
-        \ {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level\
-        \ }}',\n            'propagate': False,\n        },\n        'django': {\n\
-        \            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level\
-        \ }}',\n            'propagate': False,\n        },\n        'iso8601': {\n\
-        \            'handlers': ['null'],\n            'propagate': False,\n    \
-        \    },\n        'scss': {\n            'handlers': ['null'],\n          \
-        \  'propagate': False,\n        },\n    }\n}\n\n# 'direction' should not be\
-        \ specified for all_tcp/udp/icmp.\n# It is specified in the form.\nSECURITY_GROUP_RULES\
-        \ = {\n    'all_tcp': {\n        'name': _('All TCP'),\n        'ip_protocol':\
-        \ 'tcp',\n        'from_port': '1',\n        'to_port': '65535',\n    },\n\
-        \    'all_udp': {\n        'name': _('All UDP'),\n        'ip_protocol': 'udp',\n\
-        \        'from_port': '1',\n        'to_port': '65535',\n    },\n    'all_icmp':\
-        \ {\n        'name': _('All ICMP'),\n        'ip_protocol': 'icmp',\n    \
-        \    'from_port': '-1',\n        'to_port': '-1',\n    },\n    'ssh': {\n\
-        \        'name': 'SSH',\n        'ip_protocol': 'tcp',\n        'from_port':\
-        \ '22',\n        'to_port': '22',\n    },\n    'smtp': {\n        'name':\
-        \ 'SMTP',\n        'ip_protocol': 'tcp',\n        'from_port': '25',\n   \
-        \     'to_port': '25',\n    },\n    'dns': {\n        'name': 'DNS',\n   \
-        \     'ip_protocol': 'tcp',\n        'from_port': '53',\n        'to_port':\
-        \ '53',\n    },\n    'http': {\n        'name': 'HTTP',\n        'ip_protocol':\
-        \ 'tcp',\n        'from_port': '80',\n        'to_port': '80',\n    },\n \
-        \   'pop3': {\n        'name': 'POP3',\n        'ip_protocol': 'tcp',\n  \
-        \      'from_port': '110',\n        'to_port': '110',\n    },\n    'imap':\
-        \ {\n        'name': 'IMAP',\n        'ip_protocol': 'tcp',\n        'from_port':\
-        \ '143',\n        'to_port': '143',\n    },\n    'ldap': {\n        'name':\
-        \ 'LDAP',\n        'ip_protocol': 'tcp',\n        'from_port': '389',\n  \
-        \      'to_port': '389',\n    },\n    'https': {\n        'name': 'HTTPS',\n\
-        \        'ip_protocol': 'tcp',\n        'from_port': '443',\n        'to_port':\
-        \ '443',\n    },\n    'smtps': {\n        'name': 'SMTPS',\n        'ip_protocol':\
-        \ 'tcp',\n        'from_port': '465',\n        'to_port': '465',\n    },\n\
-        \    'imaps': {\n        'name': 'IMAPS',\n        'ip_protocol': 'tcp',\n\
-        \        'from_port': '993',\n        'to_port': '993',\n    },\n    'pop3s':\
-        \ {\n        'name': 'POP3S',\n        'ip_protocol': 'tcp',\n        'from_port':\
-        \ '995',\n        'to_port': '995',\n    },\n    'ms_sql': {\n        'name':\
-        \ 'MS SQL',\n        'ip_protocol': 'tcp',\n        'from_port': '1433',\n\
-        \        'to_port': '1433',\n    },\n    'mysql': {\n        'name': 'MYSQL',\n\
-        \        'ip_protocol': 'tcp',\n        'from_port': '3306',\n        'to_port':\
-        \ '3306',\n    },\n    'rdp': {\n        'name': 'RDP',\n        'ip_protocol':\
-        \ 'tcp',\n        'from_port': '3389',\n        'to_port': '3389',\n    },\n\
-        }\n\n# Deprecation Notice:\n#\n# The setting FLAVOR_EXTRA_KEYS has been deprecated.\n\
-        # Please load extra spec metadata into the Glance Metadata Definition Catalog.\n\
-        #\n# The sample quota definitions can be found in:\n# <glance_source>/etc/metadefs/compute-quota.json\n\
-        #\n# The metadata definition catalog supports CLI and API:\n#  $glance --os-image-api-version\
-        \ 2 help md-namespace-import\n#  $glance-manage db_load_metadefs <directory_with_definition_files>\n\
-        #\n# See Metadata Definitions on: https://docs.openstack.org/glance/latest/\n\
-        \n# Indicate to the Sahara data processing service whether or not\n# automatic\
-        \ floating IP allocation is in effect.  If it is not\n# in effect, the user\
-        \ will be prompted to choose a floating IP\n# pool for use in their cluster.\
-        \  False by default.  You would want\n# to set this to True if you were running\
-        \ Nova Networking with\n# auto_assign_floating_ip = True.\n#SAHARA_AUTO_IP_ALLOCATION_ENABLED\
-        \ = False\n\n# The hash algorithm to use for authentication tokens. This must\n\
-        # match the hash algorithm that the identity server and the\n# auth_token\
-        \ middleware are using. Allowed values are the\n# algorithms supported by\
-        \ Python's hashlib library.\n#OPENSTACK_TOKEN_HASH_ALGORITHM = 'md5'\n\n#\
-        \ AngularJS requires some settings to be made available to\n# the client side.\
-        \ Some settings are required by in-tree / built-in horizon\n# features. These\
-        \ settings must be added to REST_API_REQUIRED_SETTINGS in the\n# form of ['SETTING_1','SETTING_2'],\
-        \ etc.\n#\n# You may remove settings from this list for security purposes,\
-        \ but do so at\n# the risk of breaking a built-in horizon feature. These settings\
-        \ are required\n# for horizon to function properly. Only remove them if you\
-        \ know what you\n# are doing. These settings may in the future be moved to\
-        \ be defined within\n# the enabled panel configuration.\n# You should not\
-        \ add settings to this list for out of tree extensions.\n# See: https://wiki.openstack.org/wiki/Horizon/RESTAPI\n\
-        REST_API_REQUIRED_SETTINGS = ['OPENSTACK_HYPERVISOR_FEATURES',\n         \
-        \                     'LAUNCH_INSTANCE_DEFAULTS',\n                      \
-        \        'OPENSTACK_IMAGE_FORMATS']\n\n# Additional settings can be made available\
-        \ to the client side for\n# extensibility by specifying them in REST_API_ADDITIONAL_SETTINGS\n\
-        # !! Please use extreme caution as the settings are transferred via HTTP/S\n\
-        # and are not encrypted on the browser. This is an experimental API and\n\
-        # may be deprecated in the future without notice.\n#REST_API_ADDITIONAL_SETTINGS\
-        \ = []\n\n# DISALLOW_IFRAME_EMBED can be used to prevent Horizon from being\
-        \ embedded\n# within an iframe. Legacy browsers are still vulnerable to a\
-        \ Cross-Frame\n# Scripting (XFS) vulnerability, so this option allows extra\
-        \ security hardening\n# where iframes are not used in deployment. Default\
-        \ setting is True.\n# For more information see:\n# http://tinyurl.com/anticlickjack\n\
-        DISALLOW_IFRAME_EMBED = {{ .Values.conf.horizon.local_settings.config.disallow_iframe_embed\
-        \ }}\n\nSTATIC_ROOT = '/var/www/html/horizon'\n\n{{- range $option, $value\
-        \ := .Values.conf.horizon.local_settings.config.raw }}\n{{ $option }} = {{\
-        \ toJson $value }}\n{{- end }}\n"
-    local_settings_d: {}
-    policy:
-      ceilometer:
-        context_is_admin: role:admin
-        context_is_owner: user_id:%(target.user_id)s
-        context_is_project: project_id:%(target.project_id)s
-        segregation: rule:context_is_admin
-      heat:
-        actions:action: rule:deny_stack_user
-        build_info:build_info: rule:deny_stack_user
-        cloudformation:CancelUpdateStack: rule:deny_stack_user
-        cloudformation:CreateStack: rule:deny_stack_user
-        cloudformation:DeleteStack: rule:deny_stack_user
-        cloudformation:DescribeStackEvents: rule:deny_stack_user
-        cloudformation:DescribeStackResource: ''
-        cloudformation:DescribeStackResources: rule:deny_stack_user
-        cloudformation:DescribeStacks: rule:deny_stack_user
-        cloudformation:EstimateTemplateCost: rule:deny_stack_user
-        cloudformation:GetTemplate: rule:deny_stack_user
-        cloudformation:ListStackResources: rule:deny_stack_user
-        cloudformation:ListStacks: rule:deny_stack_user
-        cloudformation:UpdateStack: rule:deny_stack_user
-        cloudformation:ValidateTemplate: rule:deny_stack_user
-        context_is_admin: role:admin
-        deny_everybody: '!'
-        deny_stack_user: not role:heat_stack_user
-        events:index: rule:deny_stack_user
-        events:show: rule:deny_stack_user
-        resource:index: rule:deny_stack_user
-        resource:mark_unhealthy: rule:deny_stack_user
-        resource:metadata: ''
-        resource:show: rule:deny_stack_user
-        resource:signal: ''
-        resource_types:OS::Cinder::EncryptedVolumeType: rule:context_is_admin
-        resource_types:OS::Cinder::VolumeType: rule:context_is_admin
-        resource_types:OS::Manila::ShareType: rule:context_is_admin
-        resource_types:OS::Neutron::QoSBandwidthLimitRule: rule:context_is_admin
-        resource_types:OS::Neutron::QoSPolicy: rule:context_is_admin
-        resource_types:OS::Nova::Flavor: rule:context_is_admin
-        resource_types:OS::Nova::HostAggregate: rule:context_is_admin
-        service:index: rule:context_is_admin
-        software_configs:create: rule:deny_stack_user
-        software_configs:delete: rule:deny_stack_user
-        software_configs:global_index: rule:deny_everybody
-        software_configs:index: rule:deny_stack_user
-        software_configs:show: rule:deny_stack_user
-        software_deployments:create: rule:deny_stack_user
-        software_deployments:delete: rule:deny_stack_user
-        software_deployments:index: rule:deny_stack_user
-        software_deployments:metadata: ''
-        software_deployments:show: rule:deny_stack_user
-        software_deployments:update: rule:deny_stack_user
-        stacks:abandon: rule:deny_stack_user
-        stacks:create: rule:deny_stack_user
-        stacks:delete: rule:deny_stack_user
-        stacks:delete_snapshot: rule:deny_stack_user
-        stacks:detail: rule:deny_stack_user
-        stacks:environment: rule:deny_stack_user
-        stacks:export: rule:deny_stack_user
-        stacks:generate_template: rule:deny_stack_user
-        stacks:global_index: rule:deny_everybody
-        stacks:index: rule:deny_stack_user
-        stacks:list_outputs: rule:deny_stack_user
-        stacks:list_resource_types: rule:deny_stack_user
-        stacks:list_snapshots: rule:deny_stack_user
-        stacks:list_template_functions: rule:deny_stack_user
-        stacks:list_template_versions: rule:deny_stack_user
-        stacks:lookup: ''
-        stacks:preview: rule:deny_stack_user
-        stacks:preview_update: rule:deny_stack_user
-        stacks:preview_update_patch: rule:deny_stack_user
-        stacks:resource_schema: rule:deny_stack_user
-        stacks:restore_snapshot: rule:deny_stack_user
-        stacks:show: rule:deny_stack_user
-        stacks:show_output: rule:deny_stack_user
-        stacks:show_snapshot: rule:deny_stack_user
-        stacks:snapshot: rule:deny_stack_user
-        stacks:template: rule:deny_stack_user
-        stacks:update: rule:deny_stack_user
-        stacks:update_patch: rule:deny_stack_user
-        stacks:validate_template: rule:deny_stack_user
+      favicon: null
+    apache: "LogFormat \"%h %l %u %t \\\"%r\\\" %>s %b \\\"%{Referer}i\\\" \\\"%{User-Agent}i\\\"\" combined\nLogFormat \"%{X-Forwarded-For}i %l %u %t \\\"%r\\\" %>s %b \\\"%{Referer}i\\\" \\\"%{User-Agent}i\\\"\" proxy\n\nSetEnvIf X-Forwarded-For \"^.*\\..*\\..*\\..*\" forwarded\nCustomLog /dev/stdout combined env=!forwarded\nCustomLog /dev/stdout proxy env=forwarded\n\n<VirtualHost *:{{ tuple \"dashboard\" \"internal\" \"web\" . | include \"helm-toolkit.endpoints.endpoint_port_lookup\" }}>\n    WSGIApplicationGroup %{GLOBAL}\n    WSGIScriptReloading On\n    WSGIDaemonProcess horizon-http processes=5 threads=1 user=horizon group=horizon display-name=%{GROUP}\n    WSGIProcessGroup horizon-http\n    WSGIScriptAlias / /var/www/cgi-bin/horizon/django.wsgi\n    WSGIPassAuthorization On\n    RewriteEngine on\n    RewriteCond %{REQUEST_METHOD} !^(POST|PUT|GET|DELETE|PATCH)\n    RewriteRule .* - [F]\n\n    <Location \"/\">\n        Require all granted\n    </Location>\n\n    Alias /static /var/www/html/horizon\n    <Location \"/static\">\n        SetHandler static\n    </Location>\n\n    ErrorLogFormat \"%{cu}t %M\"\n    ErrorLog /dev/stdout\n    TransferLog /dev/stdout\n\n    SetEnvIf X-Forwarded-For \"^.*\\..*\\..*\\..*\" forwarded\n    CustomLog /dev/stdout combined env=!forwarded\n    CustomLog /dev/stdout proxy env=forwarded\n</Virtualhost>\n"
     security: '#
 
       # Disable access to the entire file system except for the directories that
@@ -658,18 +176,164 @@ conf:
       #
 
       '
-  software:
-    apache2:
-      a2dismod:
-      - status
-      a2enmod:
-      - headers
-      - rewrite
-      binary: apache2
-      conf_dir: /etc/apache2/conf-available
-      mods_dir: /etc/apache2/mods-available
-      site_dir: /etc/apache2/sites-available
-      start_parameters: -DFOREGROUND
+    custom_panels: {}
+    local_settings_d: {}
+    local_settings:
+      config:
+        horizon_secret_key: 9aee62c0-5253-4a86-b189-e0fb71fa503c
+        debug: 'False'
+        use_ssl: 'False'
+        endpoint_type: internalURL
+        secondary_endpoint_type: publicURL
+        keystone_multidomain_support: 'True'
+        keystone_multidomain_dropdown: 'False'
+        keystone_domains:
+          Default: Default
+          example_domain: example
+        keystone_default_domain: Default
+        default_service_regions: []
+        disable_password_reveal: 'True'
+        show_openrc_file: 'True'
+        csrf_cookie_secure: 'False'
+        csrf_cookie_httponly: 'False'
+        csrf_trusted_origins: []
+        enforce_password_check: 'True'
+        enable_pwd_validator: false
+        pwd_validator_regex: (?=.*[a-zA-Z])(?=.*\d).{8,}|(?=.*\d)(?=.*\W).{8,}|(?=.*\W)(?=.*[a-zA-Z]).{8,}
+        pwd_validator_help_text: '_("Your password must be at least eight (8) characters in length and must include characters from at least two (2) of these groupings: alpha, numeric, and special characters.")'
+        session_cookie_secure: 'False'
+        session_cookie_httponly: 'False'
+        session_engine: django.contrib.sessions.backends.cache
+        cache_backend: django.core.cache.backends.memcached.PyMemcacheCache
+        secure_proxy_ssl_header: false
+        password_autocomplete: 'False'
+        disallow_iframe_embed: 'False'
+        ssl_no_verify: 'True'
+        allowed_hosts:
+        - '*'
+        horizon_images_upload_mode: legacy
+        openstack_cinder_features:
+          enable_backup: 'True'
+        openstack_neutron_network:
+          enable_router: 'True'
+          enable_quotas: 'True'
+          enable_ipv6: 'True'
+          enable_distributed_router: 'False'
+          enable_ha_router: 'False'
+          enable_lb: 'True'
+          enable_firewall: 'True'
+          enable_vpn: 'True'
+          enable_fip_topology_check: 'True'
+        openstack_enable_password_retrieve: 'False'
+        auth:
+          sso:
+            enabled: false
+            initial_choice: credentials
+          idp_mapping:
+          - name: acme_oidc
+            label: Acme Corporation - OpenID Connect
+            idp: myidp1
+            protocol: oidc
+          - name: acme_saml2
+            label: Acme Corporation - SAML2
+            idp: myidp2
+            protocol: saml2
+        log_level: DEBUG
+        raw: {}
+        openstack_api_versions:
+          container_infra: '1.10'
+        secure_proxy_addr_header: HTTP_X_FORWARDED_FOR
+      template: "import os\n\nfrom django.utils.translation import gettext_lazy as _\n\nfrom openstack_dashboard import exceptions\n\nDEBUG = {{ .Values.conf.horizon.local_settings.config.debug }}\nTEMPLATE_DEBUG = DEBUG\n\nCOMPRESS_OFFLINE = True\nCOMPRESS_CSS_HASHING_METHOD = \"hash\"\n\n# WEBROOT is the location relative to Webserver root\n# should end with a slash.\nWEBROOT = '/'\n# LOGIN_URL = WEBROOT + 'auth/login/'\n# LOGOUT_URL = WEBROOT + 'auth/logout/'\n#\n# LOGIN_REDIRECT_URL can be used as an alternative for\n# HORIZON_CONFIG.user_home, if user_home is not set.\n# Do not set it to '/home/', as this will cause circular redirect loop\n# LOGIN_REDIRECT_URL = WEBROOT\n\n# Required for Django 1.5.\n# If horizon is running in production (DEBUG is False), set this\n# with the list of host/domain names that the application can serve.\n# For more information see:\n# https://docs.djangoproject.com/en/dev/ref/settings/#allowed-hosts\nALLOWED_HOSTS = [{{ include \"helm-toolkit.utils.joinListWithCommaAndSingleQuotes\" .Values.conf.horizon.local_settings.config.allowed_hosts }},'%s' % (os.environ.get(\"MY_POD_IP\"))]\n\n# Set SSL proxy settings:\n# For Django 1.4+ pass this header from the proxy after terminating the SSL,\n# and don't forget to strip it from the client's request.\n# For more information see:\n# https://docs.djangoproject.com/en/1.4/ref/settings/#secure-proxy-ssl-header\n#SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTOCOL', 'https')\n# https://docs.djangoproject.com/en/1.5/ref/settings/#secure-proxy-ssl-header\n{{- if .Values.conf.horizon.local_settings.config.secure_proxy_ssl_header }}\nSECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')\n{{- end }}\n\n# If Horizon is being served through SSL, then uncomment the following two\n# settings to better secure the cookies from security exploits\nUSE_SSL = {{ .Values.conf.horizon.local_settings.config.use_ssl }}\nCSRF_COOKIE_SECURE = {{ .Values.conf.horizon.local_settings.config.csrf_cookie_secure }}\nCSRF_COOKIE_HTTPONLY = {{ .Values.conf.horizon.local_settings.config.csrf_cookie_httponly }}\nSESSION_COOKIE_SECURE = {{ .Values.conf.horizon.local_settings.config.session_cookie_secure }}\n\nSESSION_COOKIE_HTTPONLY = {{ .Values.conf.horizon.local_settings.config.session_cookie_httponly }}\n\n# https://docs.djangoproject.com/en/dev/ref/settings/#csrf-trusted-origins\nCSRF_TRUSTED_ORIGINS = [{{ include \"helm-toolkit.utils.joinListWithCommaAndSingleQuotes\" .Values.conf.horizon.local_settings.config.csrf_trusted_origins }}]\n\n# Overrides for OpenStack API versions. Use this setting to force the\n# OpenStack dashboard to use a specific API version for a given service API.\n# Versions specified here should be integers or floats, not strings.\n# NOTE: The version should be formatted as it appears in the URL for the\n# service API. For example, The identity service APIs have inconsistent\n# use of the decimal point, so valid options would be 2.0 or 3.\n#OPENSTACK_API_VERSIONS = {\n#    \"data-processing\": 1.1,\n#    \"identity\": 3,\n#    \"volume\": 2,\n#}\n\nOPENSTACK_API_VERSIONS = {\n    \"identity\": 3,\n    \"container-infra\": \"{{ .Values.conf.horizon.local_settings.config.openstack_api_versions.container_infra }}\"\n}\n\n# Set this to True if running on multi-domain model. When this is enabled, it\n# will require user to enter the Domain name in addition to username for login.\nOPENSTACK_KEYSTONE_MULTIDOMAIN_SUPPORT = {{ .Values.conf.horizon.local_settings.config.keystone_multidomain_support }}\nOPENSTACK_KEYSTONE_DOMAIN_DROPDOWN = {{ .Values.conf.horizon.local_settings.config.keystone_multidomain_dropdown }}\n{{- $multiDomainDropdown := eq (lower .Values.conf.horizon.local_settings.config.keystone_multidomain_dropdown) \"true\" }}\n{{- if $multiDomainDropdown }}\nOPENSTACK_KEYSTONE_DOMAIN_CHOICES = (\n{{- range $key, $label := .Values.conf.horizon.local_settings.config.keystone_domains }}\n    ('{{ $key }}', _('{{ $label }}')),\n{{- end }}\n)\n{{- end }}\n\n# Overrides the default domain used when running on single-domain model\n# with Keystone V3.\
+        \ All entities will be created in the default domain.\nOPENSTACK_KEYSTONE_DEFAULT_DOMAIN = '{{ .Values.conf.horizon.local_settings.config.keystone_default_domain }}'\n\n# Set Console type:\n# valid options are \"AUTO\"(default), \"VNC\", \"SPICE\", \"RDP\", \"SERIAL\" or None\n# Set to None explicitly if you want to deactivate the console.\n#CONSOLE_TYPE = \"AUTO\"\n\n# Default OpenStack Dashboard configuration.\nHORIZON_CONFIG = {\n    'user_home': 'openstack_dashboard.views.get_user_home',\n    'ajax_queue_limit': 10,\n    'auto_fade_alerts': {\n        'delay': 3000,\n        'fade_duration': 1500,\n        'types': ['alert-success', 'alert-info']\n    },\n    'help_url': \"http://docs.openstack.org\",\n    'exceptions': {'recoverable': exceptions.RECOVERABLE,\n                   'not_found': exceptions.NOT_FOUND,\n                   'unauthorized': exceptions.UNAUTHORIZED},\n    'modal_backdrop': 'static',\n    'angular_modules': [],\n    'js_files': [],\n    'js_spec_files': [],\n}\n\n{{- if .Values.conf.horizon.local_settings.config.enable_pwd_validator }}\n# Specify a regular expression to validate user passwords.\nHORIZON_CONFIG[\"password_validator\"] = {\n    \"regex\": '{{ .Values.conf.horizon.local_settings.config.pwd_validator_regex }}',\n    \"help_text\": {{ .Values.conf.horizon.local_settings.config.pwd_validator_help_text }},\n}\n{{- end }}\n\n# Disable simplified floating IP address management for deployments with\n# multiple floating IP pools or complex network requirements.\n#HORIZON_CONFIG[\"simple_ip_management\"] = False\n\n# Turn off browser autocompletion for forms including the login form and\n# the database creation workflow if so desired.\nHORIZON_CONFIG[\"password_autocomplete\"] = '{{ .Values.conf.horizon.local_settings.config.password_autocomplete }}'\n\n# Setting this to True will disable the reveal button for password fields,\n# including on the login form.\nHORIZON_CONFIG[\"disable_password_reveal\"] = {{ .Values.conf.horizon.local_settings.config.disable_password_reveal }}\n\nLOCAL_PATH = '/tmp'\n\n# Set custom secret key:\n# You can either set it to a specific value or you can let horizon generate a\n# default secret key that is unique on this machine, e.i. regardless of the\n# amount of Python WSGI workers (if used behind Apache+mod_wsgi): However,\n# there may be situations where you would want to set this explicitly, e.g.\n# when multiple dashboard instances are distributed on different machines\n# (usually behind a load-balancer). Either you have to make sure that a session\n# gets all requests routed to the same dashboard instance or you set the same\n# SECRET_KEY for all of them.\nSECRET_KEY='{{ .Values.conf.horizon.local_settings.config.horizon_secret_key }}'\n\nCACHES = {\n    'default': {\n        'BACKEND': '{{ .Values.conf.horizon.local_settings.config.cache_backend }}',\n        'LOCATION': '{{ tuple \"oslo_cache\" \"internal\" \"memcache\" . | include \"helm-toolkit.endpoints.host_and_port_endpoint_uri_lookup\" }}',\n    }\n}\nDATABASES = {\n    'default': {\n        # Database configuration here\n        'ENGINE': 'django.db.backends.mysql',\n        'NAME': '{{ .Values.endpoints.oslo_db.path | base }}',\n        'USER': '{{ .Values.endpoints.oslo_db.auth.horizon.username }}',\n        'PASSWORD': '{{ .Values.endpoints.oslo_db.auth.horizon.password }}',\n        'HOST': '{{ tuple \"oslo_db\" \"internal\" . | include \"helm-toolkit.endpoints.hostname_fqdn_endpoint_lookup\" }}',\n        'default-character-set': 'utf8',\n        {{- if .Values.tls.oslo_db }}\n        'OPTIONS':{\n            'ssl': {\n                'ca': '/etc/mysql/certs/ca.crt',\n                'cert': '/etc/mysql/certs/tls.crt',\n                'key': '/etc/mysql/certs/tls.key'\n            }\n        },\n        {{- end }}\n        'PORT': '{{ tuple \"oslo_db\" \"internal\" \"mysql\" . | include \"helm-toolkit.endpoints.endpoint_port_lookup\" }}'\n    }\n}\nSESSION_ENGINE = '{{ .Values.conf.horizon.local_settings.config.session_engine }}'\n\n# Send email to the console by default\nEMAIL_BACKEND\
+        \ = 'django.core.mail.backends.console.EmailBackend'\n# Or send them to /dev/null\n#EMAIL_BACKEND = 'django.core.mail.backends.dummy.EmailBackend'\n\n# Configure these for your outgoing email host\n#EMAIL_HOST = 'smtp.my-company.com'\n#EMAIL_PORT = 25\\\\\n#EMAIL_HOST_USER = 'djangomail'\n#EMAIL_HOST_PASSWORD = 'top-secret!'\n\n# For multiple regions uncomment this configuration, and add (endpoint, title).\n#AVAILABLE_REGIONS = [\n#    ('http://cluster1.example.com:5000/v2.0', 'cluster1'),\n#    ('http://cluster2.example.com:5000/v2.0', 'cluster2'),\n#]\n\nDEFAULT_SERVICE_REGIONS = {\n  {{- range $i, $service_region := .Values.conf.horizon.local_settings.config.default_service_regions }}\n    '{{ $service_region.service }}': '{{ $service_region.region }}',\n  {{- end }}\n}\n\nOPENSTACK_KEYSTONE_URL = \"{{ tuple \"identity\" \"internal\" \"api\" . | include \"helm-toolkit.endpoints.keystone_endpoint_uri_lookup\" }}\"\nOPENSTACK_KEYSTONE_DEFAULT_ROLE = \"member\"\n\n# This setting specifies the name of the header with remote IP address. If not present,\n# then REMOTE_ADDR header is used. The common value for this setting is HTTP_X_REAL_IP\n# or HTTP_X_FORWARDED_FOR\nSECURE_PROXY_ADDR_HEADER = '{{ .Values.conf.horizon.local_settings.config.secure_proxy_addr_header }}'\n\n{{- if .Values.conf.horizon.local_settings.config.auth.sso.enabled }}\n# Enables keystone web single-sign-on if set to True.\nWEBSSO_ENABLED = True\n\n# Determines which authentication choice to show as default.\nWEBSSO_INITIAL_CHOICE = \"{{ .Values.conf.horizon.local_settings.config.auth.sso.initial_choice }}\"\n\n{{- if .Values.conf.horizon.local_settings.config.auth.sso.websso_keystone_url }}\n# The full auth URL for the Keystone endpoint used for web single-sign-on authentication.\nWEBSSO_KEYSTONE_URL = \"{{ .Values.conf.horizon.local_settings.config.auth.sso.websso_keystone_url }}\"\n{{- end }}\n\n# The list of authentication mechanisms\n# which include keystone federation protocols.\n# Current supported protocol IDs are 'saml2' and 'oidc'\n# which represent SAML 2.0, OpenID Connect respectively.\n# Do not remove the mandatory credentials mechanism.\nWEBSSO_CHOICES = (\n    (\"credentials\", _(\"Keystone Credentials\")),\n  {{- range $i, $sso := .Values.conf.horizon.local_settings.config.auth.idp_mapping }}\n    ({{ $sso.name | quote }}, {{ $sso.label | quote }}),\n  {{- end }}\n)\n\nWEBSSO_IDP_MAPPING = {\n  {{- range $i, $sso := .Values.conf.horizon.local_settings.config.auth.idp_mapping }}\n    {{ $sso.name | quote}}: ({{ $sso.idp | quote }}, {{ $sso.protocol | quote }}),\n  {{- end }}\n}\n\n{{- end }}\n\n# Disable SSL certificate checks (useful for self-signed certificates):\nOPENSTACK_SSL_NO_VERIFY = {{ .Values.conf.horizon.local_settings.config.ssl_no_verify }}\n\n{{- if .Values.secrets.tls.ca }}\n# The CA certificate to use to verify SSL connections\nOPENSTACK_SSL_CACERT = '/etc/ssl/certs/openstack-helm.crt'\n{{- end }}\n\n# The OPENSTACK_KEYSTONE_BACKEND settings can be used to identify the\n# capabilities of the auth backend for Keystone.\n# If Keystone has been configured to use LDAP as the auth backend then set\n# can_edit_user to False and name to 'ldap'.\n#\n# TODO(tres): Remove these once Keystone has an API to identify auth backend.\nOPENSTACK_KEYSTONE_BACKEND = {\n    'name': 'native',\n    'can_edit_user': True,\n    'can_edit_group': True,\n    'can_edit_project': True,\n    'can_edit_domain': True,\n    'can_edit_role': True,\n}\n\n# Setting this to True, will add a new \"Retrieve Password\" action on instance,\n# allowing Admin session password retrieval/decryption.\nOPENSTACK_ENABLE_PASSWORD_RETRIEVE = {{ .Values.conf.horizon.local_settings.config.openstack_enable_password_retrieve }}\n# Controls whether the keystone openrc file is accessible from the user menu and the api access panel.\nSHOW_OPENRC_FILE = {{ .Values.conf.horizon.local_settings.config.show_openrc_file }}\n# The Launch Instance user experience has been significantly enhanced.\n# You can choose whether to enable the new launch instance experience,\n# the legacy\
+        \ experience, or both. The legacy experience will be removed\n# in a future release, but is available as a temporary backup setting to ensure\n# compatibility with existing deployments. Further development will not be\n# done on the legacy experience. Please report any problems with the new\n# experience via the StoryBoard tracking system.\n#\n# Toggle LAUNCH_INSTANCE_LEGACY_ENABLED and LAUNCH_INSTANCE_NG_ENABLED to\n# determine the experience to enable.  Set them both to true to enable\n# both.\n#LAUNCH_INSTANCE_LEGACY_ENABLED = True\n#LAUNCH_INSTANCE_NG_ENABLED = False\n\n# The Xen Hypervisor has the ability to set the mount point for volumes\n# attached to instances (other Hypervisors currently do not). Setting\n# can_set_mount_point to True will add the option to set the mount point\n# from the UI.\nOPENSTACK_HYPERVISOR_FEATURES = {\n    'can_set_mount_point': False,\n    'can_set_password': False,\n}\n\n# The OPENSTACK_CINDER_FEATURES settings can be used to enable optional\n# services provided by cinder that is not exposed by its extension API.\nOPENSTACK_CINDER_FEATURES = {\n    'enable_backup': {{ .Values.conf.horizon.local_settings.config.openstack_cinder_features.enable_backup }},\n}\n\n# The OPENSTACK_NEUTRON_NETWORK settings can be used to enable optional\n# services provided by neutron. Options currently available are load\n# balancer service, security groups, quotas, VPN service.\nOPENSTACK_NEUTRON_NETWORK = {\n    'enable_router': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_router }},\n    'enable_quotas': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_quotas }},\n    'enable_ipv6': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_ipv6 }},\n    'enable_distributed_router': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_distributed_router }},\n    'enable_ha_router': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_ha_router }},\n    'enable_lb': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_lb }},\n    'enable_firewall': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_firewall }},\n    'enable_vpn': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_vpn }},\n    'enable_fip_topology_check': {{ .Values.conf.horizon.local_settings.config.openstack_neutron_network.enable_fip_topology_check }},\n\n    # The profile_support option is used to detect if an external router can be\n    # configured via the dashboard. When using specific plugins the\n    # profile_support can be turned on if needed.\n    'profile_support': None,\n    #'profile_support': 'cisco',\n\n    # Set which provider network types are supported. Only the network types\n    # in this list will be available to choose from when creating a network.\n    # Network types include local, flat, vlan, gre, and vxlan.\n    'supported_provider_types': ['*'],\n\n    # Set which VNIC types are supported for port binding. Only the VNIC\n    # types in this list will be available to choose from when creating a\n    # port.\n    # VNIC types include 'normal', 'macvtap' and 'direct'.\n    'supported_vnic_types': ['*']\n}\n\n# The OPENSTACK_IMAGE_BACKEND settings can be used to customize features\n# in the OpenStack Dashboard related to the Image service, such as the list\n# of supported image formats.\n#OPENSTACK_IMAGE_BACKEND = {\n#    'image_formats': [\n#        ('', _('Select format')),\n#        ('aki', _('AKI - Amazon Kernel Image')),\n#        ('ami', _('AMI - Amazon Machine Image')),\n#        ('ari', _('ARI - Amazon Ramdisk Image')),\n#        ('docker', _('Docker')),\n#        ('iso', _('ISO - Optical Disk Image')),\n#        ('ova', _('OVA - Open Virtual Appliance')),\n#        ('qcow2', _('QCOW2 - QEMU Emulator')),\n#        ('raw', _('Raw')),\n#        ('vdi', _('VDI - Virtual Disk Image')),\n#        ('vhd', ('VHD - Virtual Hard Disk')),\n#        ('vmdk', _('VMDK - Virtual Machine Disk')),\n# \
+        \   ]\n#}\n\n# The IMAGE_CUSTOM_PROPERTY_TITLES settings is used to customize the titles for\n# image custom property attributes that appear on image detail pages.\nIMAGE_CUSTOM_PROPERTY_TITLES = {\n    \"architecture\": _(\"Architecture\"),\n    \"kernel_id\": _(\"Kernel ID\"),\n    \"ramdisk_id\": _(\"Ramdisk ID\"),\n    \"image_state\": _(\"Euca2ools state\"),\n    \"project_id\": _(\"Project ID\"),\n    \"image_type\": _(\"Image Type\"),\n}\n\n# The IMAGE_RESERVED_CUSTOM_PROPERTIES setting is used to specify which image\n# custom properties should not be displayed in the Image Custom Properties\n# table.\nIMAGE_RESERVED_CUSTOM_PROPERTIES = []\n\n# Set to 'legacy' or 'direct' to allow users to upload images to glance via\n# Horizon server. When enabled, a file form field will appear on the create\n# image form. If set to 'off', there will be no file form field on the create\n# image form. See documentation for deployment considerations.\nHORIZON_IMAGES_UPLOAD_MODE = '{{ .Values.conf.horizon.local_settings.config.horizon_images_upload_mode }}'\n\n# OPENSTACK_ENDPOINT_TYPE specifies the endpoint type to use for the endpoints\n# in the Keystone service catalog. Use this setting when Horizon is running\n# external to the OpenStack environment. The default is 'publicURL'.\nOPENSTACK_ENDPOINT_TYPE = \"{{ .Values.conf.horizon.local_settings.config.endpoint_type }}\"\n\n# SECONDARY_ENDPOINT_TYPE specifies the fallback endpoint type to use in the\n# case that OPENSTACK_ENDPOINT_TYPE is not present in the endpoints\n# in the Keystone service catalog. Use this setting when Horizon is running\n# external to the OpenStack environment. The default is None.  This\n# value should differ from OPENSTACK_ENDPOINT_TYPE if used.\nSECONDARY_ENDPOINT_TYPE = \"{{ .Values.conf.horizon.local_settings.config.secondary_endpoint_type }}\"\n\n# The number of objects (Swift containers/objects or images) to display\n# on a single page before providing a paging element (a \"more\" link)\n# to paginate results.\nAPI_RESULT_LIMIT = 1000\nAPI_RESULT_PAGE_SIZE = 20\n\n# The size of chunk in bytes for downloading objects from Swift\nSWIFT_FILE_TRANSFER_CHUNK_SIZE = 512 * 1024\n\n# Specify a maximum number of items to display in a dropdown.\nDROPDOWN_MAX_ITEMS = 30\n\n# The timezone of the server. This should correspond with the timezone\n# of your entire OpenStack installation, and hopefully be in UTC.\nTIME_ZONE = \"UTC\"\n\n# When launching an instance, the menu of available flavors is\n# sorted by RAM usage, ascending. If you would like a different sort order,\n# you can provide another flavor attribute as sorting key. Alternatively, you\n# can provide a custom callback method to use for sorting. You can also provide\n# a flag for reverse sort. For more info, see\n# http://docs.python.org/2/library/functions.html#sorted\n#CREATE_INSTANCE_FLAVOR_SORT = {\n#    'key': 'name',\n#     # or\n#    'key': my_awesome_callback_method,\n#    'reverse': False,\n#}\n\n# Set this to True to display an 'Admin Password' field on the Change Password\n# form to verify that it is indeed the admin logged-in who wants to change\n# the password.\nENFORCE_PASSWORD_CHECK = {{ .Values.conf.horizon.local_settings.config.enforce_password_check }}\n\n# Modules that provide /auth routes that can be used to handle different types\n# of user authentication. Add auth plugins that require extra route handling to\n# this list.\n#AUTHENTICATION_URLS = [\n#    'openstack_auth.urls',\n#]\n\n# The Horizon Policy Enforcement engine uses these values to load per service\n# policy rule files. The content of these files should match the files the\n# OpenStack services are using to determine role based access control in the\n# target installation.\n\n# Path to directory containing policy.yaml files\nPOLICY_FILES_PATH = '/etc/openstack-dashboard'\n# Map of local copy of service policy files\n#POLICY_FILES = {\n#    'identity': 'keystone_policy.yaml',\n#    'compute': 'nova_policy.yaml',\n#    'volume': 'cinder_policy.yaml',\n#    'image': 'glance_policy.yaml',\n#    'orchestration': 'heat_policy.yaml',\n\
+        #    'network': 'neutron_policy.yaml',\n#}\n\n# Trove user and database extension support. By default support for\n# creating users and databases on database instances is turned on.\n# To disable these extensions set the permission here to something\n# unusable such as [\"!\"].\n# TROVE_ADD_USER_PERMS = []\n# TROVE_ADD_DATABASE_PERMS = []\n\n# Change this patch to the appropriate static directory containing\n# two files: _variables.scss and _styles.scss\n#CUSTOM_THEME_PATH = 'static/themes/default'\n\nLOGGING = {\n    'version': 1,\n    # When set to True this will disable all logging except\n    # for loggers specified in this configuration dictionary. Note that\n    # if nothing is specified here and disable_existing_loggers is True,\n    # django.db.backends will still log unless it is disabled explicitly.\n    'disable_existing_loggers': False,\n    'handlers': {\n        'null': {\n            'level': 'DEBUG',\n            'class': 'logging.NullHandler',\n        },\n        'console': {\n            # Set the level to \"DEBUG\" for verbose output logging.\n            'level': 'INFO',\n            'class': 'logging.StreamHandler',\n        },\n    },\n    'loggers': {\n        # Logging from django.db.backends is VERY verbose, send to null\n        # by default.\n        'django.db.backends': {\n            'handlers': ['null'],\n            'propagate': False,\n        },\n        'requests': {\n            'handlers': ['null'],\n            'propagate': False,\n        },\n        'horizon': {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level }}',\n            'propagate': False,\n        },\n        'openstack_dashboard': {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level }}',\n            'propagate': False,\n        },\n        'novaclient': {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level }}',\n            'propagate': False,\n        },\n        'cinderclient': {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level }}',\n            'propagate': False,\n        },\n        'glanceclient': {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level }}',\n            'propagate': False,\n        },\n        'neutronclient': {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level }}',\n            'propagate': False,\n        },\n        'heatclient': {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level }}',\n            'propagate': False,\n        },\n        'troveclient': {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level }}',\n            'propagate': False,\n        },\n        'swiftclient': {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level }}',\n            'propagate': False,\n        },\n        'openstack_auth': {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level }}',\n            'propagate': False,\n        },\n        'nose.plugins.manager': {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level }}',\n            'propagate': False,\n        },\n        'django': {\n            'handlers': ['console'],\n            'level': '{{ .Values.conf.horizon.local_settings.config.log_level }}',\n            'propagate': False,\n        },\n        'iso8601': {\n            'handlers': ['null'],\n            'propagate': False,\n        },\n        'scss': {\n            'handlers': ['null'],\n            'propagate': False,\n        },\n    }\n}\n\n# 'direction' should not be specified for\
+        \ all_tcp/udp/icmp.\n# It is specified in the form.\nSECURITY_GROUP_RULES = {\n    'all_tcp': {\n        'name': _('All TCP'),\n        'ip_protocol': 'tcp',\n        'from_port': '1',\n        'to_port': '65535',\n    },\n    'all_udp': {\n        'name': _('All UDP'),\n        'ip_protocol': 'udp',\n        'from_port': '1',\n        'to_port': '65535',\n    },\n    'all_icmp': {\n        'name': _('All ICMP'),\n        'ip_protocol': 'icmp',\n        'from_port': '-1',\n        'to_port': '-1',\n    },\n    'ssh': {\n        'name': 'SSH',\n        'ip_protocol': 'tcp',\n        'from_port': '22',\n        'to_port': '22',\n    },\n    'smtp': {\n        'name': 'SMTP',\n        'ip_protocol': 'tcp',\n        'from_port': '25',\n        'to_port': '25',\n    },\n    'dns': {\n        'name': 'DNS',\n        'ip_protocol': 'tcp',\n        'from_port': '53',\n        'to_port': '53',\n    },\n    'http': {\n        'name': 'HTTP',\n        'ip_protocol': 'tcp',\n        'from_port': '80',\n        'to_port': '80',\n    },\n    'pop3': {\n        'name': 'POP3',\n        'ip_protocol': 'tcp',\n        'from_port': '110',\n        'to_port': '110',\n    },\n    'imap': {\n        'name': 'IMAP',\n        'ip_protocol': 'tcp',\n        'from_port': '143',\n        'to_port': '143',\n    },\n    'ldap': {\n        'name': 'LDAP',\n        'ip_protocol': 'tcp',\n        'from_port': '389',\n        'to_port': '389',\n    },\n    'https': {\n        'name': 'HTTPS',\n        'ip_protocol': 'tcp',\n        'from_port': '443',\n        'to_port': '443',\n    },\n    'smtps': {\n        'name': 'SMTPS',\n        'ip_protocol': 'tcp',\n        'from_port': '465',\n        'to_port': '465',\n    },\n    'imaps': {\n        'name': 'IMAPS',\n        'ip_protocol': 'tcp',\n        'from_port': '993',\n        'to_port': '993',\n    },\n    'pop3s': {\n        'name': 'POP3S',\n        'ip_protocol': 'tcp',\n        'from_port': '995',\n        'to_port': '995',\n    },\n    'ms_sql': {\n        'name': 'MS SQL',\n        'ip_protocol': 'tcp',\n        'from_port': '1433',\n        'to_port': '1433',\n    },\n    'mysql': {\n        'name': 'MYSQL',\n        'ip_protocol': 'tcp',\n        'from_port': '3306',\n        'to_port': '3306',\n    },\n    'rdp': {\n        'name': 'RDP',\n        'ip_protocol': 'tcp',\n        'from_port': '3389',\n        'to_port': '3389',\n    },\n}\n\n# Deprecation Notice:\n#\n# The setting FLAVOR_EXTRA_KEYS has been deprecated.\n# Please load extra spec metadata into the Glance Metadata Definition Catalog.\n#\n# The sample quota definitions can be found in:\n# <glance_source>/etc/metadefs/compute-quota.json\n#\n# The metadata definition catalog supports CLI and API:\n#  $glance --os-image-api-version 2 help md-namespace-import\n#  $glance-manage db_load_metadefs <directory_with_definition_files>\n#\n# See Metadata Definitions on: https://docs.openstack.org/glance/latest/\n\n# Indicate to the Sahara data processing service whether or not\n# automatic floating IP allocation is in effect.  If it is not\n# in effect, the user will be prompted to choose a floating IP\n# pool for use in their cluster.  False by default.  You would want\n# to set this to True if you were running Nova Networking with\n# auto_assign_floating_ip = True.\n#SAHARA_AUTO_IP_ALLOCATION_ENABLED = False\n\n# The hash algorithm to use for authentication tokens. This must\n# match the hash algorithm that the identity server and the\n# auth_token middleware are using. Allowed values are the\n# algorithms supported by Python's hashlib library.\n#OPENSTACK_TOKEN_HASH_ALGORITHM = 'md5'\n\n# AngularJS requires some settings to be made available to\n# the client side. Some settings are required by in-tree / built-in horizon\n# features. These settings must be added to REST_API_REQUIRED_SETTINGS in the\n# form of ['SETTING_1','SETTING_2'], etc.\n#\n# You may remove settings from this list for security purposes, but do so at\n# the risk of breaking a built-in horizon feature. These settings are required\n# for horizon to function properly.\
+        \ Only remove them if you know what you\n# are doing. These settings may in the future be moved to be defined within\n# the enabled panel configuration.\n# You should not add settings to this list for out of tree extensions.\n# See: https://wiki.openstack.org/wiki/Horizon/RESTAPI\nREST_API_REQUIRED_SETTINGS = ['OPENSTACK_HYPERVISOR_FEATURES',\n                              'LAUNCH_INSTANCE_DEFAULTS',\n                              'OPENSTACK_IMAGE_FORMATS']\n\n# Additional settings can be made available to the client side for\n# extensibility by specifying them in REST_API_ADDITIONAL_SETTINGS\n# !! Please use extreme caution as the settings are transferred via HTTP/S\n# and are not encrypted on the browser. This is an experimental API and\n# may be deprecated in the future without notice.\n#REST_API_ADDITIONAL_SETTINGS = []\n\n# DISALLOW_IFRAME_EMBED can be used to prevent Horizon from being embedded\n# within an iframe. Legacy browsers are still vulnerable to a Cross-Frame\n# Scripting (XFS) vulnerability, so this option allows extra security hardening\n# where iframes are not used in deployment. Default setting is True.\n# For more information see:\n# http://tinyurl.com/anticlickjack\nDISALLOW_IFRAME_EMBED = {{ .Values.conf.horizon.local_settings.config.disallow_iframe_embed }}\n\nSTATIC_ROOT = '/var/www/html/horizon'\n\n{{- range $option, $value := .Values.conf.horizon.local_settings.config.raw }}\n{{ $option }} = {{ toJson $value }}\n{{- end }}\n"
+    policy:
+      ceilometer:
+        context_is_admin: role:admin
+        context_is_owner: user_id:%(target.user_id)s
+        context_is_project: project_id:%(target.project_id)s
+        segregation: rule:context_is_admin
+      heat:
+        actions:action: rule:deny_stack_user
+        build_info:build_info: rule:deny_stack_user
+        cloudformation:CancelUpdateStack: rule:deny_stack_user
+        cloudformation:CreateStack: rule:deny_stack_user
+        cloudformation:DeleteStack: rule:deny_stack_user
+        cloudformation:DescribeStackEvents: rule:deny_stack_user
+        cloudformation:DescribeStackResource: ''
+        cloudformation:DescribeStackResources: rule:deny_stack_user
+        cloudformation:DescribeStacks: rule:deny_stack_user
+        cloudformation:EstimateTemplateCost: rule:deny_stack_user
+        cloudformation:GetTemplate: rule:deny_stack_user
+        cloudformation:ListStackResources: rule:deny_stack_user
+        cloudformation:ListStacks: rule:deny_stack_user
+        cloudformation:UpdateStack: rule:deny_stack_user
+        cloudformation:ValidateTemplate: rule:deny_stack_user
+        context_is_admin: role:admin
+        deny_everybody: '!'
+        deny_stack_user: not role:heat_stack_user
+        events:index: rule:deny_stack_user
+        events:show: rule:deny_stack_user
+        resource:index: rule:deny_stack_user
+        resource:mark_unhealthy: rule:deny_stack_user
+        resource:metadata: ''
+        resource:show: rule:deny_stack_user
+        resource:signal: ''
+        resource_types:OS::Cinder::EncryptedVolumeType: rule:context_is_admin
+        resource_types:OS::Cinder::VolumeType: rule:context_is_admin
+        resource_types:OS::Manila::ShareType: rule:context_is_admin
+        resource_types:OS::Neutron::QoSBandwidthLimitRule: rule:context_is_admin
+        resource_types:OS::Neutron::QoSPolicy: rule:context_is_admin
+        resource_types:OS::Nova::Flavor: rule:context_is_admin
+        resource_types:OS::Nova::HostAggregate: rule:context_is_admin
+        service:index: rule:context_is_admin
+        software_configs:create: rule:deny_stack_user
+        software_configs:delete: rule:deny_stack_user
+        software_configs:global_index: rule:deny_everybody
+        software_configs:index: rule:deny_stack_user
+        software_configs:show: rule:deny_stack_user
+        software_deployments:create: rule:deny_stack_user
+        software_deployments:delete: rule:deny_stack_user
+        software_deployments:index: rule:deny_stack_user
+        software_deployments:metadata: ''
+        software_deployments:show: rule:deny_stack_user
+        software_deployments:update: rule:deny_stack_user
+        stacks:abandon: rule:deny_stack_user
+        stacks:create: rule:deny_stack_user
+        stacks:delete: rule:deny_stack_user
+        stacks:delete_snapshot: rule:deny_stack_user
+        stacks:detail: rule:deny_stack_user
+        stacks:environment: rule:deny_stack_user
+        stacks:export: rule:deny_stack_user
+        stacks:generate_template: rule:deny_stack_user
+        stacks:global_index: rule:deny_everybody
+        stacks:index: rule:deny_stack_user
+        stacks:list_outputs: rule:deny_stack_user
+        stacks:list_resource_types: rule:deny_stack_user
+        stacks:list_snapshots: rule:deny_stack_user
+        stacks:list_template_functions: rule:deny_stack_user
+        stacks:list_template_versions: rule:deny_stack_user
+        stacks:lookup: ''
+        stacks:preview: rule:deny_stack_user
+        stacks:preview_update: rule:deny_stack_user
+        stacks:preview_update_patch: rule:deny_stack_user
+        stacks:resource_schema: rule:deny_stack_user
+        stacks:restore_snapshot: rule:deny_stack_user
+        stacks:show: rule:deny_stack_user
+        stacks:show_output: rule:deny_stack_user
+        stacks:show_snapshot: rule:deny_stack_user
+        stacks:snapshot: rule:deny_stack_user
+        stacks:template: rule:deny_stack_user
+        stacks:update: rule:deny_stack_user
+        stacks:update_patch: rule:deny_stack_user
+        stacks:validate_template: rule:deny_stack_user
+    extra_panels:
+    - heat_dashboard
+    - neutron_taas_dashboard
 dependencies:
   dynamic:
     common:
@@ -712,339 +376,284 @@ dependencies:
       services:
       - endpoint: internal
         service: dashboard
-endpoints:
-  cluster_domain_suffix: cluster.local
-  dashboard:
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: horizon-int
-      public: horizon
-    name: horizon
-    path:
-      default: null
-    port:
-      web:
-        default: 80
-    scheme:
-      default: http
-  identity:
-    auth:
-      admin:
-        password: password
-        project_domain_name: default
-        project_name: admin
-        region_name: RegionOne
-        user_domain_name: default
-        username: admin
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: keystone
-      internal: keystone-api
-    name: keystone
-    path:
-      default: /v3
-    port:
-      api:
-        default: 80
-        internal: 5000
-    scheme:
-      default: http
-  ingress:
-    hosts:
-      default: ingress
-    name: ingress
-    namespace: null
-    port:
-      ingress:
-        default: 80
-  kube_dns:
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: kube-dns
-    name: kubernetes-dns
-    namespace: kube-system
-    path:
-      default: null
-    port:
-      dns:
-        default: 53
-        protocol: UDP
-    scheme: http
-  local_image_registry:
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: localhost
-      internal: docker-registry
-      node: localhost
-    name: docker-registry
-    namespace: docker-registry
-    port:
-      registry:
-        node: 5000
-  oci_image_registry:
-    auth:
-      enabled: false
-      horizon:
-        password: password
-        username: horizon
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: localhost
-    name: oci-image-registry
-    namespace: oci-image-registry
-    port:
-      registry:
-        default: null
-  oslo_cache:
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: memcached
-    port:
-      memcache:
-        default: 11211
-  oslo_db:
-    auth:
-      admin:
-        password: password
-        secret:
-          tls:
-            internal: mariadb-tls-direct
-        username: root
-      horizon:
-        password: password
-        username: horizon
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: mariadb
-    path: /horizon
-    port:
-      mysql:
-        default: 3306
-    scheme: mysql+pymysql
-extraObjects: []
-identity:
-  openrc:
-    exclude_vars: []
-    extra_vars: []
-images:
-  local_registry:
-    active: false
-    exclude:
-    - dep_check
-    - image_repo_sync
-  pull_policy: IfNotPresent
-  tags:
-    db_drop: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    db_init: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    dep_check: quay.io/airshipit/kubernetes-entrypoint:latest-ubuntu_noble
-    horizon: quay.io/airshipit/horizon:2025.1-ubuntu_jammy
-    horizon_db_sync: quay.io/airshipit/horizon:2025.1-ubuntu_jammy
-    image_repo_sync: docker.io/docker:17.07.0
-    test: quay.io/airshipit/osh-selenium:latest-ubuntu_noble
-labels:
-  dashboard:
-    node_selector_key: openstack-control-plane
-    node_selector_value: enabled
-  job:
-    node_selector_key: openstack-control-plane
-    node_selector_value: enabled
-  test:
-    node_selector_key: openstack-control-plane
-    node_selector_value: enabled
-manifests:
-  certificates: false
-  configmap_bin: true
-  configmap_etc: true
-  configmap_logo: false
-  deployment: true
-  ingress_api: true
-  job_db_drop: false
-  job_db_init: true
-  job_db_sync: true
-  job_image_repo_sync: true
-  network_policy: false
-  pdb: true
-  pod_helm_test: false
-  secret_db: true
-  secret_ingress_tls: true
-  secret_keystone: true
-  secret_registry: true
-  service: true
-  service_ingress: true
-network:
-  dashboard:
-    ingress:
-      annotations:
-        haproxy.org/path-rewrite: /
-        nginx.ingress.kubernetes.io/proxy-body-size: '0'
-        nginx.ingress.kubernetes.io/rewrite-target: /
-      classes:
-        cluster: ingress-cluster
-        namespace: ingress-openstack
-      public: true
-    # Krateo blueprint patch: how the Horizon Service is exposed.
-    #   NodePort     - default, uses network.node_port.port (kind/on-prem)
-    #   LoadBalancer - provision an external L4 LB + public IP (GKE/EKS/AKS)
-    #   ClusterIP    - in-cluster only (reach via port-forward/ingress)
-    service:
-      type: NodePort
-      annotations: {}
-  external_policy_local: false
-  node_port:
-    enabled: true
-    port: 31000
-network_policy:
-  horizon:
-    egress:
-    - {}
-    ingress:
-    - {}
 pod:
+  extraContainers:
+    horizon: []
+  extraVolumes:
+    horizon: []
+  security_context:
+    horizon:
+      pod:
+        runAsUser: 42424
+      container:
+        horizon:
+          readOnlyRootFilesystem: false
+          allowPrivilegeEscalation: false
+          runAsUser: 0
+    db_sync:
+      pod:
+        runAsUser: 42424
+      container:
+        horizon_db_sync:
+          readOnlyRootFilesystem: false
+          allowPrivilegeEscalation: false
+          runAsUser: 0
+    test:
+      pod:
+        runAsUser: 42424
+      container:
+        horizon_test:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
   affinity:
     anti:
-      topologyKey:
-        default: kubernetes.io/hostname
       type:
         default: preferredDuringSchedulingIgnoredDuringExecution
+      topologyKey:
+        default: kubernetes.io/hostname
       weight:
         default: 10
+  tolerations:
+    horizon:
+      enabled: false
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+  mounts:
+    horizon_db_init:
+      init_container: null
+      horizon_db_init:
+        volumeMounts: null
+        volumes: null
+    horizon_db_sync:
+      init_container: null
+      horizon_db_sync:
+        volumeMounts: null
+        volumes: null
+    horizon:
+      init_container: null
+      horizon:
+        volumeMounts: null
+        volumes: null
+    horizon_tests:
+      init_container: null
+      horizon_tests:
+        volumeMounts: null
+        volumes: null
+  replicas:
+    server: 1
   lifecycle:
+    upgrades:
+      deployments:
+        revision_history: 3
+        pod_replacement_strategy: RollingUpdate
+        rolling_update:
+          max_unavailable: 1
+          max_surge: 3
     disruption_budget:
       horizon:
         min_available: 0
     termination_grace_period:
       horizon:
         timeout: 30
-    upgrades:
-      deployments:
-        pod_replacement_strategy: RollingUpdate
-        revision_history: 3
-        rolling_update:
-          max_surge: 3
-          max_unavailable: 1
-  mounts:
-    horizon:
-      horizon:
-        volumeMounts: null
-        volumes: null
-      init_container: null
-    horizon_db_init:
-      horizon_db_init:
-        volumeMounts: null
-        volumes: null
-      init_container: null
-    horizon_db_sync:
-      horizon_db_sync:
-        volumeMounts: null
-        volumes: null
-      init_container: null
-    horizon_tests:
-      horizon_tests:
-        volumeMounts: null
-        volumes: null
-      init_container: null
-  replicas:
-    server: 1
   resources:
     enabled: false
-    jobs:
-      db_drop:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
-        requests:
-          cpu: 100m
-          memory: 128Mi
-      db_init:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
-        requests:
-          cpu: 100m
-          memory: 128Mi
-      db_sync:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
-        requests:
-          cpu: 100m
-          memory: 128Mi
-      image_repo_sync:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
-        requests:
-          cpu: 100m
-          memory: 128Mi
-      tests:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
-        requests:
-          cpu: 100m
-          memory: 128Mi
     server:
-      limits:
-        cpu: 2000m
-        memory: 1024Mi
       requests:
-        cpu: 100m
         memory: 128Mi
-  security_context:
-    db_sync:
-      container:
-        horizon_db_sync:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: false
-          runAsUser: 0
-      pod:
-        runAsUser: 42424
-    horizon:
-      container:
-        horizon:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: false
-          runAsUser: 0
-      pod:
-        runAsUser: 42424
-    test:
-      container:
-        horizon_test:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-      pod:
-        runAsUser: 42424
-  tolerations:
-    horizon:
-      enabled: false
-      tolerations:
-      - effect: NoSchedule
-        key: node-role.kubernetes.io/master
-        operator: Exists
-      - effect: NoSchedule
-        key: node-role.kubernetes.io/control-plane
-        operator: Exists
-release_group: null
+        cpu: 100m
+      limits:
+        memory: 1024Mi
+    jobs:
+      db_init:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 1024Mi
+      db_sync:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 1024Mi
+      db_drop:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 1024Mi
+      image_repo_sync:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 1024Mi
+      tests:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 1024Mi
+  probes:
+    dashboard:
+      horizon:
+        liveness:
+          enabled: true
+          params:
+            initialDelaySeconds: 180
+            periodSeconds: 60
+            timeoutSeconds: 5
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
 secrets:
   identity:
     admin: horizon-keystone-admin
-  oci_image_registry:
-    horizon: horizon-oci-image-registry
   oslo_db:
     admin: horizon-db-admin
     horizon: horizon-db-user
   tls:
-    dashboard:
-      dashboard:
-        internal: horizon-tls-web
-        public: horizon-tls-public
-selenium_v4: true
+    client:
+      horizon: horizon-client
+    ca: null
+  oci_image_registry:
+    horizon: horizon-oci-image-registry
 tls:
-  identity: false
+  oslo_db: false
+identity:
+  openrc:
+    exclude_vars: []
+    extra_vars: []
+endpoints:
+  cluster_domain_suffix: cluster.local
+  local_image_registry:
+    name: docker-registry
+    namespace: docker-registry
+    hosts:
+      default: localhost
+      internal: docker-registry
+      node: localhost
+    host_fqdn_override:
+      default: null
+    port:
+      registry:
+        node: 5000
+  oci_image_registry:
+    name: oci-image-registry
+    namespace: oci-image-registry
+    auth:
+      enabled: false
+      horizon:
+        username: horizon
+        password: password
+    hosts:
+      default: localhost
+    host_fqdn_override:
+      default: null
+    port:
+      registry:
+        default: null
+  identity:
+    name: keystone
+    auth:
+      admin:
+        region_name: RegionOne
+        username: admin
+        password: password
+        project_name: admin
+        user_domain_name: default
+        project_domain_name: default
+    hosts:
+      default: keystone
+      internal: keystone-api
+    host_fqdn_override:
+      default: null
+    path:
+      default: /v3
+    scheme:
+      default: http
+    port:
+      api:
+        default: 80
+        internal: 5000
+  oslo_cache:
+    hosts:
+      default: memcached
+    host_fqdn_override:
+      default: null
+    port:
+      memcache:
+        default: 11211
+  dashboard:
+    name: horizon
+    hosts:
+      default: horizon-int
+      public: horizon
+    host_fqdn_override:
+      default: null
+    path:
+      default: null
+    scheme:
+      default: http
+    port:
+      web:
+        default: 80
+  oslo_db:
+    auth:
+      admin:
+        username: root
+        password: password
+      horizon:
+        username: horizon
+        password: password
+    hosts:
+      default: mariadb
+    host_fqdn_override:
+      default: null
+    path: /horizon
+    scheme: mysql+pymysql
+    port:
+      mysql:
+        default: 3306
+  kube_dns:
+    namespace: kube-system
+    name: kubernetes-dns
+    hosts:
+      default: kube-dns
+    host_fqdn_override:
+      default: null
+    path:
+      default: null
+    scheme: http
+    port:
+      dns:
+        default: 53
+        protocol: UDP
+network_policy:
+  horizon:
+    ingress:
+    - {}
+    egress:
+    - {}
+manifests:
+  configmap_bin: true
+  configmap_etc: true
+  configmap_logo: false
+  deployment: true
+  job_db_init: true
+  job_db_sync: true
+  job_db_drop: false
+  job_image_repo_sync: true
+  pdb: true
+  pod_helm_test: false
+  network_policy: false
+  secret_db: true
+  secret_keystone: true
+  secret_registry: true
+  service: true
+extraObjects: {}

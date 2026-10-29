@@ -35,7 +35,6 @@ metadata:
 {{ tuple $envAll "keystone" "test" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
-{{ dict "envAll" $envAll "podName" "keystone-test" "containerNames" (list "init" "keystone-test" "keystone-test-ks-user") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 4 }}
 spec:
   restartPolicy: Never
 {{ dict "envAll" $envAll "application" "test" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 2 }}
@@ -48,7 +47,7 @@ spec:
 {{ tuple $envAll "tests" $mounts_tests_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 4 }}
     - name: keystone-test-ks-user
 {{ tuple $envAll "ks_user" | include "helm-toolkit.snippets.image" | indent 6 }}
-{{ tuple $envAll $envAll.Values.pod.resources.jobs.ks_user | include "helm-toolkit.snippets.kubernetes_resources" | indent 6 }}
+{{ tuple $envAll $envAll.Values.pod.resources.jobs.tests | include "helm-toolkit.snippets.kubernetes_resources" | indent 6 }}
 {{ dict "envAll" $envAll "application" "test" "container" "keystone_test_ks_user" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 6 }}
       command:
         - /tmp/ks-user.sh
@@ -59,16 +58,16 @@ spec:
           mountPath: /tmp/ks-user.sh
           subPath: ks-user.sh
           readOnly: true
-{{- if and .Values.manifests.certificates .Values.secrets.tls.identity.api.internal }}
-{{- dict "enabled" .Values.manifests.certificates "name" .Values.secrets.tls.identity.api.internal | include "helm-toolkit.snippets.tls_volume_mount"  | indent 8 }}
+{{- if and .Values.tls.identity .Values.secrets.tls.identity.api.internal }}
+{{- dict "enabled" .Values.tls.identity "name" .Values.secrets.tls.identity.api.internal | include "helm-toolkit.snippets.tls_volume_mount"  | indent 8 }}
 {{- end }}
       env:
-{{- with $env := dict "ksUserSecret" .Values.secrets.identity.admin "useCA" (and .Values.manifests.certificates .Values.secrets.tls.identity.api.internal) }}
+{{- with $env := dict "ksUserSecret" .Values.secrets.identity.admin "useCA" (and .Values.tls.identity .Values.secrets.tls.identity.api.internal) "envAll" $envAll }}
 {{- include "helm-toolkit.snippets.keystone_openrc_env_vars" $env | indent 8 }}
 {{- end }}
         - name: SERVICE_OS_SERVICE_NAME
           value: "test"
-{{- with $env := dict "ksUserSecret" .Values.secrets.identity.test }}
+{{- with $env := dict "ksUserSecret" .Values.secrets.identity.test "envAll" $envAll }}
 {{- include "helm-toolkit.snippets.keystone_user_create_env_vars" $env | indent 8 }}
 {{- end }}
         - name: SERVICE_OS_ROLE
@@ -79,10 +78,10 @@ spec:
 {{ tuple $envAll $envAll.Values.pod.resources.jobs.tests | include "helm-toolkit.snippets.kubernetes_resources" | indent 6 }}
 {{ dict "envAll" $envAll "application" "test" "container" "keystone_test" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 6}}
       env:
-{{- with $env := dict "ksUserSecret" .Values.secrets.identity.admin "useCA" (and .Values.manifests.certificates .Values.secrets.tls.identity.api.internal) }}
+{{- with $env := dict "ksUserSecret" .Values.secrets.identity.admin "useCA" (and .Values.tls.identity .Values.secrets.tls.identity.api.internal) "envAll" $envAll }}
 {{- include "helm-toolkit.snippets.keystone_openrc_env_vars" $env | indent 8 }}
 {{- end }}
-{{- with $env := dict "ksUserSecret" .Values.secrets.identity.test }}
+{{- with $env := dict "ksUserSecret" .Values.secrets.identity.test "envAll" $envAll }}
 {{- include "helm-toolkit.snippets.keystone_user_create_env_vars" $env | indent 8 }}
 {{- end }}
         - name: RALLY_ENV_NAME
@@ -104,8 +103,8 @@ spec:
           mountPath: /var/lib/rally
         - name: rally-work
           mountPath: /home/rally/.rally
-{{- if and  .Values.manifests.certificates .Values.secrets.tls.identity.api.internal }}
-{{- dict "enabled" .Values.manifests.certificates "name" .Values.secrets.tls.identity.api.internal | include "helm-toolkit.snippets.tls_volume_mount"  | indent 8 }}
+{{- if and  .Values.tls.identity .Values.secrets.tls.identity.api.internal }}
+{{- dict "enabled" .Values.tls.identity "name" .Values.secrets.tls.identity.api.internal | include "helm-toolkit.snippets.tls_volume_mount"  | indent 8 }}
 {{- end }}
 {{ if $mounts_tests.volumeMounts }}{{ toYaml $mounts_tests.volumeMounts | indent 8 }}{{ end }}
   volumes:
@@ -123,8 +122,8 @@ spec:
       emptyDir: {}
     - name: rally-work
       emptyDir: {}
-{{- if and .Values.manifests.certificates .Values.secrets.tls.identity.api.internal }}
-{{- dict "enabled" .Values.manifests.certificates "name" .Values.secrets.tls.identity.api.internal | include "helm-toolkit.snippets.tls_volume" | indent 4 }}
+{{- if and .Values.tls.identity .Values.secrets.tls.identity.api.internal }}
+{{- dict "enabled" .Values.tls.identity "name" .Values.secrets.tls.identity.api.internal | include "helm-toolkit.snippets.tls_volume" | indent 4 }}
 {{- end }}
 {{ if $mounts_tests.volumes }}{{ toYaml $mounts_tests.volumes | indent 4 }}{{ end }}
 {{- end }}

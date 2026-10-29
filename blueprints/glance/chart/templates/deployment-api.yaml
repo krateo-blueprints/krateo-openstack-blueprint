@@ -12,21 +12,31 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- define "probeTemplate" }}
-{{- $health_path := tuple "image" "healthcheck" "internal" . | include "helm-toolkit.endpoints.keystone_endpoint_path_lookup" }}
-{{- $health_port := tuple "image" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-{{- if .Values.manifests.certificates }}
-exec:
-    command:
-    - python
-    - -c
-    - "import requests; r = requests.get('http://127.0.0.1:{{ $health_port }}{{ $health_path }}'); r.raise_for_status()"
-{{- else }}
+{{/*
+Liveness and readiness answer different questions and must not share an
+endpoint. /healthcheck is served by the uwsgi request workers, so it can
+only be answered while a worker is free; long image uploads hold a worker
+for their whole duration and can saturate the pool. That is a readiness
+condition (take the replica out of rotation), not a liveness one (kill
+it). Liveness therefore asks the uwsgi master via its stats socket, which
+is served by the master process and answers regardless of worker load.
+*/}}
+{{- define "glanceApiLivenessProbeTemplate" }}
 httpGet:
-  path: {{ $health_path }}
-  scheme: {{ tuple "image" "service" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" | upper }}
-  port: {{ $health_port }}
+  path: /
+  scheme: HTTP
+  {{- if index .Values.pod.probes.api "glance-api" "liveness" "port" }}
+  port: {{ index .Values.pod.probes.api "glance-api" "liveness" "port" }}
+  {{- else }}
+  port: {{ tuple "image" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+  {{- end }}
 {{- end }}
+
+{{- define "glanceApiReadinessProbeTemplate" }}
+httpGet:
+  path: {{ tuple "image" "healthcheck" "internal" . | include "helm-toolkit.endpoints.keystone_endpoint_path_lookup" }}
+  scheme: HTTP
+  port: {{ tuple "image" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
 {{- end }}
 
 {{- if .Values.manifests.deployment_api }}
@@ -63,7 +73,6 @@ spec:
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
 {{ tuple "glance_api" . | include "helm-toolkit.snippets.custom_pod_annotations" | indent 8 }}
-{{ dict "envAll" $envAll "podName" "glance-api" "containerNames" ( list "glance-perms" "glance-api" "init" "nginx" ) | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 8 }}
     spec:
 {{ tuple "glance_api" . | include "helm-toolkit.snippets.kubernetes_pod_priority_class" | indent 6 }}
 {{ tuple "glance_api" . | include "helm-toolkit.snippets.kubernetes_pod_runtime_class" | indent 6 }}
@@ -100,9 +109,24 @@ spec:
               mountPath: /tmp
             - name: glance-images
               mountPath: {{ .Values.conf.glance.file.filesystem_store_datadir }}
+        - name: glance-tmp-perms
+{{ tuple $envAll "glance_api" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.api | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "glance" "container" "glance_perms" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
+          command:
+            - chown
+            - -R
+            - "glance:"
+            - /var/lib/glance/tmp
+          volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
+            - name: glance-tmp
+              mountPath: /var/lib/glance/tmp
         {{ if eq .Values.storage "rbd" }}
         - name: ceph-keyring-placement
 {{ tuple $envAll "glance_api" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.api | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "glance" "container" "ceph_keyring_placement" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           env:
             - name: RBD_STORE_USER
@@ -124,72 +148,24 @@ spec:
               readOnly: true
         {{ end }}
       containers:
-        {{- if $envAll.Values.manifests.certificates }}
-        - name: nginx
-{{ tuple $envAll "nginx" | include "helm-toolkit.snippets.image" | indent 10 }}
-{{ tuple $envAll $envAll.Values.pod.resources.nginx | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
-{{ dict "envAll" $envAll "application" "glance" "container" "nginx" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
-          ports:
-            - name: g-api
-              containerPort: {{ tuple "image" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-          env:
-            - name: PORT
-              value: {{ tuple "image" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" | quote }}
-            - name: POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
-            - name: SHORTNAME
-              value: {{ tuple "image" "internal" .  | include "helm-toolkit.endpoints.hostname_short_endpoint_lookup" | quote }}
-          readinessProbe:
-            tcpSocket:
-              port: {{ tuple "image" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-            initialDelaySeconds: 30
-          command:
-            - /tmp/nginx.sh
-            - start
-          lifecycle:
-            preStop:
-              exec:
-                command:
-                  - /tmp/nginx.sh
-                  - stop
-          volumeMounts:
-            - name: glance-bin
-              mountPath: /tmp/nginx.sh
-              subPath: nginx.sh
-              readOnly: true
-            - name: glance-etc
-              mountPath: /etc/nginx/nginx.conf
-              subPath: nginx.conf
-              readOnly: true
-{{- dict "enabled" .Values.manifests.certificates "name" .Values.secrets.tls.image.api.internal "path" "/etc/nginx/certs" | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
-        {{- end }}
         - name: glance-api
 {{ tuple $envAll "glance_api" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.api | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "glance" "container" "glance_api" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
-{{ dict "envAll" $envAll "component" "api" "container" "glance-api" "type" "readiness" "probeTemplate" (include "probeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | indent 10 }}
-{{ dict "envAll" $envAll "component" "api" "container" "glance-api" "type" "liveness" "probeTemplate" (include "probeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "api" "container" "glance-api" "type" "readiness" "probeTemplate" (include "glanceApiReadinessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "api" "container" "glance-api" "type" "liveness" "probeTemplate" (include "glanceApiLivenessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | indent 10 }}
           command:
-            - /tmp/glance-api.sh
-            - start
-{{- if or .Values.manifests.certificates .Values.tls.identity }}
+            - uwsgi
+            - --ini
+            - /etc/glance/glance-api-uwsgi.ini
+{{- if .Values.secrets.tls.ca }}
           env:
             - name: REQUESTS_CA_BUNDLE
-              value: "/etc/glance/certs/ca.crt"
+              value: "/etc/ssl/certs/openstack-helm.crt"
 {{- end }}
-          lifecycle:
-            preStop:
-              exec:
-                command:
-                  - /tmp/glance-api.sh
-                  - stop
-          {{- if not $envAll.Values.manifests.certificates }}
           ports:
             - name: g-api
               containerPort: {{ tuple "image" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-          {{- end }}
           volumeMounts:
             - name: pod-tmp
               mountPath: /tmp
@@ -199,10 +175,6 @@ spec:
               mountPath: /var/lib/glance/tmp
             - name: etcglance
               mountPath: /etc/glance
-            - name: glance-bin
-              mountPath: /tmp/glance-api.sh
-              subPath: glance-api.sh
-              readOnly: true
             - name: glance-etc
               mountPath: /etc/glance/glance-api.conf
               subPath: glance-api.conf
@@ -301,16 +273,17 @@ spec:
               subPath: key
               readOnly: true
 {{- end }}
-{{- dict "enabled" $envAll.Values.manifests.certificates "name" $envAll.Values.endpoints.oslo_db.auth.admin.secret.tls.internal "path" "/etc/mysql/certs" | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
-{{- dict "enabled" (or .Values.manifests.certificates .Values.tls.identity) "name" $envAll.Values.secrets.tls.image.api.internal "path" "/etc/glance/certs" | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
-{{- dict "enabled" $envAll.Values.manifests.certificates "name" $envAll.Values.endpoints.oslo_messaging.auth.admin.secret.tls.internal "path" "/etc/rabbitmq/certs" | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
+{{- dict "enabled" $envAll.Values.tls.oslo_db "name" "client-certs" "path" "/etc/mysql/certs" | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
+{{- dict "enabled" (not (empty .Values.secrets.tls.ca)) "name" .Values.secrets.tls.ca | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
+{{- dict "enabled" $envAll.Values.tls.oslo_messaging "name" "client-certs" "path" "/etc/rabbitmq/certs" | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
 {{ if $mounts_glance_api.volumeMounts }}{{ toYaml $mounts_glance_api.volumeMounts | indent 12 }}{{ end }}
+{{- range $extraContainer := $envAll.Values.pod.extraContainers.glance_api }}
+        - {{ tpl (toYaml $extraContainer) $envAll | indent 10 | trim }}
+{{- end }}
       volumes:
         - name: pod-tmp
           emptyDir: {}
         - name: oslo-lock-path
-          emptyDir: {}
-        - name: glance-tmp
           emptyDir: {}
         - name: etcglance
           emptyDir: {}
@@ -341,6 +314,14 @@ spec:
             type: DirectoryOrCreate
 {{- else }}
         - name: glance-images
+          emptyDir: {}
+{{- end }}
+{{- if and (eq .Values.storage "pvc") .Values.manifests.pvc_tmp }}
+        - name: glance-tmp
+          persistentVolumeClaim:
+            claimName: glance-tmp
+{{- else }}
+        - name: glance-tmp
           emptyDir: {}
 {{- end }}
 {{- if eq .Values.storage "rbd" }}
@@ -376,8 +357,10 @@ spec:
           hostPath:
             path: /sys
 {{- end }}
-{{- dict "enabled" $envAll.Values.manifests.certificates "name" $envAll.Values.endpoints.oslo_db.auth.admin.secret.tls.internal | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
-{{- dict "enabled" (or .Values.manifests.certificates .Values.tls.identity) "name" $envAll.Values.secrets.tls.image.api.internal | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
-{{- dict "enabled" $envAll.Values.manifests.certificates "name" $envAll.Values.endpoints.oslo_messaging.auth.admin.secret.tls.internal | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
+{{- dict "enabled" (or $envAll.Values.tls.oslo_db $envAll.Values.tls.oslo_messaging) "name" "client-certs" "secretName" $envAll.Values.secrets.tls.client.glance | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
+{{- dict "enabled" (not (empty .Values.secrets.tls.ca)) "name" .Values.secrets.tls.ca | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
 {{ if $mounts_glance_api.volumes }}{{ toYaml $mounts_glance_api.volumes | indent 8 }}{{ end }}
+{{- range $extraVolume := $envAll.Values.pod.extraVolumes.glance_api }}
+        - {{ tpl (toYaml $extraVolume) $envAll | indent 10 | trim }}
+{{- end }}
 {{- end }}

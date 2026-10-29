@@ -12,7 +12,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- if and .Values.manifests.service_ingress_api .Values.network.api.ingress.public }}
-{{- $serviceIngressOpts := dict "envAll" . "backendServiceType" "identity" -}}
-{{ $serviceIngressOpts | include "helm-toolkit.manifests.service_ingress" }}
+{{- /*
+AppArmor profiles can no longer be set per container under
+pod.mandatory_access_control, fail rather than silently dropping them.
+*/}}
+{{- $mac := .Values.pod.mandatory_access_control | default dict }}
+{{- if and $mac.type (eq $mac.type "apparmor") }}
+{{- range $podName := list
+  "memcached"
+}}
+{{- if index $mac $podName }}
+{{- fail "AppArmor profiles can no longer be set per container under pod.mandatory_access_control, set appArmorProfile under pod.security_context instead." }}
+{{- end }}
+{{- end }}
 {{- end }}

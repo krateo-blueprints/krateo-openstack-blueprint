@@ -17,8 +17,8 @@ limitations under the License.
 
 {{- if .Values.manifests.job_rabbit_init }}
 {{- $rmqUserJob := dict "envAll" . "serviceName" "glance" -}}
-{{- if .Values.manifests.certificates -}}
-{{- $_ := set $rmqUserJob "tlsSecret" .Values.endpoints.oslo_messaging.auth.admin.secret.tls.internal -}}
+{{- if .Values.tls.oslo_messaging -}}
+{{- $_ := set $rmqUserJob "tlsSecret" .Values.secrets.tls.client.glance -}}
 {{- end -}}
 {{- $_ := set $rmqUserJob "jobAnnotations" (include "metadata.annotations.job.rabbit_init" . | fromYaml) }}
 {{- if .Values.pod.tolerations.glance.enabled -}}

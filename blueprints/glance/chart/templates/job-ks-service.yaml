@@ -17,8 +17,8 @@ limitations under the License.
 
 {{- if .Values.manifests.job_ks_service }}
 {{- $ksServiceJob := dict "envAll" . "serviceName" "glance" "serviceTypes" ( tuple "image" ) -}}
-{{- if or .Values.manifests.certificates .Values.tls.identity -}}
-{{- $_ := set $ksServiceJob "tlsSecret" .Values.secrets.tls.image.api.internal -}}
+{{- if .Values.secrets.tls.ca -}}
+{{- $_ := set $ksServiceJob "tlsSecret" .Values.secrets.tls.ca -}}
 {{- end -}}
 {{- $_ := set $ksServiceJob "jobAnnotations" (include "metadata.annotations.job.ks_service" . | fromYaml) }}
 {{- if .Values.pod.tolerations.glance.enabled -}}

@@ -1,35 +1,376 @@
-# Full OpenStack-Helm mariadb defaults with the blueprint's validated overrides applied
-# (2025.1-ubuntu_jammy images, single-replica, Krateo-CDC-friendly). A small curated
-# subset is overridable per Composition (see values.schema.json).
-conf:
-  backup:
-    base_path: /var/backup
-    days_to_keep: 3
-    enabled: false
-    mysqldump_options: '--single-transaction --quick --add-drop-database --add-drop-table
-      --add-locks --databases
-
-      '
-    remote_backup:
-      container_name: mariadb
-      days_to_keep: 14
-      delay_range:
-        max: 60
-        min: 30
+# Vendored from opendev.org/openstack/openstack-helm at 2026.2.0,
+# with this repo's policy overrides re-applied. Image pins come from upstream.
+release_group: null
+images:
+  tags:
+    mariadb: quay.io/airshipit/mariadb:latest-ubuntu_noble
+    prometheus_create_mysql_user: quay.io/airshipit/mariadb:11.4.8-noble
+    prometheus_mysql_exporter: docker.io/prom/mysqld-exporter:v0.12.1
+    prometheus_mysql_exporter_helm_tests: quay.io/airshipit/openstack-client:2026.2-ubuntu_resolute
+    dep_check: quay.io/airshipit/kubernetes-entrypoint:latest-ubuntu_noble
+    image_repo_sync: quay.io/airshipit/docker:27.5.0
+    mariadb_backup: quay.io/airshipit/porthole-mysqlclient-utility:latest-ubuntu_jammy
+    ks_user: quay.io/airshipit/openstack-client:2026.2-ubuntu_resolute
+    scripted_test: quay.io/airshipit/mariadb:latest-ubuntu_noble
+    mariadb_controller: quay.io/airshipit/mariadb:latest-ubuntu_noble
+    mariadb_db_controller: quay.io/airshipit/mariadb:latest-ubuntu_noble
+  pull_policy: IfNotPresent
+  local_registry:
+    active: false
+    exclude:
+    - dep_check
+    - image_repo_sync
+labels:
+  server:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+  prometheus_mysql_exporter:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+  job:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+  test:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+  controller:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+  db_controller:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+pod:
+  env:
+    mariadb_controller:
+      MARIADB_CONTROLLER_DEBUG: 0
+      MARIADB_CONTROLLER_CHECK_PODS_DELAY: 10
+      MARIADB_CONTROLLER_PYKUBE_REQUEST_TIMEOUT: 60
+    mariadb_db_controller:
+      MARIADB_DB_CONTROLLER_DEBUG: 0
+      MARIADB_DB_CONTROLLER_RECONCILE_INTERVAL: 10
+      MARIADB_DB_CONTROLLER_FULL_RESYNC_INTERVAL: 1800
+      MARIADB_DB_CONTROLLER_ERROR_BACKOFF: 10
+      MARIADB_DB_CONTROLLER_PYKUBE_REQUEST_TIMEOUT: 60
+      MARIADB_DB_CONTROLLER_DB_CONNECT_TIMEOUT: 10
+      MARIADB_DB_CONTROLLER_DEFAULT_CHARACTER_SET: utf8
+      MARIADB_DB_CONTROLLER_DEFAULT_COLLATE: utf8_general_ci
+  probes:
+    server:
+      mariadb:
+        readiness:
+          enabled: true
+          disk_usage_percent: 99
+          params:
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 15
+        liveness:
+          enabled: true
+          params:
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 15
+      mariadb_exporter:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 5
+            periodSeconds: 60
+            timeoutSeconds: 10
+        liveness:
+          enabled: true
+          params:
+            initialDelaySeconds: 15
+            periodSeconds: 60
+            timeoutSeconds: 10
+  security_context:
+    server:
+      pod:
+        runAsUser: 999
+      container:
+        perms:
+          runAsUser: 0
+          readOnlyRootFilesystem: true
+        mariadb:
+          runAsUser: 999
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+    prometheus_mysql_exporter:
+      pod:
+        runAsUser: 99
+      container:
+        exporter:
+          runAsUser: 99
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+    prometheus_create_mysql_user:
+      pod:
+        runAsUser: 0
+      container:
+        main:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+    mariadb_backup:
+      pod:
+        runAsUser: 65534
+      container:
+        backup_perms:
+          runAsUser: 0
+          readOnlyRootFilesystem: true
+        verify_perms:
+          runAsUser: 0
+          readOnlyRootFilesystem: true
+        mariadb_backup:
+          runAsUser: 65534
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+    tests:
+      pod:
+        runAsUser: 999
+      container:
+        test:
+          runAsUser: 999
+          readOnlyRootFilesystem: true
+    controller:
+      pod:
+        runAsUser: 65534
+      container:
+        controller:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+    db_controller:
+      pod:
+        runAsUser: 65534
+        runAsNonRoot: true
+      container:
+        db_controller:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+    cluster_wait:
+      pod:
+        runAsUser: 65534
+        runAsNonRoot: true
+      container:
+        mariadb_cluster_wait:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+  affinity:
+    anti:
+      type:
+        default: preferredDuringSchedulingIgnoredDuringExecution
+      topologyKey:
+        default: kubernetes.io/hostname
+      weight:
+        default: 10
+  tolerations:
+    mariadb:
       enabled: false
-      failover_user_class: mariadb_failover
-      number_of_retries: 5
-      primary_user_class: mariadb
-      storage_policy: default-placement
-      throttle_backups:
-        container_name: throttle-backups-manager
-        enabled: false
-        lock_expire_after: 7200
-        retry_after: 3600
-        sessions_limit: 480
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+  replicas:
+    server: 1
+    controller: 1
+    db_controller: 1
+  lifecycle:
+    upgrades:
+      deployments:
+        revision_history: 3
+        pod_replacement_strategy: RollingUpdate
+        rolling_update:
+          max_unavailable: 1
+          max_surge: 3
+    termination_grace_period:
+      server:
+        timeout: 600
+    disruption_budget:
+      mariadb:
+        min_available: 0
+  resources:
+    enabled: false
+    server:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 1024Mi
+    controller:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 1024Mi
+    db_controller:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 1024Mi
+    jobs:
+      tests:
+        limits:
+          memory: 1024Mi
+        requests:
+          memory: 128Mi
+          cpu: 100m
+      prometheus_create_mysql_user:
+        limits:
+          memory: 1024Mi
+        requests:
+          memory: 128Mi
+          cpu: 100m
+      image_repo_sync:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 1024Mi
+      mariadb_backup:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 1024Mi
+      ks_user:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 1024Mi
+dependencies:
+  dynamic:
+    common:
+      local_image_registry:
+        jobs:
+        - mariadb-image-repo-sync
+        services:
+        - endpoint: node
+          service: local_image_registry
+  static:
+    mariadb_backup:
+      jobs:
+      - mariadb-ks-user
+      services:
+      - endpoint: internal
+        service: oslo_db
+    prometheus_create_mysql_user:
+      services:
+      - endpoint: internal
+        service: oslo_db
+    image_repo_sync:
+      services:
+      - endpoint: internal
+        service: local_image_registry
+    tests:
+      services:
+      - endpoint: internal
+        service: oslo_db
+    controller:
+      services: null
+    db_controller:
+      jobs:
+      - mariadb-cluster-wait
+      services:
+      - endpoint: internal
+        service: oslo_db
+    cluster_wait:
+      services:
+      - endpoint: internal
+        service: oslo_db
+volume:
+  use_local_path_for_single_pod_cluster:
+    enabled: true
+    host_path: /tmp/mysql-data
+  chown_on_start: true
+  enabled: false
+  class_name: general
+  size: 5Gi
+  backup:
+    enabled: true
+    class_name: general
+    size: 5Gi
+jobs:
+  cluster_wait:
+    clusterCheckWait: 30
+    clusterCheckRetries: 30
+    clusterStabilityCount: 30
+    clusterStabilityWait: 4
+  exporter_create_sql_user:
+    backoffLimit: 87600
+    activeDeadlineSeconds: 3600
+  mariadb_backup:
+    activeDeadlineSeconds: 0
+    backoffLimit: 6
+    cron: 0 0 * * *
+    history:
+      success: 3
+      failed: 1
+  ks_user:
+    activeDeadlineSeconds: 0
+    backoffLimit: 6
+conf:
+  tests:
+    endpoint: internal
+    params:
+    - --auto-generate-sql
+    - --concurrency=100
+    - --number-of-queries=1000
+    - --number-char-cols=1
+    - --number-int-cols=1
+  mariadb_server:
+    setup_wait:
+      iteration: 30
+      duration: 5
+  backup:
+    enabled: false
+    base_path: /var/backup
     validateData:
       ageOffset: 120
+    mysqldump_options: '--single-transaction --quick --add-drop-database --add-drop-table --add-locks --databases
+
+      '
+    days_to_keep: 3
+    remote_backup:
+      enabled: false
+      container_name: mariadb
+      days_to_keep: 14
+      storage_policy: default-placement
+      number_of_retries: 5
+      delay_range:
+        min: 30
+        max: 60
+      throttle_backups:
+        enabled: false
+        sessions_limit: 480
+        lock_expire_after: 7200
+        retry_after: 3600
+        container_name: throttle-backups-manager
+      primary_user_class: mariadb
+      failover_user_class: mariadb_failover
+  galera:
+    cluster_leader_ttl: 60
   database:
+    mysql_histfile: /dev/null
+    my: '[mysqld]
+
+      datadir=/var/lib/mysql
+
+      basedir=/usr
+
+      ignore-db-dirs=lost+found
+
+
+      [client-server]
+
+      !includedir /etc/mysql/conf.d/
+
+      '
     00_base: '[mysqld]
 
       # Charset
@@ -66,8 +407,7 @@ conf:
 
       bind_address=0.0.0.0
 
-      port={{ tuple "oslo_db" "direct" "mysql" . | include "helm-toolkit.endpoints.endpoint_port_lookup"
-      }}
+      port={{ tuple "oslo_db" "direct" "mysql" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
 
 
       # When a client connects, the server will perform hostname resolution,
@@ -150,8 +490,7 @@ conf:
 
       #
 
-      # The buffer pool is where data and indexes are cached: having it as large as
-      possible
+      # The buffer pool is where data and indexes are cached: having it as large as possible
 
       # will ensure you use memory and not disks for most read operations.
 
@@ -192,21 +531,17 @@ conf:
 
       innodb_flush_log_at_trx_commit=2
 
-      wsrep_cluster_name={{ tuple "oslo_db" "direct" . | include "helm-toolkit.endpoints.hostname_namespaced_endpoint_lookup"
-      | replace "." "_" }}
+      wsrep_cluster_name={{ tuple "oslo_db" "direct" . | include "helm-toolkit.endpoints.hostname_namespaced_endpoint_lookup" | replace "." "_" }}
 
       wsrep_on=1
 
       wsrep_provider=/usr/lib/galera/libgalera_smm.so
 
-      wsrep_provider_options="evs.suspect_timeout=PT30S; gmcast.peer_timeout=PT15S;
-      gmcast.listen_addr=tcp://0.0.0.0:{{ tuple "oslo_db" "direct" "wsrep" . | include
-      "helm-toolkit.endpoints.endpoint_port_lookup" }}"
+      wsrep_provider_options="evs.suspect_timeout=PT30S; gmcast.peer_timeout=PT15S; gmcast.listen_addr=tcp://0.0.0.0:{{ tuple "oslo_db" "direct" "wsrep" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}"
 
       wsrep_slave_threads=12
 
-      wsrep_sst_auth={{ .Values.endpoints.oslo_db.auth.sst.username }}:{{ .Values.endpoints.oslo_db.auth.sst.password
-      }}
+      wsrep_sst_auth={{ .Values.endpoints.oslo_db.auth.sst.username }}:{{ .Values.endpoints.oslo_db.auth.sst.password }}
 
       wsrep_sst_method=mariabackup
 
@@ -238,8 +573,7 @@ conf:
 
       protocol=tcp
 
-      port={{ tuple "oslo_db" "direct" "mysql" . | include "helm-toolkit.endpoints.endpoint_port_lookup"
-      }}
+      port={{ tuple "oslo_db" "direct" "mysql" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
 
       {{ if .Values.manifests.certificates }}
 
@@ -258,6 +592,7 @@ conf:
       {{ end }}
 
       '
+    config_override: null
     99_force: '[mysqld]
 
       datadir=/var/lib/mysql
@@ -265,499 +600,11 @@ conf:
       tmpdir=/tmp
 
       '
-    config_override: null
-    my: '[mysqld]
-
-      datadir=/var/lib/mysql
-
-      basedir=/usr
-
-      ignore-db-dirs=lost+found
-
-
-      [client-server]
-
-      !includedir /etc/mysql/conf.d/
-
-      '
-    mysql_histfile: /dev/null
-  galera:
-    cluster_leader_ttl: 60
-  mariadb_server:
-    setup_wait:
-      duration: 5
-      iteration: 30
-  tests:
-    endpoint: internal
-    params:
-    - --auto-generate-sql
-    - --concurrency=100
-    - --number-of-queries=1000
-    - --number-char-cols=1
-    - --number-int-cols=1
-dependencies:
-  dynamic:
-    common:
-      local_image_registry:
-        jobs:
-        - mariadb-image-repo-sync
-        services:
-        - endpoint: node
-          service: local_image_registry
-  static:
-    cluster_wait:
-      services:
-      - endpoint: internal
-        service: oslo_db
-    controller:
-      services: null
-    image_repo_sync:
-      services:
-      - endpoint: internal
-        service: local_image_registry
-    mariadb_backup:
-      jobs:
-      - mariadb-ks-user
-      services:
-      - endpoint: internal
-        service: oslo_db
-    prometheus_create_mysql_user:
-      services:
-      - endpoint: internal
-        service: oslo_db
-    tests:
-      services:
-      - endpoint: internal
-        service: oslo_db
-endpoints:
-  cluster_domain_suffix: cluster.local
-  identity:
-    auth:
-      admin:
-        auth_url: null
-        password: password
-        project_domain_name: default
-        project_name: admin
-        region_name: RegionOne
-        user_domain_name: default
-        username: admin
-      mariadb:
-        auth_url: null
-        password: password
-        project_domain_name: service
-        project_name: service
-        region_name: RegionOne
-        role: admin
-        user_domain_name: service
-        username: mariadb-backup-user
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: keystone
-      internal: keystone-api
-    name: backup-storage-auth
-    namespace: openstack
-    path:
-      default: /v3
-    port:
-      api:
-        default: 80
-        internal: 5000
-    scheme:
-      default: http
-  kube_dns:
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: kube-dns
-    name: kubernetes-dns
-    namespace: kube-system
-    path:
-      default: null
-    port:
-      dns:
-        default: 53
-        protocol: UDP
-      dns_tcp:
-        default: 53
-    scheme: http
-  local_image_registry:
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: localhost
-      internal: docker-registry
-      node: localhost
-    name: docker-registry
-    namespace: docker-registry
-    port:
-      registry:
-        node: 5000
-  monitoring:
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: prom-metrics
-      public: prometheus
-    name: prometheus
-    namespace: null
-    path:
-      default: null
-    port:
-      api:
-        default: 9090
-        public: 80
-    scheme:
-      default: http
-  oci_image_registry:
-    auth:
-      enabled: false
-      mariadb:
-        password: password
-        username: mariadb
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: localhost
-    name: oci-image-registry
-    namespace: oci-image-registry
-    port:
-      registry:
-        default: null
-  oslo_db:
-    auth:
-      admin:
-        password: password
-        username: root
-      audit:
-        password: password
-        username: audit
-      exporter:
-        password: password
-        username: exporter
-      sst:
-        password: password
-        username: sst
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: mariadb
-      direct: mariadb-server
-      discovery: mariadb-discovery
-    namespace: null
-    path: null
-    port:
-      ist:
-        default: 4568
-      mysql:
-        default: 3306
-      sst:
-        default: 4444
-      wsrep:
-        default: 4567
-    scheme: mysql+pymysql
-  prometheus_mysql_exporter:
-    host_fqdn_override:
-      default: null
-    hosts:
-      default: mysql-exporter
-    namespace: null
-    path:
-      default: /metrics
-    port:
-      metrics:
-        default: 9104
-    scheme:
-      default: http
-extraObjects: []
-identity:
-  openrc:
-    exclude_vars: []
-    extra_vars: []
-images:
-  local_registry:
-    active: false
-    exclude:
-    - dep_check
-    - image_repo_sync
-  pull_policy: IfNotPresent
-  tags:
-    dep_check: quay.io/airshipit/kubernetes-entrypoint:latest-ubuntu_noble
-    image_repo_sync: quay.io/airshipit/docker:27.5.0
-    ks_user: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    mariadb: quay.io/airshipit/mariadb:latest-ubuntu_noble
-    mariadb_backup: quay.io/airshipit/porthole-mysqlclient-utility:latest-ubuntu_jammy
-    mariadb_controller: quay.io/airshipit/mariadb:latest-ubuntu_noble
-    prometheus_create_mysql_user: quay.io/airshipit/mariadb:11.4.8-noble
-    prometheus_mysql_exporter: docker.io/prom/mysqld-exporter:v0.12.1
-    prometheus_mysql_exporter_helm_tests: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    scripted_test: quay.io/airshipit/mariadb:latest-ubuntu_noble
-jobs:
-  cluster_wait:
-    clusterCheckRetries: 30
-    clusterCheckWait: 30
-    clusterStabilityCount: 30
-    clusterStabilityWait: 4
-  exporter_create_sql_user:
-    activeDeadlineSeconds: 3600
-    backoffLimit: 87600
-  ks_user:
-    activeDeadlineSeconds: 0
-    backoffLimit: 6
-  mariadb_backup:
-    activeDeadlineSeconds: 0
-    backoffLimit: 6
-    cron: 0 0 * * *
-    history:
-      failed: 1
-      success: 3
-labels:
-  controller:
-    node_selector_key: openstack-control-plane
-    node_selector_value: enabled
-  job:
-    node_selector_key: openstack-control-plane
-    node_selector_value: enabled
-  prometheus_mysql_exporter:
-    node_selector_key: openstack-control-plane
-    node_selector_value: enabled
-  server:
-    node_selector_key: openstack-control-plane
-    node_selector_value: enabled
-  test:
-    node_selector_key: openstack-control-plane
-    node_selector_value: enabled
-manifests:
-  certificates: false
-  configmap_bin: true
-  configmap_etc: true
-  configmap_services_tcp: true
-  cron_job_mariadb_backup: false
-  deployment_controller: true
-  job_cluster_wait: false
-  job_image_repo_sync: true
-  job_ks_user: false
-  monitoring:
-    prometheus:
-      configmap_bin: true
-      job_user_create: true
-      secret_etc: true
-  network_policy: false
-  pdb_server: true
-  pod_test: false
-  pvc_backup: false
-  secret_backup_restore: false
-  secret_dbadmin_password: true
-  secret_dbaudit_password: true
-  secret_etc: true
-  secret_registry: true
-  secret_sst_password: true
-  service: true
-  service_discovery: true
-  service_error: false
-  service_master: true
-  statefulset: true
 monitoring:
   prometheus:
     enabled: false
     mysqld_exporter:
       scrape: true
-network:
-  mariadb: {}
-  mariadb_discovery: {}
-  mariadb_master: {}
-network_policy:
-  mariadb:
-    egress:
-    - {}
-    ingress:
-    - {}
-  prometheus-mysql-exporter:
-    egress:
-    - {}
-    ingress:
-    - {}
-pod:
-  affinity:
-    anti:
-      topologyKey:
-        default: kubernetes.io/hostname
-      type:
-        default: preferredDuringSchedulingIgnoredDuringExecution
-      weight:
-        default: 10
-  env:
-    mariadb_controller:
-      MARIADB_CONTROLLER_CHECK_PODS_DELAY: 10
-      MARIADB_CONTROLLER_DEBUG: 0
-      MARIADB_CONTROLLER_PYKUBE_REQUEST_TIMEOUT: 60
-  lifecycle:
-    disruption_budget:
-      mariadb:
-        min_available: 0
-    termination_grace_period:
-      server:
-        timeout: 600
-    upgrades:
-      deployments:
-        pod_replacement_strategy: RollingUpdate
-        revision_history: 3
-        rolling_update:
-          max_surge: 3
-          max_unavailable: 1
-  probes:
-    server:
-      mariadb:
-        liveness:
-          enabled: true
-          params:
-            initialDelaySeconds: 120
-            periodSeconds: 30
-            timeoutSeconds: 15
-        readiness:
-          disk_usage_percent: 99
-          enabled: true
-          params:
-            initialDelaySeconds: 30
-            periodSeconds: 30
-            timeoutSeconds: 15
-      mariadb_exporter:
-        liveness:
-          enabled: true
-          params:
-            initialDelaySeconds: 15
-            periodSeconds: 60
-            timeoutSeconds: 10
-        readiness:
-          enabled: true
-          params:
-            initialDelaySeconds: 5
-            periodSeconds: 60
-            timeoutSeconds: 10
-  replicas:
-    controller: 1
-    server: 1
-  resources:
-    enabled: false
-    jobs:
-      image_repo_sync:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
-        requests:
-          cpu: 100m
-          memory: 128Mi
-      ks_user:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
-        requests:
-          cpu: 100m
-          memory: 128Mi
-      mariadb_backup:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
-        requests:
-          cpu: 100m
-          memory: 128Mi
-      prometheus_create_mysql_user:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
-        requests:
-          cpu: 100m
-          memory: 128Mi
-      tests:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
-        requests:
-          cpu: 100m
-          memory: 128Mi
-    server:
-      limits:
-        cpu: 2000m
-        memory: 1024Mi
-      requests:
-        cpu: 100m
-        memory: 128Mi
-  security_context:
-    cluster_wait:
-      container:
-        mariadb_cluster_wait:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - ALL
-      pod:
-        runAsNonRoot: true
-        runAsUser: 65534
-    controller:
-      container:
-        controller:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-      pod:
-        runAsUser: 65534
-    mariadb_backup:
-      container:
-        backup_perms:
-          readOnlyRootFilesystem: true
-          runAsUser: 0
-        mariadb_backup:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          runAsUser: 65534
-        verify_perms:
-          readOnlyRootFilesystem: true
-          runAsUser: 0
-      pod:
-        runAsUser: 65534
-    prometheus_create_mysql_user:
-      container:
-        main:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-      pod:
-        runAsUser: 0
-    prometheus_mysql_exporter:
-      container:
-        exporter:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          runAsUser: 99
-      pod:
-        runAsUser: 99
-    server:
-      container:
-        mariadb:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          runAsUser: 999
-        perms:
-          readOnlyRootFilesystem: true
-          runAsUser: 0
-      pod:
-        runAsUser: 999
-    tests:
-      container:
-        test:
-          readOnlyRootFilesystem: true
-          runAsUser: 999
-      pod:
-        runAsUser: 999
-  tolerations:
-    mariadb:
-      enabled: false
-      tolerations:
-      - effect: NoSchedule
-        key: node-role.kubernetes.io/master
-        operator: Exists
-      - effect: NoSchedule
-        key: node-role.kubernetes.io/control-plane
-        operator: Exists
-release_group: null
 secrets:
   identity:
     admin: keystone-admin-user
@@ -769,17 +616,197 @@ secrets:
   tls:
     oslo_db:
       server:
-        internal: mariadb-tls-direct
         public: mariadb-tls-server
-volume:
-  backup:
-    class_name: general
-    enabled: true
-    size: 5Gi
-  chown_on_start: true
-  class_name: general
-  enabled: false
-  size: 5Gi
-  use_local_path_for_single_pod_cluster:
-    enabled: true
-    host_path: /tmp/mysql-data
+        internal: mariadb-tls-direct
+identity:
+  openrc:
+    exclude_vars: []
+    extra_vars: []
+endpoints:
+  cluster_domain_suffix: cluster.local
+  local_image_registry:
+    name: docker-registry
+    namespace: docker-registry
+    hosts:
+      default: localhost
+      internal: docker-registry
+      node: localhost
+    host_fqdn_override:
+      default: null
+    port:
+      registry:
+        node: 5000
+  oci_image_registry:
+    name: oci-image-registry
+    namespace: oci-image-registry
+    auth:
+      enabled: false
+      mariadb:
+        username: mariadb
+        password: password
+    hosts:
+      default: localhost
+    host_fqdn_override:
+      default: null
+    port:
+      registry:
+        default: null
+  monitoring:
+    name: prometheus
+    namespace: null
+    hosts:
+      default: prom-metrics
+      public: prometheus
+    host_fqdn_override:
+      default: null
+    path:
+      default: null
+    scheme:
+      default: http
+    port:
+      api:
+        default: 9090
+        public: 80
+  prometheus_mysql_exporter:
+    namespace: null
+    hosts:
+      default: mysql-exporter
+    host_fqdn_override:
+      default: null
+    path:
+      default: /metrics
+    scheme:
+      default: http
+    port:
+      metrics:
+        default: 9104
+  oslo_db:
+    namespace: null
+    auth:
+      admin:
+        username: root
+        password: password
+      sst:
+        username: sst
+        password: password
+      audit:
+        username: audit
+        password: password
+      exporter:
+        username: exporter
+        password: password
+    hosts:
+      default: mariadb
+      direct: mariadb-server
+      discovery: mariadb-discovery
+    host_fqdn_override:
+      default: null
+    path: null
+    scheme: mysql+pymysql
+    port:
+      mysql:
+        default: 3306
+      wsrep:
+        default: 4567
+      ist:
+        default: 4568
+      sst:
+        default: 4444
+  kube_dns:
+    namespace: kube-system
+    name: kubernetes-dns
+    hosts:
+      default: kube-dns
+    host_fqdn_override:
+      default: null
+    path:
+      default: null
+    scheme: http
+    port:
+      dns_tcp:
+        default: 53
+      dns:
+        default: 53
+        protocol: UDP
+  identity:
+    name: backup-storage-auth
+    namespace: openstack
+    auth:
+      admin:
+        auth_url: null
+        region_name: RegionOne
+        username: admin
+        password: password
+        project_name: admin
+        user_domain_name: default
+        project_domain_name: default
+      mariadb:
+        auth_url: null
+        role: admin
+        region_name: RegionOne
+        username: mariadb-backup-user
+        password: password
+        project_name: service
+        user_domain_name: service
+        project_domain_name: service
+    hosts:
+      default: keystone
+      internal: keystone-api
+    host_fqdn_override:
+      default: null
+    path:
+      default: /v3
+    scheme:
+      default: http
+    port:
+      api:
+        default: 80
+        internal: 5000
+network:
+  mariadb: {}
+  mariadb_discovery: {}
+  mariadb_master: {}
+network_policy:
+  mariadb:
+    ingress:
+    - {}
+    egress:
+    - {}
+  prometheus-mysql-exporter:
+    ingress:
+    - {}
+    egress:
+    - {}
+manifests:
+  certificates: false
+  configmap_bin: true
+  crds: true
+  configmap_etc: true
+  configmap_services_tcp: true
+  job_image_repo_sync: true
+  cron_job_mariadb_backup: false
+  job_ks_user: false
+  pvc_backup: false
+  monitoring:
+    prometheus:
+      configmap_bin: true
+      job_user_create: true
+      secret_etc: true
+  pdb_server: true
+  network_policy: false
+  pod_test: false
+  secret_dbadmin_password: true
+  secret_sst_password: true
+  secret_dbaudit_password: true
+  secret_backup_restore: false
+  secret_etc: true
+  secret_registry: true
+  service_discovery: true
+  service_error: false
+  service: true
+  statefulset: true
+  deployment_controller: true
+  deployment_db_controller: false
+  service_master: true
+  job_cluster_wait: false
+extraObjects: {}
