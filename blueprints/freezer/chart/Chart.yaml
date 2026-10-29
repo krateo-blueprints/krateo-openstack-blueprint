@@ -36,6 +36,6 @@ annotations:
   "helm.sh/hook-weight": "-5"
 dependencies:
   - name: helm-toolkit
-    repository: file://../helm-toolkit
+    repository: file://../../../charts/helm-toolkit
     version: ">= 0.1.0"
 ...

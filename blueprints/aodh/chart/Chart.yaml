@@ -37,6 +37,6 @@ annotations:
   krateoSupportedVersion: ">= 2.5.1"
 dependencies:
   - name: helm-toolkit
-    repository: file://../helm-toolkit
+    repository: file://../../../charts/helm-toolkit
     version: ">= 0.1.0"
 ...

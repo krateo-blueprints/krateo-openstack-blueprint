@@ -7,3 +7,10 @@ kubeconfig
 .claude/
 __pycache__/
 *.pyc
+
+# helm-toolkit is vendored ONCE at charts/helm-toolkit and pulled into each chart by
+# `helm dependency build`. Before this it was committed 34 times, byte-identical, while
+# every Chart.yaml declared a path (file://../helm-toolkit) that did not exist on a clean
+# clone -- so `helm dependency build` failed and only the committed copies made rendering work.
+blueprints/*/chart/charts/
+blueprints/*/chart/Chart.lock
