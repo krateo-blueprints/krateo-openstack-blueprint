@@ -66,7 +66,13 @@ jobs:
                 sed -i "s/CHART_VERSION/${VERSION}/g" "$extra"
               fi
             done
-            helm dependency update "$dir" 2>/dev/null || true
+            # No `|| true`: the only dependency is the vendored charts/helm-toolkit, so a
+            # failure here means the chart is about to be packaged WITHOUT its toolkit and
+            # every template would fail at install. --skip-refresh because no remote repo
+            # is involved and refreshing them is pure latency.
+            # `update`, not `build`: build requires a committed Chart.lock, and a lock over a
+            # single file:// path carries no information worth maintaining in 34 copies.
+            helm dependency update "$dir" --skip-refresh
             helm package "$dir" --version "${VERSION}" --destination .
             helm push "${name}-${VERSION}.tgz" "${OCI_REPO}"
             echo "Published ${OCI_REPO}/${name}:${VERSION}"

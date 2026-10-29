@@ -40,6 +40,37 @@ jobs:
       - name: Every chart's defaults must satisfy its own schema
         run: python3 hack/validate-values-schema.py .
 
+  chart-deps:
+    # Gating. Every chart declares helm-toolkit at a file:// path; before charts/helm-toolkit was
+    # shared, that path did not exist on a clean clone and resolution had never once succeeded --
+    # rendering worked only because 34 byte-identical copies were committed under charts/, and the
+    # release swallowed the failure with `|| true`. Nothing would have noticed the copies going away
+    # until every template failed at install.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Stamp the CHART_VERSION placeholder for CI
+        # Resolution validates chart metadata, and the literal placeholder is not valid semver.
+        run: |
+          find . -type f -name Chart.yaml -not -path '*/charts/*' -not -path './.git/*' \
+            -exec sed -i "s/CHART_VERSION/0.0.0-ci/g" {} +
+
+      - name: Every chart's declared dependencies must resolve
+        run: |
+          set -euo pipefail
+          # --skip-refresh: the only dependency is a local path, so no remote index is involved.
+          while IFS= read -r -d '' cf; do
+            dir=$(dirname "$cf")
+            echo "::group::${dir}"
+            helm dependency update "$dir" --skip-refresh
+            echo "::endgroup::"
+          done < <(find . -type f -name Chart.yaml -not -path '*/charts/*' -not -path './.git/*' -print0)
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -63,7 +94,7 @@ jobs:
           while IFS= read -r -d '' cf; do
             dir=$(dirname "$cf")
             echo "::group::${dir}"
-            helm dependency update "$dir" 2>/dev/null || true
+            helm dependency update "$dir" --skip-refresh
             helm template release "$dir" >/dev/null \
               || echo "::warning::helm template failed for ${dir} (may require values or private deps)"
             helm lint "$dir" || true
