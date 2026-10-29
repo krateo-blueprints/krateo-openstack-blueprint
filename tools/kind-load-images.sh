@@ -18,17 +18,42 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 # Identity-plane blueprints are the ones that run on kind (compute needs KVM/OVS).
 COMPONENTS="mariadb memcached keystone glance horizon"
 
+# Collect into a file rather than a pipeline, so a render failure can abort the run.
+# Previously this piped straight into `sort -u`, which made the exit status sort's and
+# left a failed render indistinguishable from a chart with no images.
 collect() {
+  local out="$1"
+  : > "$out"
   for c in $COMPONENTS; do
     local d; d="$(mktemp -d)"; cp -R "$HERE/blueprints/$c/chart" "$d/chart"
     sed -i.bak 's/CHART_VERSION/0.0.0-load/' "$d/chart/Chart.yaml"
-    helm template load "$d/chart" 2>/dev/null | grep -oE 'image: .*' | sed -E 's/image:\s*"?([^"]+)"?/\1/'
+    # helm-toolkit is vendored once at the repo root and referenced by a relative path that
+    # does not survive the copy into $d. Bring it along: the copy exists to stamp
+    # CHART_VERSION without mutating the tree, not to exercise dependency resolution.
+    mkdir -p "$d/chart/charts"
+    cp -R "$HERE/charts/helm-toolkit" "$d/chart/charts/helm-toolkit"
+    if ! helm template load "$d/chart" >"$d/rendered" 2>"$d/err"; then
+      echo "FATAL: helm template failed for '$c'; cannot determine which images to pre-load." >&2
+      sed 's/^/    /' "$d/err" >&2
+      rm -rf "$d"
+      return 1
+    fi
+    grep -oE 'image: .*' "$d/rendered" | sed -E 's/image:\s*"?([^"]+)"?/\1/' >> "$out"
     rm -rf "$d"
-  done | sort -u
+  done
+  sort -u -o "$out" "$out"
+  # An empty list means the charts rendered but reference no images, which never happens
+  # for these five. Treat it as a failure rather than pre-loading nothing and reporting success.
+  if [ ! -s "$out" ]; then
+    echo "FATAL: no images collected from: $COMPONENTS" >&2
+    return 1
+  fi
 }
 
-IMAGES="$(collect)"
-echo ">> Pre-loading $(echo "$IMAGES" | wc -l | tr -d ' ') images into kind cluster '$CLUSTER' as amd64:"
+LIST="$(mktemp)"; trap 'rm -f "$LIST"' EXIT
+collect "$LIST" || exit 1
+IMAGES="$(cat "$LIST")"
+echo ">> Pre-loading $(wc -l < "$LIST" | tr -d ' ') images into kind cluster '$CLUSTER' as amd64:"
 for img in $IMAGES; do
   echo "   $img"
   docker pull --platform=linux/amd64 "$img"
