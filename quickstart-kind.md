@@ -20,6 +20,12 @@ kubectl label --overwrite nodes --all openstack-control-plane=enabled
 # org (krateoplatformops). On 1.0.0 a CompositionDefinition whose chart cannot be read
 # reports nothing at all -- empty status, no conditions, no CRD -- so an install failure
 # is indistinguishable from an install still working. Fixed from 2.13.39 onward.
+#
+# 2.13.41 is pinned because it is the version this path has actually been run on
+# end to end. If you bump it, skip 2.13.42: it shipped a regression where a CRD
+# version created after the process started was invisible to helm Upgrade for the
+# lifetime of that process, so a cluster could not enable a feature or bump a
+# component without restarting a cdc. 2.13.41 predates it; 2.13.43 fixes it.
 OCI=oci://ghcr.io/krateo-platformops/charts
 helm upgrade --install core-provider-crds $OCI/core-provider-crds \
   --version 2.13.41 -n krateo-system --create-namespace --wait
