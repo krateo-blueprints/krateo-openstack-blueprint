@@ -38,7 +38,12 @@ collect() {
       rm -rf "$d"
       return 1
     fi
-    grep -oE 'image: .*' "$d/rendered" | sed -E 's/image:\s*"?([^"]+)"?/\1/' >> "$out"
+    # Three anchored substitutions rather than one regex using \s: BSD sed (macOS, which is the
+    # ONLY platform this script exists for) does not treat \s as whitespace, so the original left
+    # a leading space and, for quoted values, a trailing quote. `docker pull` then fails with
+    # "invalid reference format". POSIX classes and anchors behave identically on BSD and GNU.
+    grep -oE 'image: .*' "$d/rendered" \
+      | sed -e 's/^image:[[:space:]]*//' -e 's/^"//' -e 's/"$//' >> "$out"
     rm -rf "$d"
   done
   sort -u -o "$out" "$out"
