@@ -69,6 +69,30 @@
 {{- end -}}
 
 {{/* "true" if every dependency Composition (by component name) is Ready. */}}
+{{/* Returns "true" if the component's own CR exists at all -- Ready or not.
+
+     This is what makes the dependency gate a precondition for CREATION rather than an
+     invariant for CONTINUED EXISTENCE. The gate is a lookup re-evaluated every reconcile,
+     so without this a dependency that merely goes unready stops the dependent rendering,
+     and a Helm release that stops rendering is a Helm release that gets uninstalled. A
+     two-minute MariaDB readiness blip deleted a working Keystone -- Composition, release
+     and Deployment -- which is #68.
+
+     Deselection is unaffected: `has $c.name $sel` is checked before this in
+     compositions.yaml, so a component removed from the profile is never emitted and cannot
+     be resurrected by the fact that it still exists. Removing it stays the way to remove it.
+
+     The CRD check is deliberately NOT latched. If the CRD does not serve the target version
+     the CR cannot be rendered at all (the render 500s), so that one must stay a hard gate. */}}
+{{- define "osh.exists" -}}
+{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}
+{{- $r := "" -}}
+{{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)))) "true" -}}
+{{- if lookup (include "osh.apiVersion" (list $top)) $kind $top.Release.Namespace $name -}}{{- $r = "true" -}}{{- end -}}
+{{- end -}}
+{{- $r -}}
+{{- end -}}
+
 {{- define "osh.depsReady" -}}
 {{- $top := index . 0 -}}{{- $deps := index . 1 -}}{{- $comps := index . 2 -}}
 {{- $all := "true" -}}

@@ -1,13 +1,20 @@
-{{- /* Step 2: emit each Composition only when its CRD exists and all its
-       dependency Compositions report Ready=True (Helm lookup, re-evaluated each
-       reconcile). On the first pass only zero-dependency components render; later
-       passes unlock the rest in order. */ -}}
+{{- /* Step 2: emit each Composition once its CRD exists and all its dependency
+       Compositions report Ready=True. On the first pass only zero-dependency components
+       render; later passes unlock the rest in order.
+
+       `or $exists` makes the dependency check a precondition for creation, not a condition
+       for staying alive. The lookup is re-evaluated every reconcile, so without it a
+       dependency going briefly unready stops the dependent rendering -- and a release that
+       stops rendering is uninstalled. See #68: a MariaDB readiness blip deleted a running
+       Keystone. Deselection still removes a component, because `has $c.name $sel` below is
+       checked first and independently. */ -}}
 {{- $sel := splitList " " (include "osh.selected" (list $)) }}
 {{- range $c := .Values.components }}
 {{- if has $c.name $sel }}
 {{- $crd := include "osh.crdExists" (list $c.kind (include "osh.version" (list $))) }}
 {{- $deps := include "osh.depsReady" (list $ $c.deps $.Values.components) }}
-{{- if and (eq $crd "true") (eq $deps "true") }}
+{{- $exists := include "osh.exists" (list $ $c.kind $c.name) }}
+{{- if and (eq $crd "true") (or (eq $deps "true") (eq $exists "true")) }}
 {{- $ov := (index ($.Values.componentValues | default dict) $c.name) | default dict }}
 ---
 apiVersion: {{ include "osh.apiVersion" (list $) }}
