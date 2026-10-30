@@ -26,6 +26,16 @@ kubectl label --overwrite nodes --all openstack-control-plane=enabled
 # version created after the process started was invisible to helm Upgrade for the
 # lifetime of that process, so a cluster could not enable a feature or bump a
 # component without restarting a cdc. 2.13.41 predates it; 2.13.43 fixes it.
+#
+# 2.13.45 (2026-10-30) is the version to bump TO when someone next runs this path end to
+# end. It fixes two faults that bite blueprint authors specifically: a chart that renames a
+# managed child left the old name in status.managed forever, with the composition stuck at
+# Ready=False (Creating) against a resource that no longer exists; and a CompositionDefinition
+# version migration could lose the outgoing controller's status write, which is how that stale
+# record got there. Bumping a blueprint chart version migrates a CD version, so this repo
+# triggers that path on every release. The pin stays at 2.13.41 only because that is the
+# version this quickstart has actually been run on -- which is the whole reason the pin is
+# worth trusting.
 OCI=oci://ghcr.io/krateo-platformops/charts
 helm upgrade --install core-provider-crds $OCI/core-provider-crds \
   --version 2.13.41 -n krateo-system --create-namespace --wait
