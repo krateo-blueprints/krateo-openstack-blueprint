@@ -65,6 +65,50 @@ def get_secret_definition(name):
     return resp.json()
 
 
+def create_secret(name):
+    """Create an empty Secret so setup has something to populate.
+
+    The Job's Role already grants `create` on secrets -- it always did -- but this
+    script only ever implemented get and update, so a Secret that did not exist yet
+    was a hard failure. That is fine while something else emits the Secret first, and
+    fatal once nothing does: see #74, where the chart stopped emitting an unpopulated
+    Secret (#61, to stop a reconcile wiping populated keys) and fresh installs could
+    no longer come up at all.
+
+    Creating it here resolves that for good. The chart can keep its rule of never
+    emitting an unpopulated Secret -- so a render can never wipe keys -- while a fresh
+    install still gets one, because the component that generates the keys also owns
+    bringing the Secret into existence.
+    """
+    url = '%s/api/v1/namespaces/%s/secrets' % (KUBE_HOST, NAMESPACE)
+    body = {
+        'apiVersion': 'v1',
+        'kind': 'Secret',
+        'type': 'Opaque',
+        'metadata': {
+            'name': name,
+            'namespace': NAMESPACE,
+            'annotations': {'helm.sh/resource-policy': 'keep'},
+        },
+        'data': {},
+    }
+    resp = requests.post(url,
+                         json=body,
+                         headers={'Authorization': 'Bearer %s' % KUBE_TOKEN},
+                         verify=KUBE_CERT)
+    if resp.status_code == 409:
+        # Raced with another setup Job, or with a render that emitted it. Either way
+        # it exists now, which is all this needs.
+        LOG.info("Secret '%s' already created concurrently; re-reading it.", name)
+        return get_secret_definition(name)
+    if resp.status_code not in (200, 201):
+        LOG.error('Cannot create secret %s.', name)
+        LOG.error(resp.text)
+        return None
+    LOG.info("Created empty secret '%s'.", name)
+    return resp.json()
+
+
 def update_secret(name, secret):
     url = '%s/api/v1/namespaces/%s/secrets/%s' % (KUBE_HOST, NAMESPACE, name)
     resp = requests.put(url,
@@ -140,8 +184,15 @@ def main():
     read_kube_config()
     secret = get_secret_definition(SECRET_NAME)
     if not secret:
-        LOG.error("Secret '%s' does not exist.", SECRET_NAME)
-        sys.exit(1)
+        if args.command in ('credential_setup', 'fernet_setup'):
+            secret = create_secret(SECRET_NAME)
+            if not secret:
+                sys.exit(1)
+        else:
+            # A rotate has nothing to rotate if setup never ran. Creating an empty
+            # Secret here would silently turn that into a no-op.
+            LOG.error("Secret '%s' does not exist.", SECRET_NAME)
+            sys.exit(1)
 
     if args.command in ('fernet_rotate', 'credential_rotate'):
         LOG.info("Copying existing %s keys from secret '%s' to %s.",
