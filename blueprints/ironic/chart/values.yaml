@@ -50,7 +50,7 @@ images:
     ironic_pxe: quay.io/airshipit/ironic:2025.1-ubuntu_noble
     ironic_pxe_init: quay.io/airshipit/ironic:2025.1-ubuntu_noble
     ironic_pxe_http: docker.io/nginx:1.13.3
-    dep_check: quay.io/airshipit/kubernetes-entrypoint@sha256:7d8dfe9dc96d9933cac0d1a3446977220dd6e7555e988526f9f6cf7d3613bfe9
+    dep_check: quay.io/airshipit/kubernetes-entrypoint:4fbcf7ce324dc66e78480f73035e31434cfea1e8-ubuntu_focal
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: "IfNotPresent"
   local_registry:
