@@ -708,7 +708,7 @@ images:
     bootstrap: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
     db_drop: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
     db_init: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    dep_check: quay.io/airshipit/kubernetes-entrypoint:latest-ubuntu_noble
+    dep_check: quay.io/airshipit/kubernetes-entrypoint@sha256:19bdc6d63231357121f8dc045fd874b28563d9c8f1139bd6f744078934f8bef7
     image_repo_sync: docker.io/docker:17.07.0
     keystone_api: quay.io/airshipit/keystone:2025.1-ubuntu_jammy
     keystone_bootstrap: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy

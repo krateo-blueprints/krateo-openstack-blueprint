@@ -46,7 +46,7 @@ images:
     ceilometer_compute: quay.io/airshipit/ceilometer:2025.1-ubuntu_jammy
     ceilometer_ipmi: quay.io/airshipit/ceilometer:2025.1-ubuntu_jammy
     ceilometer_notification: quay.io/airshipit/ceilometer:2025.1-ubuntu_jammy
-    dep_check: quay.io/airshipit/kubernetes-entrypoint:latest-ubuntu_noble
+    dep_check: quay.io/airshipit/kubernetes-entrypoint@sha256:19bdc6d63231357121f8dc045fd874b28563d9c8f1139bd6f744078934f8bef7
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: "IfNotPresent"
   local_registry:

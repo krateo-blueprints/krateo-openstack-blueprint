@@ -42,7 +42,7 @@ images:
   tags:
     test: docker.io/xrally/xrally-openstack:2.0.0
     bootstrap: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    dep_check: quay.io/airshipit/kubernetes-entrypoint:latest-ubuntu_noble
+    dep_check: quay.io/airshipit/kubernetes-entrypoint@sha256:19bdc6d63231357121f8dc045fd874b28563d9c8f1139bd6f744078934f8bef7
     db_init: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
     mistral_db_sync: quay.io/airshipit/mistral:2025.1-ubuntu_jammy
     db_drop: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
