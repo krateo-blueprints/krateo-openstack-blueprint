@@ -40,6 +40,30 @@ jobs:
       - name: Every chart's defaults must satisfy its own schema
         run: python3 hack/validate-values-schema.py .
 
+  image-tags:
+    # Gating, and offline. A rebuildable tag -- `latest`, or any variant containing it --
+    # resolves forever and may resolve to different bytes each time, so `preflight-refs`
+    # reporting "all references resolve" says nothing about whether the chart version still
+    # identifies what it installs. 49 such tags were live across 34 of 35 charts while every
+    # check we had passed (#69).
+    #
+    # This runs the immutability half only, which needs no registry calls and takes ~3s, so it
+    # can gate every PR. The full resolution run stays on its weekly schedule because it makes
+    # ~450 network requests. Without this gate the next re-vendor (#56) silently reintroduces
+    # all of them: upstream's values carry `latest` and a three-way merge takes them back.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Every image tag must be immutable
+        run: python3 hack/preflight-refs.py . --mutable-only
+
   examples-apiversion:
     # Gating. core-provider derives the served group version from the chart version, so a literal
     # `composition.krateo.io/vX-Y-Z` in an example is correct for exactly one release and wrong

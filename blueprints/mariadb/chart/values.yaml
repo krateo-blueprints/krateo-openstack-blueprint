@@ -482,16 +482,16 @@ images:
     - image_repo_sync
   pull_policy: IfNotPresent
   tags:
-    dep_check: quay.io/airshipit/kubernetes-entrypoint:latest-ubuntu_noble
+    dep_check: quay.io/airshipit/kubernetes-entrypoint@sha256:19bdc6d63231357121f8dc045fd874b28563d9c8f1139bd6f744078934f8bef7
     image_repo_sync: quay.io/airshipit/docker:27.5.0
     ks_user: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    mariadb: quay.io/airshipit/mariadb:latest-ubuntu_noble
-    mariadb_backup: quay.io/airshipit/porthole-mysqlclient-utility:latest-ubuntu_jammy
-    mariadb_controller: quay.io/airshipit/mariadb:latest-ubuntu_noble
+    mariadb: quay.io/airshipit/mariadb:ubuntu_noble-20261030
+    mariadb_backup: quay.io/airshipit/porthole-mysqlclient-utility@sha256:2be20ca74a7463a149525d5bd9e034ddad6ee76ea54af1abe250b3137405eeac
+    mariadb_controller: quay.io/airshipit/mariadb:ubuntu_noble-20261030
     prometheus_create_mysql_user: quay.io/airshipit/mariadb:11.4.8-noble
     prometheus_mysql_exporter: docker.io/prom/mysqld-exporter:v0.12.1
     prometheus_mysql_exporter_helm_tests: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    scripted_test: quay.io/airshipit/mariadb:latest-ubuntu_noble
+    scripted_test: quay.io/airshipit/mariadb:ubuntu_noble-20261030
 jobs:
   cluster_wait:
     clusterCheckRetries: 30

@@ -21,11 +21,22 @@ OCI = re.compile(r'oci://([a-z0-9.-]+)/([a-zA-Z0-9._/-]+)')
 # host/path:tag — an image. Requires a dot in the host so `foo/bar:baz` in prose is skipped.
 IMG = re.compile(r'\b([a-z0-9-]+(?:\.[a-z0-9-]+)+)/([a-zA-Z0-9._/-]+):([a-zA-Z0-9._-]+)\b')
 VERSION_NEAR = re.compile(r'version:\s*"?([0-9]+\.[0-9]+\.[0-9]+[^"\s]*)"?')
+# host/path@sha256:...  — a digest-pinned image. IMG cannot match one, because '@' is not in
+# its path character class, so without this the most deterministic way to write a reference
+# would also be the only way to make it unverified.
+DIGEST = re.compile(r'\b([a-z0-9-]+(?:\.[a-z0-9-]+)+)/([a-zA-Z0-9._/-]+)@(sha256:[a-f0-9]{64})\b')
 
 # Anything templated, placeholder, or obviously not a literal.
 #   \.\.\.  -- `ghcr.io/.../name:1.2.3` is the usual way docs and comments elide an org.
 #             It parses as a perfectly good reference and is never a real one.
-SKIP = re.compile(r'\{\{|\$\{|%[sqvd]|CHART_VERSION|VERSION|<[a-zA-Z]|x\.y\.z|\.\.\.|latest$')
+SKIP = re.compile(r'\{\{|\$\{|%[sqvd]|CHART_VERSION|VERSION|<[a-zA-Z]|x\.y\.z|\.\.\.')
+
+# A tag that can be rebuilt under the same name. These resolve forever and mean something
+# different each time, so a resolution check can never catch one -- see #69, where 49 were
+# live while this script reported "all references resolve".
+# Applied to the tag of an already-extracted reference, never to raw text: `pipeline:main:`
+# and `filter:maintenance:` are PasteDeploy keys in these charts, not image tags.
+MUTABLE = re.compile(r'latest', re.I)
 
 
 def ghcr_token(repo):
@@ -63,10 +74,17 @@ def registry_get(host, repo, ref):
             tok = ""
         auth = {"Authorization": "Bearer " + tok} if tok else {}
         base = "https://registry-1.docker.io/v2"
-    elif host == "quay.io":
+    elif host == "quay.io" and not ref.startswith("sha256:"):
         # quay's /v2 manifest endpoint returns 401 for an ABSENT tag as often as 404, which is
         # indistinguishable from "needs auth". Its tag API is authoritative and anonymous, so
         # ask it directly: a tag either is in the active-tag list or it is not.
+        #
+        # A DIGEST is excluded from this branch deliberately. The tag API answers "is this a
+        # tag", and a digest never is, so routing one here reports 404 for an image that
+        # exists -- which would make digest pinning, the only immutable option for images
+        # with no immutable tag, fail this very check. Verified directly: quay's /v2 endpoint
+        # returns 200 for a present digest and a clean 404 for an absent one, so the
+        # ambiguity that motivates this branch does not arise for digests. Falls through.
         try:
             u = "https://quay.io/api/v1/repository/%s/tag/?specificTag=%s&onlyActiveTags=true" % (repo, ref)
             with urllib.request.urlopen(u, timeout=TIMEOUT) as r:
@@ -209,6 +227,11 @@ def scan(root):
                             continue  # repo root with no resolvable chart name — not a ref
                     if ver:
                         charts.add((host, path, ver, rel, i + 1))
+                for m in DIGEST.finditer(line):
+                    host, path, dig = m.group(1), m.group(2), m.group(3)
+                    if host.endswith((".krateo.dev", ".svc")):
+                        continue
+                    images.add((host, path, dig, rel, i + 1))
                 sp = split_image(lines, i)
                 if sp:
                     images.add((sp[0], sp[1], sp[2], rel, i + 1))
@@ -231,9 +254,36 @@ def scan(root):
 
 
 def main():
-    root = sys.argv[1] if len(sys.argv) > 1 else "."
+    # --mutable-only does the tag-immutability half with no network at all. Resolution needs
+    # ~450 registry calls, which is why the full run is weekly (cron) rather than per-PR; but
+    # a reintroduced floating tag should fail the PR that adds it, not surface up to a week
+    # later, and nothing about immutability requires asking a registry.
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    mutable_only = "--mutable-only" in sys.argv[1:]
+    root = args[0] if args else "."
     charts, images = scan(root)
     bad = []
+
+    if mutable_only:
+        mutable = sorted(
+            (host, path, tag, rel, ln)
+            for host, path, tag, rel, ln in images
+            if MUTABLE.search(tag)
+        )
+        print("image references scanned (%d), no registry calls made" % len(images))
+        if mutable:
+            print()
+            print("MUTABLE TAGS: %d" % len(mutable))
+            for host, path, tag, rel, ln in mutable:
+                print("  %s/%s:%s   %s:%d" % (host, path, tag, rel, ln))
+            print()
+            print("A rebuildable tag resolves forever and means something different each time,")
+            print("so the chart version stops identifying what it installs. Pin to a tag that")
+            print("cannot be rebuilt, or to @sha256: when the registry publishes no immutable")
+            print("tag for that image.")
+            return 1
+        print("every image tag is immutable")
+        return 0
 
     print("chart references (%d)" % len(charts))
     for host, path, ver, rel, ln in sorted(charts):
@@ -252,16 +302,34 @@ def main():
         if not ok:
             bad.append(("image", "%s/%s:%s" % (host, path, tag), rel, ln, code))
 
-    print()
+    mutable = sorted(
+        (host, path, tag, rel, ln)
+        for host, path, tag, rel, ln in images
+        if MUTABLE.search(tag)
+    )
+    if mutable:
+        print()
+        print("MUTABLE TAGS: %d" % len(mutable))
+        for host, path, tag, rel, ln in mutable:
+            print("  %s/%s:%s   %s:%d" % (host, path, tag, rel, ln))
+        print()
+        print("These resolve today and may resolve to different bytes tomorrow, so the chart")
+        print("version stops identifying what it installs. Pin to a tag that cannot be rebuilt,")
+        print("or to @sha256: when the registry publishes no immutable tag for that image.")
+
     if bad:
+        print()
         print("UNRESOLVABLE REFERENCES: %d" % len(bad))
         for kind, ref, rel, ln, code in bad:
             print("  %-6s %s  -> HTTP %s   %s:%d" % (kind, ref, code, rel, ln))
         print()
         print("A reference that does not resolve here fails at provisioning time instead,")
         print("as an ImagePullBackOff or a composition that reports Ready=True and deploys nothing.")
+
+    print()
+    if bad or mutable:
         return 1
-    print("all references resolve")
+    print("all references resolve, and every tag is immutable")
     return 0
 
 

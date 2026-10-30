@@ -23,7 +23,7 @@ images:
     cyborg_conductor: quay.io/airshipit/cyborg:2025.1-ubuntu_jammy
     cyborg_agent: quay.io/airshipit/cyborg:2025.1-ubuntu_jammy
     rabbit_init: docker.io/rabbitmq:3.13-management
-    dep_check: quay.io/airshipit/kubernetes-entrypoint:latest-ubuntu_noble
+    dep_check: quay.io/airshipit/kubernetes-entrypoint@sha256:19bdc6d63231357121f8dc045fd874b28563d9c8f1139bd6f744078934f8bef7
   pull_policy: "IfNotPresent"
   local_registry:
     active: false
