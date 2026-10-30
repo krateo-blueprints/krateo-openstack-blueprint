@@ -74,10 +74,51 @@ jobs:
             # single file:// path carries no information worth maintaining in 34 copies.
             helm dependency update "$dir" --skip-refresh
             helm package "$dir" --version "${VERSION}" --destination .
-            helm push "${name}-${VERSION}.tgz" "${OCI_REPO}"
+            # Retry: this push fails transiently. The 0.3.13 release died on
+            #   failed to perform "Tag" on destination: sha256:405b...: not found
+            # for one chart after others had pushed fine, and an unchanged re-run succeeded.
+            # Without a retry, one registry hiccup leaves the registry holding this version for
+            # some components and not others (#76).
+            pushed=""
+            for attempt in 1 2 3; do
+              if helm push "${name}-${VERSION}.tgz" "${OCI_REPO}"; then pushed=yes; break; fi
+              echo "::warning::helm push ${name}:${VERSION} failed (attempt ${attempt}/3); retrying"
+              sleep $(( attempt * 10 ))
+            done
+            if [ -z "$pushed" ]; then
+              echo "::error::helm push ${name}:${VERSION} failed after 3 attempts"
+              exit 1
+            fi
             echo "Published ${OCI_REPO}/${name}:${VERSION}"
             echo "::endgroup::"
           done
+
+          # Every chart must resolve at this version before anything is published that claims
+          # it does. A partial push is the dangerous state: a CompositionDefinition stamped
+          # ${VERSION} referencing a chart that never pushed installs nothing while reporting a
+          # version that looks valid -- the same shape as #50, a reference that resolves in form
+          # but not in fact.
+          #
+          # `helm show chart` rather than curling the registry API, deliberately. An OCI Helm
+          # chart's manifest is returned only for
+          # `Accept: application/vnd.oci.image.manifest.v1+json`; ask ghcr without it and every
+          # chart answers 404. A check written the obvious way would fail every release while
+          # reporting that nothing had been published -- a guard worse than no guard. helm
+          # speaks the right protocol by construction.
+          echo "::group::verify every chart resolves at ${VERSION}"
+          missing=""
+          for dir in ./blueprints/*/chart; do
+            name=$(basename "$(dirname "$dir")")
+            if ! helm show chart "${OCI_REPO}/${name}" --version "${VERSION}" >/dev/null 2>&1; then
+              missing="${missing} ${name}"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::published incompletely at ${VERSION}; missing:${missing}"
+            exit 1
+          fi
+          echo "all charts resolve at ${VERSION}"
+          echo "::endgroup::"
 
       - name: Publish the stamped CompositionDefinitions and example Compositions as release assets
         env:
