@@ -59,7 +59,7 @@ images:
     cinder_storage_init: quay.io/airshipit/ceph-config-helper:ubuntu_jammy_20.2.4-1-20260828
     cinder_backup: quay.io/airshipit/cinder:2025.1-ubuntu_jammy
     cinder_backup_storage_init: quay.io/airshipit/ceph-config-helper:ubuntu_jammy_20.2.4-1-20260828
-    dep_check: quay.io/airshipit/kubernetes-entrypoint@sha256:19bdc6d63231357121f8dc045fd874b28563d9c8f1139bd6f744078934f8bef7
+    dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: "IfNotPresent"
   local_registry:

@@ -69,7 +69,7 @@ images:
     - image_repo_sync
   pull_policy: IfNotPresent
   tags:
-    dep_check: quay.io/airshipit/kubernetes-entrypoint@sha256:19bdc6d63231357121f8dc045fd874b28563d9c8f1139bd6f744078934f8bef7
+    dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
     image_repo_sync: quay.io/airshipit/docker:27.5.0
     openvswitch_db_server: quay.io/airshipit/openvswitch:ubuntu_noble-20261030
     openvswitch_vswitchd: quay.io/airshipit/openvswitch:ubuntu_noble-20261030
