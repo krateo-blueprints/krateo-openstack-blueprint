@@ -220,19 +220,44 @@ serviceContract:
         claim: groups
         fullPath: false
 
+  # These names must be CMP roles, not names invented here. The previous defaults
+  # (openstack-viewer / openstack-operator / openstack-admin) matched neither the six
+  # predefined roles nor any capability below, so they resolved to nothing -- a mapping
+  # keyed on roles that do not exist maps nothing, however plausible it reads.
+  #
+  # The deployer's descriptor is merged over this at install time and is the operative
+  # mapping; the CMP reads the merged values, never this copy alone. These defaults exist
+  # so a standalone `helm install` of the chart is valid and so the shape is self-documenting,
+  # not to be authoritative. Keep them in step with capabilities[].aggregateTo below.
+  #
+  # The contract describes this section as "reconciled by the service adapter into the native
+  # system". Nothing in this chart performs that reconciliation yet, so today the mapping is a
+  # declaration rather than an enforced binding.
   roleMapping:
-    - cmpRole: openstack-viewer
+    - cmpRole: read-only
       nativeRole: reader
       scope: project
       description: Read-only access to project resources (Keystone default reader role).
-    - cmpRole: openstack-operator
+    - cmpRole: tenant-reader
+      nativeRole: reader
+      scope: project
+      description: Read-only access within the tenant's projects.
+    - cmpRole: auditor
+      nativeRole: reader
+      scope: project
+      description: Read-only access for audit and compliance review.
+    - cmpRole: operator
       nativeRole: member
       scope: project
       description: Manage project workloads (Keystone default member role).
-    - cmpRole: openstack-admin
+    - cmpRole: tenant-admin
       nativeRole: admin
       scope: project
-      description: Full project administration (Keystone default admin role).
+      description: Full administration of the tenant's projects.
+    - cmpRole: org-admin
+      nativeRole: admin
+      scope: project
+      description: Full project administration across the organization.
 
   capabilities:
     - name: view
