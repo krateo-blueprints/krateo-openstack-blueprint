@@ -25,8 +25,24 @@ import sys
 import tempfile
 from pathlib import Path
 
-# The predefined roles a capability may aggregate into. Adding one here without it
-# existing platform-side recreates the bug this script exists to prevent.
+# The predefined roles a capability may aggregate into.
+#
+# KNOWN LIMIT, and it is the same class of fault this script exists to catch: this is a
+# COPY of the platform's role names, not derived from them. It catches a capability
+# aggregating to a name that is not in this set. It cannot catch this set drifting from
+# the platform -- if a predefined role is renamed or added platform-side, every check
+# here stays green while the two disagree, and the symptom is again a capability that
+# renders, lists, and joins nothing.
+#
+# Deriving the set from the published predefined-roles chart's aggregationRule selectors
+# would close that, and is the right eventual shape. It is not done here because it makes
+# a per-PR gate depend on fetching an external chart, which trades a silent-drift failure
+# for an availability failure -- and a gate that cannot reach the network must then
+# distinguish "the roles disagree" from "I could not look", or it becomes the thing it was
+# meant to prevent. Worth doing deliberately rather than as a footnote to this fix.
+#
+# Until then: adding a name here without it existing platform-side recreates the original
+# bug, with the gate's blessing.
 PREDEFINED = {
     "read-only",
     "tenant-reader",
