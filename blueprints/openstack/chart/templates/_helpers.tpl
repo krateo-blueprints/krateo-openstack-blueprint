@@ -42,7 +42,21 @@
 {{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)))) "true" -}}
 {{- $o := lookup (include "osh.apiVersion" (list $top)) $kind $top.Release.Namespace $name -}}
 {{- if $o -}}{{- range ($o.status.conditions | default list) -}}
-{{- if and (eq .type "Ready") (eq (.status | toString) "True") -}}{{- $r = "true" -}}{{- end -}}
+{{- /* Reason, not just status. Two of the five conditions this can see carry a status that
+       is not False, and they mean opposite things:
+
+         Available                  children healthy              True
+         ReconcileGracefullyPaused  an operator stopped it        True     <- not ready
+         ZeroEvidence               never evaluated, no inventory Unknown  <- not ready
+
+       An operator pausing reconciliation is saying "do not act on this", and emitting a
+       dependent against it acts on it -- the dependent then reconciles against a component
+       nobody is maintaining, which is the situation the pause exists to prevent.
+
+       ZeroEvidence was already refused, but by luck: Unknown is not True, and a truthiness
+       test happens to reject it. The gate asked "is this true" rather than reasoning about
+       which conditions mean ready, and one of the five needed a distinction it did not make. */ -}}
+{{- if and (eq .type "Ready") (eq (.status | toString) "True") (ne (.reason | toString) "ReconcileGracefullyPaused") -}}{{- $r = "true" -}}{{- end -}}
 {{- end -}}{{- end -}}
 {{- end -}}
 {{- $r -}}
