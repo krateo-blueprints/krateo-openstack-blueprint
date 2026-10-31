@@ -608,6 +608,32 @@ pod:
   probes:
     server:
       mariadb:
+        # A startupProbe, so liveness cannot fire while the first bootstrap is still
+        # running. Kubernetes disables BOTH liveness and readiness until a startupProbe
+        # succeeds, which is the only mechanism that makes "do not kill it yet" reliable --
+        # raising liveness's initialDelaySeconds just moves the same race.
+        #
+        # The kill is not recoverable, which is what makes this worth a probe rather than a
+        # longer delay. Observed on a fresh install where the first bootstrap had not
+        # produced a mariadbd pid inside liveness's 210s budget (120 + 3x30), so the
+        # container was killed mid-initialisation and every restart then died on the
+        # half-written datadir:
+        #
+        #     Could not open mysql.plugin table: "Unknown storage engine 'Aria'"
+        #     Exception: WSREP_REC_POS position could not be found.   (start.py:615)
+        #
+        # CrashLoopBackOff with no way back. The same chart and image came up on the same
+        # cluster an hour earlier, so this is a race the probe can lose, not a broken image.
+        #
+        # 30 + 60x10 = 630s of budget, which still bounds a genuinely failed bootstrap
+        # rather than waiting forever.
+        startup:
+          enabled: true
+          params:
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 15
+            failureThreshold: 60
         liveness:
           enabled: true
           params:
