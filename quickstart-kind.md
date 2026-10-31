@@ -49,13 +49,21 @@ tools/kind-load-images.sh openstack         # Apple Silicon only
 
 ```sh
 kubectl create namespace openstack-system
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/compositiondefinition-openstack.yaml
+# The blueprint release this path has been verified against. Pinned, not `latest`, for
+# the same reason core-provider is pinned below: `latest` is whatever was cut most
+# recently, which is not the same as whatever works. 0.3.10 through 0.3.12 could not
+# complete a fresh keystone install at all, and for the hours they were `latest` this
+# document handed them to anyone who followed it. Bump this line when a newer release
+# has actually been run through these steps.
+BP_VERSION=0.3.16
+
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 kubectl wait compositiondefinition/openstack -n openstack-system --for=condition=Ready --timeout=180s
 
 kubectl create namespace openstack
 # The in-tree examples carry a COMPOSITION_API_VERSION placeholder; the release publishes them
 # stamped to the apiVersion that release actually serves.
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-openstack.yaml
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-openstack.yaml
 ```
 
 The orchestrator registers the component CompositionDefinitions and emits each component
@@ -68,8 +76,8 @@ kubectl get openstackmariadb,openstackmemcached,openstackkeystone,openstackglanc
 kubectl -n openstack rollout status deploy/keystone-api --timeout=600s
 ```
 
-> Prefer the per-component path instead? Register `https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/compositiondefinition-<c>.yaml` for
-> mariadb, memcached, keystone, glance, horizon and `kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-01-identity.yaml`.
+> Prefer the per-component path instead? Register `https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/0.3.16/compositiondefinition-<c>.yaml` for
+> mariadb, memcached, keystone, glance, horizon and `kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/0.3.16/example-01-identity.yaml`.
 
 > If you re-publish a changed chart under the **same** version, restart the analyzers so the CDC
 > RBAC/chart cache is refreshed:

@@ -52,11 +52,19 @@ Composition CRD.
 ```sh
 # Register only the orchestrator blueprint...
 kubectl create namespace openstack-system
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/compositiondefinition-openstack.yaml
+# The blueprint release this path has been verified against. Pinned, not `latest`, for
+# the same reason core-provider is pinned below: `latest` is whatever was cut most
+# recently, which is not the same as whatever works. 0.3.10 through 0.3.12 could not
+# complete a fresh keystone install at all, and for the hours they were `latest` this
+# document handed them to anyone who followed it. Bump this line when a newer release
+# has actually been run through these steps.
+BP_VERSION=0.3.16
+
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 
 # ...then one Composition rolls out a whole install in dependency order.
 kubectl create namespace openstack
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-openstack.yaml
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-openstack.yaml
 ```
 
 `profile: identity` brings up MariaDB+Memcached+Keystone+Glance+Horizon; `profile: full`
@@ -67,10 +75,11 @@ brings up the whole catalog (needs a large amd64 cluster — see `quickstart-gke
 ```sh
 kubectl create namespace openstack-system
 for c in mariadb memcached keystone glance horizon; do
-  kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/compositiondefinition-$c.yaml; done
+BP_VERSION=0.3.16   # the release this path is verified against; see the note above
+  kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-$c.yaml; done
 kubectl create namespace openstack
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-01-identity.yaml
-# kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-02-compute.yaml   # compute plane (GKE)
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-01-identity.yaml
+# kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-02-compute.yaml   # compute plane (GKE)
 ```
 
 Full install paths and how to access OpenStack/Horizon: [docs/usage.md](docs/usage.md).

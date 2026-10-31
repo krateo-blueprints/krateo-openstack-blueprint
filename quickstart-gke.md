@@ -40,7 +40,15 @@ helm upgrade --install core-provider $OCI/core-provider \
 
 kubectl create namespace openstack-system
 for c in mariadb memcached keystone glance horizon rabbitmq placement openvswitch libvirt nova neutron; do
-  kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/compositiondefinition-$c.yaml
+# The blueprint release this path has been verified against. Pinned, not `latest`, for
+# the same reason core-provider is pinned below: `latest` is whatever was cut most
+# recently, which is not the same as whatever works. 0.3.10 through 0.3.12 could not
+# complete a fresh keystone install at all, and for the hours they were `latest` this
+# document handed them to anyone who followed it. Bump this line when a newer release
+# has actually been run through these steps.
+BP_VERSION=0.3.16
+
+  kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-$c.yaml
 done
 ```
 
@@ -52,10 +60,11 @@ No image pre-loading is needed — GKE nodes are amd64, so the OpenStack images 
 dependency order):
 
 ```sh
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/compositiondefinition-openstack.yaml
+BP_VERSION=0.3.16   # the release this path is verified against; see the note above
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 kubectl wait compositiondefinition/openstack -n openstack-system --for=condition=Ready --timeout=180s
 kubectl create namespace openstack
-curl -sfL https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-openstack.yaml \
+curl -sfL https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-openstack.yaml \
   | sed 's/profile: identity/profile: full/' | kubectl apply -f -
 ```
 
@@ -63,8 +72,9 @@ curl -sfL https://github.com/krateo-blueprints/krateo-openstack-blueprint/releas
 
 ```sh
 kubectl create namespace openstack
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-01-identity.yaml
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-02-compute.yaml
+BP_VERSION=0.3.16   # the release this path is verified against; see the note above
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-01-identity.yaml
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-02-compute.yaml
 ```
 
 The compute Compositions inherit the validated defaults: Nova `virt_type: qemu`, Neutron single-node
