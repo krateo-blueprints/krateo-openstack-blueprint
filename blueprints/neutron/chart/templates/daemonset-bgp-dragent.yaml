@@ -17,7 +17,11 @@ exec:
   command:
     - bash
     - -c
-    - pidof -x /var/lib/openstack/bin/neutron-bgp-dragent
+    # pgrep -f, not pidof -x: pidof identifies a process by its executable, which under an
+    # emulating runtime is the emulator rather than the program, so the probe can never pass
+    # there. The target is a Python script, so its path appears in the process cmdline and -f
+    # matches it faithfully. Same cause as the mariadb probe; see issue #96.
+    - pgrep -f /var/lib/openstack/bin/neutron-bgp-dragent
 {{- end }}
 
 

@@ -66,6 +66,14 @@ jobs:
       - name: Every capability must aggregate to a predefined role
         run: python3 hack/validate-capability-roles.py .
 
+      # Offline and fast. pidof identifies a process by its executable, which under an
+      # emulating runtime is the emulator -- so a pidof-based probe fails forever while the
+      # program runs normally, the kubelet kills a healthy process, and the pod never becomes
+      # Ready. That reads as a slow environment rather than a broken probe, which is why it
+      # needs a gate and not just a fix. See issue #96.
+      - name: No probe may identify a process with pidof
+        run: python3 hack/validate-no-pidof.py .
+
   image-tags:
     # Gating, and offline. A rebuildable tag -- `latest`, or any variant containing it --
     # resolves forever and may resolve to different bytes each time, so `preflight-refs`

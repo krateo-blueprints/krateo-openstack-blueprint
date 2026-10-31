@@ -92,11 +92,24 @@ check_readiness () {
 }
 
 check_liveness () {
-  if pidof mariadb-upgrade > /dev/null 2>&1 ; then
+  # NOTE(krateo): pgrep, not pidof. /usr/bin/pidof in this image is sysvinit's killall5,
+  # which identifies a process by its EXECUTABLE. Under an emulating runtime every process's
+  # /proc/<pid>/exe resolves to the emulator, so `pidof mariadbd` matches nothing even while
+  # mariadbd is running normally, and `pidof rosetta` matches every process in the container:
+  #
+  #   readlink /proc/176/exe  ->  /run/rosetta/rosetta
+  #   pidof mariadbd          ->  (empty)
+  #   pgrep -x mariadbd       ->  176
+  #
+  # The probe then fails forever, the kubelet kills a healthy server, and the pod never
+  # becomes Ready. pgrep matches /proc/<pid>/comm, which the kernel sets correctly under
+  # emulation and natively, so this is strictly more reliable on both. -x anchors the match
+  # so a longer name cannot satisfy it. See issue #96.
+  if pgrep -x mariadb-upgrade > /dev/null 2>&1 ; then
     echo "The process mariadb-upgrade is active. Skip rest checks"
     exit 0
   fi
-  if ! pidof mariadbd > /dev/null 2>&1 ; then
+  if ! pgrep -x mariadbd > /dev/null 2>&1 ; then
     echo "The mariadbd pid not found"
     exit 1
   fi
