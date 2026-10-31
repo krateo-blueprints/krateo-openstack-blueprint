@@ -1,5 +1,5 @@
 # Full OpenStack-Helm mariadb defaults with the blueprint's validated overrides applied
-# (2025.1-ubuntu_jammy images, single-replica, Krateo-CDC-friendly). A small curated
+# (2025.2-ubuntu_noble images, single-replica, Krateo-CDC-friendly). A small curated
 # subset is overridable per Composition (see values.schema.json).
 conf:
   backup:
@@ -484,13 +484,13 @@ images:
   tags:
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
     image_repo_sync: quay.io/airshipit/docker:27.5.0
-    ks_user: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
+    ks_user: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
     mariadb: quay.io/airshipit/mariadb:ubuntu_noble-20261030
     mariadb_backup: quay.io/airshipit/porthole-mysqlclient-utility:d51f180252a26421dbb2904e1533a38866fd0d74-ubuntu_jammy
     mariadb_controller: quay.io/airshipit/mariadb:ubuntu_noble-20261030
     prometheus_create_mysql_user: quay.io/airshipit/mariadb:11.4.8-noble
     prometheus_mysql_exporter: docker.io/prom/mysqld-exporter:v0.12.1
-    prometheus_mysql_exporter_helm_tests: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
+    prometheus_mysql_exporter_helm_tests: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
     scripted_test: quay.io/airshipit/mariadb:ubuntu_noble-20261030
 jobs:
   cluster_wait:
