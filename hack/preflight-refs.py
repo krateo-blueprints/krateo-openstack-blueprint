@@ -271,6 +271,16 @@ def main():
             if MUTABLE.search(tag)
         )
         print("image references scanned (%d), no registry calls made" % len(images))
+        if not images:
+            # A check that examined nothing must not report that nothing is wrong. Run from
+            # the wrong directory, or after a path change the scan no longer matches, this
+            # printed "every image tag is immutable" and exited 0 -- green CI over an
+            # unexamined tree.
+            print()
+            print("FAILED MEASUREMENT: no image references found at all. This repository has")
+            print("hundreds; finding none means the scan did not look where it meant to, which")
+            print("is not the same as finding nothing wrong.")
+            return 1
         if mutable:
             print()
             print("MUTABLE TAGS: %d" % len(mutable))
@@ -328,6 +338,11 @@ def main():
 
     print()
     if bad or mutable:
+        return 1
+    if not charts and not images:
+        print("FAILED MEASUREMENT: no references found at all -- the scan did not look where")
+        print("it meant to. A clean result from an empty scan is indistinguishable from a")
+        print("clean result from a clean tree, and only one of them is true here.")
         return 1
     print("all references resolve, and every tag is immutable")
     return 0
