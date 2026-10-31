@@ -42,9 +42,15 @@ kubectl label --overwrite nodes --all openstack-control-plane=enabled
 # apiserver latency rather than to RBAC. `kubectl auth can-i list pods --as=<the SA>` is what
 # actually answers it.
 #
-# A fresh INSTALL on 2.13.45 is unaffected; it is version BUMPS that wedge. That distinction
-# matters here, because bumping a blueprint chart version migrates a CompositionDefinition
-# version -- so this repo triggers the affected path on every single release.
+# A fresh INSTALL on 2.13.45 is unaffected. Both version BUMPS and DELETES wedge: the drain
+# wait runs on any CompositionDefinition transition, not only a migration. An earlier version
+# of this note said "it is version BUMPS that wedge", which was the boundary as first
+# reported and is incomplete -- deleting a CompositionDefinition on 2.13.45 hangs the same
+# way, observed on a real cluster while tearing an install down to replace it.
+#
+# That distinction still matters, because bumping a blueprint chart version migrates a
+# CompositionDefinition version -- so this repo triggers the affected path on every single
+# release -- but "I am only deleting, so I am safe" is not true.
 #
 # 2.13.46 fixes it. At the time of writing it is tagged but not yet pullable
 # (`helm show chart oci://ghcr.io/krateo-platformops/charts/core-provider --version 2.13.46`
