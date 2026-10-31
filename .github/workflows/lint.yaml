@@ -40,6 +40,32 @@ jobs:
       - name: Every chart's defaults must satisfy its own schema
         run: python3 hack/validate-values-schema.py .
 
+  capability-roles:
+    # Gating. A capability aggregates into a predefined role via a
+    # `rbac.krateo.io/aggregate-to-<role>=true` label, and nothing validates the <role>.
+    # A label naming a role that does not exist is valid YAML, renders without complaint,
+    # and produces a ClusterRole that is created, listed in the catalog, and joined to
+    # NOTHING -- so the capability looks present and grants no access. This repo shipped
+    # exactly that in all four capabilities for as long as they existed.
+    #
+    # Renders the chart rather than reading values, because a template that stops emitting
+    # the label produces the same silent outcome and a values-level check would pass it.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Every capability must aggregate to a predefined role
+        run: python3 hack/validate-capability-roles.py .
+
   image-tags:
     # Gating, and offline. A rebuildable tag -- `latest`, or any variant containing it --
     # resolves forever and may resolve to different bytes each time, so `preflight-refs`

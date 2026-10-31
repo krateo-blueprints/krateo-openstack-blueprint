@@ -13,6 +13,9 @@ metadata:
   name: {{ printf "%s-%s" $.Values.serviceContract.service.name .name }}
   labels:
     krateo.io/capability: "true"
+    # The catalog shows this when present and falls back to the role name.
+    # Stable across a title change, which the title is not.
+    krateo.io/capability-id: {{ printf "%s-%s" $.Values.serviceContract.service.name .name | quote }}
     app.kubernetes.io/name: {{ $.Values.serviceContract.service.name }}
     app.kubernetes.io/managed-by: {{ $.Release.Service }}
     {{- range .aggregateTo }}

@@ -239,38 +239,73 @@ serviceContract:
       title: View OpenStack installations
       description: List and inspect OpenStack compositions and their components.
       enforcement: rbac
-      aggregateTo: [viewer, admin]
+      # Every predefined role can look. `resources` is openstacks, not "*": a role
+      # titled "View OpenStack installations" that grants read on every composition
+      # kind in the cluster is a different permission from the one its title claims.
+      aggregateTo:
+        - read-only
+        - tenant-reader
+        - auditor
+        - operator
+        - tenant-admin
+        - org-admin
       rules:
-        - apiGroups: ["composition.krateo.io"]
-          resources: ["*"]
-          verbs: ["get", "list", "watch"]
+        - apiGroups:
+            - composition.krateo.io
+          resources:
+            - openstacks
+          verbs:
+            - get
+            - list
+            - watch
     - name: provision
       title: Provision and reconfigure OpenStack
       enforcement: rbac
-      aggregateTo: [admin]
+      aggregateTo:
+        - operator
+        - tenant-admin
+        - org-admin
       rules:
-        - apiGroups: ["composition.krateo.io"]
-          resources: ["openstacks"]
-          verbs: ["create", "update", "patch"]
+        - apiGroups:
+            - composition.krateo.io
+          resources:
+            - openstacks
+          verbs:
+            - create
+            - update
+            - patch
     - name: decommission
       title: Delete an OpenStack installation
       description: Destructive operation; requires a step-up authenticated session.
       enforcement: acr
       requiresAcr: "urn:krateo:loa:2"
-      aggregateTo: [admin]
+      aggregateTo:
+        - operator
+        - tenant-admin
+        - org-admin
       rules:
-        - apiGroups: ["composition.krateo.io"]
-          resources: ["openstacks"]
-          verbs: ["delete"]
+        - apiGroups:
+            - composition.krateo.io
+          resources:
+            - openstacks
+          verbs:
+            - delete
     - name: compute-tier-guard
       title: Provision the compute tier only with approval
       description: The full profile (compute tier) must carry an explicit approval annotation.
       enforcement: abac
-      aggregateTo: [admin]
+      aggregateTo:
+        - operator
+        - tenant-admin
+        - org-admin
       rules:
-        - apiGroups: ["composition.krateo.io"]
-          resources: ["openstacks"]
-          verbs: ["create", "update"]
+        - apiGroups:
+            - composition.krateo.io
+          resources:
+            - openstacks
+          verbs:
+            - create
+            - update
       abac:
         match:
           kinds: ["Openstack"]
