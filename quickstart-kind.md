@@ -27,15 +27,32 @@ kubectl label --overwrite nodes --all openstack-control-plane=enabled
 # lifetime of that process, so a cluster could not enable a feature or bump a
 # component without restarting a cdc. 2.13.41 predates it; 2.13.43 fixes it.
 #
-# 2.13.45 (2026-10-30) is the version to bump TO when someone next runs this path end to
-# end. It fixes two faults that bite blueprint authors specifically: a chart that renames a
-# managed child left the old name in status.managed forever, with the composition stuck at
-# Ready=False (Creating) against a resource that no longer exists; and a CompositionDefinition
-# version migration could lose the outgoing controller's status write, which is how that stale
-# record got there. Bumping a blueprint chart version migrates a CD version, so this repo
-# triggers that path on every release. The pin stays at 2.13.41 only because that is the
-# version this quickstart has actually been run on -- which is the whole reason the pin is
-# worth trusting.
+# Do NOT bump to 2.13.45. An earlier version of this comment recommended it, for real fixes
+# it carries (a stale status.managed entry after a chart renames a managed child, and a lost
+# status write during a CompositionDefinition version migration). It also shipped a regression
+# that wedges the exact path those fixes were for: a drain wait LISTs pods without the RBAC to
+# do so, so a CD version migration hangs at Synced=False/ReconcileError forever while the
+# cluster is already in the correct state.
+#
+# Its symptom names the wrong layer, which is why it is worth writing down:
+#
+#     Timeout: failed waiting for *v1.Pod Informer to sync
+#
+# The informer swallows the 403 in its retry loop, so the message sends you to cache sync and
+# apiserver latency rather than to RBAC. `kubectl auth can-i list pods --as=<the SA>` is what
+# actually answers it.
+#
+# A fresh INSTALL on 2.13.45 is unaffected; it is version BUMPS that wedge. That distinction
+# matters here, because bumping a blueprint chart version migrates a CompositionDefinition
+# version -- so this repo triggers the affected path on every single release.
+#
+# 2.13.46 fixes it. At the time of writing it is tagged but not yet pullable
+# (`helm show chart oci://ghcr.io/krateo-platformops/charts/core-provider --version 2.13.46`
+# does not answer), so this does not recommend it as available -- check before bumping.
+#
+# The pin stays at 2.13.41 regardless, because that is the version this quickstart has
+# actually been run on end to end, which is the whole reason the pin is worth trusting. It
+# predates both the 2.13.42 and 2.13.45 regressions.
 OCI=oci://ghcr.io/krateo-platformops/charts
 helm upgrade --install core-provider-crds $OCI/core-provider-crds \
   --version 2.13.41 -n krateo-system --create-namespace --wait
