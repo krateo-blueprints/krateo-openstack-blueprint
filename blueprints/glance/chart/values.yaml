@@ -441,10 +441,32 @@ dependencies:
           service: local_image_registry
   static:
     api:
+      # No rabbitmq dependencies, because this chart does not use rabbitmq.
+      #
+      # conf.glance.oslo_messaging_notifications.driver is `noop` and
+      # manifests.job_rabbit_init is false, so glance neither emits notifications nor
+      # renders a rabbit-init Job -- but the api entrypoint still waited for both. The
+      # effect is that glance-api can never start unless rabbitmq happens to be installed
+      # by something else:
+      #
+      #   Resolving dependency Service rabbitmq in namespace openstack failed:
+      #   Service rabbitmq has no ready endpoints
+      #
+      # glance-rabbit-init is removed from the list as tidying, not as a second fix: it
+      # renders zero objects here, and helm-toolkit already filters disabled jobs out of
+      # DEPENDENCY_JOBS, so it was never actually waited on. Listing a job that cannot
+      # exist is still misleading to read.
+      #
+      # keystone already has exactly this shape (noop driver, no oslo_messaging service, no
+      # rabbit-init job) and comes up fine; glance was the only chart here declaring a
+      # messaging dependency it had configured itself not to use.
+      #
+      # If notifications are ever wanted, the driver and these dependencies move together:
+      # a messaging driver with no oslo_messaging dependency would start and silently fail
+      # to publish.
       jobs:
       - glance-storage-init
       - glance-db-sync
-      - glance-rabbit-init
       - glance-ks-user
       - glance-ks-endpoints
       services:
@@ -452,8 +474,6 @@ dependencies:
         service: oslo_db
       - endpoint: internal
         service: identity
-      - endpoint: internal
-        service: oslo_messaging
     bootstrap:
       jobs: null
       services:
