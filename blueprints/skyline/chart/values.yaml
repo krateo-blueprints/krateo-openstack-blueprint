@@ -94,8 +94,20 @@ endpoints:
       default: null
     path: /skyline
     scheme:
-      default: mysql+pymysql
-      skyline: mysql+pymysql
+    # `mysql`, not `mysql+pymysql`. Skyline is not an oslo.db service: its API server uses
+    # the `databases` library over aiomysql and compares the URL scheme EXACTLY --
+    # skyline_apiserver/db/base.py raises ValueError("Unsupported database backend") for
+    # anything that is not `mysql` or `sqlite`, so `mysql+pymysql` crash-loops the API server.
+    #
+    # The sync path is unaffected either way, which is why this hid: skyline's alembic env.py
+    # does `if db_url.scheme == "mysql": db_url.replace(dialect="mysql+pymysql")` -- it
+    # converts the canonical form UP for SQLAlchemy itself. So `mysql` is correct for both
+    # paths and `mysql+pymysql` is correct only for the one that was already passing.
+    #
+    # Every other service here IS an oslo.db service and genuinely wants the driver-qualified
+    # form; this override is skyline-only on purpose.
+      default: mysql
+      skyline: mysql
     port:
       mysql:
         default: 3306
