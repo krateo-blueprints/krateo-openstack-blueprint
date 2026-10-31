@@ -19,6 +19,44 @@ httpGet:
   port: {{ tuple "identity" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
 {{- end }}
 
+{{/*
+Readiness, unlike liveness, also requires the fernet keys to be present.
+
+/healthcheck is oslo's healthcheck middleware: it confirms the WSGI app is listening and
+touches neither fernet nor the database. With an empty keystone-fernet-keys Secret the pod
+therefore reports 1/1 Ready -- and so do the Deployment, the Composition and the umbrella --
+while every POST /v3/auth/tokens returns 500 with keystone.exception.KeysNotFound. Measured,
+not hypothetical: see issue #99. The dependency gate reads that Ready as "safe to build on".
+
+Readiness and NOT liveness, deliberately. Missing keys are not repaired by restarting the
+container -- deleting the pod with an empty Secret was measured and the keys did not come
+back, because keystone-fernet-setup is a Completed Job and does not re-run (issue #41). A
+liveness probe on this condition would convert a visible unready pod into a CrashLoop and
+repair nothing. Readiness is the honest signal: do not route to me, do not count me available.
+
+The directory is a Secret volume, so it always holds ..data and a timestamped directory even
+when the Secret is empty; the keys themselves appear as entries not starting with a dot.
+Filtering on that distinguishes empty-but-mounted from populated.
+*/}}
+{{- define "apiReadinessProbeTemplate" }}
+exec:
+  command:
+    - python3
+    - -c
+    - |
+      import os, sys, urllib.request
+      d = "/etc/keystone/fernet-keys"
+      try:
+          keys = [f for f in os.listdir(d) if not f.startswith(".")]
+      except OSError as e:
+          sys.exit("fernet key dir %s unreadable: %s" % (d, e))
+      if not keys:
+          sys.exit("no fernet keys in %s: keystone cannot issue tokens" % d)
+      urllib.request.urlopen(
+          "{{ tuple "identity" "service" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" }}://localhost:{{ tuple "identity" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}{{ tuple "identity" "healthcheck" "internal" . | include "helm-toolkit.endpoints.keystone_endpoint_path_lookup" }}",
+          timeout=10).read()
+{{- end }}
+
 {{- if .Values.manifests.deployment_api }}
 {{- $envAll := . }}
 
@@ -86,7 +124,7 @@ spec:
           ports:
             - name: ks-pub
               containerPort: {{ tuple "identity" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-{{ dict "envAll" $envAll "component" "api" "container" "api" "type" "readiness" "probeTemplate" (include "apiProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
+{{ dict "envAll" $envAll "component" "api" "container" "api" "type" "readiness" "probeTemplate" (include "apiReadinessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
 {{ dict "envAll" $envAll "component" "api" "container" "api" "type" "liveness" "probeTemplate" (include "apiProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
           volumeMounts:
             - name: pod-tmp
