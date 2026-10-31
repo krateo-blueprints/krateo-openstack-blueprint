@@ -42,9 +42,28 @@ kubectl label --overwrite nodes --all openstack-control-plane=enabled
 # apiserver latency rather than to RBAC. `kubectl auth can-i list pods --as=<the SA>` is what
 # actually answers it.
 #
-# A fresh INSTALL on 2.13.45 is unaffected; it is version BUMPS that wedge. That distinction
-# matters here, because bumping a blueprint chart version migrates a CompositionDefinition
-# version -- so this repo triggers the affected path on every single release.
+# A fresh INSTALL on 2.13.45 is unaffected. EVERY PATH THAT RETIRES A CONTROLLER WEDGES.
+# Confirmed from core-provider's source rather than inferred from symptoms -- four call sites
+# reach the drain wait, and none of them is Create:
+#
+#     Update              a CompositionDefinition version migration
+#     Delete  (x2)        removing a CompositionDefinition
+#     handOverController  handing a shared controller to a successor
+#
+# This note said "it is version BUMPS that wedge" an hour before this, which was the boundary
+# as first reported and was wrong in the dangerous direction: it implied that REMOVING an
+# install is the safe operation, and removing one is exactly what hung on a real cluster.
+#
+# handOverController is the one nobody would predict: it fires when NEITHER definition is
+# being deleted or bumped, so "I am not bumping or deleting" is also not a guarantee.
+#
+# 2.13.46 fixes all four, because the missing RBAC grant lives inside the drain wait rather
+# than in any caller. It is now published and verified pullable, and its chart's clusterrole
+# template carries the pods rule that 2.13.45 lacked:
+#
+#     helm show chart oci://ghcr.io/krateo-platformops/charts/core-provider --version 2.13.46
+#       -> 2.13.46                     (and 2.13.47 -> NOT FOUND, so the check can say no)
+#     clusterrole.yaml:59              - pods
 #
 # 2.13.46 fixes it. At the time of writing it is tagged but not yet pullable
 # (`helm show chart oci://ghcr.io/krateo-platformops/charts/core-provider --version 2.13.46`
