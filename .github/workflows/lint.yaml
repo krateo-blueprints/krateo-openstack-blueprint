@@ -74,6 +74,13 @@ jobs:
       - name: No probe may identify a process with pidof
         run: python3 hack/validate-no-pidof.py .
 
+      # Renders the chart and inspects the probes the kubelet would receive. A readiness probe
+      # that does not depend on the fernet keys lets an identity plane which cannot issue a
+      # single token report Ready at every layer, including the umbrella's own condition --
+      # and a revert of the fix is as invisible as the bug was. See issue #99.
+      - name: Keystone readiness must require the fernet keys
+        run: python3 hack/validate-keystone-readiness.py .
+
   image-tags:
     # Gating, and offline. A rebuildable tag -- `latest`, or any variant containing it --
     # resolves forever and may resolve to different bytes each time, so `preflight-refs`
