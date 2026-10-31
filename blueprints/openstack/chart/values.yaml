@@ -411,6 +411,12 @@ contractEmitter:
     # pointing anywhere else was inconsistent with the row ids it writes. `krateo` did not
     # exist on a real install; the platform's ClickHouse ships `default`.
     database: showback
+    # Health rows live in their own database, and not by accident. showback owns the usage
+    # schema and migrates it; this emitter owns the health table and creates it. Pointing
+    # both at showback's database would make bootstrap issue CREATE TABLE inside a database
+    # that does not exist until showback has run -- breaking the half this emitter owns in
+    # order to fix the half it does not. `default` ships with the platform's ClickHouse.
+    healthDatabase: default
     # usage_records is owned by the platform's rating engine DDL (UsageRecord shape).
     usageTable: usage_records
     healthTable: health_records

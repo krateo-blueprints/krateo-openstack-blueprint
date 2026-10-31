@@ -85,6 +85,8 @@ spec:
                   value: {{ $ce.clickhouse.database | quote }}
                 - name: CH_USAGE_TABLE
                   value: {{ $ce.clickhouse.usageTable | quote }}
+                - name: CH_HEALTH_DATABASE
+                  value: {{ $ce.clickhouse.healthDatabase | default $ce.clickhouse.database | quote }}
                 - name: CH_HEALTH_TABLE
                   value: {{ $ce.clickhouse.healthTable | quote }}
                 - name: CH_BOOTSTRAP_HEALTH_TABLE

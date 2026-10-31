@@ -309,9 +309,30 @@ def collect_health(auth_url, token, catalog):
 # --------------------------------------------------------------------------
 # ClickHouse (HTTP interface)
 # --------------------------------------------------------------------------
-def ch_query(sql, body=None):
+def usage_database():
+    return os.environ.get("CH_DATABASE", "showback")
+
+
+def health_database():
+    """Health rows live in their own database, and not by accident.
+
+    showback owns the usage schema and migrates it; this emitter owns the health table and
+    creates it. Pointing both at showback's database meant bootstrap issued CREATE TABLE
+    inside a database that does not exist until showback has run -- so on any cluster
+    without showback, which is currently every cluster, the half this emitter owns broke
+    in order to make the half it does not own correct.
+    """
+    return os.environ.get("CH_HEALTH_DATABASE") or usage_database()
+
+
+def ch_query(sql, body=None, database=None):
     base = os.environ["CH_URL"].rstrip("/")
-    params = {"query": sql, "database": os.environ.get("CH_DATABASE", "showback")}
+    db = usage_database() if database is None else database
+    params = {"query": sql}
+    # An empty database means "do not pin one": CREATE DATABASE cannot run inside the
+    # database it is creating.
+    if db:
+        params["database"] = db
     headers = {"Content-Type": "application/octet-stream"}
     if os.environ.get("CH_USERNAME"):
         headers["X-ClickHouse-User"] = os.environ["CH_USERNAME"]
@@ -320,20 +341,23 @@ def ch_query(sql, body=None):
     return request("POST", url, body=body if body is not None else b"", headers=headers, timeout=30)
 
 
-def ch_insert(table, rows):
+def ch_insert(table, rows, database=None):
     if not rows:
         log("nothing to insert")
         return
-    db = os.environ.get("CH_DATABASE", "showback")
+    db = usage_database() if database is None else database
     sql = f"INSERT INTO {db}.{table} FORMAT JSONEachRow"
     body = ("\n".join(json.dumps(r) for r in rows) + "\n").encode()
-    ch_query(sql, body=body)
+    ch_query(sql, body=body, database=db)
     log(f"inserted {len(rows)} rows into {db}.{table}")
 
 
 def ch_bootstrap_health_table():
-    db = os.environ.get("CH_DATABASE", "showback")
+    db = health_database()
     table = os.environ.get("CH_HEALTH_TABLE", "health_records")
+    # Unpinned, because the database may not exist yet -- a query pinned to it would fail
+    # before it could create it.
+    ch_query(f"CREATE DATABASE IF NOT EXISTS {db}", database="")
     ch_query(
         f"CREATE TABLE IF NOT EXISTS {db}.{table} ("
         " record_id String,"
@@ -360,7 +384,8 @@ def main():
         if os.environ.get("CH_BOOTSTRAP_HEALTH_TABLE", "true").lower() == "true":
             ch_bootstrap_health_table()
         rows = collect_health(auth_url, token, catalog)
-        ch_insert(os.environ.get("CH_HEALTH_TABLE", "health_records"), rows)
+        ch_insert(os.environ.get("CH_HEALTH_TABLE", "health_records"), rows,
+                  database=health_database())
     else:
         raise SystemExit(f"unknown MODE {mode!r} (usage|health)")
 
