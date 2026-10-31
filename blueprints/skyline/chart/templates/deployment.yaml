@@ -96,6 +96,42 @@ spec:
 {{ dict "envAll" $envAll "application" "skyline" "container" "skyline" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
             - /tmp/skyline-apiserver.sh
+          # An exec probe, not httpGet, because gunicorn binds a unix socket rather than a
+          # port: `bind = "unix:/var/lib/skyline/skyline.sock"` in the image's gunicorn.py.
+          # There is no TCP listener on this container to probe.
+          #
+          # Without any probe the kubelet counts the container ready the instant it starts,
+          # so a crash-looping API server still drives readyReplicas to 1 in each window
+          # between crashes. That is not cosmetic: a composition's Ready condition is
+          # computed from `readyReplicas >= desired && unavailableReplicas == 0`, so the
+          # component reports Available while serving nothing, and this repo's orchestrator
+          # gates dependents on exactly that condition. Observed on a real install, where
+          # the Ready condition flapped in step with the crash loop.
+          #
+          # /api/v1/openapi.json is served by the app itself and only once it is serving at
+          # all: skyline_apiserver's on_startup raises before the worker accepts connections
+          # when it cannot reach the database, so a failed startup answers nothing rather
+          # than answering unhealthily.
+          #
+          # Readiness only. A livenessProbe here would add restart pressure to a container
+          # that already restarts on its own faults, and the problem being fixed is what the
+          # cluster REPORTS, not whether it restarts.
+          readinessProbe:
+            exec:
+              command:
+                - curl
+                - --fail
+                - --silent
+                - --show-error
+                - --max-time
+                - "5"
+                - --unix-socket
+                - /var/lib/skyline/skyline.sock
+                - http://localhost/api/v1/openapi.json
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 3
           volumeMounts:
             - name: pod-tmp
               mountPath: /tmp
