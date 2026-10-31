@@ -2386,6 +2386,10 @@
               "type": "string",
               "minLength": 1
             },
+            "healthDatabase": {
+              "type": "string",
+              "description": "Database for health rows. Separate from `database` because showback owns the usage schema while this emitter creates the health table: bootstrapping into showback's database fails until showback has migrated. Defaults to `database` when unset."
+            },
             "usageTable": {
               "type": "string",
               "minLength": 1

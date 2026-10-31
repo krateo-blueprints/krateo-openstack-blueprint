@@ -396,8 +396,27 @@ contractEmitter:
     interface: internal
     tlsVerify: true
   clickhouse:
-    url: http://clickhouse.krateo-system.svc.cluster.local:8123
-    database: krateo
+    # The address the platform actually ships, measured on a real install -- the previous
+    # default (clickhouse.krateo-system.svc.cluster.local) resolves to nothing, so usage and
+    # health rows went nowhere and said so only in the CronJob's log.
+    #
+    # This is a HEADLESS Service: it has no cluster IP and its DNS returns the pod A records.
+    # urllib resolves through getaddrinfo and connects to one of them, so no cluster IP is
+    # needed. With more than one ClickHouse pod, consecutive requests may land on different
+    # pods; that is safe here because record_id is deterministic and the target table is a
+    # ReplacingMergeTree, so a row written twice replaces rather than duplicates.
+    url: http://krateo-clickstack-clickhouse-clickhouse-headless.krateo-system.svc:8123
+    # showback owns the usage_records schema and documents `showback` as the canonical
+    # database. This emitter already reproduces showback's deterministicID byte-for-byte, so
+    # pointing anywhere else was inconsistent with the row ids it writes. `krateo` did not
+    # exist on a real install; the platform's ClickHouse ships `default`.
+    database: showback
+    # Health rows live in their own database, and not by accident. showback owns the usage
+    # schema and migrates it; this emitter owns the health table and creates it. Pointing
+    # both at showback's database would make bootstrap issue CREATE TABLE inside a database
+    # that does not exist until showback has run -- breaking the half this emitter owns in
+    # order to fix the half it does not. `default` ships with the platform's ClickHouse.
+    healthDatabase: default
     # usage_records is owned by the platform's rating engine DDL (UsageRecord shape).
     usageTable: usage_records
     healthTable: health_records
