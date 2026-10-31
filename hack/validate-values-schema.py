@@ -107,6 +107,11 @@ def main():
         print("fails at `helm install` and chart-inspector answers 500. Fix the schema when the")
         print("templates already accept the value; fix values.yaml only if it is not vendored.")
         return 1
+    if checked == 0:
+        print("FAILED MEASUREMENT: no chart carrying a values.schema.json was found. 35 of them")
+        print("exist in this repository, so finding none means the scan did not look where it")
+        print("meant to -- a clean result from an instrument that examined nothing.")
+        return 1
     print("%d charts carry a schema; every one accepts its own defaults" % checked)
     return 0
 
