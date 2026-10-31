@@ -158,9 +158,9 @@ images:
   tags:
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
     image_repo_sync: quay.io/airshipit/docker:27.5.0
-    prometheus_rabbitmq_exporter_helm_tests: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    prometheus_rabbitmq_exporter_helm_tests: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
     rabbitmq: quay.io/airshipit/rabbitmq:3.10.18
-    rabbitmq_init: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    rabbitmq_init: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
     scripted_test: quay.io/airshipit/rabbitmq:3.10.18-management
 labels:
   jobs:

@@ -43,19 +43,19 @@ labels:
 
 images:
   tags:
-    bootstrap: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
-    db_init: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
-    db_drop: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    bootstrap: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+    db_init: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+    db_drop: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
     rabbit_init: docker.io/rabbitmq:3.13-management
-    aodh_db_sync: quay.io/airshipit/aodh:2025.2-ubuntu_noble
-    ks_user: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
-    ks_service: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
-    ks_endpoints: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
-    aodh_api: quay.io/airshipit/aodh:2025.2-ubuntu_noble
-    aodh_evaluator: quay.io/airshipit/aodh:2025.2-ubuntu_noble
-    aodh_listener: quay.io/airshipit/aodh:2025.2-ubuntu_noble
-    aodh_notifier: quay.io/airshipit/aodh:2025.2-ubuntu_noble
-    aodh_alarms_cleaner: quay.io/airshipit/aodh:2025.2-ubuntu_noble
+    aodh_db_sync: quay.io/airshipit/aodh:2026.1-ubuntu_noble
+    ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+    ks_service: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+    ks_endpoints: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+    aodh_api: quay.io/airshipit/aodh:2026.1-ubuntu_noble
+    aodh_evaluator: quay.io/airshipit/aodh:2026.1-ubuntu_noble
+    aodh_listener: quay.io/airshipit/aodh:2026.1-ubuntu_noble
+    aodh_notifier: quay.io/airshipit/aodh:2026.1-ubuntu_noble
+    aodh_alarms_cleaner: quay.io/airshipit/aodh:2026.1-ubuntu_noble
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: "IfNotPresent"
