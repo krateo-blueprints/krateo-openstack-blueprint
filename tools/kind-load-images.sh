@@ -16,7 +16,17 @@ CLUSTER="${1:-openstack}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Identity-plane blueprints are the ones that run on kind (compute needs KVM/OVS).
-COMPONENTS="mariadb memcached keystone glance horizon"
+#
+# Overridable, because the umbrella already supports installing a subset: `enabled: [keystone]`
+# expands to its dependency closure (keystone, mariadb, memcached) and never renders glance or
+# horizon. Pre-loading those two anyway costs roughly 4GB of node disk for images the install
+# will not reference. On a host sharing one Docker volume with other clusters that is the
+# difference between a load that finishes and one that stops partway, which presents as an
+# install failure rather than a capacity problem -- the loader is where the disk goes, so it is
+# where the scope belongs. Default is unchanged, so every existing invocation behaves as before.
+#
+#   COMPONENTS="mariadb memcached keystone" tools/kind-load-images.sh openstack
+COMPONENTS="${COMPONENTS:-mariadb memcached keystone glance horizon}"
 
 # Collect into a file rather than a pipeline, so a render failure can abort the run.
 # Previously this piped straight into `sort -u`, which made the exit status sort's and
