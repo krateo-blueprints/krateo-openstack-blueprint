@@ -21,6 +21,27 @@ metadata:
 data:
   contract-emitter.py: |
     {{- .Files.Get "files/contract-emitter.py" | nindent 4 }}
+{{- /*
+The CronJobs wait for the openrc Secret, the components do not wait for the CronJobs.
+
+envFrom.secretRef is not optional -- the emitter cannot authenticate to Keystone without
+those credentials -- so the kubelet cannot create the container until that Secret exists. On
+a fresh install the CronJobs otherwise fire while Keystone is still being built and their
+pods sit in CreateContainerConfigError until it appears. Self-correcting, but it spends the
+one signal this emitter has: a failed Job is supposed to mean connectivity or auth, and
+"Keystone is not up yet" is neither. A reader checking `kubectl get jobs` during an install
+would be reading noise as a fault.
+
+Gated on the Secret rather than on Keystone being Ready because the Secret is the actual
+dependency, and its name is configurable -- Keystone could be Ready under a chart that names
+its openrc Secret something else.
+
+Not latched, unlike the component gate in compositions.yaml (#68). That latch exists because
+ceasing to render a Composition UNINSTALLS a release and destroys a running service. Ceasing
+to render a CronJob removes a schedule and nothing else: no data, no state, and it cannot do
+its job without those credentials anyway.
+*/ -}}
+{{- if lookup "v1" "Secret" $.Release.Namespace $ce.openstack.existingSecret }}
 {{- range $mode := tuple "usage" "health" }}
 {{- $decl := index $.Values.serviceContract $mode }}
 ---
@@ -117,5 +138,6 @@ spec:
             - name: emitter
               configMap:
                 name: {{ $svc }}-contract-emitter
+{{- end }}
 {{- end }}
 {{- end }}
