@@ -705,21 +705,21 @@ images:
     - image_repo_sync
   pull_policy: IfNotPresent
   tags:
-    bootstrap: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
-    db_drop: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
-    db_init: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    bootstrap: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+    db_drop: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+    db_init: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
     image_repo_sync: docker.io/docker:17.07.0
-    keystone_api: quay.io/airshipit/keystone:2025.2-ubuntu_noble
-    keystone_bootstrap: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    keystone_api: quay.io/airshipit/keystone:2026.1-ubuntu_noble
+    keystone_bootstrap: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
     keystone_credential_cleanup: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
-    keystone_credential_rotate: quay.io/airshipit/keystone:2025.2-ubuntu_noble
-    keystone_credential_setup: quay.io/airshipit/keystone:2025.2-ubuntu_noble
-    keystone_db_sync: quay.io/airshipit/keystone:2025.2-ubuntu_noble
-    keystone_domain_manage: quay.io/airshipit/keystone:2025.2-ubuntu_noble
-    keystone_fernet_rotate: quay.io/airshipit/keystone:2025.2-ubuntu_noble
-    keystone_fernet_setup: quay.io/airshipit/keystone:2025.2-ubuntu_noble
-    ks_user: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    keystone_credential_rotate: quay.io/airshipit/keystone:2026.1-ubuntu_noble
+    keystone_credential_setup: quay.io/airshipit/keystone:2026.1-ubuntu_noble
+    keystone_db_sync: quay.io/airshipit/keystone:2026.1-ubuntu_noble
+    keystone_domain_manage: quay.io/airshipit/keystone:2026.1-ubuntu_noble
+    keystone_fernet_rotate: quay.io/airshipit/keystone:2026.1-ubuntu_noble
+    keystone_fernet_setup: quay.io/airshipit/keystone:2026.1-ubuntu_noble
+    ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
     rabbit_init: docker.io/rabbitmq:3.13-management
     test: docker.io/xrally/xrally-openstack:2.0.0
 jobs:

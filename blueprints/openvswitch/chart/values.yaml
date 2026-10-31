@@ -1,5 +1,5 @@
 # Full OpenStack-Helm openvswitch defaults with the blueprint's validated overrides applied
-# (2025.2-ubuntu_noble images, single-replica, Krateo-CDC-friendly). A small curated
+# (2026.1-ubuntu_noble images, single-replica, Krateo-CDC-friendly). A small curated
 # subset is overridable per Composition (see values.schema.json).
 conf:
   openvswitch_db_server:

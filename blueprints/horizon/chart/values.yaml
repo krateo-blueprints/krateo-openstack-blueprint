@@ -1,5 +1,5 @@
 # Full OpenStack-Helm horizon defaults with the blueprint's validated overrides applied
-# (2025.2-ubuntu_noble images, single-replica, Krateo-CDC-friendly). A small curated
+# (2026.1-ubuntu_noble images, single-replica, Krateo-CDC-friendly). A small curated
 # subset is overridable per Composition (see values.schema.json).
 conf:
   horizon:
@@ -841,11 +841,11 @@ images:
     - image_repo_sync
   pull_policy: IfNotPresent
   tags:
-    db_drop: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
-    db_init: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    db_drop: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+    db_init: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
-    horizon: quay.io/airshipit/horizon:2025.2-ubuntu_noble
-    horizon_db_sync: quay.io/airshipit/horizon:2025.2-ubuntu_noble
+    horizon: quay.io/airshipit/horizon:2026.1-ubuntu_noble
+    horizon_db_sync: quay.io/airshipit/horizon:2026.1-ubuntu_noble
     image_repo_sync: docker.io/docker:17.07.0
     test: quay.io/airshipit/osh-selenium:ubuntu_noble-20261030
 labels:
