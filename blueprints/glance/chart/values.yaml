@@ -781,18 +781,18 @@ images:
     - image_repo_sync
   pull_policy: IfNotPresent
   tags:
-    bootstrap: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    db_drop: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    db_init: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
+    bootstrap: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    db_drop: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    db_init: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
-    glance_api: quay.io/airshipit/glance:2025.1-ubuntu_jammy
-    glance_db_sync: quay.io/airshipit/glance:2025.1-ubuntu_jammy
-    glance_metadefs_load: quay.io/airshipit/glance:2025.1-ubuntu_jammy
+    glance_api: quay.io/airshipit/glance:2025.2-ubuntu_noble
+    glance_db_sync: quay.io/airshipit/glance:2025.2-ubuntu_noble
+    glance_metadefs_load: quay.io/airshipit/glance:2025.2-ubuntu_noble
     glance_storage_init: quay.io/airshipit/ceph-config-helper:ubuntu_jammy_20.2.4-1-20260828
     image_repo_sync: docker.io/docker:17.07.0
-    ks_endpoints: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    ks_service: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    ks_user: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
+    ks_endpoints: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    ks_service: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    ks_user: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
     rabbit_init: docker.io/rabbitmq:3.13-management
     test: docker.io/xrally/xrally-openstack:2.0.0
 keep_pvc: true

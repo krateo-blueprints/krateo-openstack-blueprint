@@ -41,19 +41,19 @@ release_group: null
 images:
   tags:
     test: docker.io/xrally/xrally-openstack:2.0.0
-    bootstrap: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
+    bootstrap: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
-    db_init: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    mistral_db_sync: quay.io/airshipit/mistral:2025.1-ubuntu_jammy
-    db_drop: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
+    db_init: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    mistral_db_sync: quay.io/airshipit/mistral:2025.2-ubuntu_noble
+    db_drop: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
     rabbit_init: docker.io/rabbitmq:3.13-management
-    ks_user: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    ks_service: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    ks_endpoints: quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy
-    mistral_api: quay.io/airshipit/mistral:2025.1-ubuntu_jammy
-    mistral_engine: quay.io/airshipit/mistral:2025.1-ubuntu_jammy
-    mistral_event_engine: quay.io/airshipit/mistral:2025.1-ubuntu_jammy
-    mistral_executor: quay.io/airshipit/mistral:2025.1-ubuntu_jammy
+    ks_user: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    ks_service: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    ks_endpoints: quay.io/airshipit/openstack-client:2025.2-ubuntu_noble
+    mistral_api: quay.io/airshipit/mistral:2025.2-ubuntu_noble
+    mistral_engine: quay.io/airshipit/mistral:2025.2-ubuntu_noble
+    mistral_event_engine: quay.io/airshipit/mistral:2025.2-ubuntu_noble
+    mistral_executor: quay.io/airshipit/mistral:2025.2-ubuntu_noble
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: "IfNotPresent"
   local_registry:

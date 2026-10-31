@@ -38,17 +38,17 @@ release_group: null
 images:
   tags:
     test: docker.io/xrally/xrally-openstack:2.0.0
-    db_init: quay.io/airshipit/heat:2025.1-ubuntu_jammy
-    trove_db_sync: quay.io/airshipit/trove:2025.1-ubuntu_jammy
-    db_drop: quay.io/airshipit/heat:2025.1-ubuntu_jammy
+    db_init: quay.io/airshipit/heat:2025.2-ubuntu_noble
+    trove_db_sync: quay.io/airshipit/trove:2025.2-ubuntu_noble
+    db_drop: quay.io/airshipit/heat:2025.2-ubuntu_noble
     rabbit_init: docker.io/rabbitmq:3.13-management
-    ks_user: quay.io/airshipit/heat:2025.1-ubuntu_jammy
-    ks_service: quay.io/airshipit/heat:2025.1-ubuntu_jammy
-    ks_endpoints: quay.io/airshipit/heat:2025.1-ubuntu_jammy
-    trove_api: quay.io/airshipit/trove:2025.1-ubuntu_jammy
-    trove_conductor: quay.io/airshipit/trove:2025.1-ubuntu_jammy
-    trove_taskmanager: quay.io/airshipit/trove:2025.1-ubuntu_jammy
-    trove_db_purge: quay.io/airshipit/trove:2025.1-ubuntu_jammy
+    ks_user: quay.io/airshipit/heat:2025.2-ubuntu_noble
+    ks_service: quay.io/airshipit/heat:2025.2-ubuntu_noble
+    ks_endpoints: quay.io/airshipit/heat:2025.2-ubuntu_noble
+    trove_api: quay.io/airshipit/trove:2025.2-ubuntu_noble
+    trove_conductor: quay.io/airshipit/trove:2025.2-ubuntu_noble
+    trove_taskmanager: quay.io/airshipit/trove:2025.2-ubuntu_noble
+    trove_db_purge: quay.io/airshipit/trove:2025.2-ubuntu_noble
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: "IfNotPresent"
