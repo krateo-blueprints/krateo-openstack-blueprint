@@ -311,7 +311,7 @@ def collect_health(auth_url, token, catalog):
 # --------------------------------------------------------------------------
 def ch_query(sql, body=None):
     base = os.environ["CH_URL"].rstrip("/")
-    params = {"query": sql, "database": os.environ.get("CH_DATABASE", "krateo")}
+    params = {"query": sql, "database": os.environ.get("CH_DATABASE", "showback")}
     headers = {"Content-Type": "application/octet-stream"}
     if os.environ.get("CH_USERNAME"):
         headers["X-ClickHouse-User"] = os.environ["CH_USERNAME"]
@@ -324,7 +324,7 @@ def ch_insert(table, rows):
     if not rows:
         log("nothing to insert")
         return
-    db = os.environ.get("CH_DATABASE", "krateo")
+    db = os.environ.get("CH_DATABASE", "showback")
     sql = f"INSERT INTO {db}.{table} FORMAT JSONEachRow"
     body = ("\n".join(json.dumps(r) for r in rows) + "\n").encode()
     ch_query(sql, body=body)
@@ -332,7 +332,7 @@ def ch_insert(table, rows):
 
 
 def ch_bootstrap_health_table():
-    db = os.environ.get("CH_DATABASE", "krateo")
+    db = os.environ.get("CH_DATABASE", "showback")
     table = os.environ.get("CH_HEALTH_TABLE", "health_records")
     ch_query(
         f"CREATE TABLE IF NOT EXISTS {db}.{table} ("
