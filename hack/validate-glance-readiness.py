@@ -48,11 +48,16 @@ if not CHART.is_dir():
     print(f"FAILED MEASUREMENT: no glance chart at {CHART} -- wrong path?")
     sys.exit(2)
 
+# FAILED MEASUREMENT and not SKIP, deliberately. The gates here that skip on a missing PyYAML
+# had never once run in CI: setup-python ships no PyYAML, so each printed `SKIP: PyYAML
+# unavailable`, exited 0, and the job went green -- a gate reporting success without measuring
+# anything, which is the same bug as a probe that cannot fail. The workflow now installs it;
+# this exits 2 so that if it stops doing so, the answer is "not measured" and not "fine".
 try:
     import yaml
 except ImportError:
-    print("SKIP: PyYAML unavailable")
-    sys.exit(0)
+    print("FAILED MEASUREMENT: PyYAML unavailable, so the rendered probes were never inspected")
+    sys.exit(2)
 
 values = yaml.safe_load((CHART / "values.yaml").read_text())
 # The directory the chart configures as its file store, mounts glance-images at, and chowns in

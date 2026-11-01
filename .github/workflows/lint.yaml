@@ -75,6 +75,16 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Five of the gates in this job parse the rendered YAML, and setup-python ships no
+      # PyYAML. They are written to print `SKIP: PyYAML unavailable` and exit 0 rather than
+      # crash on a developer's machine -- which on this runner meant they reported success
+      # without measuring anything. Checked in the run for this job's own pull request:
+      # keystone readiness, glance readiness, roleMapping, shipped python and the component
+      # DAG all printed SKIP, and the job was green. That is the failure this whole file
+      # exists to prevent, one level up.
+      - name: Install PyYAML
+        run: pip install pyyaml
+
       - name: Every capability must aggregate to a predefined role
         run: python3 hack/validate-capability-roles.py .
 
