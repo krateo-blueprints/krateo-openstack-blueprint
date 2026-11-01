@@ -108,6 +108,14 @@ jobs:
       # capability name, so an invented name validates cleanly and binds nothing. That is
       # how the defaults came to read openstack-viewer / openstack-operator /
       # openstack-admin, which match neither the six predefined roles nor any capability.
+      # The same failure shape as keystone's, one service along. Glance answers /healthcheck
+      # with 200 whenever its API process is up, but its image store is a PVC written as uid
+      # 42424 with no fsGroup -- writable only because an init container chowns it. If the
+      # volume does not honour that chown, every upload 500s while the pod sits 1/1 Ready.
+      # See issue #110.
+      - name: Glance readiness must require a writable image store
+        run: python3 hack/validate-glance-readiness.py .
+
       - name: roleMapping must name real CMP roles
         run: python3 hack/validate-rolemapping.py .
 
