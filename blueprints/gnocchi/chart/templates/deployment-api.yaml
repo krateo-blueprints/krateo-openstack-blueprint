@@ -110,10 +110,6 @@ spec:
               mountPath: /etc/gnocchi/policy.yaml
               subPath: policy.yaml
               readOnly: true
-            - name: gnocchi-etc
-              mountPath: /etc/apache2/conf-enabled/wsgi-gnocchi.conf
-              subPath: wsgi-gnocchi.conf
-              readOnly: true
             - name: etcceph
               mountPath: /etc/ceph
             - name: ceph-etc

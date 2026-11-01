@@ -41,15 +41,15 @@ images:
     db_init_indexer: docker.io/library/postgres:9.5
     # using non-kolla images until kolla supports postgres as
     # an indexer
-    db_init: quay.io/attcomdev/ubuntu-source-gnocchi-api:3.0.3
-    db_sync: quay.io/attcomdev/ubuntu-source-gnocchi-api:3.0.3
+    db_init: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
+    db_sync: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
     ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
     ks_service: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
     ks_endpoints: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
-    gnocchi_api: quay.io/attcomdev/ubuntu-source-gnocchi-api:3.0.3
-    gnocchi_statsd: quay.io/attcomdev/ubuntu-source-gnocchi-statsd:3.0.3
-    gnocchi_metricd: quay.io/attcomdev/ubuntu-source-gnocchi-metricd:3.0.3
-    gnocchi_resources_cleaner: quay.io/attcomdev/ubuntu-source-gnocchi-base:3.0.3
+    gnocchi_api: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
+    gnocchi_statsd: quay.io/openstack.kolla/gnocchi-statsd:2026.1-ubuntu-noble
+    gnocchi_metricd: quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble
+    gnocchi_resources_cleaner: quay.io/openstack.kolla/gnocchi-base:2026.1-ubuntu-noble
     image_repo_sync: quay.io/airshipit/docker:27.5.0
   pull_policy: "IfNotPresent"
   local_registry:
