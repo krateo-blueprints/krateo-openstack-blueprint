@@ -76,7 +76,8 @@ deploys = [
 if not deploys:
     fail("no keystone-api Deployment in the rendered chart")
 
-c = deploys[0]["spec"]["template"]["spec"]["containers"][0]
+pod = deploys[0]["spec"]["template"]["spec"]
+c = pod["containers"][0]
 
 ro = c.get("readinessProbe")
 if not ro:
@@ -98,4 +99,55 @@ if lv and KEY_DIR in json.dumps(lv):
         f"      visible unready pod into a CrashLoop. Check them in readiness only."
     )
 
+# The other half of the same failure mode. #99 made a missing-keys state visible; #41 is the
+# recovery. A Completed Job never re-runs, so without an init container that re-runs
+# fernet_setup on every pod start, an emptied Secret stays empty -- measured at 180s with the
+# Job reporting 1 succeeded. Detection without recovery leaves an operator a permanently
+# unready pod; recovery without detection is the silent 500s. Both or neither.
+inits = pod.get("initContainers") or []
+ensure = [ic for ic in inits if "fernet_setup" in " ".join(ic.get("command") or [])]
+if not ensure:
+    fail(
+        "keystone-api has no init container running fernet_setup.\n"
+        "      Without it an emptied keystone-fernet-keys Secret is never repopulated, because\n"
+        "      keystone-fernet-setup is a Job and a Completed Job does not re-run (issue #41).\n"
+        f"      init containers found: {[ic.get('name') for ic in inits]}"
+    )
+
+# And it must stay narrowly permitted. Granting the API pod blanket Secret access is the
+# tempting fix for any RBAC error here, and it would hand a long-lived internet-facing pod
+# every Secret in the namespace to cover two it owns. The Job's own Role does exactly that;
+# it is not a precedent to copy.
+sa = pod.get("serviceAccountName")
+wide = []
+for doc in docs:
+    if doc.get("kind") != "Role":
+        continue
+    bound = False
+    for rb in docs:
+        if rb.get("kind") != "RoleBinding":
+            continue
+        if rb.get("roleRef", {}).get("name") != doc["metadata"]["name"]:
+            continue
+        if any(s.get("kind") == "ServiceAccount" and s.get("name") == sa
+               for s in rb.get("subjects") or []):
+            bound = True
+    if not bound:
+        continue
+    for rule in doc.get("rules") or []:
+        if "secrets" not in (rule.get("resources") or []):
+            continue
+        verbs = set(rule.get("verbs") or [])
+        if verbs & {"create", "delete", "deletecollection", "patch", "update", "*"} and not rule.get("resourceNames"):
+            wide.append((doc["metadata"]["name"], sorted(verbs)))
+if wide:
+    fail(
+        f"a Role bound to ServiceAccount {sa!r} grants unscoped write access to secrets:\n"
+        + "".join(f"      {n}: verbs={v}\n" for n, v in wide)
+        + "      Scope it with resourceNames to the Secrets this pod owns. `create` cannot be\n"
+        + "      restricted by resourceName, so it must not be granted here at all."
+    )
+
 print(f"OK: keystone-api readiness requires {KEY_DIR}; liveness does not")
+print(f"OK: fernet_setup init container present ({ensure[0].get('name')}); "
+      f"secret write access is resourceNames-scoped")
