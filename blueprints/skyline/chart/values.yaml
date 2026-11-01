@@ -106,7 +106,30 @@ endpoints:
     #
     # Every other service here IS an oslo.db service and genuinely wants the driver-qualified
     # form; this override is skyline-only on purpose.
-      default: mysql
+      # Three consumers read this, not two, and they do not agree.
+      #
+      # helm-toolkit resolves the scheme per ENDPOINT:
+      #   index $endpointMap.scheme $endpoint | default $endpointMap.scheme.default
+      #
+      #   endpoint `skyline`  -> scheme.skyline -> skyline's own database_url
+      #   endpoint `internal` -> scheme.default -> the admin secret, which /tmp/db-init.py uses
+      #
+      # 1. skyline's API server compares the scheme EXACTLY (`if db_url.scheme == "mysql"`), so
+      #    it needs the bare form or it crash-loops. That was issue #86.
+      # 2. skyline's own alembic converts up for itself:
+      #    `if db_url.scheme == "mysql": db_url.replace(dialect="mysql+pymysql")`, so it accepts
+      #    either.
+      # 3. openstack-helm's generic /tmp/db-init.py calls SQLAlchemy create_engine() with NO
+      #    conversion. A bare `mysql://` makes SQLAlchemy select the mysqldb dialect, which
+      #    imports MySQLdb -- absent from the skyline image, which ships pymysql. #86 set both
+      #    keys to the bare form and broke this path: db-init CrashLoopBackOff with
+      #    `ModuleNotFoundError: No module named 'MySQLdb'`, logged under the misleading
+      #    message "Could not connect to database as root user" from an except handler that
+      #    never attempted a connection.
+      #
+      # So they must differ: driver-qualified for the admin/db-init path, bare for skyline's own
+      # config. helm-toolkit's own documented default for oslo_db is mysql+pymysql.
+      default: mysql+pymysql
       skyline: mysql
     port:
       mysql:
