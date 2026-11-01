@@ -46,6 +46,12 @@ for c in mariadb memcached keystone glance horizon rabbitmq placement openvswitc
 # complete a fresh keystone install at all, and for the hours they were `latest` this
 # document handed them to anyone who followed it. Bump this line when a newer release
 # has actually been run through these steps.
+#
+# This is the GKE path and it is NOT at the latest release, deliberately. 0.3.26 has been run
+# end to end on kind -- all five identity components Ready, keystone issuing a scoped token,
+# glance and horizon serving -- but nobody has run these GKE steps on it. Bumping this line
+# because the kind path passed would be exactly the claim this comment exists to prevent, so it
+# stays at the release the GKE path was actually run on. See README.md for the kind version.
 BP_VERSION=0.3.16
 
   kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-$c.yaml

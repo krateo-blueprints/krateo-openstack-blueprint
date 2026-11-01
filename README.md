@@ -58,7 +58,7 @@ kubectl create namespace openstack-system
 # complete a fresh keystone install at all, and for the hours they were `latest` this
 # document handed them to anyone who followed it. Bump this line when a newer release
 # has actually been run through these steps.
-BP_VERSION=0.3.16
+BP_VERSION=0.3.26
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 
@@ -75,7 +75,7 @@ brings up the whole catalog (needs a large amd64 cluster — see `quickstart-gke
 ```sh
 kubectl create namespace openstack-system
 for c in mariadb memcached keystone glance horizon; do
-BP_VERSION=0.3.16   # the release this path is verified against; see the note above
+BP_VERSION=0.3.26   # the release this path is verified against; see the note above
   kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-$c.yaml; done
 kubectl create namespace openstack
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-01-identity.yaml
