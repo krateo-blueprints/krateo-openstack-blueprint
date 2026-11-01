@@ -50,6 +50,16 @@ Composition CRD.
 ### Recommended: one orchestrator Composition
 
 ```sh
+# Every chart schedules with nodeSelector openstack-control-plane=enabled -- all 34 of them, via
+# labels.*.node_selector_key. Nothing in the charts creates that label, so on a cluster whose
+# nodes do not carry it every pod sits Pending indefinitely with
+#
+#   0/N nodes are available: N node(s) didn't match Pod's node affinity/selector
+#
+# and no indication of what to do about it. Measured on a fresh GKE cluster: MariaDB waited five
+# minutes before anyone noticed. Label the nodes that should run OpenStack first.
+kubectl label --overwrite nodes --all openstack-control-plane=enabled
+
 # Register only the orchestrator blueprint...
 kubectl create namespace openstack-system
 # The blueprint release this path has been verified against. Pinned, not `latest`, for
@@ -73,6 +83,9 @@ brings up the whole catalog (needs a large amd64 cluster — see `quickstart-gke
 ### Or drive the per-component blueprints directly
 
 ```sh
+# Same node label as above -- without it every pod stays Pending.
+kubectl label --overwrite nodes --all openstack-control-plane=enabled
+
 kubectl create namespace openstack-system
 for c in mariadb memcached keystone glance horizon; do
 BP_VERSION=0.3.26   # the release this path is verified against; see the note above
