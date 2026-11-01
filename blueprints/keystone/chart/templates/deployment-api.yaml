@@ -66,6 +66,53 @@ exec:
 {{- $serviceAccountName := "keystone-api" }}
 {{ tuple $envAll "api" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 
+{{/*
+The fernet-ensure init container below reads and repopulates the key Secrets, which the
+entrypoint Role does not cover -- it grants get/list on services, endpoints, jobs and pods
+only.
+
+Scoped by resourceNames to exactly the two Secrets this pod owns. The fernet_setup Job's own
+Role grants get/list/create/update on EVERY Secret in the namespace; that is wider than
+anything it needs and not a precedent to copy into a long-lived API pod.
+
+get and update, deliberately NOT create. Kubernetes cannot restrict `create` by resourceName --
+the object name is not known at authorization time -- so granting it here would hand the API
+pod blanket Secret creation in the namespace to cover a case that cannot arise: the Secret is
+templated with helm.sh/resource-policy: keep, so it exists before this pod starts. If someone
+deletes it outright, the init container fails loudly and the pod stays in Init, which is the
+correct outcome for an identity service with no keys -- and strictly better than the silent
+500s this whole issue is about.
+*/}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $serviceAccountName }}-fernet-ensure
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    resourceNames:
+      - keystone-fernet-keys
+      - keystone-credential-keys
+    verbs:
+      - get
+      - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $serviceAccountName }}-fernet-ensure
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $serviceAccountName }}-fernet-ensure
+subjects:
+  - kind: ServiceAccount
+    name: {{ $serviceAccountName }}
+    namespace: {{ $envAll.Release.Namespace }}
+
 {{- $etcSources := .Values.pod.etcSources.keystone_api }}
 ---
 apiVersion: apps/v1
@@ -107,6 +154,66 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.api.timeout | default "30" }}
       initContainers:
 {{ tuple $envAll "api" $mounts_keystone_api_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
+{{- if .Values.manifests.job_fernet_setup }}
+        # Ensures the fernet keys exist before the API starts, on EVERY pod start.
+        #
+        # keystone-fernet-setup is a Job: once Completed it never runs again, so an emptied or
+        # lost keystone-fernet-keys Secret is never repopulated. Measured: emptying the Secret
+        # and deleting this pod left it empty for 180s with the Job showing 1 succeeded, while
+        # every POST /v3/auth/tokens returned 500 with KeysNotFound.
+        #
+        # fernet-manage.py fernet_setup is already idempotent and already handles the empty
+        # case -- `if secret.get('data', False)` treats an empty dict as absent, so a populated
+        # Secret short-circuits to exit 0 and an empty one is regenerated. No change to the
+        # script was needed; the gap was only that nothing ran it again.
+        #
+        # It writes into its OWN emptyDir, not the Secret mount the main container uses: that
+        # mount is read-only, and the script generates keys on disk before uploading them. The
+        # main container's Secret volume then picks the keys up on the kubelet's next refresh,
+        # so a healed pod can be briefly unready before the readiness probe's key check passes.
+        # Unready-then-ready is the intended path, and is what makes the heal observable.
+        - name: keystone-fernet-ensure
+{{ tuple $envAll "keystone_fernet_setup" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.jobs.fernet_setup | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "fernet_setup" "container" "keystone_fernet_setup" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
+          env:
+            - name: KEYSTONE_USER
+              value: {{ .Values.jobs.fernet_setup.user | quote }}
+            - name: KEYSTONE_GROUP
+              value: {{ .Values.jobs.fernet_setup.group | quote }}
+            - name: KUBERNETES_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: KEYSTONE_KEYS_REPOSITORY
+              value: {{ .Values.conf.keystone.fernet_tokens.key_repository | quote }}
+          command:
+            - python
+            - /tmp/fernet-manage.py
+            - fernet_setup
+          volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
+            - name: fernet-ensure-etc
+              mountPath: /etc/keystone
+            - name: fernet-ensure-keys
+              mountPath: {{ .Values.conf.keystone.fernet_tokens.key_repository | quote }}
+            - name: keystone-etc
+              mountPath: /etc/keystone/keystone.conf
+              subPath: keystone.conf
+              readOnly: true
+            - name: keystone-etc-snippets
+              mountPath: /etc/keystone/keystone.conf.d/
+              readOnly: true
+            {{- if .Values.conf.keystone.DEFAULT.log_config_append }}
+            - name: keystone-etc
+              mountPath: {{ .Values.conf.keystone.DEFAULT.log_config_append }}
+              subPath: {{ base .Values.conf.keystone.DEFAULT.log_config_append }}
+              readOnly: true
+            {{- end }}
+            - name: keystone-bin
+              mountPath: /tmp/fernet-manage.py
+              subPath: fernet-manage.py
+              readOnly: true
+{{- end }}
       containers:
         - name: keystone-api
 {{ tuple $envAll "keystone_api" | include "helm-toolkit.snippets.image" | indent 10 }}
@@ -208,6 +315,16 @@ spec:
       volumes:
         - name: pod-tmp
           emptyDir: {}
+{{- if .Values.manifests.job_fernet_setup }}
+        # Private to the fernet-ensure init container. It cannot share the main container's
+        # etckeystone or its read-only fernet-keys Secret mount: the script writes generated
+        # keys to disk before uploading them, and writing into the path the Secret occupies
+        # would either fail or shadow the Secret for the rest of the pod.
+        - name: fernet-ensure-etc
+          emptyDir: {}
+        - name: fernet-ensure-keys
+          emptyDir: {}
+{{- end }}
         - name: oslo-lock-path
           emptyDir: {}
         - name: etckeystone
