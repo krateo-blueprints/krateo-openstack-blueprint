@@ -75,15 +75,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Five of the gates in this job parse the rendered YAML, and setup-python ships no
-      # PyYAML. They are written to print `SKIP: PyYAML unavailable` and exit 0 rather than
-      # crash on a developer's machine -- which on this runner meant they reported success
-      # without measuring anything. Checked in the run for this job's own pull request:
-      # keystone readiness, glance readiness, roleMapping, shipped python and the component
-      # DAG all printed SKIP, and the job was green. That is the failure this whole file
-      # exists to prevent, one level up.
-      - name: Install PyYAML
-        run: pip install pyyaml
+      # Without this, four of the gates below have never run. actions/setup-python ships no
+      # PyYAML, and validate-keystone-readiness, validate-rolemapping, validate-shipped-python
+      # and validate-component-dag each catch the ImportError, print "SKIP: PyYAML unavailable"
+      # and exit 0 -- so the job goes green having checked nothing. Confirmed in the lint run on
+      # main at 2026-11-01T15:39:07Z, where three of the four print SKIP on consecutive lines.
+      #
+      # The gate that protects the keystone fernet readiness check (#100) was among them, which
+      # means the most serious defect this repo has shipped had a guard that could not fire.
+      - name: Install the gates' Python dependencies
+        run: pip install PyYAML
 
       - name: Every capability must aggregate to a predefined role
         run: python3 hack/validate-capability-roles.py .
@@ -103,17 +104,18 @@ jobs:
       - name: Keystone readiness must require the fernet keys
         run: python3 hack/validate-keystone-readiness.py .
 
-      # The same failure mode one service along. Glance answers /healthcheck with 200 and / with
-      # 300, so both of its HTTP-shaped probes are satisfied by an API whose image store is not
-      # writable -- and the store is writable only because an init container chowns a volume
-      # Kubernetes applies no fsGroup to. See issue #110.
-      - name: Glance readiness must require a writable image store
-        run: python3 hack/validate-glance-readiness.py .
-
       # The schema types cmpRole as a free string and only describes it as a CMP role or
       # capability name, so an invented name validates cleanly and binds nothing. That is
       # how the defaults came to read openstack-viewer / openstack-operator /
       # openstack-admin, which match neither the six predefined roles nor any capability.
+      # The same failure shape as keystone's, one service along. Glance answers /healthcheck
+      # with 200 whenever its API process is up, but its image store is a PVC written as uid
+      # 42424 with no fsGroup -- writable only because an init container chowns it. If the
+      # volume does not honour that chown, every upload 500s while the pod sits 1/1 Ready.
+      # See issue #110.
+      - name: Glance readiness must require a writable image store
+        run: python3 hack/validate-glance-readiness.py .
+
       - name: roleMapping must name real CMP roles
         run: python3 hack/validate-rolemapping.py .
 
