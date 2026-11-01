@@ -80,6 +80,26 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 `profile: identity` brings up MariaDB+Memcached+Keystone+Glance+Horizon; `profile: full`
 brings up the whole catalog (needs a large amd64 cluster — see `quickstart-gke.md`).
 
+#### The install unlocks over several reconciles, and that is normal
+
+The orchestrator emits a component's Composition only once its CRD exists *and* its dependencies
+report `Ready`. Both conditions are evaluated with Helm `lookup` at render time, so the **first**
+render emits no component Compositions at all — the CompositionDefinitions in that same pass are
+what create the CRDs. Later passes unlock mariadb and memcached, then keystone, then glance and
+horizon.
+
+On the path above that happens by itself: the orchestrator is a Composition, so Krateo's
+composition-dynamic-controller re-reconciles it on its own interval and each pass unlocks the
+next level with nobody re-running anything. Seeing fewer components than the profile lists for
+the first minutes is the gate working, not a stall.
+
+If instead you install the umbrella chart **directly with helm**, nothing re-renders it, so you
+have to drive the passes yourself with repeated `helm upgrade` until the set stops growing. That
+route works and needs the manual passes; the route above needs none. Worth knowing before
+concluding the gate is broken — someone on the Krateo path re-running upgrades is doing
+unnecessary work, and someone on the helm path who expects one shot will stop at zero
+components.
+
 ### Or drive the per-component blueprints directly
 
 ```sh
