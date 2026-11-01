@@ -124,7 +124,7 @@ def update_secret(name, secret):
 
 def read_from_files():
     keys = [name for name in os.listdir(FERNET_DIR) if os.path.isfile(FERNET_DIR + name)
-            and re.match("^\d+$", name)]
+            and re.match(r"^\d+$", name)]
     data = {}
     for key in keys:
         with open(FERNET_DIR + key, 'r') as f:
