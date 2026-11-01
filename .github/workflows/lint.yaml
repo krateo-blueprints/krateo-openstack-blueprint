@@ -93,6 +93,13 @@ jobs:
       - name: Keystone readiness must require the fernet keys
         run: python3 hack/validate-keystone-readiness.py .
 
+      # The same failure mode one service along. Glance answers /healthcheck with 200 and / with
+      # 300, so both of its HTTP-shaped probes are satisfied by an API whose image store is not
+      # writable -- and the store is writable only because an init container chowns a volume
+      # Kubernetes applies no fsGroup to. See issue #110.
+      - name: Glance readiness must require a writable image store
+        run: python3 hack/validate-glance-readiness.py .
+
       # The schema types cmpRole as a free string and only describes it as a CMP role or
       # capability name, so an invented name validates cleanly and binds nothing. That is
       # how the defaults came to read openstack-viewer / openstack-operator /
