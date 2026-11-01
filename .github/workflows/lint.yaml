@@ -88,6 +88,13 @@ jobs:
       - name: roleMapping must name real CMP roles
         run: python3 hack/validate-rolemapping.py .
 
+      # Compiles the RENDERED scripts, not the templates: the templates contain Go directives
+      # and no textual substitution parses them in every context. A SyntaxWarning today is an
+      # error in a later Python, and these run inside containers at install time where nobody
+      # reads warnings -- the keystone fernet init container was emitting one.
+      - name: Shipped python must compile without warnings
+        run: python3 hack/validate-shipped-python.py .
+
   image-tags:
     # Gating, and offline. A rebuildable tag -- `latest`, or any variant containing it --
     # resolves forever and may resolve to different bytes each time, so `preflight-refs`
