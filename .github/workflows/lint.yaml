@@ -75,6 +75,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Without this, four of the gates below have never run. actions/setup-python ships no
+      # PyYAML, and validate-keystone-readiness, validate-rolemapping, validate-shipped-python
+      # and validate-component-dag each catch the ImportError, print "SKIP: PyYAML unavailable"
+      # and exit 0 -- so the job goes green having checked nothing. Confirmed in the lint run on
+      # main at 2026-11-01T15:39:07Z, where three of the four print SKIP on consecutive lines.
+      #
+      # The gate that protects the keystone fernet readiness check (#100) was among them, which
+      # means the most serious defect this repo has shipped had a guard that could not fire.
+      - name: Install the gates' Python dependencies
+        run: pip install PyYAML
+
       - name: Every capability must aggregate to a predefined role
         run: python3 hack/validate-capability-roles.py .
 
