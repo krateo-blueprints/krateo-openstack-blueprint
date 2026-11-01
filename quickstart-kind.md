@@ -91,7 +91,7 @@ kubectl create namespace openstack-system
 # complete a fresh keystone install at all, and for the hours they were `latest` this
 # document handed them to anyone who followed it. Bump this line when a newer release
 # has actually been run through these steps.
-BP_VERSION=0.3.16
+BP_VERSION=0.3.26
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 kubectl wait compositiondefinition/openstack -n openstack-system --for=condition=Ready --timeout=180s
