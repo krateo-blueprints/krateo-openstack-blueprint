@@ -13,6 +13,18 @@ on:
   pull_request:
     paths:
       - "**"
+  # Also on main. Every gate here ran on its own pull request and none had ever run on main:
+  # the last lint run on main was 2026-08-11, while seven pull requests merged after it. Each
+  # was gated against the base it branched from, never against the result of combining them, so
+  # two changes that each pass can merge into a main that does not and nothing says so.
+  #
+  # It matters more because release-tag.yaml fires on a tag push: a release publishes 35 charts
+  # from whatever main happens to contain, and until now that tree had not been linted. 0.3.26
+  # was cut that way. It passes -- checked every gate against it by hand -- but passing by luck
+  # and passing by construction are different properties, and only one of them holds next time.
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
