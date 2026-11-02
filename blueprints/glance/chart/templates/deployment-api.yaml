@@ -29,6 +29,63 @@ httpGet:
 {{- end }}
 {{- end }}
 
+{{/*
+Readiness, unlike liveness, also requires the image store directory to be writable.
+
+/healthcheck is oslo's healthcheck middleware: it confirms the WSGI app is listening and
+touches neither the store nor the database. GET / is no better -- it answers 300 with a version
+list, which is a success, not an error -- so every HTTP-shaped probe glance has is satisfied by
+an API that cannot store a single byte.
+
+The store is the prerequisite that can be absent while the API is perfectly up. glance-images
+is a PersistentVolumeClaim by default (storage: pvc), the pod sets no fsGroup, and the directory
+becomes writable by uid 42424 only because the glance-perms init container chowns it as root.
+Where the volume does not honour that chown -- NFS with root_squash is the common one -- every
+PUT /v2/images/<id>/file returns 500 while the pod reports 1/1 Ready, and so do the Deployment,
+the Composition and the umbrella. That is the same shape as keystone's KeysNotFound (issue #99),
+where the dependency gate read a Ready that meant nothing as "safe to build on".
+
+Readiness and NOT liveness, deliberately. A directory the process cannot write is not repaired
+by restarting the process: the ownership belongs to the volume, not to the container. A liveness
+probe on this condition would convert a visible unready pod into a CrashLoop and repair nothing.
+Readiness is the honest signal: do not route to me, do not count me available.
+
+The path is read from .Values.conf.glance.file.filesystem_store_datadir, the same value the
+deployment mounts glance-images at and the same one glance-perms chowns, in every storage mode --
+file is in enabled_backends for all of them. Deliberately not derived from
+glance_store.default_backend: that key is empty in values and is filled in by configmap-etc.yaml
+at render time, and one template must not depend on another template's mutation of .Values
+having already happened.
+
+A real write rather than os.access: access(2) answers from the permission bits and the mount
+flags for the real uid, and misses the cases that fail least predictably -- ACLs, and a volume
+that is full or over quota. The canary is named per pod, because replicas may share an RWX
+volume, and is opened O_TRUNC rather than O_EXCL so that a leftover from a probe killed between
+open and unlink is overwritten and then removed instead of wedging readiness forever. Nothing in
+this chart enumerates the store directory, so the canary cannot be mistaken for an image.
+
+The urlopen timeout stays below the readiness timeoutSeconds in values, so a hung socket fails
+the probe with a message the kubelet records rather than being killed halfway through the call.
+*/}}
+{{- define "apiReadinessProbeTemplate" }}
+exec:
+  command:
+    - python3
+    - -c
+    - |
+      import os, sys, urllib.request
+      d = "{{ .Values.conf.glance.file.filesystem_store_datadir }}"
+      canary = os.path.join(d, ".readiness-%s" % os.uname().nodename)
+      try:
+          os.close(os.open(canary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600))
+          os.unlink(canary)
+      except OSError as e:
+          sys.exit("image store %s not writable: %s" % (d, e))
+      urllib.request.urlopen(
+          "{{ tuple "image" "service" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" }}://localhost:{{ tuple "image" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}{{ tuple "image" "healthcheck" "internal" . | include "helm-toolkit.endpoints.keystone_endpoint_path_lookup" }}",
+          timeout=3).read()
+{{- end }}
+
 {{- if .Values.manifests.deployment_api }}
 {{- $envAll := . }}
 
@@ -169,7 +226,7 @@ spec:
 {{ tuple $envAll "glance_api" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.api | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "glance" "container" "glance_api" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
-{{ dict "envAll" $envAll "component" "api" "container" "glance-api" "type" "readiness" "probeTemplate" (include "probeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "api" "container" "glance-api" "type" "readiness" "probeTemplate" (include "apiReadinessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | indent 10 }}
 {{ dict "envAll" $envAll "component" "api" "container" "glance-api" "type" "liveness" "probeTemplate" (include "probeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | indent 10 }}
           command:
             - /tmp/glance-api.sh
