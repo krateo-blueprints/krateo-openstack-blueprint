@@ -213,6 +213,18 @@ jobs:
       - name: The creation gate's relax-set must be exactly the cycles that need it
         run: python3 hack/validate-readiness-deadlock.py .
 
+      # The two gates above judge the graph: that it is well formed, and that its runtime wait
+      # consequences are not deadlocked. Neither looks at what a component's rendered config
+      # points at, which is how gnocchi shipped declaring `deps: [keystone,
+      # mariadb]` while its config said `indexer.driver: postgresql` and `storage.driver:
+      # ceph` -- two backends with no component in this blueprint. On a 4-node GKE install of
+      # the full profile its pods sat in Init reporting `Service postgresql ... has no ready
+      # endpoints`, with every gate green. This checks the rendered kubernetes-entrypoint
+      # waits and the rendered backend identities against each component's declared
+      # transitive closure. See issue #115.
+      - name: Rendered config may only reference declared dependencies
+        run: python3 hack/validate-component-config-closure.py .
+
   image-tags:
     # Gating, and offline. A rebuildable tag -- `latest`, or any variant containing it --
     # resolves forever and may resolve to different bytes each time, so `preflight-refs`

@@ -38,9 +38,15 @@ images:
   tags:
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
     gnocchi_storage_init: quay.io/airshipit/ceph-config-helper:ubuntu_jammy_20.2.1-1-20260407
-    db_init_indexer: docker.io/library/postgres:9.5
-    # using non-kolla images until kolla supports postgres as
-    # an indexer
+    # The postgresql-indexer db-init job, which is the only consumer of this tag, no longer
+    # renders: the indexer is mysql (conf.gnocchi.indexer.driver), so gnocchi-db-init on
+    # mariadb creates the one database gnocchi uses. The tag is kept so the postgresql path
+    # stays renderable, but repointed off docker.io/library/postgres:9.5 -- an unmaintained
+    # 2017 image that preflight-refs would keep pulling for nothing. Upstream's comment
+    # here said "using non-kolla images until kolla supports postgres as an indexer"; that
+    # is no longer true, the Kolla gnocchi-api image has psycopg2 installed (verified in
+    # quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble).
+    db_init_indexer: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
     db_init: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
     db_sync: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
     ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
@@ -96,9 +102,15 @@ dependencies:
           - endpoint: node
             service: local_image_registry
   static:
+    # kubernetes-entrypoint waits. Every service named here must be one this blueprint
+    # actually serves, and every job named here must be one this chart actually renders --
+    # kubernetes-entrypoint does not distinguish "not ready yet" from "will never exist",
+    # it just blocks. `oslo_db_postgresql` and `gnocchi-storage-init` were both of the
+    # second kind (#115): the GKE install showed `Service postgresql ... has no ready
+    # endpoints` on db-init-indexer, db-sync, metricd and statsd, forever.
+    # hack/validate-component-config-closure.py now asserts both halves of that.
     api:
       jobs:
-        - gnocchi-storage-init
         - gnocchi-db-sync
         - gnocchi-ks-endpoints
         - gnocchi-ks-service
@@ -108,6 +120,8 @@ dependencies:
           service: identity
         - endpoint: internal
           service: oslo_db
+        - endpoint: internal
+          service: object_store
     clean:
       services: null
     db_init:
@@ -121,12 +135,14 @@ dependencies:
           service: oslo_db_postgresql
     db_sync:
       jobs:
-        - gnocchi-storage-init
         - gnocchi-db-init
-        - gnocchi-db-init-indexer
       services:
         - endpoint: internal
-          service: oslo_db_postgresql
+          service: oslo_db
+        # gnocchi-upgrade creates the storage layout as well as the indexer schema, so
+        # db-sync needs the object store up, not just the database.
+        - endpoint: internal
+          service: object_store
     ks_endpoints:
       jobs:
         - gnocchi-ks-service
@@ -143,31 +159,32 @@ dependencies:
           service: identity
     metricd:
       jobs:
-        - gnocchi-storage-init
         - gnocchi-db-sync
         - gnocchi-ks-user
         - gnocchi-ks-service
         - gnocchi-ks-endpoints
       services:
         - endpoint: internal
-          service: oslo_db_postgresql
+          service: oslo_db
+        - endpoint: internal
+          service: object_store
         - endpoint: internal
           service: metric
     statsd:
       jobs:
-        - gnocchi-storage-init
         - gnocchi-db-sync
         - gnocchi-ks-user
         - gnocchi-ks-service
         - gnocchi-ks-endpoints
       services:
         - endpoint: internal
-          service: oslo_db_postgresql
+          service: oslo_db
+        - endpoint: internal
+          service: object_store
         - endpoint: internal
           service: metric
     resources_cleaner:
       jobs:
-        - gnocchi-storage-init
         - gnocchi-db-sync
         - gnocchi-ks-user
         - gnocchi-ks-endpoints
@@ -182,13 +199,12 @@ dependencies:
       services: null
     tests:
       jobs:
-        - gnocchi-storage-init
         - gnocchi-db-sync
       services:
         - endpoint: internal
           service: identity
         - endpoint: internal
-          service: oslo_db_postgresql
+          service: oslo_db
         - endpoint: internal
           service: metric
     image_repo_sync:
@@ -561,7 +577,45 @@ conf:
       ## the connection string via a mounted configuration snippet.
       connection: ""
     storage:
-      driver: ceph
+      # swift, not ceph. There is no ceph component in this blueprint -- no
+      # blueprints/ceph directory, no CompositionDefinition, nothing in the catalogue --
+      # so `driver: ceph` pointed the API, 4x metricd and 4x statsd at a backend that
+      # cannot exist here, and gnocchi-storage-init looped on `ceph -s` forever (#115).
+      # swift IS a component, so gnocchi now depends only on things this blueprint ships.
+      #
+      # `file` was the other candidate and is worse: metricd and statsd are DaemonSets, so
+      # a file store has to be one ReadWriteMany volume shared by the API and every node's
+      # metricd and statsd, and RWX is exactly what a stock GKE/kind cluster does not have.
+      # swift needs no shared filesystem.
+      driver: swift
+      # swift_authurl/user/key/project_name/*_domain_name are auto-generated from
+      # endpoints.identity by configmap-etc.yaml when left empty, the same way
+      # keystone_authtoken is -- gnocchi authenticates to keystone as its own service
+      # user and then finds the object-store endpoint in the catalogue.
+      swift_auth_version: "3"
+      swift_authurl: ""
+      swift_user: ""
+      swift_key: ""
+      swift_project_name: ""
+      swift_user_domain_name: ""
+      swift_project_domain_name: ""
+      # internalURL, not gnocchi's publicURL default. The public object-store endpoint is
+      # http://swift/ -- the ingress Service, which only exists when an ingress controller
+      # is installed. The internal one is swift-proxy:8080, a plain ClusterIP Service that
+      # swift always renders. keystoneclient's ServiceCatalogV3 normalises the trailing
+      # "URL" away, verified against a v3 catalogue in the image.
+      swift_endpoint_type: internalURL
+      swift_service_type: object-store
+      swift_container_prefix: gnocchi
+      # The ceph options below are inert under any other driver -- gnocchi registers them in
+      # the [storage] group whatever the driver is, and the swift driver never reads them.
+      # They are kept so that a ceph-backed install stays a values change rather than a
+      # re-vendor, and because hack/revendor.py would re-add them from upstream anyway.
+      # Every ceph *Kubernetes object* (the gnocchi-storage-init and gnocchi-clean Jobs, the
+      # ceph-keyring-placement init containers, the /etc/ceph mounts) is gated on
+      # `driver: ceph` in the templates. NOTE: the dependency waits are not gated -- turning
+      # ceph back on also means restoring `gnocchi-storage-init` to the
+      # dependencies.static.*.jobs lists below, which nothing else will tell you.
       ceph_pool: gnocchi.metrics
       ceph_username: gnocchi
       ceph_keyring: /etc/ceph/ceph.client.gnocchi.keyring
@@ -569,7 +623,19 @@ conf:
       file_basepath: /var/lib/gnocchi
       provided_keyring: null
     indexer:
-      driver: postgresql
+      # mysql, against the mariadb this chart already provisions: gnocchi-db-init creates
+      # the `gnocchi` database on mariadb and completes, and the previous
+      # `driver: postgresql` then ignored it and waited on a postgresql Service that no
+      # component in this blueprint serves.
+      #
+      # The generated URL carries endpoints.oslo_db.scheme, i.e. `mysql+pymysql://`, and
+      # that is correct for gnocchi -- unlike skyline (#116), gnocchi needs no per-endpoint
+      # scheme split. Verified inside quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble:
+      # `gnocchi.indexer` registers mysql, mysql+pymysql, postgresql and postgresql+psycopg2
+      # as stevedore entry points, so the driver-qualified scheme resolves the driver;
+      # SQLAlchemyIndexer.dress_url leaves an explicit driver alone; and the resulting
+      # engine's DBAPI module is pymysql 1.4.6, which is installed, while MySQLdb is not.
+      driver: mysql
       # -- Indexer connection URI. When empty the URI is auto-generated
       ## from endpoints.oslo_db (or oslo_db_postgresql). Set to null to
       ## disable auto-generation.
@@ -703,6 +769,28 @@ endpoints:
     port:
       statsd:
         default: 8125
+  # The object store gnocchi's metric storage lives in. Mirrors endpoints.object_store in
+  # blueprints/swift/chart/values.yaml, because the two have to agree: the hosts/port here
+  # are what kubernetes-entrypoint waits on (swift-proxy:8080) and what swift's own
+  # ks-endpoints job registers in the catalogue. gnocchi reaches the store through the
+  # catalogue rather than this entry, so only the wait depends on it.
+  object_store:
+    name: swift
+    hosts:
+      default: swift-proxy
+      public: swift
+    host_fqdn_override:
+      default: null
+    path:
+      default: /v1/AUTH_%(tenant_id)s
+    scheme:
+      default: http
+    port:
+      api:
+        default: 8080
+        public: 80
+  # Only the postgresql-indexer path reads this, and that path is off: see
+  # conf.gnocchi.indexer.driver. Kept so the path stays renderable.
   oslo_db_postgresql:
     auth:
       admin:

@@ -58,6 +58,38 @@ limitations under the License.
 {{- $_ := tuple "oslo_db" "internal" "gnocchi" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" | set .Values.conf.gnocchi.database "connection" -}}
 {{- end -}}
 
+{{/*
+Swift storage credentials, filled from endpoints.identity exactly as keystone_authtoken is
+above. gnocchi's swift driver authenticates to keystone as gnocchi's own service user and
+then resolves the object-store endpoint from the catalogue, so these are keystone
+credentials and not a swift endpoint: see gnocchi/common/swift.py, which passes them
+straight to swiftclient.Connection(authurl=, user=, key=, tenant_name=, os_options=).
+
+Upstream's chart has no swift storage support at all -- it ships `storage.driver: ceph`
+and nothing fills these -- so this block is a deliberate divergence, recorded in
+hack/upstream-divergences.yaml. Without it `driver: swift` would authenticate as
+gnocchi's upstream default user, the literal string "admin:admin", against
+http://localhost:8080/auth/v1.0.
+*/}}
+{{- if empty .Values.conf.gnocchi.storage.swift_authurl -}}
+{{- $_ := tuple "identity" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" | set .Values.conf.gnocchi.storage "swift_authurl" -}}
+{{- end -}}
+{{- if empty .Values.conf.gnocchi.storage.swift_user -}}
+{{- $_ := set .Values.conf.gnocchi.storage "swift_user" .Values.endpoints.identity.auth.gnocchi.username -}}
+{{- end -}}
+{{- if empty .Values.conf.gnocchi.storage.swift_key -}}
+{{- $_ := set .Values.conf.gnocchi.storage "swift_key" .Values.endpoints.identity.auth.gnocchi.password -}}
+{{- end -}}
+{{- if empty .Values.conf.gnocchi.storage.swift_project_name -}}
+{{- $_ := set .Values.conf.gnocchi.storage "swift_project_name" .Values.endpoints.identity.auth.gnocchi.project_name -}}
+{{- end -}}
+{{- if empty .Values.conf.gnocchi.storage.swift_user_domain_name -}}
+{{- $_ := set .Values.conf.gnocchi.storage "swift_user_domain_name" .Values.endpoints.identity.auth.gnocchi.user_domain_name -}}
+{{- end -}}
+{{- if empty .Values.conf.gnocchi.storage.swift_project_domain_name -}}
+{{- $_ := set .Values.conf.gnocchi.storage "swift_project_domain_name" .Values.endpoints.identity.auth.gnocchi.project_domain_name -}}
+{{- end -}}
+
 {{- if and (not (kindIs "invalid" .Values.conf.gnocchi.indexer.url)) (empty .Values.conf.gnocchi.indexer.url) -}}
 {{ if eq .Values.conf.gnocchi.indexer.driver "postgresql" }}
 {{- $_ := tuple "oslo_db_postgresql" "internal" "gnocchi" "postgresql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" | set .Values.conf.gnocchi.indexer "url" -}}

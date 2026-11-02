@@ -28,10 +28,22 @@ data:
   bootstrap.sh: |
 {{ tuple "bin/_bootstrap.sh.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
 {{- end }}
+{{/*
+Ceph-only scripts. storage-init.sh is `ceph -s` / `ceph osd pool create` /
+`ceph auth get-or-create`, and clean-secrets.sh deletes the rbd keyring Secret that
+storage-init creates; the two Jobs that mount them render only under
+`storage.driver: ceph`. Gated with them so that a swift-backed install ships no ceph
+tooling at all -- "the driver value changed" and "nothing ceph is left" are different
+claims, and only the second one is checkable. What remains after this is prose: the word
+appears in gnocchi-probe.py's docstring, which lists the drivers its storage check
+supports. Nothing mounts or executes ceph here.
+*/}}
+{{- if eq .Values.conf.gnocchi.storage.driver "ceph" }}
   storage-init.sh: |
 {{ tuple "bin/_storage-init.sh.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
   clean-secrets.sh: |
 {{ tuple "bin/_clean-secrets.sh.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
+{{- end }}
   db-init.sh: |
 {{ tuple "bin/_db-init.sh.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
   db-init.py: |
@@ -56,10 +68,12 @@ data:
 {{- include "helm-toolkit.scripts.keystone_user" . | indent 4 }}
   ks-domain-user.sh: |
 {{- include "helm-toolkit.scripts.keystone_domain_user" . | indent 4 }}
+{{- if eq .Values.conf.gnocchi.storage.driver "ceph" }}
   ceph-keyring.sh: |
 {{ tuple "bin/_ceph-keyring.sh.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
   ceph-admin-keyring.sh: |
 {{ tuple "bin/_ceph-admin-keyring.sh.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
+{{- end }}
   gnocchi-test.sh: |
 {{ tuple "bin/_gnocchi-test.sh.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
 {{- end }}

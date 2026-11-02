@@ -85,6 +85,12 @@ components:
       - keystone
       - rabbitmq
       - mariadb
+      # magnum-api and magnum-conductor both wait on the heat-api and barbican-api Services
+      # in their own rendered entrypoints -- magnum drives cluster creation through heat and
+      # stores certificates in barbican. Found by
+      # hack/validate-component-config-closure.py.
+      - heat
+      - barbican
     tier: compute
   - name: manila
     kind: Manila
@@ -105,6 +111,12 @@ components:
     deps:
       - keystone
       - rabbitmq
+      # ceilometer publishes its samples to gnocchi: its own rendered entrypoints wait on
+      # the gnocchi-api Service in all four of its pods, and endpoints.metric.hosts.default
+      # is gnocchi-api. The dep was missing, so the orchestrator emitted ceilometer before
+      # gnocchi and every ceilometer pod sat in Init waiting for it. Found by
+      # hack/validate-component-config-closure.py.
+      - gnocchi
     tier: compute
   - name: aodh
     kind: Aodh
@@ -147,6 +159,10 @@ components:
       - keystone
       - rabbitmq
       - mariadb
+      # tacker-server and tacker-conductor both wait on the barbican-api Service in their
+      # own rendered entrypoints. Found by
+      # hack/validate-component-config-closure.py.
+      - barbican
     tier: compute
   - name: cyborg
     kind: Cyborg
@@ -185,6 +201,13 @@ components:
     deps:
       - keystone
       - mariadb
+      # swift holds gnocchi's metric storage (conf.gnocchi.storage.driver). Before #115
+      # gnocchi declared keystone and mariadb while its rendered config named postgresql
+      # and ceph, neither of which is a component here, so it waited forever on backends
+      # that could not exist. It is now configured against mariadb and swift only, and
+      # this list says so. swift's own deps add nothing new: swift depends on keystone,
+      # which is already in gnocchi's closure.
+      - swift
     tier: compute
   - name: swift
     kind: Swift

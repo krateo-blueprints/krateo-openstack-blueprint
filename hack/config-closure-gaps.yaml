@@ -1,0 +1,56 @@
+# Findings of hack/validate-component-config-closure.py that are real and not yet fixed.
+#
+# This file is not a list of false positives. Every entry below is a component whose
+# rendered config references something it cannot reach, which means that component cannot
+# finish installing in the full profile today. They are recorded rather than fixed because
+# each needs a decision this file cannot make -- a new component, or dropping a wait that
+# upstream put there on purpose -- and because a gate that fails on five unrelated
+# pre-existing bugs blocks every unrelated change until all five are resolved.
+#
+# The gate prints every entry on success, under "DECLARED GAP, still suppressing a finding",
+# so a waiver cannot go quiet. It also fails when an entry stops matching, so a fix forces
+# the waiver out instead of leaving it to shadow the next regression.
+#
+# Each entry:
+#   component  the blueprint
+#   reference  what the gate flagged -- "service:<name>", "job:<name>" or "backend:<token>"
+#   why        what is actually broken, and why it is not fixed here
+#   tracking   where the reasoning lives
+gaps:
+  - component: ceilometer
+    reference: job:ceilometer-ks-endpoints
+    why: >-
+      ceilometer's dependencies.static lists the ceilometer-ks-endpoints Job in five places,
+      but the chart has no job-ks-endpoints.yaml template and no manifests flag for one --
+      ceilometer serves no API, so it registers no keystone endpoints. Every ceilometer pod
+      therefore waits on a Job that is never created, which never completes. The fix is to
+      drop the five wait entries, which belongs in a ceilometer change rather than a gnocchi
+      one.
+    tracking: 115
+
+  - component: neutron
+    reference: service:nova-api
+    why: >-
+      neutron's dhcp, l3 and metadata agents wait on the nova-api Service, but nova already
+      depends on neutron, so declaring the dependency would make the DAG cyclic and
+      hack/validate-component-dag.py would reject it. The agents do not need nova to start
+      -- only the metadata proxy talks to it, and lazily -- so the resolution is to remove
+      the waits, which is a neutron decision with its own blast radius.
+    tracking: 115
+
+  - component: neutron
+    reference: service:nova-metadata
+    why: >-
+      Same wait, same cycle, same resolution as service:nova-api above.
+    tracking: 115
+
+  - component: zaqar
+    reference: backend:redis
+    why: >-
+      zaqar sets `[drivers] message_store = redis` with
+      `[drivers:message_store:redis] uri = redis://redis:6379`, and this blueprint has no
+      redis component, so zaqar's message store points at a host that does not resolve --
+      the same defect as gnocchi's postgresql indexer in #115, in a different component.
+      Fixing it means either adding a redis component or moving the message store to a
+      backend that exists, which is a zaqar design decision.
+    tracking: 115

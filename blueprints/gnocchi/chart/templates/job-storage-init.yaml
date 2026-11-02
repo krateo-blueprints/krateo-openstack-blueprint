@@ -12,7 +12,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- if .Values.manifests.job_storage_init }}
+{{/*
+Gated on the storage driver. Everything this Job does is ceph: `ceph -s`,
+`ceph osd pool create`, `ceph auth get-or-create client.gnocchi`, behind a
+ceph-keyring-placement init container that needs an admin keyring. With `storage.driver:
+swift` there is no ceph cluster to talk to -- this blueprint ships no ceph component -- and
+gnocchi-upgrade (the gnocchi-db-sync Job) creates the swift containers itself.
+
+Rendering it anyway is not merely useless: it was named in dependencies.static.*.jobs, so
+the API, metricd, statsd, the resources cleaner and the tests all waited on a Job that
+could never complete. The waits have been removed with it; see the NOTE in values.yaml
+about restoring them if ceph is ever turned back on.
+*/}}
+{{- if and .Values.manifests.job_storage_init (eq .Values.conf.gnocchi.storage.driver "ceph") }}
 {{- $envAll := . }}
 
 {{- $serviceAccountName := "gnocchi-storage-init" }}

@@ -12,7 +12,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- if .Values.manifests.job_clean }}
+{{/*
+Gated on the storage driver. This Job deletes secrets.rbd, the ceph client keyring Secret
+that gnocchi-storage-init creates. Under `storage.driver: swift` that Secret is never
+created, so the Job -- and the ceph-config-helper image it pulls to run one kubectl
+command -- has nothing to clean.
+*/}}
+{{- if and .Values.manifests.job_clean (eq .Values.conf.gnocchi.storage.driver "ceph") }}
 {{- $envAll := . }}
 
 {{- $serviceAccountName := print "gnocchi-clean" }}
