@@ -116,6 +116,15 @@ jobs:
       - name: Glance readiness must require a writable image store
         run: python3 hack/validate-glance-readiness.py .
 
+      # The same shape again, and the plainest case of it. Horizon has exactly one HTTP-shaped
+      # signal, GET /, and with keystone stopped it answers 200 with the whole login form while
+      # the login POST answers 200 carrying "Unable to establish connection to keystone
+      # endpoint" -- measured in the real image. The converse half is measured too: with
+      # memcached away every Django path answers 500, so a liveness probe on / restarts every
+      # replica during a dependency outage and repairs nothing. See issue #110.
+      - name: Horizon readiness must require keystone, and no restarting probe may enter Django
+        run: python3 hack/validate-horizon-readiness.py .
+
       # The no-probe half of the same issue, on the component at the bottom of every dependency
       # graph here. mariadb-controller is a reconcile loop that blocks only on the kubernetes
       # API: wedged in a call, it keeps the process alive, the pod Ready and the database
