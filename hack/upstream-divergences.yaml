@@ -49,3 +49,76 @@ divergences:
       - file: values.yaml
         present: openstack.kolla/gnocchi-api
         why: The maintained replacement.
+
+  # The uwsgi stats port as a liveness target, in the four charts that shipped it. The values
+  # half of each fix is protected by revendor's three-way merge; the template half is not, and
+  # the template half is the one that removes the knob entirely. hack/validate-probe-not-uwsgi-
+  # stats.py asserts the rendered outcome on every push; these assertions name the divergence so
+  # that a hand-refresh of the templates from upstream fails immediately, with the reason, rather
+  # than waiting for a later re-vendor to bring 1717 back into values as well.
+  - component: placement
+    issue: 110
+    reason: >-
+      Upstream points placement-api's liveness probe at uwsgi's stats socket (1717, with
+      stats-http) via pod.probes.placement.api.liveness.port. That socket is served by the uwsgi
+      master, which never imports placement and never handles a request, so it answers 200 with
+      every worker wedged -- making liveness strictly weaker than the readiness probe beside it
+      and leaving a hung API running forever with zero restarts.
+    assertions:
+      - file: templates/deployment.yaml
+        absent: liveness.port
+        why: >-
+          Restoring `{{- if .Values.pod.probes.placement.api.liveness.port }}` restores the only
+          knob that ever selected the stats port. Liveness must reach the service's own endpoint
+          port, where a uwsgi worker has to serve GET / for the probe to pass.
+      - file: templates/deployment.yaml
+        present: failureThreshold
+        why: >-
+          The deliberate slack on liveness. conf uwsgi sets processes = 1, so a worker saturated
+          by a slow database is not a wedged one; upstream's 5s/10s with the default threshold
+          would restart placement after 30 seconds of load. Losing it turns the fix into the
+          restart storm it was written to avoid.
+  - component: heat
+    issue: 110
+    reason: >-
+      Upstream points both heat-api's and heat-cfn's liveness probes at uwsgi's stats socket
+      (1717, with stats-http) via pod.probes.api.heat_api.liveness.port and
+      pod.probes.cfn.heat_cfn.liveness.port, with the same consequence as placement's.
+    assertions:
+      - file: templates/deployment-api.yaml
+        absent: liveness.port
+        why: >-
+          Restoring the knob restores the stats-port target. GET / on the orchestration endpoint
+          port returns 300 with the version document from the versionnegotiation filter, which a
+          worker must run.
+      - file: templates/deployment-api.yaml
+        present: failureThreshold
+        why: >-
+          The deliberate slack on liveness; see placement's entry. Upstream ships only
+          initialDelaySeconds: 10 here.
+      - file: templates/deployment-cfn.yaml
+        absent: liveness.port
+        why: The same knob for the cloudformation API.
+      - file: templates/deployment-cfn.yaml
+        present: failureThreshold
+        why: The same slack for the cloudformation API.
+  - component: neutron
+    issue: 110
+    reason: >-
+      Upstream points neutron-server's liveness probe at uwsgi's stats socket (1717, with
+      stats-http) via pod.probes.server.server.liveness.port. A hung neutron-server then presents
+      as endpoints empty, pod Running, zero restarts -- readiness withdraws it from the Service
+      while liveness reports healthy forever.
+    assertions:
+      - file: templates/deployment-server.yaml
+        absent: liveness.port
+        why: >-
+          Restoring the knob in serverLivenessProbeTemplate restores the stats-port target. The
+          api-paste `/` pipeline carries no authtoken, so GET / on the network endpoint port
+          needs no token and no backend -- only a worker.
+      - file: values.yaml
+        present: failureThreshold
+        why: >-
+          neutron's probe params come from values, not from the template, so this is where its
+          liveness slack lives. Without it the probe inherits the default threshold of 3 and
+          restarts a merely busy single-worker API.

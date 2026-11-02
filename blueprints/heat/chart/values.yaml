@@ -1202,15 +1202,12 @@ pod:
         limits:
           memory: "1024Mi"
           cpu: "2000m"
-  probes:
-    api:
-      heat_api:
-        liveness:
-          port: 1717
-    cfn:
-      heat_cfn:
-        liveness:
-          port: 1717
+  # pod.probes is absent deliberately. Upstream's only entries here were
+  # api.heat_api.liveness.port: 1717 and cfn.heat_cfn.liveness.port: 1717, the uwsgi stats
+  # socket, which answers 200 whenever the uwsgi MASTER is alive and so made liveness unable to
+  # fail -- see the comments on the liveness probes in templates/deployment-api.yaml and
+  # templates/deployment-cfn.yaml, and issue #110. Neither template reads the key any more, so
+  # there is nothing left for this section to configure.
 
 network_policy:
   heat:

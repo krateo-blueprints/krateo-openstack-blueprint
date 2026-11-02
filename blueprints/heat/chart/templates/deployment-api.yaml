@@ -90,16 +90,48 @@ spec:
               path: /
               port: {{ tuple "orchestration" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
             initialDelaySeconds: 30
+          {{- /*
+          Liveness reaches the API port, not the uwsgi stats port.
+
+          Upstream's `pod.probes.api.heat_api.liveness.port` exists to repoint this probe at
+          0.0.0.0:1717, which is `stats` with `stats-http = true` in conf.heat_api_uwsgi --
+          uwsgi's statistics socket, served by the MASTER process. The master binds the listening
+          socket, forks workers and reaps them; it never imports heat and never handles a request.
+          So that endpoint answers 200 with a JSON blob whenever the master is alive: with the
+          worker wedged, with the worker stopped, and with the application failing to import.
+          There is no state of the service in which it says no, which makes liveness STRICTLY
+          WEAKER than the readiness probe directly above -- and liveness is the probe that
+          restarts things. Measured in quay.io/airshipit/heat:2026.1-ubuntu_noble: with the
+          single worker SIGSTOPped, :1717 still answered 200 while :8004 timed out.
+
+          The whole knob only ever selected that port, so it is removed rather than defaulted:
+          an override cannot reintroduce what the template no longer reads. See issue #110.
+
+          GET / returns 300 Multiple Choices with the version-discovery document, and the kubelet
+          counts 200-399 as success. It is produced by the `versionnegotiation` filter, which
+          sits BEFORE `authtoken` in the heat-api paste pipeline and short-circuits the root path,
+          so no token is needed and keystone is never contacted; the document itself is built from
+          constants, so neither the database nor rabbit is touched. Measured in the same image
+          with mariadb, rabbit and keystone all unresolvable: the app loaded and GET / answered
+          300. A worker must nevertheless run the request, which is what liveness wants to know.
+
+          Timing is deliberately slack, and much slacker than readiness. conf uwsgi sets
+          processes = 1, so a single in-flight request blocks the static document too: during a
+          database or rabbit slowdown a saturated worker can miss a probe without being wedged.
+          Readiness stays at 30s initial delay so traffic is withdrawn promptly and visibly;
+          liveness restarts only after 60s + 6 x 30s = four minutes in which no attempt returned
+          the version document. The app took 35 seconds to import in the measurement above, which
+          is why the initial delay is 60s and not upstream's 10s.
+          */}}
           livenessProbe:
             httpGet:
               scheme: {{ tuple "orchestration" "service" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" | upper }}
               path: /
-              {{- if .Values.pod.probes.api.heat_api.liveness.port }}
-              port: {{ .Values.pod.probes.api.heat_api.liveness.port }}
-              {{- else }}
               port: {{ tuple "orchestration" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-              {{- end }}
-            initialDelaySeconds: 10
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
           volumeMounts:
             - name: pod-tmp
               mountPath: /tmp

@@ -2362,13 +2362,23 @@ pod:
     rpc_timeout: 60
     server:
       server:
+        # No `port` key: upstream's was 1717, the uwsgi stats socket, which answers 200 whenever
+        # the uwsgi MASTER is alive and so made liveness unable to fail. See the comment on
+        # serverLivenessProbeTemplate in templates/deployment-server.yaml and issue #110; the
+        # template no longer reads the key.
+        #
+        # failureThreshold and a 30s period, against readiness's 15s: liveness now exercises the
+        # same static version document a worker must serve, so it restarts only after
+        # 60s + 6 x 30s = four minutes of unbroken failure, while readiness keeps withdrawing
+        # traffic within two periods. conf uwsgi sets processes = 1, so a worker saturated by a
+        # slow database is not a wedged one and must not be restarted for it.
         liveness:
           enabled: true
           params:
+            failureThreshold: 6
             initialDelaySeconds: 60
-            periodSeconds: 15
+            periodSeconds: 30
             timeoutSeconds: 10
-          port: 1717
         readiness:
           enabled: true
           params:
