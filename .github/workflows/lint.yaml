@@ -125,6 +125,33 @@ jobs:
       - name: Horizon readiness must require keystone, and no restarting probe may enter Django
         run: python3 hack/validate-horizon-readiness.py .
 
+      # The no-probe half of the same issue, on the component at the bottom of every dependency
+      # graph here. mariadb-controller is a reconcile loop that blocks only on the kubernetes
+      # API: wedged in a call, it keeps the process alive, the pod Ready and the database
+      # beside it healthy, while the selector of the master service every OpenStack service
+      # resolves to stops being maintained -- broad across several Galera primaries, or pinned
+      # to a pod a failover already replaced. It shipped with no probe at all. This also
+      # protects the server's probe, the best one in this repo, from an edit in the same chart.
+      - name: Mariadb's controller must report a wedged reconcile loop
+        run: python3 hack/validate-mariadb-readiness.py .
+
+      # Same failure shape again, one container along. nginx is the only listener on skyline's
+      # Service port -- every request, console and API alike, arrives there -- and it had no
+      # probe at all, so the kubelet counted it ready the instant nginx was exec'd. An nginx
+      # that 500s the console and 502s the API reported 1/1 Ready at every layer. The probe
+      # must go through nginx's own listener to both halves of what it serves; a tcpSocket is
+      # satisfied by the 502. See issue #110.
+      - name: Skyline's nginx readiness must prove it can serve
+        run: python3 hack/validate-skyline-readiness.py .
+
+      # revendor.py three-way merges values.yaml, so a values override survives a re-vendor by
+      # itself. It never writes templates, so a template divergence has no protection at all --
+      # and reverting one half of a fix while the other half stays is worse than reverting both.
+      # gnocchi is the live case: Kolla images with upstream's apache start script would exec a
+      # binary that is not in the image. See issue #115.
+      - name: Deliberate upstream divergences must still hold
+        run: python3 hack/validate-upstream-divergences.py .
+
       - name: roleMapping must name real CMP roles
         run: python3 hack/validate-rolemapping.py .
 
