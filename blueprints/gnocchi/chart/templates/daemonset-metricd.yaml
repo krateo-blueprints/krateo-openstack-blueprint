@@ -12,6 +12,61 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
+{{/*
+metricd had no probe of any kind, and of everything in this repository it is the component whose
+failure is hardest to see.
+
+statsd and the API accept measures; metricd is the only thing that aggregates them. gnocchi
+4.7.0's gnocchi/cli/metricd.py, MetricProcessBase.run(), is:
+
+    while not self._shutdown.is_set():
+        try:
+            self._run_job()
+        except Exception:
+            LOG.error("Unexpected error during %s job", self.name, exc_info=True)
+        self._wake_up.wait(...)
+
+Every failure is caught, logged and retried forever. A metricd that cannot reach its indexer,
+its measure store or its coordinator therefore runs, stays up, is counted Ready by the
+DaemonSet, the Composition and the umbrella, and aggregates nothing -- while measures are still
+accepted. There is no user-facing error at any point, ever: a `gnocchi measures show` simply
+returns fewer points than it should. Nothing else here fails this quietly.
+
+So the probe has to check what metricd needs rather than whether it is running. All three are
+hard requirements of MetricProcessBase._configure(), in order: get_coordinator_and_start()
+against coordination_url (itself wrapped in retry_on_exception_and_log, so a missing
+coordination backend blocks startup forever without crashing), then storage, incoming and
+indexer drivers.
+
+The probe asks gnocchi to load its own configured drivers rather than knowing anything about
+which backend is in use, so this keeps working as the chart's indexer and measure store change.
+
+Readiness and NOT liveness, deliberately, and no startupProbe. Restarting metricd does not
+repair a database, a measure store or a memcached that is down -- all three live outside this
+pod -- so a liveness probe on these conditions converts a visible unready pod into a CrashLoop
+and fixes nothing; this is the same reasoning as keystone's fernet keys (#99) and glance's image
+store (#110). A startupProbe would be worse still: it suppresses both liveness and readiness
+until it passes, which would hide the one signal this exists to produce. There is deliberately
+no liveness probe at all: the failure mode a restart would fix -- the daemon's own threads dying
+while the process lives -- is already handled by cotyledon respawning its children, and no
+honest progress signal exists for "is it actually aggregating", so inventing one that restarts
+the container would be worse than the gap.
+
+periodSeconds in values is 60, matching metricd's own default metric_processing_delay, so the
+probe costs about one extra backend round trip per processing pass per node.
+*/}}
+{{- define "metricdReadinessProbeTemplate" }}
+exec:
+  command:
+    - python3
+    - /tmp/gnocchi-probe.py
+    - --deadline
+    - "25"
+    - --indexer
+    - --storage
+    - --coordination
+{{- end }}
+
 {{- if .Values.manifests.daemonset_metricd }}
 {{- $envAll := . }}
 
@@ -72,6 +127,7 @@ spec:
 {{ tuple $envAll $envAll.Values.pod.resources.metricd | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           command:
             - /tmp/gnocchi-metricd.sh
+{{ dict "envAll" $envAll "component" "metricd" "container" "gnocchi-metricd" "type" "readiness" "probeTemplate" (include "metricdReadinessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
           volumeMounts:
             - name: pod-tmp
               mountPath: /tmp
@@ -90,6 +146,10 @@ spec:
             - name: gnocchi-bin
               mountPath: /tmp/gnocchi-metricd.sh
               subPath: gnocchi-metricd.sh
+              readOnly: true
+            - name: gnocchi-bin
+              mountPath: /tmp/gnocchi-probe.py
+              subPath: gnocchi-probe.py
               readOnly: true
             - name: etcceph
               mountPath: /etc/ceph

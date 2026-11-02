@@ -234,6 +234,69 @@ pod:
     gnocchi_tests:
       init_container: null
       gnocchi_tests:
+  # -- Probe parameters, merged over the probe bodies the templates define.
+  ## Every readiness probe here runs bin/_gnocchi-probe.py.tpl, which makes a real round trip
+  ## to each backend the container cannot work without. See the comments in
+  ## templates/daemonset-metricd.yaml and templates/daemonset-statsd.yaml for why metricd and
+  ## statsd need one at all: both swallow every backend error and keep running, so a live
+  ## process says nothing about whether measures are being aggregated or stored.
+  ##
+  ## timeoutSeconds must stay ABOVE the --deadline the templates pass to the script (25s), so
+  ## that an unreachable backend fails the probe with a message the kubelet records on the pod
+  ## instead of the kubelet killing the check halfway through it. hack/validate-gnocchi-
+  ## readiness.py asserts that ordering.
+  ##
+  ## 25s/30s is deliberately generous, and the asymmetry is why. A budget that is too small
+  ## makes a healthy pod permanently unready, which blocks the install; a budget that is too
+  ## large only delays detection of a backend that is already down, and metricd's own
+  ## processing delay is 60s anyway. The script's steady-state cost is dominated by starting
+  ## an interpreter and importing sqlalchemy and tooz, which was measured at ~10s wall inside
+  ## quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble -- but under amd64 EMULATION on
+  ## an arm64 host, where a bare `python3 -c pass` in the same container took 5-23s, and where
+  ## the first run after container start, with a cold page cache, took 30s. None of those
+  ## numbers transfers to a real amd64 node; they only bound the budget from above.
+  ##
+  ## Only the API has a liveness probe, and it is the shallow /healthcheck: a wedged uwsgi
+  ## worker set is repaired by a restart, while a database or ceph pool in another pod is not.
+  probes:
+    api:
+      gnocchi-api:
+        liveness:
+          enabled: true
+          params:
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 30
+            # 60 and not 30, so that a probe which uses its whole 25s budget is not immediately
+            # followed by the next one. Slower endpoint removal costs little here: the backends
+            # are shared, so a broken one breaks every replica equally and dropping one from
+            # the Service achieves nothing. The per-pod failure a restart DOES fix -- wedged
+            # uwsgi workers -- is caught by the liveness probe above every 30s, and by the
+            # --http part of this one within HTTP_TIMEOUT rather than the full deadline.
+            periodSeconds: 60
+            timeoutSeconds: 30
+    metricd:
+      gnocchi-metricd:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 30
+            # metricd's own metric_processing_delay default, so the probe adds roughly one
+            # backend round trip per processing pass per node.
+            periodSeconds: 60
+            timeoutSeconds: 30
+    statsd:
+      gnocchi-statsd:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 30
   replicas:
     api: 1
   lifecycle:
@@ -377,29 +440,63 @@ conf:
     override:
     append:
   enable_paste: True
+  # -- api-paste.ini, mirroring the file gnocchi 4.7 ships in gnocchi/rest/api-paste.ini.
+  ## This had to change for the API to start at all, and the probes in
+  ## templates/deployment-api.yaml depend on it. gnocchi/rest/app.py load_app() asks paste for
+  ## the composite named "gnocchi+" + conf.api.auth_mode, and conf.api.auth_mode is keystone
+  ## here, so it looks up `gnocchi+keystone`. The previous values named the composites
+  ## `gnocchi+auth` / `gnocchi+noauth`, which no version of gnocchi has ever asked for, and
+  ## pointed the two apps at gnocchi.rest.VersionsController and gnocchi.rest.V1Controller,
+  ## which moved to gnocchi.rest.api years ago -- gnocchi/rest/__init__.py is now empty.
+  ##
+  ## Measured in the image this chart installs, not inferred: running
+  ## `uwsgi --http 0.0.0.0:8041 --module gnocchi.rest.wsgi --need-app` in
+  ## quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble with the previously rendered
+  ## api-paste.ini ends in
+  ##   LookupError: No section 'gnocchi+keystone' (prefixed by 'app' or ...) found in config
+  ##   /etc/gnocchi/api-paste.ini
+  ##   unable to load app 0 (mountpoint='') (callable not found or import error)
+  ##   *** no app loaded. GAME OVER ***
+  ## so gnocchi-api could not have served a single request. It never did: the images it used
+  ## before #117 were Docker Registry v1 manifests that no current docker can pull.
+  ##
+  ## /healthcheck is oslo.middleware's healthcheck app and is part of upstream gnocchi's file.
+  ## It sits in the urlmap beside the pecan applications, so it answers without building the
+  ## indexer, the storage or the coordinator -- which is what makes it the right liveness
+  ## target and the wrong readiness target.
   paste:
-    pipeline:main:
-      pipeline: gnocchi+auth
-    composite:gnocchi+noauth:
+    composite:gnocchi+basic:
       use: egg:Paste#urlmap
-      /: gnocchiversions
+      /: gnocchiversions_pipeline
       /v1: gnocchiv1+noauth
-    composite:gnocchi+auth:
+      /healthcheck: healthcheck
+    composite:gnocchi+keystone:
       use: egg:Paste#urlmap
-      /: gnocchiversions
-      /v1: gnocchiv1+auth
+      /: gnocchiversions_pipeline
+      /v1: gnocchiv1+keystone
+      /healthcheck: healthcheck
+    composite:gnocchi+remoteuser:
+      use: egg:Paste#urlmap
+      /: gnocchiversions_pipeline
+      /v1: gnocchiv1+noauth
+      /healthcheck: healthcheck
     pipeline:gnocchiv1+noauth:
       pipeline: gnocchiv1
-    pipeline:gnocchiv1+auth:
+    pipeline:gnocchiv1+keystone:
       pipeline: keystone_authtoken gnocchiv1
+    pipeline:gnocchiversions_pipeline:
+      pipeline: gnocchiversions
     app:gnocchiversions:
       paste.app_factory: gnocchi.rest.app:app_factory
-      root: gnocchi.rest.VersionsController
+      root: gnocchi.rest.api.VersionsController
     app:gnocchiv1:
       paste.app_factory: gnocchi.rest.app:app_factory
-      root: gnocchi.rest.V1Controller
+      root: gnocchi.rest.api.V1Controller
     filter:keystone_authtoken:
-      paste.filter_factory: keystonemiddleware.auth_token:filter_factory
+      use: egg:keystonemiddleware#auth_token
+      oslo_config_project: gnocchi
+    app:healthcheck:
+      use: egg:oslo.middleware#healthcheck
       oslo_config_project: gnocchi
   policy:
     admin_or_creator: 'role:admin or project_id:%(created_by_project_id)s'
@@ -583,6 +680,10 @@ endpoints:
       #     key: null
     path:
       default: null
+      # -- oslo.middleware's healthcheck app, mounted by conf.paste outside the pecan
+      ## application. It proves a uwsgi worker answered and touches no backend, which is what
+      ## the API's liveness probe wants and is exactly why it is not enough for readiness.
+      healthcheck: /healthcheck
     scheme:
       default: 'http'
     port:
