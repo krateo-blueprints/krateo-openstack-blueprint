@@ -4,6 +4,12 @@
 # resolving them all on every PR would be slow and rate-limit-prone. Instead it runs weekly
 # and on demand: a report that catches a pin drifting to a deleted/absent tag without gating
 # every change. Same check as the per-PR preflight in smaller repos; different trigger.
+#
+# This run also checks each image's manifest MEDIA TYPE and fails on a Docker Registry v1
+# manifest, which no current docker can pull. That half cannot move to the per-PR lint job
+# with the immutability check, because unlike immutability it is not a property of the
+# reference text — only the registry knows how it stores the manifest, so it needs the
+# round-trip this job is here to make. See hack/preflight-refs.py and #117 (gnocchi).
 name: preflight-refs
 on:
   schedule:
@@ -17,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
+        with:
+          python-version: "3.12"
       - name: Resolve every chart and image reference
         run: python3 hack/preflight-refs.py .
