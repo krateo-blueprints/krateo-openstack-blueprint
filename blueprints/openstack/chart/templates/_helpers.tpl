@@ -31,32 +31,42 @@
 {{- printf "composition.krateo.io/%s" (include "osh.version" (list $top)) -}}
 {{- end -}}
 
-{{/* Returns "true" if a Composition of <kind>/<name> reports Ready=True. Guarded by
-     osh.crdExists: a `lookup` of an unregistered group/version *errors* (not nil), which
-     would fail the whole render on first install (before the component CRDs exist). The
-     guard makes the umbrella self-bootstrapping - on early reconciles deps simply read as
-     not-ready until their CRDs appear. */}}
-{{- define "osh.ready" -}}
+{{/* Returns "true" if an operator has paused reconciliation of the <kind>/<name> Composition.
+
+     Readiness itself is no longer a creation gate (#110, see compositions.yaml), but one
+     distinction the readiness gate drew still has to survive: a paused dependency. Krateo
+     reports a pause as a REASON on a condition whose status is not False, which is why this
+     cannot be read off the status alone:
+
+       Available                  children healthy              True
+       ReconcileGracefullyPaused  an operator stopped it        True     <- paused
+       ZeroEvidence               never evaluated, no inventory Unknown
+
+     An operator pausing reconciliation is saying "do not act on this", and creating a
+     dependent against it acts on it -- the dependent's db_init and db_sync then run against a
+     component nobody is maintaining, which is the situation the pause exists to prevent (#95).
+     So a paused dependency still blocks CREATION of its dependents, even though a dependency
+     that is merely not yet Ready no longer does.
+
+     ZeroEvidence needs no special case here: it is not a pause, and a dependency that exists
+     but has never been evaluated is exactly the "exists, not yet ready" case that is now
+     allowed through.
+
+     This never withdraws anything. compositions.yaml consults it only through osh.depsExist,
+     whose result is or'd with osh.exists, so pausing a component cannot uninstall the
+     components already built on it (#68).
+
+     Guarded by osh.crdExists for the same reason osh.exists is: a `lookup` of an unregistered
+     group/version *errors* (not nil), which would fail the whole render on first install,
+     before the component CRDs exist. Nothing can be paused before its CRD exists, so the
+     guard's "" is also the honest answer. */}}
+{{- define "osh.paused" -}}
 {{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}
 {{- $r := "" -}}
 {{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)))) "true" -}}
 {{- $o := lookup (include "osh.apiVersion" (list $top)) $kind $top.Release.Namespace $name -}}
 {{- if $o -}}{{- range ($o.status.conditions | default list) -}}
-{{- /* Reason, not just status. Two of the five conditions this can see carry a status that
-       is not False, and they mean opposite things:
-
-         Available                  children healthy              True
-         ReconcileGracefullyPaused  an operator stopped it        True     <- not ready
-         ZeroEvidence               never evaluated, no inventory Unknown  <- not ready
-
-       An operator pausing reconciliation is saying "do not act on this", and emitting a
-       dependent against it acts on it -- the dependent then reconciles against a component
-       nobody is maintaining, which is the situation the pause exists to prevent.
-
-       ZeroEvidence was already refused, but by luck: Unknown is not True, and a truthiness
-       test happens to reject it. The gate asked "is this true" rather than reasoning about
-       which conditions mean ready, and one of the five needed a distinction it did not make. */ -}}
-{{- if and (eq .type "Ready") (eq (.status | toString) "True") (ne (.reason | toString) "ReconcileGracefullyPaused") -}}{{- $r = "true" -}}{{- end -}}
+{{- if and (eq .type "Ready") (eq (.reason | toString) "ReconcileGracefullyPaused") -}}{{- $r = "true" -}}{{- end -}}
 {{- end -}}{{- end -}}
 {{- end -}}
 {{- $r -}}
@@ -82,7 +92,6 @@
 {{- $found -}}
 {{- end -}}
 
-{{/* "true" if every dependency Composition (by component name) is Ready. */}}
 {{/* Returns "true" if the component's own CR exists at all -- Ready or not.
 
      This is what makes the dependency gate a precondition for CREATION rather than an
@@ -107,12 +116,30 @@
 {{- $r -}}
 {{- end -}}
 
-{{- define "osh.depsReady" -}}
+{{/* "true" if every dependency Composition (by component name) EXISTS and none of them is
+     paused. This is the creation gate; compositions.yaml's header says why it asks about
+     existence rather than readiness (#110).
+
+     Existence still ORDERS creation, which is the property worth keeping: a dependency's
+     Composition has to have been created before any of its dependents is, so the install
+     still unlocks in levels (mariadb, memcached, rabbitmq, openvswitch first; then keystone;
+     then everything standing on keystone) and a dependency that is never created still holds
+     its dependents back, visibly. What it no longer does is WAIT for the dependency to report
+     Ready -- which is what deadlocked, because a component's readiness can require a workload
+     that only exists once one of its own dependents has been created.
+
+     This predicate is deliberately a separate name from the osh.depsReady it replaced, rather
+     than a redefinition of it: which semantics the gate is in says everything about how an
+     install progresses, and a reader has to be able to see which one is in play from the call
+     site. Nothing consults readiness any more, so no readiness predicate is kept -- a dead
+     helper encoding the semantics that deadlocked is an invitation to restore it. */}}
+{{- define "osh.depsExist" -}}
 {{- $top := index . 0 -}}{{- $deps := index . 1 -}}{{- $comps := index . 2 -}}
 {{- $all := "true" -}}
 {{- range $d := $deps -}}
   {{- $kind := "" -}}{{- range $c := $comps -}}{{- if eq $c.name $d -}}{{- $kind = $c.kind -}}{{- end -}}{{- end -}}
-  {{- if ne (include "osh.ready" (list $top $kind $d)) "true" -}}{{- $all = "" -}}{{- end -}}
+  {{- if ne (include "osh.exists" (list $top $kind $d)) "true" -}}{{- $all = "" -}}{{- end -}}
+  {{- if eq (include "osh.paused" (list $top $kind $d)) "true" -}}{{- $all = "" -}}{{- end -}}
 {{- end -}}
 {{- $all -}}
 {{- end -}}

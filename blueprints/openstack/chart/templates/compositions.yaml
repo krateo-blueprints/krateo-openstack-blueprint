@@ -1,10 +1,40 @@
-{{- /* Step 2: emit each Composition once its CRD exists and all its dependency
-       Compositions report Ready=True. On the first pass only zero-dependency components
-       render; later passes unlock the rest in order.
+{{- /* Step 2: emit each Composition once its CRD exists and all its dependency Compositions
+       EXIST. On the first pass only zero-dependency components render; later passes unlock the
+       rest in order, one level of the DAG per reconcile.
+
+       Existence, not readiness. This gate used to wait for each dependency to report
+       Ready=True, and that deadlocks the whole compute tier (#110). openstack-helm's charts
+       order their own startup with kubernetes-entrypoint, and those waits do not follow this
+       DAG: neutron's dhcp, l3 and metadata agents wait for Service nova-api before they will
+       start, which is upstream's own `dependencies.static.{dhcp,l3,metadata}.services` and is
+       byte-identical in upstream master. Upstream does not deadlock on it because it installs
+       every chart at once and the agents simply sit in Init until nova appears. Readiness
+       gating turned that soft startup wait into a hard creation block: neutron cannot become
+       Ready until nova-api exists, nova's Composition was not created until neutron was Ready,
+       and so nova-api never existed. Measured on a 4-node GKE install of profile=full --
+       neutron stuck at "3 of 73 managed children are not ready", no nova workload at all, and
+       ironic and octavia blocked behind the same pair.
+
+       The cycle is real but it is not in the declared DAG, which is acyclic and stays that
+       way (hack/validate-component-dag.py). It exists only in the runtime readiness dimension,
+       which is what hack/validate-readiness-deadlock.py gates: a dependency gate that waits on
+       a RUNTIME condition of its dependency can be closed by the dependency's own charts, and
+       existence is the one condition about a dependency that only this umbrella can satisfy.
+
+       What is kept: creation is still ORDERED. A dependency's Composition must exist before any
+       of its dependents is created, so the install still unlocks level by level, and a
+       dependency that is never created still visibly holds its dependents back. What is given
+       up: the levels now advance one reconcile at a time instead of one readiness wait at a
+       time, so all 34 releases land within a few reconciles and install concurrently, and the
+       umbrella no longer sequences a dependent behind a WORKING dependency -- only behind a
+       created one. Startup ordering is then entirely the charts' own entrypoint waits, exactly
+       as upstream intends; and where a declared dep has no matching entrypoint wait
+       (nova -> placement, for instance) nothing sequences it at all and the dependent retries
+       against it at runtime.
 
        `or $exists` makes the dependency check a precondition for creation, not a condition
        for staying alive. The lookup is re-evaluated every reconcile, so without it a
-       dependency going briefly unready stops the dependent rendering -- and a release that
+       dependency that disappears stops the dependent rendering -- and a release that
        stops rendering is uninstalled. See #68: a MariaDB readiness blip deleted a running
        Keystone. Deselection still removes a component, because `has $c.name $sel` below is
        checked first and independently. */ -}}
@@ -12,7 +42,7 @@
 {{- range $c := .Values.components }}
 {{- if has $c.name $sel }}
 {{- $crd := include "osh.crdExists" (list $c.kind (include "osh.version" (list $))) }}
-{{- $deps := include "osh.depsReady" (list $ $c.deps $.Values.components) }}
+{{- $deps := include "osh.depsExist" (list $ $c.deps $.Values.components) }}
 {{- $exists := include "osh.exists" (list $ $c.kind $c.name) }}
 {{- if and (eq $crd "true") (or (eq $deps "true") (eq $exists "true")) }}
 {{- $ov := (index ($.Values.componentValues | default dict) $c.name) | default dict }}

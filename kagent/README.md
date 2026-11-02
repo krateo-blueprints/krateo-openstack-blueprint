@@ -5,9 +5,11 @@ subject-matter expert on this blueprint:
 
 - The per-component architecture: ONE Krateo blueprint per OpenStack-Helm
   chart (34 of them) plus the `Openstack` umbrella orchestrator.
-- The umbrella's two-pass, readiness-gated, **self-bootstrapping** engine —
-  `osh.crdExists` + `osh.depsReady` -> `osh.ready` gate each component
-  Composition via a re-evaluated Helm `lookup`.
+- The umbrella's two-pass, existence-gated, **self-bootstrapping** engine —
+  `osh.crdExists` + `osh.depsExist` -> `osh.exists` / `osh.paused` gate each
+  component Composition via a re-evaluated Helm `lookup`. Existence and not
+  readiness, because readiness gating deadlocks the compute tier against
+  openstack-helm's own `kubernetes-entrypoint` waits (#110).
 - The `profile` / `enabled` (transitive dependency closure) /
   `componentValues` (typed per-component passthrough) operator surface.
 - The comparison against `kolla-ansible` (see

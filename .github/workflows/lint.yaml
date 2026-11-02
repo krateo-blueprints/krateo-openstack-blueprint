@@ -182,6 +182,21 @@ jobs:
       - name: Component DAG must be closed, acyclic and renderable
         run: python3 hack/validate-component-dag.py .
 
+      # The gate above proves the DECLARED graph is acyclic, and that is not enough: the compute
+      # tier of a 4-node GKE install of profile=full deadlocked while it was (#110). neutron's
+      # agents will not start until Service nova-api exists -- upstream openstack-helm's own
+      # kubernetes-entrypoint wait, unchanged here -- so with creation gated on dependency
+      # READINESS, neutron could not become Ready until nova existed and nova was not created
+      # until neutron was Ready. The cycle ran through two dimensions at once and neither gate
+      # that looks at one of them could see it. Nothing reported an error: 3 of neutron's 73
+      # managed children were simply never ready.
+      #
+      # This renders all 34 charts and builds the graph of every wait in them, so it also fails
+      # if the existence gate is reverted in either file -- the fix and its guard are the same
+      # change.
+      - name: No component may deadlock on a dependent's readiness
+        run: python3 hack/validate-readiness-deadlock.py .
+
   image-tags:
     # Gating, and offline. A rebuildable tag -- `latest`, or any variant containing it --
     # resolves forever and may resolve to different bytes each time, so `preflight-refs`
