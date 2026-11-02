@@ -12,6 +12,50 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
+{{/*
+statsd had no probe of any kind either, and it cannot usefully have an HTTP or tcpSocket one:
+gnocchi/statsd.py binds a DATAGRAM endpoint (asyncio create_datagram_endpoint, with a
+`TODO(jd) Add TCP support` beside it), so there is no TCP listener on 8125 to connect to and no
+reply for a sender to inspect.
+
+What can be false while the process is perfectly alive is the write path. gnocchi 4.7.0's
+Stats.flush() is:
+
+    for metric_name, measure in itertools.chain(...):
+        try:
+            ...
+            self.incoming.add_measures(metric.id, (measure,))
+        except Exception as e:
+            LOG.error("Unable to add measure %s: %s", metric_name, e)
+
+Per measure, caught and logged. A statsd whose measure store or indexer has gone keeps
+accepting every datagram and discards every one, every flush_delay seconds, forever -- and UDP
+gives the sender nothing back, so neither end can tell. The socket stays bound, the process
+stays up, the DaemonSet stays Ready.
+
+So the probe checks the two backends statsd actually writes through. Both are used by
+Stats.__init__ and Stats.flush(): the incoming/measure store via add_measures, and the indexer
+via create_metric and get_archive_policy_for_metric.
+
+Not --coordination: statsd never builds a coordinator (unlike metricd and the API), so making
+its readiness depend on one would report a failure it does not have.
+
+Readiness and NOT liveness, and no startupProbe, for the same reason as metricd: an unreachable
+database or measure store is not repaired by restarting this container, so a restarting probe
+would convert a visible unready pod into a CrashLoop and fix nothing, and a startupProbe
+suppresses readiness until it passes.
+*/}}
+{{- define "statsdReadinessProbeTemplate" }}
+exec:
+  command:
+    - python3
+    - /tmp/gnocchi-probe.py
+    - --deadline
+    - "25"
+    - --indexer
+    - --storage
+{{- end }}
+
 {{- if .Values.manifests.daemonset_statsd }}
 {{- $envAll := . }}
 
@@ -74,6 +118,7 @@ spec:
           ports:
             - name: gn-stats
               containerPort: {{ tuple "metric_statsd" "internal" "statsd" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+{{ dict "envAll" $envAll "component" "statsd" "container" "gnocchi-statsd" "type" "readiness" "probeTemplate" (include "statsdReadinessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
           volumeMounts:
             - name: pod-tmp
               mountPath: /tmp
@@ -96,6 +141,10 @@ spec:
             - name: gnocchi-bin
               mountPath: /tmp/gnocchi-statsd.sh
               subPath: gnocchi-statsd.sh
+              readOnly: true
+            - name: gnocchi-bin
+              mountPath: /tmp/gnocchi-probe.py
+              subPath: gnocchi-probe.py
               readOnly: true
             - name: etcceph
               mountPath: /etc/ceph

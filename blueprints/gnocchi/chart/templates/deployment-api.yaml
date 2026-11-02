@@ -12,6 +12,70 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
+{{/*
+Liveness is the shallow check, and deliberately only that.
+
+/healthcheck is oslo.middleware's healthcheck app, mounted by api-paste.ini outside the pecan
+application: it proves a uwsgi WORKER executed Python and answered, and it touches neither the
+indexer, the measure store nor the coordinator. That is exactly what a restarting probe should
+test here. A wedged or dead worker set IS repaired by restarting the container, and a backend
+outage is NOT -- so the backend checks belong in readiness, below, where they cannot CrashLoop
+a pod over something that lives in another pod.
+
+It must be an HTTP request and not a tcpSocket, which is what this container had. The API is
+served by `uwsgi --http`, and uwsgi's HTTP router is not a worker: the router accepts the TCP
+connection itself and only then hands it on. A tcpSocket probe on 8041 therefore succeeds
+while every worker is wedged -- the same mistake as pointing liveness at uwsgi's stats port
+1717, which reports on the master and answers 200 with every worker stuck.
+
+The port is looked up as "internal", matching what bin/_gnocchi-api.sh.tpl tells uwsgi to bind.
+The previous probe looked it up as "service", which resolves to the same number today only
+because endpoints.metric.port.api has no "service" key and falls back to default.
+*/}}
+{{- define "apiLivenessProbeTemplate" }}
+httpGet:
+  path: {{ tuple "metric" "healthcheck" "internal" . | include "helm-toolkit.endpoints.keystone_endpoint_path_lookup" }}
+  scheme: {{ tuple "metric" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" | upper }}
+  port: {{ tuple "metric" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+{{- end }}
+
+{{/*
+Readiness, unlike liveness, also requires every backend the API cannot serve a request without.
+
+The API answers /healthcheck from oslo.middleware before pecan is ever reached, so an API whose
+indexer, measure store or coordinator is gone still answers it 200 -- while every /v1 request
+returns 500. That is the same shape as keystone's KeysNotFound (issue #99) and glance's
+unwritable store (issue #110): a Ready that the dependency gate, the Composition and the
+umbrella all read as "safe to build on", and that means nothing.
+
+All three are hard dependencies of the gnocchi API, not optional extras. gnocchi/rest/app.py
+GnocchiHook.on_route() lazily builds the coordinator, the storage, the indexer and the incoming
+driver for EVERY request, with the comment "We don't care about raise error here, if something
+fail, this will just raise a 500" -- and the coordinator is built through
+metricd.get_coordinator_and_start, which is wrapped in retry_on_exception_and_log and so retries
+forever rather than failing. A gnocchi API with no coordination backend does not error; it
+hangs.
+
+The --http check stays in readiness as well as liveness: the backend checks run in a separate
+process, so without it a readiness pass would say nothing about whether a worker can answer.
+
+--deadline is below the probe's timeoutSeconds in values, so the script fails itself with a
+message the kubelet records rather than being killed mid-check.
+*/}}
+{{- define "apiReadinessProbeTemplate" }}
+exec:
+  command:
+    - python3
+    - /tmp/gnocchi-probe.py
+    - --deadline
+    - "25"
+    - --http
+    - {{ printf "%s://127.0.0.1:%s%s" (tuple "metric" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup") (tuple "metric" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup") (tuple "metric" "healthcheck" "internal" . | include "helm-toolkit.endpoints.keystone_endpoint_path_lookup") | quote }}
+    - --indexer
+    - --storage
+    - --coordination
+{{- end }}
+
 {{- if .Values.manifests.deployment_api }}
 {{- $envAll := . }}
 
@@ -86,9 +150,8 @@ spec:
           ports:
             - name: gn-api
               containerPort: {{ tuple "metric" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-          readinessProbe:
-            tcpSocket:
-              port: {{ tuple "metric" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+{{ dict "envAll" $envAll "component" "api" "container" "gnocchi-api" "type" "readiness" "probeTemplate" (include "apiReadinessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
+{{ dict "envAll" $envAll "component" "api" "container" "gnocchi-api" "type" "liveness" "probeTemplate" (include "apiLivenessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
           volumeMounts:
             - name: pod-tmp
               mountPath: /tmp
@@ -123,6 +186,10 @@ spec:
             - name: gnocchi-bin
               mountPath: /tmp/gnocchi-api.sh
               subPath: gnocchi-api.sh
+              readOnly: true
+            - name: gnocchi-bin
+              mountPath: /tmp/gnocchi-probe.py
+              subPath: gnocchi-probe.py
               readOnly: true
 {{ if $mounts_gnocchi_api.volumeMounts }}{{ toYaml $mounts_gnocchi_api.volumeMounts | indent 12 }}{{ end }}
       volumes:

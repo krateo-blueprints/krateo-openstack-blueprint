@@ -49,6 +49,27 @@ divergences:
       - file: values.yaml
         present: openstack.kolla/gnocchi-api
         why: The maintained replacement.
+      - file: values.yaml
+        absent: "composite:gnocchi+auth"
+        why: >-
+          Upstream's conf.paste names its composites gnocchi+auth / gnocchi+noauth, which no
+          version of gnocchi has ever asked for: gnocchi/rest/app.py load_app() looks up
+          "gnocchi+" + conf.api.auth_mode, which is gnocchi+keystone here. Measured in
+          quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble: with upstream's names,
+          `uwsgi --need-app` ends in `LookupError: No section 'gnocchi+keystone'` and
+          `*** no app loaded. GAME OVER ***`, so the API serves nothing.
+      - file: values.yaml
+        present: "composite:gnocchi+keystone"
+        why: >-
+          The composite gnocchi actually asks for. hack/validate-gnocchi-readiness.py also
+          asserts it in the RENDERED api-paste.ini, which is the form the container reads.
+      - file: values.yaml
+        absent: gnocchi.rest.VersionsController
+        why: >-
+          Upstream points the paste apps at gnocchi.rest.VersionsController and
+          gnocchi.rest.V1Controller. gnocchi/rest/__init__.py is empty in gnocchi 4.7; the
+          controllers are in gnocchi.rest.api, and paste resolves the root at app load, so
+          restoring upstream's names breaks the API even with the composites fixed.
 
   # The uwsgi stats port as a liveness target, in the four charts that shipped it. The values
   # half of each fix is protected by revendor's three-way merge; the template half is not, and

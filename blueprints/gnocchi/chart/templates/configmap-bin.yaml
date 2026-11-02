@@ -46,6 +46,8 @@ data:
 {{ tuple "bin/_gnocchi-statsd.sh.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
   gnocchi-resources-cleaner.sh: |
 {{ tuple "bin/_gnocchi-resources-cleaner.sh.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
+  gnocchi-probe.py: |
+{{ tuple "bin/_gnocchi-probe.py.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
   ks-service.sh: |
 {{- include "helm-toolkit.scripts.keystone_service" . | indent 4 }}
   ks-endpoints.sh: |

@@ -144,6 +144,18 @@ jobs:
       - name: Skyline's nginx readiness must prove it can serve
         run: python3 hack/validate-skyline-readiness.py .
 
+      # The quietest version of the same failure. gnocchi-metricd and gnocchi-statsd had no
+      # probe at all, and both swallow every backend error and loop forever
+      # (MetricProcessBase.run and Stats.flush in gnocchi 4.7.0), so a metricd that cannot
+      # reach its indexer, its measure store or its coordinator reports Ready and aggregates
+      # nothing while measures are still accepted -- with no user-facing error at any point.
+      # gnocchi-api had a bare tcpSocket on 8041, which `uwsgi --http` answers in its HTTP
+      # router rather than in a worker: measured, a TCP connect succeeds with both workers
+      # SIGSTOPped. Also asserts api-paste.ini still names the composite gnocchi asks for,
+      # without which the API loads no app at all. See issues #110 and #117.
+      - name: Gnocchi probes must check its backends
+        run: python3 hack/validate-gnocchi-readiness.py .
+
       # Renders every chart and reads the ports its probes actually reach. uwsgi's stats socket
       # is served by the MASTER process, which never imports the application and never handles a
       # request, so with stats-http it answers 200 with every worker wedged -- a liveness probe
