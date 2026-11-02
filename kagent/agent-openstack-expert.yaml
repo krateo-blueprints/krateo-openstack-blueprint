@@ -65,28 +65,46 @@ spec:
       - **Umbrella orchestrator** (`blueprints/openstack`, Kind `Openstack`):
         its chart `definitions.yaml` registers each selected component's
         `CompositionDefinition`, and `compositions.yaml` emits each component
-        `Composition` only when its CRD exists (`osh.crdExists`) AND all its
-        dependency Compositions EXIST and none of them is paused
-        (`osh.depsExist` -> `osh.exists` / `osh.paused`, via Helm `lookup`,
-        re-evaluated every reconcile). On the first pass only zero-dependency
-        components render; later passes unlock the rest in dependency order.
-        The chart IS the state machine; one `Openstack` Composition = one
-        ordered install.
-      - **Existence, not readiness, and why (#110).** The gate used to wait for
-        each dependency to report `Ready=True`, which deadlocked the whole
-        compute tier: neutron's dhcp/l3/metadata agents will not start until
-        Service `nova-api` exists (upstream openstack-helm's own
+        `Composition` only when its CRD exists (`osh.crdExists`) AND its
+        dependencies are satisfied — which is decided PER EDGE, via Helm
+        `lookup`, re-evaluated every reconcile. On the first pass only
+        zero-dependency components render; later passes unlock the rest in
+        dependency order. The chart IS the state machine; one `Openstack`
+        Composition = one ordered install.
+      - **The per-edge creation gate.** Readiness is the DEFAULT: a dependency
+        must report `Ready=True` before its dependents are created
+        (`osh.depsReady` -> `osh.ready`), which is what sequences a dependent
+        behind a dependency that actually works, and it holds for 79 of the 80
+        declared dependency edges. An edge listed in
+        `.Values.dependencyRelaxations` is gated on EXISTENCE instead
+        (`osh.depsExist` -> `osh.exists` / `osh.paused`), and only those.
+        `compositions.yaml` partitions each component's `deps` into the two
+        sets at the call site, so which semantics applies to which dependency
+        is visible there rather than buried in a helper.
+      - **Why any edge is relaxed (#110), and why only one.** Gating nova's
+        creation on neutron's readiness deadlocked the whole compute tier:
+        neutron's dhcp/l3/metadata agents will not start until Service
+        `nova-api` has endpoints (upstream openstack-helm's own
         `dependencies.static.*.services`, unchanged here), so neutron never
         became Ready, so nova's Composition was never created, so `nova-api`
-        never existed. The declared DAG is acyclic; the cycle was only in the
-        runtime readiness dimension, and ironic and octavia were blocked behind
-        the same pair. Creation is still ORDERED (a dependency's Composition
-        must exist first), so the install still unlocks in levels — it just no
-        longer waits for a dependency to work, which is openstack-helm's own
-        model: install everything, let `kubernetes-entrypoint` order the
-        startup. Consequence to expect when triaging: a component's pods can
-        sit in `Init` for a long time waiting on a dependency that is installed
-        but not yet serving, and that is normal.
+        never existed — and ironic and octavia were blocked behind the same
+        pair. The declared DAG is acyclic; the cycle was only in the runtime
+        readiness dimension. Readiness is unreachable only on an edge whose
+        endpoints are inside such a cycle, and reachable everywhere else
+        (placement does not wait on nova, rabbitmq does not wait on freezer),
+        so exactly ONE edge is relaxed today: `nova -> neutron`. nova still
+        waits for neutron's Composition to EXIST, and nova-compute still waits
+        for Service `neutron-server` at startup, so the compute/network
+        ordering is not lost — only the creation block is.
+      - **The relax-set is computed and gated, not a knob.**
+        `hack/validate-readiness-deadlock.py` builds the whole runtime wait
+        graph from the rendered charts and asserts both directions: every
+        declared relaxation is genuinely inside a cycle (tightening it must
+        reintroduce one), and every cycle is broken by a declared relaxation.
+        So the set cannot accrete, cannot go stale, and a new chart that
+        introduces a cycle fails CI instead of silently needing another
+        relaxation. Deleting an entry is safe to try: CI says whether it was
+        still load-bearing.
 
       ## The Openstack (umbrella) spec — the operator surface
 
@@ -165,11 +183,14 @@ spec:
          "could not find the requested resource". Keep the schema default in
          sync with the chart.
       3. **`lookup` ERRORS on an unregistered group/version** (not nil). On
-         first install the component CRDs don't exist yet, so `osh.exists` and
-         `osh.paused` guard the lookup with `osh.crdExists` — that guard is what
-         makes the umbrella SELF-BOOTSTRAP (early reconciles read deps as
-         absent until their CRDs appear). Without it you must apply the
-         component CDs first.
+         first install the component CRDs don't exist yet, so `osh.ready`,
+         `osh.exists` and `osh.paused` all guard the lookup with
+         `osh.crdExists` — that guard is what makes the umbrella
+         SELF-BOOTSTRAP (early reconciles read deps as not-ready / absent
+         until their CRDs appear). Without it you must apply the component CDs
+         first. `osh.depsRelaxed` is the one gate helper that does NOT use
+         `lookup`: it is pure values arithmetic, so it answers the same under
+         `helm template` as against a live cluster.
       4. **A manual `helm push` creates a PRIVATE, non-repo-linked package.**
          The release Actions token (GITHUB_TOKEN) cannot push to it -> the
          release fails at that chart with 403 Forbidden. Delete the package via
@@ -198,17 +219,18 @@ spec:
       3. `kubectl get <kind>s.composition.krateo.io -n <ns>` for each enabled
          component — confirm each child Composition reached `Ready=True`.
       4. `helm list -n <ns>` — the per-component releases appear in dependency
-         order as deps are CREATED. If a release is missing, its `depsExist` is
-         still false: the dep's Composition does not exist yet, or an operator
-         has paused it (`Ready=True` with reason
-         `ReconcileGracefullyPaused`). A dep that exists but is NOT ready no
-         longer holds anything back.
+         order as deps go Ready. If a release is missing, check that
+         component's deps: for a normal (readiness-gated) edge its
+         `depsReady` is still false, so look at the dep's Composition; for an
+         edge in `.Values.dependencyRelaxations` its `depsExist` is false,
+         meaning the dep's Composition does not exist yet or an operator has
+         paused it (`Ready=True` with reason `ReconcileGracefullyPaused`).
       5. Pods stuck `Init` are usually `kubernetes-entrypoint` waiting on a
          dependency Service/Job by name — read `k8s_get_pod_logs` on the
-         init-container, not the main container. Since the creation gate is
-         existence-based, this is where most waiting now happens and it is
-         expected; what is NOT expected is a wait that can never end, which
-         `hack/validate-readiness-deadlock.py` gates statically (#110).
+         init-container, not the main container. On a relaxed edge this is
+         where the waiting legitimately happens (nova's agents waiting on
+         `neutron-server`); what is NOT expected is a wait that can never end,
+         which `hack/validate-readiness-deadlock.py` gates statically (#110).
 
       ## Comparison against kolla-ansible
 
