@@ -27,6 +27,39 @@ httpGet:
   port: {{ tuple "network" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
 {{- end }}
 {{- end }}
+{{/*
+Liveness reaches the API port, not the uwsgi stats port.
+
+Upstream's `pod.probes.server.server.liveness.port` exists to repoint this probe at
+0.0.0.0:1717, which is `stats` with `stats-http = true` in conf.neutron_api_uwsgi -- uwsgi's
+statistics socket, served by the MASTER process. The master binds the listening socket, forks
+workers and reaps them; it never imports neutron and never handles a request. So that endpoint
+answers 200 with a JSON blob whenever the master is alive: with the worker wedged, with the
+worker stopped, and with the application failing to import. There is no state of the service in
+which it says no, which makes liveness STRICTLY WEAKER than the readiness probe above -- and
+liveness is the probe that restarts things. The failure shape is a hung neutron-server that
+presents as endpoints empty, pod Running, zero restarts: readiness correctly withdraws it from
+the Service while liveness reports healthy forever and nothing restarts it. Measured in
+quay.io/airshipit/neutron:2026.1-ubuntu_noble, in the two states that matter: with the
+application failing to import entirely ("unable to load app 0 (mountpoint='')"), :1717 answered
+200 while :9696 answered 500; and with the single worker SIGSTOPped, :1717 answered 200 while
+:9696 timed out. The knob only ever selected that port, so it is removed rather than defaulted
+-- an override cannot reintroduce what the template no longer reads. See issue #110.
+
+GET / and not /healthcheck, because neutron mounts no healthcheck middleware. api-paste.ini maps
+`/` to the neutronversions_composite pipeline, whose keystone variant is
+`cors http_proxy_to_wsgi neutronversions` -- no authtoken, so no token is needed and keystone is
+never contacted -- and neutron.pecan_wsgi.app:versions_factory builds the version-discovery
+document without reaching the database or rabbit. A worker must nevertheless run the request,
+which is exactly the property liveness wants.
+
+Liveness is therefore identical in shape to readiness, and differs only in its params, which
+come from pod.probes.server.server in values: readiness reports promptly, liveness restarts only
+after four minutes of unbroken failure. That separation is the point. conf uwsgi sets
+processes = 1, so a single in-flight request blocks the static document too, and a worker
+saturated by a slow database is not a wedged one. Nothing here reaches a dependency, so a
+database, keystone or rabbit outage cannot turn into a crashloop across every replica.
+*/}}
 {{- define "serverLivenessProbeTemplate" }}
 {{- if .Values.manifests.certificates }}
 exec:
@@ -39,11 +72,7 @@ initialDelaySeconds: 30
 httpGet:
   scheme: {{ tuple "network" "service" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" | upper }}
   path: /
-  {{- if .Values.pod.probes.server.server.liveness.port }}
-  port: {{ .Values.pod.probes.server.server.liveness.port }}
-  {{ else }}
   port: {{ tuple "network" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-  {{- end}}
 {{- end }}
 {{- end }}
 

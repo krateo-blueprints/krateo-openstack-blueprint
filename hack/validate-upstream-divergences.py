@@ -23,10 +23,16 @@ def strip_comments(text, suffix):
     """Remove comment lines so a divergence described IN a comment cannot satisfy or trip a check.
 
     This repo has produced false findings from careless text transformation before, so this only
-    drops whole comment lines and never rewrites code. Shell and YAML share '#'; Go templates in
-    .tpl files additionally use {{/* ... */}}, which is handled by dropping those blocks whole.
+    drops whole comment lines and never rewrites code. Shell and YAML share '#'; Go templates
+    additionally use {{/* ... */}}, which is handled by dropping those blocks whole.
+
+    Go-template comments are stripped from .yaml as well as .tpl, because a helm template IS a
+    .yaml file -- templates/deployment-api.yaml and friends. Handling only .tpl left exactly the
+    files a divergence is most likely to be explained in: issue #110's entries name
+    `pod.probes.<svc>.liveness.port` in the {{/* */}} block above the probe they removed it from,
+    which under the old rule satisfied its own `absent` assertion and could never fail.
     """
-    if suffix == ".tpl":
+    if suffix in (".tpl", ".yaml", ".yml"):
         text = re.sub(r"\{\{-?\s*/\*.*?\*/\s*-?\}\}", "", text, flags=re.S)
     out = []
     for line in text.splitlines():

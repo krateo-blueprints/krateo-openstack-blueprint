@@ -108,17 +108,47 @@ spec:
               port: {{ tuple "placement" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
             initialDelaySeconds: 5
             periodSeconds: 10
+          {{- /*
+          Liveness reaches the API port, not the uwsgi stats port.
+
+          Upstream's `pod.probes.placement.api.liveness.port` exists to repoint this probe at
+          0.0.0.0:1717, which is `stats` with `stats-http = true` in conf.placement_api_uwsgi --
+          uwsgi's statistics socket, served by the MASTER process. The master binds the listening
+          socket, forks workers and reaps them; it never imports placement and never handles a
+          request. So that endpoint answers 200 with a JSON blob whenever the master is alive:
+          with the worker wedged, with the worker stopped, and with the application failing to
+          import. There is no state of the service in which it says no, which makes liveness
+          STRICTLY WEAKER than the readiness probe directly above -- and liveness is the probe
+          that restarts things. Measured in quay.io/airshipit/placement:2026.1-ubuntu_noble: with
+          the single worker SIGSTOPped, :1717 still answered 200 while :8778 timed out.
+
+          The whole knob only ever selected that port, so it is removed rather than defaulted:
+          an override cannot reintroduce what the template no longer reads. See issue #110.
+
+          GET / and not /healthcheck, because placement mounts no healthcheck middleware. It is
+          served by placement.handlers.root:home, which assembles the version-discovery document
+          from microversion constants and touches neither the database nor keystone; and
+          placement.auth.PlacementAuthProtocol.__call__ short-circuits auth_token for
+          PATH_INFO in ('/', ''), so no token is needed and keystone is never contacted. A
+          worker must nevertheless run the request, which is exactly the property liveness wants.
+
+          Timing is deliberately slack, and much slacker than readiness. conf uwsgi sets
+          processes = 1, so a single in-flight request blocks the static document too: during a
+          database slowdown a saturated worker can miss a probe without being wedged. Readiness
+          stays at 5s/10s so traffic is withdrawn promptly and visibly; liveness restarts only
+          after 60s + 6 x 30s = four minutes in which no attempt returned a static document.
+          Nothing here reaches a dependency, so a database, keystone or rabbit outage cannot
+          turn into a crashloop across every replica.
+          */}}
           livenessProbe:
             httpGet:
               scheme: {{ tuple "placement" "service" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" | upper }}
               path: /
-              {{- if .Values.pod.probes.placement.api.liveness.port }}
-              port: {{ .Values.pod.probes.placement.api.liveness.port }}
-              {{- else }}
               port: {{ tuple "placement" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-              {{- end }}
-            initialDelaySeconds: 5
-            periodSeconds: 10
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
           volumeMounts:
             - name: pod-tmp
               mountPath: /tmp

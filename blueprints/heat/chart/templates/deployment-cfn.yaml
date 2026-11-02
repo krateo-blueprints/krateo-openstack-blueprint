@@ -89,16 +89,31 @@ spec:
               scheme: {{ tuple "cloudformation" "service" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" | upper }}
               path: /
               port: {{ tuple "cloudformation" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+          {{- /*
+          Liveness reaches the CFN API port, not the uwsgi stats port. Same defect and same
+          reasoning as deployment-api.yaml, one API along: `pod.probes.cfn.heat_cfn.liveness.port`
+          only ever selected 0.0.0.0:1717, which is `stats` with `stats-http = true` in
+          conf.heat_api_cfn_uwsgi -- uwsgi's master-served statistics socket, which answers 200
+          whether or not a worker is alive, so liveness could never be false and a wedged
+          heat-cfn was never restarted. The knob is removed, not defaulted. See issue #110.
+
+          GET / short-circuits at the `cfnversionnegotiation` filter, which sits before
+          `ec2authtoken` and `authtoken` in the heat-api-cfn pipeline, so the version document
+          needs no token, no database and no rabbit -- only a worker to serve it.
+
+          Timing matches deployment-api.yaml: processes = 1 means a busy worker is not a wedged
+          one, so liveness restarts only after four minutes of unbroken failure while readiness
+          keeps reporting promptly.
+          */}}
           livenessProbe:
             httpGet:
               scheme: {{ tuple "cloudformation" "service" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" | upper }}
               path: /
-              {{- if .Values.pod.probes.cfn.heat_cfn.liveness.port }}
-              port: {{ .Values.pod.probes.cfn.heat_cfn.liveness.port }}
-              {{- else }}
               port: {{ tuple "cloudformation" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-              {{- end }}
-            initialDelaySeconds: 10
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
           volumeMounts:
             - name: pod-tmp
               mountPath: /tmp

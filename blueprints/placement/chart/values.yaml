@@ -356,11 +356,11 @@ pod:
       placement_db_sync:
         volumeMounts: null
         volumes: null
-  probes:
-    placement:
-      api:
-        liveness:
-          port: 1717
+  # pod.probes is absent deliberately. Upstream's only entry here was
+  # placement.api.liveness.port: 1717, the uwsgi stats socket, which answers 200 whenever the
+  # uwsgi MASTER is alive and so made liveness unable to fail -- see the comment on the liveness
+  # probe in templates/deployment.yaml and issue #110. templates/deployment.yaml no longer reads
+  # the key, so there is nothing left for this section to configure.
   replicas:
     api: 1
   resources:
