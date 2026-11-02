@@ -12,6 +12,117 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
+{{/*
+Liveness is the static handler, deliberately not /.
+
+Apache serves /static straight out of the collected asset tree -- `Alias /static
+/var/www/html/horizon` with `SetHandler static`, both in conf.horizon.apache -- so the request
+never enters Django and depends on nothing outside this container. That is the whole requirement
+for a probe that restarts the container, and it still proves apache2 is accepting connections and
+a worker is serving them, which is the failure a restart repairs.
+
+GET / cannot be used here, measured in the real image: horizon's own
+SimultaneousSessionsMiddleware calls caches['default'].get() and .set() on EVERY request, so with
+memcached away / answers 500, not 200. A liveness probe on it would therefore turn a memcached
+outage into a rolling restart of every horizon replica, and the restart would repair nothing --
+kubernetes-entrypoint then holds the new pod in Init until memcached returns, having paid for a
+collectstatic and a compress again. That condition belongs in readiness, and it is there, because
+readiness does fetch /.
+*/}}
+{{- define "dashboardProbeTemplate" }}
+httpGet:
+  scheme: {{ tuple "dashboard" "internal" "web" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" | upper }}
+  path: /static/dashboard/img/favicon.ico
+  port: {{ tuple "dashboard" "internal" "web" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+{{- end }}
+
+{{/*
+Readiness, unlike liveness, also requires keystone to be reachable.
+
+Horizon owns no data. What it needs in order to serve a dashboard somebody can use is its
+local_settings, its session cache, and keystone -- and of those three, keystone is the one that
+can be entirely absent while horizon reports itself perfectly healthy. Measured in the real
+image, with keystone stopped: GET / returns 200 and renders the full login form, and a login POST
+also returns 200, carrying `Unable to establish connection to keystone endpoint.` So the pod sits
+1/1 Ready, and so do the Deployment, the Composition and the umbrella, while nobody can log in.
+That is the shape of keystone's own KeysNotFound (issue #99), where the dependency gate read a
+Ready that meant nothing as "safe to build on".
+
+The URL is the same OPENSTACK_KEYSTONE_URL that local_settings carries, from the same endpoint
+lookup, and the GET is the unauthenticated version document -- no credentials, no token issued,
+nothing written. Reachability is the right depth and not a shortcut: keystone's own readiness
+probe already requires the fernet keys (issue #100), so a keystone that cannot issue a token is
+not Ready, its Service has no endpoints, and this GET fails. Going deeper here would duplicate
+that gate and would need admin credentials to do it.
+
+Keystone is already a static dashboard dependency, so kubernetes-entrypoint gates the FIRST start
+on it. This probe closes exactly the gap that leaves: the init container runs once, and a keystone
+that dies an hour later is never looked at again.
+
+The local GET / is kept, and it is the session-cache check -- not a formality. SESSION_ENGINE is
+django.contrib.sessions.backends.cache and the single CACHES entry is a memcached backend
+(conf.horizon.local_settings.config.session_engine and .cache_backend), so every session lives in
+memcached; and because SimultaneousSessionsMiddleware does a get() and a set() on every request,
+one GET / exercises that store through the client library horizon itself uses. Measured, again in
+the real image: with memcached stopped / answers 500 (socket.gaierror raised out of pymemcache),
+and against a memcached that accepts connections and answers every set with `SERVER_ERROR out of
+memory storing object`, / also answers 500 (pymemcache.exceptions.MemcacheServerError). A raw
+set/get round-trip from the probe was written first and then deliberately removed: it measured
+nothing / did not already measure, and it could fail where horizon succeeds -- a
+SASL-authenticated memcached, a TLS one, or an mcrouter-style proxy would reject the probe's bare
+socket and take a working dashboard out of service. A probe may not be able to wedge the pod.
+
+Readiness and NOT liveness, deliberately. A keystone outage is not repaired by restarting horizon
+-- keystone is outside this pod -- so a liveness probe on it would convert a visible unready pod
+into a restart storm across every replica and repair nothing. Nor a startupProbe, which
+suppresses liveness AND readiness until it succeeds and so would remove the very signal this is
+about. Readiness is the honest signal: do not route to me, do not count me available. Nothing in
+this install depends on horizon, so an unready horizon cascades nowhere.
+
+periodSeconds is 30 with the default failureThreshold of 3, so keystone is polled twice a minute
+per replica and has 90s of blips before any endpoint is withdrawn.
+
+The SIGALRM is the probe's deadline and the per-call timeouts are not, measured: urlopen's timeout
+bounds each socket operation, not the call, so a server that trickles bytes keeps resetting it. A
+probe run against a cold horizon returned successfully after 104 SECONDS with timeout=15 set. The
+kubelet would have killed that at timeoutSeconds and recorded nothing useful; the alarm fires
+first, at 20s, and says what happened. 20s sits below the timeoutSeconds of 25 in values, and the
+two per-call timeouts (5s and 15s) sum to exactly it, so each phase still fails with its own
+message when it is the one that hangs.
+
+The local GET gets 15 of those 20 seconds because it is not a static file: / redirects to
+/auth/login/ and Django renders the login page, which is the point -- the probe walks the same
+path a user does. Measured warm in the real image it takes 0.6-2.3s, so 15s is six to twenty
+times the cost of the request it is budgeting for. But mod_wsgi is configured with `processes=5
+threads=1` and each of those five daemon processes pays a cold Django import on its first request,
+so the first requests after a start are far slower -- tens of seconds on the emulated x86-64 this
+was measured on, where the probe needed six attempts to first report Ready. How much of that is
+emulation was not measured; the budget is set from the warm figure, not from a guess at a native
+cold one, because readiness failing while a process warms is the honest report -- those requests
+really are too slow to serve -- and failures before the first success restart nothing. Liveness
+has initialDelaySeconds 180 and does not touch Django at all.
+*/}}
+{{- define "dashboardReadinessProbeTemplate" }}
+exec:
+  command:
+    - python3
+    - -c
+    - |
+      import signal, sys, urllib.request
+      def expired(signum, frame):
+          sys.exit("readiness probe exceeded its 20s deadline")
+      signal.signal(signal.SIGALRM, expired)
+      signal.alarm(20)
+      keystone = "{{ tuple "identity" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" }}"
+      try:
+          urllib.request.urlopen(keystone, timeout=5).read()
+      except Exception as e:
+          sys.exit("keystone unreachable at %s, so no one can log in: %s" % (keystone, e))
+      urllib.request.urlopen(
+          "{{ tuple "dashboard" "internal" "web" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" }}://localhost:{{ tuple "dashboard" "internal" "web" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}/",
+          timeout=15).read()
+{{- end }}
+
 {{- if .Values.manifests.deployment }}
 {{- $envAll := . }}
 
@@ -89,22 +200,8 @@ spec:
           ports:
             - name: web
               containerPort: {{ tuple "dashboard" "internal" "web" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-          readinessProbe:
-            httpGet:
-              scheme: {{ tuple "dashboard" "internal" "web" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" | upper }}
-              path: /
-              port: {{ tuple "dashboard" "internal" "web" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-            initialDelaySeconds: 15
-            periodSeconds: 10
-            timeoutSeconds: 5
-          livenessProbe:
-            httpGet:
-              scheme: {{ tuple "dashboard" "internal" "web" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" | upper }}
-              path: /
-              port: {{ tuple "dashboard" "internal" "web" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-            initialDelaySeconds: 180
-            periodSeconds: 60
-            timeoutSeconds: 5
+{{ dict "envAll" $envAll "component" "server" "container" "horizon" "type" "readiness" "probeTemplate" (include "dashboardReadinessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
+{{ dict "envAll" $envAll "component" "server" "container" "horizon" "type" "liveness" "probeTemplate" (include "dashboardProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
           volumeMounts:
             - name: pod-tmp
               mountPath: /tmp

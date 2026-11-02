@@ -122,3 +122,29 @@ divergences:
           neutron's probe params come from values, not from the template, so this is where its
           liveness slack lives. Without it the probe inherits the default threshold of 3 and
           restarts a merely busy single-worker API.
+  - component: mariadb
+    issue: 110
+    reason: >-
+      Upstream ships mariadb-controller with no probe of any kind, so a reconcile loop wedged in
+      a kubernetes API call keeps the process alive, the pod Ready and the database beside it
+      healthy while the selector of the master service every OpenStack service resolves to stops
+      being maintained. The loop reports each completed pass to a heartbeat file and readiness
+      reads it; hack/validate-mariadb-readiness.py checks the probe itself in detail.
+    assertions:
+      - file: templates/bin/_mariadb_controller.py.tpl
+        present: def write_heartbeat
+        why: >-
+          Without it the loop produces nothing a probe can read, and a re-vendor that restores
+          upstream's script leaves the probe watching a file nothing writes -- which fails closed
+          on the component at the bottom of every dependency graph in this repo.
+      - file: templates/deployment-controller.yaml
+        present: mariadbControllerReadinessProbe
+        why: >-
+          The probe itself. Upstream's container has none, and that is the defect: the one
+          failure mode this component has is invisible from outside without it.
+      - file: values.yaml
+        present: MARIADB_CONTROLLER_HEARTBEAT_PATH
+        why: >-
+          The single place the heartbeat path is set. The script's default and the probe's
+          fallback agree with it, so losing it from values is the only way the three can drift
+          apart without one of them changing.
