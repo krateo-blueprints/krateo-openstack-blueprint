@@ -1,0 +1,51 @@
+# Deliberate divergences from upstream openstack-helm, and the assertions that keep them.
+#
+# hack/revendor.py three-way merges values.yaml, so a values override survives a re-vendor
+# automatically: `ours != base, theirs == base` keeps ours. It never writes templates. A template
+# divergence is therefore protected by nothing at all -- anyone who refreshes a chart's templates
+# from upstream by hand silently reverts it, and the revert is invisible because the values half
+# of the same fix stays in place. That combination is worse than either state alone.
+#
+# So every intentional divergence is declared here with the reason it exists, and
+# hack/validate-upstream-divergences.py asserts it still holds. A gate, not a memory.
+#
+# Each entry:
+#   component   the blueprint whose chart diverges
+#   issue       where the reasoning lives, so a future reader can judge whether it still applies
+#   reason      why upstream is wrong for this repo, in one sentence
+#   assertions  checks against a file, relative to blueprints/<component>/chart/
+#                 absent  - this string must NOT appear outside comments
+#                 present - this string MUST appear outside comments
+divergences:
+  - component: gnocchi
+    issue: 115
+    reason: >-
+      Upstream points gnocchi at quay.io/attcomdev/ubuntu-source-gnocchi-* images that are Docker
+      Registry v1 manifests, unpullable by any current docker, and publishes no alternative. The
+      only maintained family is the official OpenStack Kolla set, which carries no apache, so the
+      API cannot be served the way upstream's chart serves it.
+    assertions:
+      - file: templates/bin/_gnocchi-api.sh.tpl
+        absent: exec apache2
+        why: >-
+          Kolla images have no apache2 binary and no /etc/apache2. Restoring upstream's
+          `exec apache2 -DFOREGROUND` makes the API container exec a binary that is not in the
+          image, so it fails instantly while the values still name the Kolla images.
+      - file: templates/bin/_gnocchi-api.sh.tpl
+        present: exec uwsgi
+        why: >-
+          Kolla ships uwsgi at /var/lib/kolla/venv/bin/uwsgi with gnocchi's standard WSGI module,
+          which is how the API is served here.
+      - file: templates/deployment-api.yaml
+        absent: /etc/apache2/conf-enabled
+        why: >-
+          The wsgi-gnocchi.conf mount has nowhere to land in an image with no apache, and its
+          presence signals the apache serving model has been restored.
+      - file: values.yaml
+        absent: attcomdev
+        why: >-
+          The unpullable v1-manifest images. preflight-refs' media-type check would also catch
+          these, but only on its weekly network run; this catches them on every push.
+      - file: values.yaml
+        present: openstack.kolla/gnocchi-api
+        why: The maintained replacement.
