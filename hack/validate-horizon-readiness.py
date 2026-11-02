@@ -249,7 +249,7 @@ if identity_host not in dep_services:
         f"      cannot work."
     )
 
-print(f"OK: horizon readiness requires {keystone_url} and still fetches http://localhost:{web_port}/")
+print(f"OK: horizon readiness requires {keystone_url} and still fetches localhost:{web_port}/")
 print(f"OK: no restarting probe reaches keystone or enters Django; liveness stays under "
       f"{static_prefix}")
 print(f"OK: sessions still live in {session_engine.group(1)} on {cache_backend.group(1)}, which "
