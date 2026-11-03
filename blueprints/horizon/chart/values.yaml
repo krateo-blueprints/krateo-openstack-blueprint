@@ -950,27 +950,6 @@ pod:
         volumeMounts: null
         volumes: null
       init_container: null
-  probes:
-    server:
-      horizon:
-        liveness:
-          enabled: true
-          params:
-            initialDelaySeconds: 180
-            periodSeconds: 60
-            timeoutSeconds: 5
-        readiness:
-          enabled: true
-          params:
-            # 30s with the default failureThreshold of 3: the readiness probe reaches keystone,
-            # so this is how often every replica touches a shared dependency, and how long a
-            # blip is tolerated before an endpoint is withdrawn (90s).
-            failureThreshold: 3
-            initialDelaySeconds: 15
-            periodSeconds: 30
-            # Above the probe's own 20s SIGALRM deadline, so a hung dependency fails with the
-            # probe's own message rather than being killed mid-call by the kubelet.
-            timeoutSeconds: 25
   replicas:
     server: 1
   resources:

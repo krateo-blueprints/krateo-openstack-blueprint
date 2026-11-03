@@ -116,33 +116,17 @@ jobs:
       - name: Glance readiness must require a writable image store
         run: python3 hack/validate-glance-readiness.py .
 
-      # The same shape again, and the plainest case of it. Horizon has exactly one HTTP-shaped
-      # signal, GET /, and with keystone stopped it answers 200 with the whole login form while
-      # the login POST answers 200 carrying "Unable to establish connection to keystone
-      # endpoint" -- measured in the real image. The converse half is measured too: with
-      # memcached away every Django path answers 500, so a liveness probe on / restarts every
-      # replica during a dependency outage and repairs nothing. See issue #110.
-      - name: Horizon readiness must require keystone, and no restarting probe may enter Django
-        run: python3 hack/validate-horizon-readiness.py .
-
-      # The no-probe half of the same issue, on the component at the bottom of every dependency
-      # graph here. mariadb-controller is a reconcile loop that blocks only on the kubernetes
-      # API: wedged in a call, it keeps the process alive, the pod Ready and the database
-      # beside it healthy, while the selector of the master service every OpenStack service
-      # resolves to stops being maintained -- broad across several Galera primaries, or pinned
-      # to a pod a failover already replaced. It shipped with no probe at all. This also
-      # protects the server's probe, the best one in this repo, from an edit in the same chart.
-      - name: Mariadb's controller must report a wedged reconcile loop
-        run: python3 hack/validate-mariadb-readiness.py .
-
-      # Same failure shape again, one container along. nginx is the only listener on skyline's
-      # Service port -- every request, console and API alike, arrives there -- and it had no
-      # probe at all, so the kubelet counted it ready the instant nginx was exec'd. An nginx
-      # that 500s the console and 502s the API reported 1/1 Ready at every layer. The probe
-      # must go through nginx's own listener to both halves of what it serves; a tcpSocket is
-      # satisfied by the 502. See issue #110.
-      - name: Skyline's nginx readiness must prove it can serve
-        run: python3 hack/validate-skyline-readiness.py .
+      # Not the same shape: the one place upstream gets a probe actively wrong rather than
+      # merely shallow. Upstream points horizon's liveness at /, and horizon's own
+      # SimultaneousSessionsMiddleware touches the default cache on EVERY request, so with
+      # memcached away every Django path answers 500 -- measured in the real image, where
+      # /static/dashboard/img/favicon.ico still answered 200. Upstream's probe therefore
+      # restarts every replica for the duration of a memcached outage, repairs nothing, and
+      # pays for a collectstatic of ~4000 files per restart. Liveness stays on the static
+      # handler; the keystone readiness check that shipped beside it was an improvement with
+      # no upstream defect behind it and has been reverted. See issue #110.
+      - name: No probe that restarts horizon may enter Django
+        run: python3 hack/validate-horizon-liveness.py .
 
       # The quietest version of the same failure. gnocchi-metricd and gnocchi-statsd had no
       # probe at all, and both swallow every backend error and loop forever
