@@ -565,8 +565,34 @@ conf:
       # Pinned (not empty) - empty defaults are filled with uuidv4 at render time,
       # which re-randomises every reconcile and rolls the etc configmap/pods. Fixed here.
       resource_id: 00000000-0000-4000-8000-000000000c01
-      user_id: 00000000-0000-4000-8000-000000000c02
-      project_id: 00000000-0000-4000-8000-000000000c03
+      # `creator`, not user_id/project_id. gnocchi/opts.py registers exactly six options in the
+      # [statsd] group -- host, port, resource_id, creator, archive_policy_name, flush_delay --
+      # and `user_id`/`project_id` are not among them in any 4.x gnocchi; they were replaced by
+      # the single `creator` string before this image's version. Verified in
+      # quay.io/openstack.kolla/gnocchi-statsd:2026.1-ubuntu-noble (gnocchi 4.7.0): statsd.py's
+      # Stats.__init__ passes self.conf.statsd.creator to indexer.create_resource(), and
+      # Stats.flush() passes it to indexer.create_metric(). oslo.config ignores unregistered
+      # keys in a config file, so the two old keys were inert -- rendered, read by nobody -- and
+      # every resource and metric statsd created was stored with a NULL creator.
+      #
+      # That is not fatal: creator is a StrOpt with no default and no required=True, statsd.py
+      # start() raises RequiredOptError only for resource_id, the indexer's `creator` column is
+      # nullable, and sqlalchemy_base's jsonify handles `creator is None` explicitly. Measured:
+      # statsd with these old keys parses its config and proceeds to connect to the indexer. The
+      # cost is that the metrics are unattributable -- created_by_user_id and
+      # created_by_project_id come from creator.partition(":"), so with NULL both are null and
+      # gnocchi's default `rule:admin_or_creator` policies can never match a non-admin, leaving
+      # the statsd metrics readable only by admin.
+      #
+      # The format is "<user_id>:<project_id>": that is literally what the API stores, from
+      # KeystoneAuthHelper.get_current_user() in gnocchi/rest/auth_helper.py:
+      #   return user_id + ":" + project_id
+      # The two halves below are the UUIDs the old user_id/project_id keys carried, so the
+      # intent is unchanged. They are synthetic. An operator who wants these metrics visible to
+      # a real project must set this to that project's own user_id:project_id -- which is why
+      # nothing generates it: a random creator can never match any policy, so generating one
+      # would only hide the fact that it was never configured.
+      creator: 00000000-0000-4000-8000-000000000c02:00000000-0000-4000-8000-000000000c03
     metricd:
       workers: 1
     database:

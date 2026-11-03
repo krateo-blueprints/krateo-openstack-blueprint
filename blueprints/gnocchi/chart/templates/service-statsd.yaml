@@ -12,6 +12,44 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
+{{/*
+protocol: UDP, and it is not decoration.
+
+A ServicePort's `protocol` defaults to TCP when it is omitted -- that is the API default, not a
+"whatever the backend speaks" placeholder -- and gnocchi's statsd speaks only UDP. In
+quay.io/openstack.kolla/gnocchi-statsd:2026.1-ubuntu-noble (gnocchi 4.7.0),
+gnocchi/statsd.py start() is:
+
+    loop = asyncio.get_event_loop()
+    # TODO(jd) Add TCP support
+    listen = loop.create_datagram_endpoint(
+        lambda: StatsdServer(stats),
+        local_addr=(conf.statsd.host, conf.statsd.port))
+
+create_datagram_endpoint, with the TODO beside it. There is no TCP listener on 8125 and there
+never has been. So upstream's declaration-free port built a TCP Service in front of a UDP-only
+socket: kube-proxy programmed TCP rules for 8125, every datagram sent to gnocchi-statsd:8125 was
+dropped before it reached a pod, and the Service could not deliver one measure.
+
+Nothing reports that. UDP sends no reply, so a client learns nothing; and Stats.flush() wraps
+each individual measure in `except Exception: LOG.error(...)`, so even a measure that did arrive
+and failed to store would only be logged. With both halves of #127 fixed the Service has
+endpoints and the DaemonSet is Ready, so a TCP protocol here would leave every observable
+signal green and the metric pipeline empty -- the same shape as #110 and #115, one layer out.
+
+The protocol was not the only reason this Service delivered nothing: templates/daemonset-statsd.yaml
+labelled its pods component=metricd while the selector below asks for component=statsd, so it
+also had no endpoints at all. See the note at the top of that file. Each defect alone is
+sufficient, which is why both are fixed here and both are asserted.
+
+One declaration covers both Service shapes. `nodePort` is a field of the SAME ServicePort entry
+as `port` and `protocol`; a ServicePort carries exactly one protocol, which applies to the
+cluster IP port, the node port and the target port alike. There is no second place to declare
+it, and adding `protocol` inside the node_port branch would be a duplicate key.
+
+The containerPort in templates/daemonset-statsd.yaml needs the same declaration, for the same
+reason and with the same default.
+*/}}
 {{- if .Values.manifests.service_statsd }}
 {{- $envAll := . }}
 ---
@@ -23,6 +61,7 @@ spec:
   ports:
     - name: gn-stats
       port: {{ tuple "metric_statsd" "internal" "statsd" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+      protocol: UDP
     {{ if .Values.network.statsd.node_port.enabled }}
       nodePort: {{ .Values.network.statsd.node_port.port }}
     {{ end }}

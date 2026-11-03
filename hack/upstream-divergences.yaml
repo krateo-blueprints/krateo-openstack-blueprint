@@ -257,3 +257,50 @@ divergences:
           Without this block `driver: swift` authenticates with gnocchi's own defaults -- user
           "admin:admin" against http://localhost:8080/auth/v1.0 -- instead of as gnocchi's
           keystone service user against this install's keystone.
+
+  # Both halves of the statsd datagram path. This is a pure template divergence -- there is no
+  # values key for either protocol or for the component label -- so revendor's three-way merge
+  # protects nothing here and a hand-refresh of these two templates from upstream silently
+  # restores a Service that cannot deliver a measure. hack/validate-udp-services.py asserts the
+  # rendered outcome on every push; these assertions name the divergence so the revert fails
+  # immediately, with the reason.
+  - component: gnocchi
+    issue: 127
+    reason: >-
+      Upstream's gnocchi chart declares the statsd ServicePort and containerPort with no
+      `protocol:`, which Kubernetes defaults to TCP, in front of a daemon that speaks only UDP:
+      gnocchi/statsd.py start() in gnocchi 4.7.0 calls asyncio create_datagram_endpoint with
+      `# TODO(jd) Add TCP support` on the line above it, verified in
+      quay.io/openstack.kolla/gnocchi-statsd:2026.1-ubuntu-noble. Upstream also labels the statsd
+      DaemonSet, its selector and its pod template with component "metricd" -- byte for byte what
+      daemonset-metricd.yaml emits -- while service-statsd.yaml selects component "statsd", so
+      the Service matched no pod at all. Each defect alone makes the Service undeliverable, and
+      neither reports anything: UDP sends no reply, and Stats.flush() catches and logs every
+      individual measure that fails.
+    assertions:
+      - file: templates/service-statsd.yaml
+        present: 'protocol: UDP'
+        why: >-
+          A ServicePort's protocol defaults to TCP. Without this line kube-proxy programs TCP
+          rules for 8125 and every datagram sent to gnocchi-statsd:8125 is dropped before it
+          reaches a pod, while the Service keeps its endpoints and the DaemonSet stays Ready.
+          One declaration covers the node_port shape too: nodePort is a field of the same
+          ServicePort entry, which carries exactly one protocol.
+      - file: templates/daemonset-statsd.yaml
+        present: 'protocol: UDP'
+        why: >-
+          A ContainerPort's protocol defaults to TCP in the same way, so this is the same defect
+          one layer down. It is the key a named targetPort resolves by -- Kubernetes matches a
+          named targetPort on name AND protocol -- and what kubectl and any NetworkPolicy read.
+      - file: templates/daemonset-statsd.yaml
+        present: tuple $envAll "gnocchi" "statsd"
+        why: >-
+          The pod labels the statsd Service selects. Upstream's `tuple $envAll "gnocchi"
+          "metricd"` here, in all three places, left the Service with no endpoints and gave the
+          chart's two DaemonSets identical matchLabels, which Kubernetes documents as undefined.
+      - file: templates/daemonset-statsd.yaml
+        absent: tuple $envAll "gnocchi" "metricd"
+        why: >-
+          The upstream spelling, named explicitly: restoring any one of the three occurrences
+          reintroduces the label mismatch, and a Service with no endpoints looks identical to a
+          healthy one from everywhere except `kubectl get endpoints`.

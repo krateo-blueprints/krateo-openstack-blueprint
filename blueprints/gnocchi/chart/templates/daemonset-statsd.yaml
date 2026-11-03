@@ -56,6 +56,40 @@ exec:
     - --storage
 {{- end }}
 
+{{/*
+The component label is "statsd", not "metricd", in all three places below.
+
+Upstream labels this DaemonSet, its own selector and its pod template with
+`tuple $envAll "gnocchi" "metricd"` -- byte for byte what templates/daemonset-metricd.yaml
+emits. templates/service-statsd.yaml selects `tuple $envAll "gnocchi" "statsd"`. Those do not
+intersect, so the gnocchi-statsd Service matched no pod, had no endpoints, and could not deliver
+a datagram no matter what protocol it declared. Found by hack/validate-udp-services.py while
+checking that the Service is in front of the daemon it names; verified in the rendered chart,
+where the Service selects component=statsd and the DaemonSet's pods carry component=metricd.
+
+It also gave the two DaemonSets in this chart identical matchLabels -- `application: gnocchi`,
+`component: metricd`, `release_group: <release>` -- which Kubernetes documents as undefined:
+"you should not normally create any Pods whose labels match this selector", and two controllers
+selecting the same set is the same hazard one step further out. Each DaemonSet's pods are kept
+by its own ControllerRef, so this did not visibly break, which is exactly why it survived.
+
+Only the labels change. The node selector, the resources and the probe already read
+.Values.labels.statsd / .Values.pod.resources.statsd / component "statsd", so the chart's own
+values have always said "statsd"; these three tuples were the only disagreement.
+
+UPGRADE NOTE. spec.selector on an apps/v1 DaemonSet is immutable -- "Updates to this field are
+forbidden" -- so an install that already has a gnocchi-statsd DaemonSet from before this change
+will reject the apply with an immutable-field error until the old object is removed:
+
+    kubectl -n <namespace> delete daemonset gnocchi-statsd
+
+It is a DaemonSet of a stateless UDP receiver with no PVC and no leader election, so deleting
+and letting it be recreated costs nothing but the datagrams in flight, and this Service has
+never delivered one. The alternative -- pointing service-statsd.yaml's selector at
+component=metricd to avoid touching the selector -- was rejected: it would leave the statsd
+pods labelled as a different component, leave the chart's two DaemonSets selecting the same
+label set, and leave anything that selects on component unable to tell them apart.
+*/}}
 {{- if .Values.manifests.daemonset_statsd }}
 {{- $envAll := . }}
 
@@ -70,15 +104,15 @@ kind: DaemonSet
 metadata:
   name: gnocchi-statsd
   labels:
-{{ tuple $envAll "gnocchi" "metricd" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+{{ tuple $envAll "gnocchi" "statsd" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
   selector:
     matchLabels:
-{{ tuple $envAll "gnocchi" "metricd" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
+{{ tuple $envAll "gnocchi" "statsd" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
   template:
     metadata:
       labels:
-{{ tuple $envAll "gnocchi" "metricd" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+{{ tuple $envAll "gnocchi" "statsd" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
       annotations:
 {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
@@ -118,9 +152,24 @@ spec:
 {{ tuple $envAll $envAll.Values.pod.resources.statsd | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           command:
             - /tmp/gnocchi-statsd.sh
+{{/*
+protocol: UDP here too. A ContainerPort's `protocol` defaults to TCP exactly as a ServicePort's
+does, so upstream declared a TCP containerPort in front of the create_datagram_endpoint socket
+above -- the same defect as the Service, one layer down. See templates/service-statsd.yaml for
+the measured evidence from the Kolla image.
+
+Both halves are needed, and for different reasons. The Service's protocol is what kube-proxy
+programs, so it alone decides whether a datagram addressed to gnocchi-statsd:8125 is forwarded.
+The containerPort's protocol decides what the port is published as: it is the key a Service's
+`targetPort: gn-stats` resolves by (a named targetPort matches on name AND protocol), it is what
+`kubectl describe`/`get pod -o wide` reports, and it is what a NetworkPolicy or a sidecar reading
+the pod spec sees. Declaring TCP there describes the pod incorrectly even once the Service is
+right, and a later named-targetPort refactor would then fail to resolve.
+*/}}
           ports:
             - name: gn-stats
               containerPort: {{ tuple "metric_statsd" "internal" "statsd" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+              protocol: UDP
 {{ dict "envAll" $envAll "component" "statsd" "container" "gnocchi-statsd" "type" "readiness" "probeTemplate" (include "statsdReadinessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
           volumeMounts:
             - name: pod-tmp
