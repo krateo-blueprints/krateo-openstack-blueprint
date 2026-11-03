@@ -102,13 +102,20 @@ http://localhost:8080/auth/v1.0.
 {{- $_ := uuidv4 | set .Values.conf.gnocchi.statsd "resource_id" -}}
 {{- end -}}
 
-{{- if empty .Values.conf.gnocchi.statsd.user_id -}}
-{{- $_ := uuidv4 | set .Values.conf.gnocchi.statsd "user_id" -}}
-{{- end -}}
+{{/*
+Upstream filled conf.gnocchi.statsd.user_id and .project_id with uuidv4 here. gnocchi has not
+registered either option since 3.x -- gnocchi/opts.py's [statsd] group is host, port,
+resource_id, creator, archive_policy_name, flush_delay -- so both were rendered into
+gnocchi.conf and read by nobody, while the one key Stats.__init__ and Stats.flush() do read,
+`creator`, was never rendered at all. See the note beside conf.gnocchi.statsd.creator in
+values.yaml for the measurement.
 
-{{- if empty .Values.conf.gnocchi.statsd.project_id -}}
-{{- $_ := uuidv4 | set .Values.conf.gnocchi.statsd "project_id" -}}
-{{- end -}}
+`creator` gets no generated fallback on purpose. It is a "<user_id>:<project_id>" pair that has
+to name a real keystone user and project for gnocchi's default rule:admin_or_creator policies to
+match anything; a uuidv4 could never match, so generating one would only make an unconfigured
+install look configured. values.yaml pins it, which is also what keeps the etc Secret stable
+across reconciles.
+*/}}
 
 {{- if empty .Values.conf.gnocchi.api.port -}}
 {{- $_ := tuple "metric" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" | set .Values.conf.gnocchi.api "port" -}}

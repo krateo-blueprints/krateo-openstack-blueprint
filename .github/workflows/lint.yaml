@@ -151,6 +151,20 @@ jobs:
       - name: No probe may target a uwsgi stats port
         run: python3 hack/validate-probe-not-uwsgi-stats.py .
 
+      # protocol on a ServicePort and on a ContainerPort defaults to TCP, so a port entry written
+      # without one in front of a UDP-only daemon produces a Service kube-proxy programs for TCP
+      # over a socket that has no TCP listener -- every datagram dropped before it reaches a pod,
+      # with no error at either end, because UDP sends no reply and gnocchi's Stats.flush() logs
+      # each failed measure and carries on. gnocchi-statsd shipped exactly that, in both layers
+      # at once, verified against gnocchi/statsd.py's create_datagram_endpoint in the Kolla image
+      # it installs. The same check found the statsd Service selecting component=statsd while its
+      # DaemonSet labelled pods component=metricd, so it had no endpoints either. Renders every
+      # chart: half of the gate needs no configuration and asserts that every Service port and
+      # the container port it resolves to agree on protocol, which is what catches a half-revert.
+      # See issue #127.
+      - name: A Service in front of a UDP-only listener must declare UDP
+        run: python3 hack/validate-udp-services.py .
+
       # revendor.py three-way merges values.yaml, so a values override survives a re-vendor by
       # itself. It never writes templates, so a template divergence has no protection at all --
       # and reverting one half of a fix while the other half stays is worse than reverting both.
