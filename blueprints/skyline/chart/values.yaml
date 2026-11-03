@@ -106,31 +106,30 @@ endpoints:
     #
     # Every other service here IS an oslo.db service and genuinely wants the driver-qualified
     # form; this override is skyline-only on purpose.
-      # Three consumers read this, not two, and they do not agree.
+      # Upstream's single value, restored. #86 split this on the premise that skyline's API
+      # server compares the scheme exactly and raises ValueError("Unsupported database backend")
+      # on mysql+pymysql. That string does not exist anywhere in the shipped image
+      # (skyline-apiserver 8.0.1.dev12), and the only exact scheme comparison is in alembic's
+      # env.py, which CONVERTS UP rather than rejecting:
       #
-      # helm-toolkit resolves the scheme per ENDPOINT:
-      #   index $endpointMap.scheme $endpoint | default $endpointMap.scheme.default
+      #     if db_url.scheme == "mysql": db_url = db_url.replace(dialect="mysql+pymysql")
       #
-      #   endpoint `skyline`  -> scheme.skyline -> skyline's own database_url
-      #   endpoint `internal` -> scheme.default -> the admin secret, which /tmp/db-init.py uses
+      # The API server's own path is db/base.py setup(), which branches only on
+      # startswith("sqlite") and otherwise hands database_url straight to SQLAlchemy's
+      # create_engine. A bare mysql:// therefore selects the mysqldb dialect and imports
+      # MySQLdb, which the image does not ship -- it has pymysql. That is the crash a peer
+      # observed on a real cluster: the API pod in Error with 6 restarts on
+      # ModuleNotFoundError: No module named 'MySQLdb', while db-init and db-sync Completed.
       #
-      # 1. skyline's API server compares the scheme EXACTLY (`if db_url.scheme == "mysql"`), so
-      #    it needs the bare form or it crash-loops. That was issue #86.
-      # 2. skyline's own alembic converts up for itself:
-      #    `if db_url.scheme == "mysql": db_url.replace(dialect="mysql+pymysql")`, so it accepts
-      #    either.
-      # 3. openstack-helm's generic /tmp/db-init.py calls SQLAlchemy create_engine() with NO
-      #    conversion. A bare `mysql://` makes SQLAlchemy select the mysqldb dialect, which
-      #    imports MySQLdb -- absent from the skyline image, which ships pymysql. #86 set both
-      #    keys to the bare form and broke this path: db-init CrashLoopBackOff with
-      #    `ModuleNotFoundError: No module named 'MySQLdb'`, logged under the misleading
-      #    message "Could not connect to database as root user" from an except handler that
-      #    never attempted a connection.
-      #
-      # So they must differ: driver-qualified for the admin/db-init path, bare for skyline's own
-      # config. helm-toolkit's own documented default for oslo_db is mysql+pymysql.
-      default: mysql+pymysql
-      skyline: mysql
+      # So all three consumers want the driver-qualified form: the API server because
+      # create_engine needs the driver, alembic because it accepts either, and
+      # openstack-helm's /tmp/db-init.py because it calls create_engine with no conversion.
+      # One value, and it is upstream's -- including its shape: upstream writes a plain string
+      # here, not a per-endpoint map. helm-toolkit's keystone_endpoint_scheme_lookup handles
+      # both (`if kindIs "string" $endpointMap.scheme`), so the map form worked, but a map with
+      # one key is a per-endpoint override that overrides nothing and invites the next reader to
+      # add a second key. Matching upstream exactly.
+    scheme: mysql+pymysql
     port:
       mysql:
         default: 3306
