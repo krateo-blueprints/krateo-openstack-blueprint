@@ -1,0 +1,115 @@
+# Lets the Openstack orchestrator read node labels, so that it can refuse to install components
+# whose pods no node in this cluster can run.
+#
+# Apply this once, as an administrator, alongside compositiondefinition-openstack.yaml. It is
+# published as a release asset:
+#
+#   kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/<version>/node-reader-rbac.yaml
+#
+# ---------------------------------------------------------------------------------------------
+# WHY IT IS NEEDED
+#
+# Every component chart pins its pods with a nodeSelector -- openstack-control-plane=enabled for
+# 33 of the 35 charts, plus openstack-compute-node, openvswitch and openstack-network-node for
+# the compute and network planes -- and nothing in the charts creates those labels. The
+# orchestrator therefore checks them and refuses to render when no node carries one that a
+# selected component needs (blueprints/openstack/chart/templates/compositions.yaml).
+#
+# Checking means listing nodes, and the identity that renders the chart cannot:
+# composition-dynamic-controller runs as a service account whose generated ClusterRole grants
+# `customresourcedefinitions get/list/watch` -- which is why the chart's CRD lookup works -- and
+# no `nodes` rule at all. Measured:
+#
+#   $ kubectl auth can-i list nodes --as=system:serviceaccount:openstack:keystones-v0-3-29
+#   no
+#
+# WITHOUT THIS GRANT THE CHECK IS SKIPPED, NOT BROKEN. The chart's guard
+# (osh.nodeReadGranted) reads this ClusterRole back and withholds the node lookup until it is
+# present and sufficient, because a refused `lookup` is not an empty `lookup`: Helm returns an
+# empty map only for a NotFound, and a Forbidden comes back as a template error that fails the
+# WHOLE render -- on every reconcile, and a Helm release that stops rendering is a Helm release
+# that gets uninstalled. So an install without this file behaves exactly as it did before the
+# check existed, and an install with it gets told what to label before anything is created.
+#
+# It is applied by an administrator rather than created by the chart on purpose. The controller
+# is in fact allowed to create it -- `escalate` and `bind` on clusterroles are both in that
+# generated role, and a server-side dry-run create of these two objects as a real controller
+# service account passes admission -- but a chart that widens its own permissions is a decision
+# that should be a human's, and refusable, not a template's.
+#
+# ---------------------------------------------------------------------------------------------
+# WHY THE SUBJECT IS A GROUP AND NOT THE CONTROLLER'S SERVICE ACCOUNT
+#
+# Two reasons, both measured, and both the kind of mistake that would be silent until it was
+# catastrophic -- a binding whose subject is not the render identity makes the guard pass and the
+# node lookup 403, which is the render-aborting error above.
+#
+#  1. The account's name cannot be written down reliably. core-provider names it
+#     <plural>-<chart version>, and these plurals are irregular exactly where it matters:
+#     Magnum -> `magna`, Nova -> `nova`, Manila -> `manila` (observed on a live install, not
+#     derived from a rule). The chart itself already refuses to guess a plural for this reason --
+#     osh.crdExists matches CRDs by Kind.
+#  2. A version-stamped subject goes stale on every release. Bind `openstacks-v0-3-29` and
+#     0.3.30's controller finds a binding that names somebody else, concludes from its presence
+#     that it may read nodes, and gets the 403.
+#
+# The group is every service account in the namespace, so the grant is cluster-scoped read on
+# nodes for workloads in that one namespace. Node objects carry addresses, kernel and OS
+# versions, taints and capacity -- no secrets, but it is reconnaissance surface, which is the
+# cost of this being certainly correct rather than probably correct.
+#
+# THE NAMESPACE BELOW MUST BE THE ONE THE Openstack COMPOSITION LIVES IN. It is `openstack`,
+# which is what README.md creates. If you install elsewhere, change it: the chart's guard looks
+# for a subject naming ITS OWN namespace, so a binding for the wrong namespace is read as "no
+# grant" and the check is skipped rather than producing a 403.
+#
+# ---------------------------------------------------------------------------------------------
+# APPLY ONCE PER CLUSTER, NOT PER RELEASE
+#
+# Neither object's name contains a version, and the chart's guard looks for exactly these fixed
+# names, so one application covers every later release and every upgrade of the blueprint.
+# Re-applying is harmless.
+#
+# That is a deliberate design constraint and not an accident of naming. A version-pinned grant of
+# this shape is a shipped failure elsewhere in this organisation: it "used to wedge every
+# migration's FRESH SA with `nodes is forbidden` (Synced=False) until an operator granted it by
+# hand". Here the equivalent mistake would be quieter and therefore worse -- a release shipping
+# a new object name would find no grant under it, so every upgrade would silently revert to not
+# checking, with nothing to indicate the check had stopped running.
+#
+# If you rename these the guard will not find them and the check will silently stop being
+# enforced. hack/validate-node-label-preconditions.py asserts that this file and that guard still
+# agree on the name and on the rule, and that no version has crept into either.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: krateo-openstack-node-reader
+  labels:
+    app.kubernetes.io/name: openstack
+    app.kubernetes.io/component: node-label-precondition
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: krateo-openstack-node-reader
+  labels:
+    app.kubernetes.io/name: openstack
+    app.kubernetes.io/component: node-label-precondition
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: krateo-openstack-node-reader
+subjects:
+  - kind: Group
+    name: system:serviceaccounts:openstack
+    apiGroup: rbac.authorization.k8s.io

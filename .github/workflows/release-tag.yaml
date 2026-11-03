@@ -179,6 +179,15 @@ jobs:
           done < <(find blueprints -type f -name compositiondefinition.yaml -not -path '*/charts/*' -print0)
           echo "prepared $(ls dist | wc -l | tr -d ' ') CompositionDefinition asset(s)"
 
+          # The node-read grant, published beside the CompositionDefinition it serves. The
+          # orchestrator refuses to install components whose pods no node can run, which means
+          # listing nodes, which the controller's generated role does not permit -- so without
+          # this applied the check skips itself. It is a separate, administrator-applied asset
+          # rather than something the chart creates for itself: the chart is able to
+          # (`escalate`/`bind` are in that role) and a chart widening its own permissions should
+          # be a person's decision. Carries no placeholder, so it is copied, not stamped.
+          cp blueprints/openstack/node-reader-rbac.yaml dist/node-reader-rbac.yaml
+
           # The example Compositions carry COMPOSITION_API_VERSION for the same reason the CDs
           # carry CHART_VERSION: core-provider derives the served group version from the chart
           # version (0.3.8 -> v0-3-8, full major.minor.patch), so any literal in the tree is wrong

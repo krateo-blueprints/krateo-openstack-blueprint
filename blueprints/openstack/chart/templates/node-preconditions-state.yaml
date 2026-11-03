@@ -1,0 +1,57 @@
+{{- /* What the node-label precondition is asking of this cluster, and whether it was able to
+       ask at all.
+
+       The precondition (templates/compositions.yaml, osh.requireNodeLabels) is loud when it
+       FAILS -- `fail` takes the render down and composition-dynamic-controller puts the message
+       on the Composition's status. It is necessarily silent when it cannot measure, because
+       `lookup` returns nothing under `helm template` and the node lookup is withheld until the
+       node-read grant is applied. Those skips are correct, but an invisible skip is how four
+       gates in this repo reported success for weeks having checked nothing (#120) -- and here
+       the skip is reachable by simply not applying one release asset, which makes writing it
+       down where an operator can read it the difference between a check that is enforced and a
+       check that is assumed:
+
+         kubectl -n <ns> get configmap <release>-node-label-preconditions -o yaml
+
+       It is also the answer to a question the failure path cannot answer, because by definition
+       it never fires on a healthy install: "which labels does what I have selected actually
+       need?" -- worth having in hand before adding a node pool, which arrives unlabelled and
+       runs none of these pods.
+
+       It consults osh.nodeReadGranted, which is two named GETs, and deliberately does NOT look
+       the node list up again: that list is fetched once per render in compositions.yaml and a
+       second cluster-wide fetch is exactly the cost osh.crdExists exists to document. So this
+       reports whether the check COULD measure, not a second opinion on what it found. */ -}}
+{{- $sel := splitList " " (include "osh.selected" (list $)) }}
+{{- $wanted := include "osh.nodeLabelsWanted" (list $ $sel) }}
+{{- $granted := include "osh.nodeReadGranted" (list $) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-node-label-preconditions" .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.serviceContract.service.name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+  # The node labels the SELECTED components' pods schedule on. Derived from the rendered pods of
+  # the component charts, not from the charts' values keys; see .Values.nodeLabelPreconditions.
+  requiredNodeLabels: {{ $wanted | quote }}
+  labelCommand: {{ printf "kubectl label --overwrite nodes --all %s" $wanted | quote }}
+{{- if eq $granted "true" }}
+  # The orchestrator can read this cluster's nodes, so the labels above were checked against
+  # them on this render. Had any of them been carried by no node, this render would have failed
+  # instead of producing this ConfigMap.
+  state: measured
+{{- else }}
+  state: unmeasured
+  # NOT a pass. The labels above were not checked on this render, for one of two reasons: there
+  # is no cluster to ask, as under `helm template`; or the node-read grant is not installed, in
+  # which case the node lookup is withheld rather than risking the Forbidden that would abort
+  # the render and uninstall this release. To enforce the check, apply the release asset
+  # node-reader-rbac.yaml (and make sure the namespace in its ClusterRoleBinding subject is this
+  # one) -- then this reads `measured` on the next reconcile. Until it does, the labels above are
+  # yours to apply by hand, with labelCommand.
+  reason: the orchestrator may not read this cluster's nodes, so no label was verified
+{{- end }}

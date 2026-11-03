@@ -50,15 +50,42 @@ Composition CRD.
 ### Recommended: one orchestrator Composition
 
 ```sh
-# Every chart schedules with nodeSelector openstack-control-plane=enabled -- all 35 of them, via
-# labels.*.node_selector_key. Nothing in the charts creates that label, so on a cluster whose
-# nodes do not carry it every pod sits Pending indefinitely with
+# Every component chart pins its pods to a node label, and nothing in the charts creates those
+# labels. It is NOT one label: how many you need depends on which components you select.
 #
-#   0/N nodes are available: N node(s) didn't match Pod's node affinity/selector
+#   openstack-control-plane=enabled   33 of the 35 charts -- every API, database, queue,
+#                                     scheduler and conductor. BOTH profiles need it.
+#   openstack-compute-node=enabled    the hypervisor: nova-compute, libvirt, plus
+#                                     ceilometer-compute and cyborg-agent.   | profile: full
+#   openvswitch=enabled               the data plane: the openvswitch        | only
+#                                     DaemonSet and neutron's ovs agent.     |
+#   openstack-network-node=enabled    octavia's worker, health-manager and   |
+#                                     driver-agent.                          |
 #
-# and no indication of what to do about it. Measured on a fresh GKE cluster: MariaDB waited five
-# minutes before anyone noticed. Label the nodes that should run OpenStack first.
+# profile: identity -- one label is enough:
 kubectl label --overwrite nodes --all openstack-control-plane=enabled
+
+# profile: full -- all four. (Label individual nodes instead of --all if you are separating the
+# roles; the compute label is what decides which nodes run VMs.)
+kubectl label --overwrite nodes --all openstack-control-plane=enabled \
+  openstack-compute-node=enabled openvswitch=enabled openstack-network-node=enabled
+
+# The orchestrator CHECKS this for the components you selected, and refuses to render -- naming
+# the label, the components that want it and this command, on the Composition's own status --
+# when it can see the cluster's nodes and none of them carries one. It is a mechanism and not
+# just this paragraph because it was just this paragraph: the line above has been in this README,
+# with the scheduler's message quoted next to it, and a fresh GKE install still stalled with 5
+# pods Pending, because the scheduler says
+#
+#   0/4 nodes are available: 4 node(s) didn't match Pod's node affinity/selector
+#
+# which names neither the label nor the chart that wants it. It was found by diffing a working
+# cluster's node labels against the broken one's.
+#
+# Pending is the visible half. A DaemonSet whose nodeSelector matches no node creates NO POD AT
+# ALL -- desiredNumberScheduled=0, nothing Pending, no event. A 4-node profile=full install whose
+# nodes carried only openstack-control-plane ran 227 pods and had no nova-compute, no libvirt and
+# no openvswitch: an OpenStack that could not boot an instance, reported by nothing.
 
 # Register only the orchestrator blueprint...
 kubectl create namespace openstack-system
@@ -71,6 +98,28 @@ kubectl create namespace openstack-system
 BP_VERSION=0.3.26
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
+
+# ...and let the orchestrator read node labels, so the check above can actually run. Krateo's
+# composition-dynamic-controller renders this chart under a service account whose generated role
+# grants it CRDs and not nodes, so without this the orchestrator cannot see the labels and skips
+# the check -- silently and deliberately, because a refused Helm `lookup` is not an empty one: it
+# is a template error that would fail the render on every reconcile, and a release that stops
+# rendering gets uninstalled. Applied by you, rather than taken by the chart, because it is a
+# cluster-scoped read for every service account in the namespace.
+#
+#   kubectl get clusterrole krateo-openstack-node-reader   # is the check enforced on this cluster
+#   kubectl -n openstack get cm openstack-node-label-preconditions -o yaml
+#                                                          # was it measured, and what does it want
+#
+# Edit the namespace in its ClusterRoleBinding subject if you install anywhere but `openstack`.
+#
+# APPLY IT ONCE PER CLUSTER, NOT PER RELEASE. Its two objects are named
+# krateo-openstack-node-reader with no version in them, and the chart looks for that same fixed
+# name, so one application covers every later release and every upgrade. (Deliberately: a
+# version-pinned grant of this kind is a known failure -- it wedges each new release's fresh
+# service account with `nodes is forbidden` until someone grants it by hand, and here it would
+# instead make every upgrade quietly stop checking.) Re-applying it is harmless.
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/node-reader-rbac.yaml
 
 # ...then one Composition rolls out a whole install in dependency order.
 kubectl create namespace openstack
@@ -103,7 +152,14 @@ components.
 ### Or drive the per-component blueprints directly
 
 ```sh
-# Same node label as above -- without it every pod stays Pending.
+# Same node labels as above. The five components below are the identity plane, so
+# openstack-control-plane is the only label they schedule on; the compute-plane example at the
+# end of this block needs openstack-compute-node and openvswitch as well.
+#
+# NOTE: on this path nothing checks. The precondition check lives in the orchestrator umbrella
+# (see above), so driving the per-component blueprints directly puts the labels back on you --
+# a component installed with no node able to run it goes Pending, or in the case of a DaemonSet
+# produces no pod at all and no error.
 kubectl label --overwrite nodes --all openstack-control-plane=enabled
 
 kubectl create namespace openstack-system
