@@ -148,15 +148,19 @@ divergences:
     issue: 115
     reason: >-
       Upstream's gnocchi chart is written for a deployment that also runs postgresql and ceph:
-      it ships `indexer.driver: postgresql` and `storage.driver: ceph`, renders the ceph
-      machinery unconditionally, and has no swift storage support at all. This blueprint has
-      neither a postgres nor a ceph component, so upstream's defaults point gnocchi at two
-      backends that cannot exist here -- which is precisely what was observed on a 4-node GKE
-      install of the full profile, with db-init-indexer, db-sync, 4x metricd and 4x statsd stuck
-      in Init on `Service postgresql ... has no ready endpoints` and behind a
-      ceph-keyring-placement init container. gnocchi is now configured against the mariadb it
-      already provisions and the swift this blueprint does ship, and every ceph object is gated
-      on the storage driver.
+      it ships `indexer.driver: postgresql` and `storage.driver: ceph` and renders the ceph
+      machinery unconditionally. This blueprint has neither a postgres nor a ceph component, so
+      upstream's defaults point gnocchi at two backends that cannot exist here -- which is
+      precisely what was observed on a 4-node GKE install of the full profile, with
+      db-init-indexer, db-sync, 4x metricd and 4x statsd stuck in Init on
+      `Service postgresql ... has no ready endpoints` and behind a ceph-keyring-placement init
+      container. gnocchi is now configured against the mariadb it already provisions and the
+      redis this blueprint ships, and every ceph object is gated on the storage driver. The
+      metric store was swift between #129 and this change; swift is a component here, but its
+      swift-shared-storage PVC asks ReadWriteMany of a `nfs-provisioner` StorageClass that a
+      stock cluster does not have, so swift itself never became Ready on GKE and gnocchi was
+      blocked behind it -- the same class of defect one service along, which is why the store
+      now depends on redis, which needs no volume at all.
     assertions:
       - file: values.yaml
         absent: 'driver: ceph'
@@ -166,11 +170,25 @@ divergences:
           container in front of the API, metricd, statsd and db-sync, which is the state the
           GKE install was found in.
       - file: values.yaml
-        present: 'driver: swift'
+        present: 'driver: redis'
         why: >-
-          swift IS a component here, so this is the one object store gnocchi can reach. It also
-          avoids the ReadWriteMany volume that `file` storage would need across the API and
-          every node's metricd and statsd.
+          redis is a component here (0.3.30, upstream's own redis/ chart with a verified
+          readiness probe) and needs no volume, so it is a metric store that can actually report
+          Ready. Verified in quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble: `redis` is
+          a registered entry point in BOTH the gnocchi.storage and gnocchi.incoming stevedore
+          namespaces, and the `redis` python package (7.2.0) that gnocchi/common/redis.py
+          requires is installed. One key configures it, redis_url, asserted below.
+      - file: values.yaml
+        absent: 'driver: swift'
+        why: >-
+          Named explicitly because it is a plausible revert, not a hypothetical: it is what this
+          chart shipped in 0.3.30 and it renders, passes every other gate, and still cannot
+          work. swift's swift-shared-storage PVC requests ReadWriteMany from a StorageClass
+          named `nfs-provisioner`; on GKE that class does not exist and the default
+          `standard-rwo` is block storage with no RWX mode at all, so four swift-storage pods
+          sit Pending and swift reports Ready=False. The gnocchi -> swift edge gates on
+          readiness, so gnocchi got no Composition and ceilometer, which depends on gnocchi,
+          was blocked too. `file` is excluded by the same shortage of RWX.
       - file: values.yaml
         absent: 'driver: postgresql'
         why: >-
@@ -211,8 +229,8 @@ divergences:
         present: eq .Values.conf.gnocchi.storage.driver "ceph"
         why: >-
           Gates the ceph-keyring-placement init container and the /etc/ceph mounts. Ungated,
-          gnocchi-api cannot start under swift storage: the pod waits on a ceph keyring Secret
-          that only gnocchi-storage-init creates.
+          gnocchi-api cannot start under any non-ceph storage driver: the pod waits on a ceph
+          keyring Secret that only gnocchi-storage-init creates.
       - file: templates/daemonset-metricd.yaml
         present: eq .Values.conf.gnocchi.storage.driver "ceph"
         why: Same gate, for the metricd DaemonSet -- one pod per control-plane node.
@@ -223,14 +241,20 @@ divergences:
         present: eq .Values.conf.gnocchi.storage.driver "ceph"
         why: >-
           Same gate, for the Job that runs gnocchi-upgrade. db-sync creates the storage layout
-          as well as the indexer schema, so it is the one pod that must reach the object store.
+          as well as the indexer schema, so it is the one pod that must reach the metric store.
       - file: templates/configmap-etc.yaml
-        present: swift_authurl
+        present: redis_url
         why: >-
-          Upstream has no swift storage support, so nothing fills gnocchi's swift credentials.
-          Without this block `driver: swift` authenticates with gnocchi's own defaults -- user
-          "admin:admin" against http://localhost:8080/auth/v1.0 -- instead of as gnocchi's
-          keystone service user against this install's keystone.
+          Upstream has no redis storage support, so nothing fills gnocchi's redis_url. Without
+          this block `driver: redis` falls back to gnocchi's own default,
+          `redis://localhost:6379/`, which resolves inside the gnocchi pod itself -- reachable
+          by nothing, named in no endpoint, and therefore invisible to every dependency wait and
+          to hack/validate-component-config-closure.py. This replaces #129's `swift_authurl`
+          assertion, which asserted that the same block filled gnocchi's swift keystone
+          credentials: those six keys are gone with the swift driver, so the assertion no longer
+          describes anything in the tree. It is removed rather than relaxed -- the divergence it
+          protected (upstream fills no storage credentials at all) is the same one, now
+          protected at the key the configured driver actually reads.
 
   # Both halves of the statsd datagram path. This is a pure template divergence -- there is no
   # values key for either protocol or for the component label -- so revendor's three-way merge
