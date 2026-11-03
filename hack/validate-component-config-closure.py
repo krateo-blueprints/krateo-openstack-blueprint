@@ -27,7 +27,19 @@ matters is the object the cluster acts on:
     declared TRANSITIVE closure, or itself. Transitive matters: placement declares only
     keystone yet legitimately opens a mysql connection, because keystone depends on mariadb.
     This check needs no hand-maintained table: the Service -> component map is built from
-    the renders themselves.
+    the renders themselves. An EMPTY ELEMENT of a non-empty list counts too, and is
+    reported rather than skipped: a dependencies.static entry naming an endpoint the
+    chart's values do not define renders as nothing between two commas, and
+    kubernetes-entrypoint's util/env.SplitEnvToDeps does not drop it -- it registers a
+    dependency on the Service named "", whose Endpoints Get fails with `resource name may
+    not be empty` on every pass, forever. ceilometer waited that way on `oslo_db`, in a
+    chart that defines no endpoints.oslo_db and whose rendered ceilometer.conf has no
+    [database] section at all, and skipping the empty element is what kept it invisible
+    here while three of its pods sat in Init (#130). An entirely empty DEPENDENCY_SERVICE
+    is a different thing and not a finding: SplitEnvToDeps returns before splitting when
+    the value is "", so nothing is registered and nothing blocks. Both halves were
+    measured against a real API server with the image's own build before this check was
+    written -- "" gives 0 dependencies, "a,,b" gives 3, the middle one named "".
 
  2. Backend identities in the rendered config. A `driver = <token>` selection or a
     `<key>url/uri/connection = <scheme>://...` in an oslo config names a backend. If the
@@ -297,11 +309,28 @@ for name, docs in sorted(renders.items()):
             for env in (container.get("env") or []):
                 value = env.get("value") or ""
                 if env.get("name") == "DEPENDENCY_SERVICE":
+                    # An entirely empty variable is not a wait: util/env.SplitEnvToDeps
+                    # returns before splitting when the value is "", so no dependency is
+                    # registered and the init container does not block. Measured against a
+                    # real API server: "" -> 0 deps. 31 of this repo's workloads render
+                    # DEPENDENCY_SERVICE="" and are all fine.
+                    if not value.strip():
+                        continue
                     for item in (i.strip() for i in value.split(",")):
-                        if not item:
-                            continue
                         svc = item.split(":")[-1]
                         checked_waits += 1
+                        if not svc:
+                            report(name, "service:<empty>",
+                                   f"{where} waits for a Service with an empty name: its "
+                                   f"DEPENDENCY_SERVICE is {value!r}, and an empty element of a "
+                                   f"non-empty list is NOT dropped -- "
+                                   f"util/env.SplitEnvToDeps turns it into a dependency on the "
+                                   f"Service named \"\", whose Endpoints Get fails with "
+                                   f"`resource name may not be empty` forever. Measured: "
+                                   f"\"a,,b\" -> 3 deps, the middle one named \"\". The cause is "
+                                   f"a dependencies.static entry naming an endpoint the chart's "
+                                   f"values do not define, which renders as nothing at all")
+                            continue
                         owners = served_by.get(svc)
                         if not owners:
                             report(name, f"service:{svc}",
