@@ -12,69 +12,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{/*
-The controller is not the database, and the server's probes say nothing about it.
-
-mariadb_controller.py is a reconcile loop and nothing else: it lists the mariadb server pods,
-picks the first Ready one, and narrows the selector of the master service -- the `mariadb`
-Service every OpenStack service in the namespace resolves to -- from "all server pods" to that
-one pod, so that Galera takes writes on a single primary. Every call it makes is to the
-kubernetes API, so a loop wedged in one of them leaves the process alive, the container
-Running, the Deployment Available and the StatefulSet beside it reporting a perfectly healthy
-database, while the selector keeps whatever it last held: broad on a fresh install, so writes
-land on several primaries at once, or pinned to a pod a failover has already replaced, so every
-service gets connection refused from the one endpoint they all share. The container had no
-probe of any kind, which made that state unreportable -- the no-probe half of issue #110, on
-the component at the bottom of every dependency graph in this repo.
-
-So the loop reports each completed pass to a heartbeat file carrying the deadline for its next
-one, and this probe compares that deadline with the clock. Deliberately a check on the loop and
-not a second opinion about the cluster: a probe that re-read the master service from the API
-would pass throughout a wedge -- the selector it finds is the one the wedged loop left behind,
-valid until the next failover, which is precisely the moment it stops being valid -- and would
-fail whenever the database is down, which is the server's condition to report and not something
-restarting or depooling this container improves.
-
-Readiness only, no liveness and no startupProbe. The loop blocks on nothing but the apiserver,
-so a stale heartbeat almost always means the apiserver is slow or unreachable; killing the one
-process whose job is to re-link the master service the instant it answers again repairs
-nothing, and on a cluster-wide apiserver blip it would restart this container everywhere at
-once. A startupProbe would be worse than useless here: it suppresses readiness until it
-succeeds, so it would hide the signal this change exists to add. Unready is the honest report,
-and it costs nothing downstream -- no Service selects this pod, and nothing in
-.Values.dependencies waits on it.
-
-The pods_seen check is in the heartbeat and not in the probe for the same reason the deadline
-is: the loop knows what it saw. A pass that lists zero server pods will never link a primary,
-which is a label or namespace misconfiguration rather than a transient, and the probe's
-failureThreshold is what keeps the first seconds of an install -- where the StatefulSet's pod
-object may not exist yet -- from being reported as one.
-*/}}
-{{- define "mariadbControllerReadinessProbe" }}
-exec:
-  command:
-    - python3
-    - -c
-    - |
-      import os, sys, time
-      path = os.environ.get(
-          "MARIADB_CONTROLLER_HEARTBEAT_PATH", "/tmp/mariadb-controller-heartbeat")
-      try:
-          deadline, pods_seen, primary = open(path).read().split()
-      except (OSError, ValueError) as e:
-          sys.exit("no reconcile pass has reported through %s: %s" % (path, e))
-      late = int(time.time()) - int(deadline)
-      if late > 0:
-          sys.exit(
-              "the reconcile loop is %ds past the deadline it set for its next pass, so the "
-              "master service selector is no longer being maintained" % late)
-      if pods_seen == "0":
-          sys.exit(
-              "the last reconcile pass found no mariadb server pods, so no primary can ever "
-              "be linked: check the server pod labels and MARIADB_CONTROLLER_PODS_NAMESPACE")
-      print("reconciled %s server pod(s), master service linked to %s" % (pods_seen, primary))
-{{- end }}
-
 {{- if .Values.manifests.deployment_controller }}
 {{- $envAll := . }}
 
@@ -157,7 +94,6 @@ spec:
 {{ tuple $envAll "mariadb_controller" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ dict "envAll" $envAll "application" "controller" "container" "controller" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.controller | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
-{{ dict "envAll" $envAll "component" "controller" "container" "controller" "type" "readiness" "probeTemplate" (include "mariadbControllerReadinessProbe" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
           command:
             - /tmp/mariadb_controller.py
           env:

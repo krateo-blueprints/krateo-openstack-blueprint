@@ -590,12 +590,6 @@ pod:
     mariadb_controller:
       MARIADB_CONTROLLER_CHECK_PODS_DELAY: 10
       MARIADB_CONTROLLER_DEBUG: 0
-      # The file each completed reconcile pass reports through, and the one the readiness
-      # probe reads. Set here rather than left to the script's default so that both halves
-      # take it from the container's environment and cannot drift apart: the probe runs
-      # inside this container and reads the same variable. It must stay under /tmp, the
-      # only writable mount the container has -- its root filesystem is read-only.
-      MARIADB_CONTROLLER_HEARTBEAT_PATH: /tmp/mariadb-controller-heartbeat
       MARIADB_CONTROLLER_PYKUBE_REQUEST_TIMEOUT: 60
   lifecycle:
     disruption_budget:
@@ -612,31 +606,6 @@ pod:
           max_surge: 3
           max_unavailable: 1
   probes:
-    controller:
-      controller:
-        # Readiness only. The container had no probe at all, so a reconcile loop wedged in a
-        # kubernetes API call reported Running, Available and Ready while the master service
-        # selector every OpenStack service resolves to stopped being maintained. See the
-        # comment above mariadbControllerReadinessProbe in deployment-controller.yaml for why
-        # this is a check on the loop rather than a second read of the cluster, and why a
-        # liveness or startup probe would be wrong here.
-        #
-        # The heartbeat the probe reads carries its own deadline, computed by the loop from
-        # the delay and the request timeout above -- 310s with one server pod -- so these
-        # numbers only decide how often the deadline is compared with the clock and how long
-        # a transient is tolerated. failureThreshold is the kubernetes default, stated
-        # because it is load-bearing: three consecutive failures at a 30s period put the
-        # earliest unready report 90s after the container starts, which is what keeps the
-        # first seconds of an install -- where a pass can genuinely list zero server pods,
-        # because the StatefulSet has not created its pod object yet -- from being reported
-        # as a misconfiguration.
-        readiness:
-          enabled: true
-          params:
-            initialDelaySeconds: 30
-            periodSeconds: 30
-            timeoutSeconds: 10
-            failureThreshold: 3
     server:
       mariadb:
         # A startupProbe, so liveness cannot fire while the first bootstrap is still
