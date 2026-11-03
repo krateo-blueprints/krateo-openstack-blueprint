@@ -31,15 +31,18 @@
 {{- printf "composition.krateo.io/%s" (include "osh.version" (list $top)) -}}
 {{- end -}}
 
-{{/* Returns "true" if a Composition of <kind>/<name> reports Ready=True. Guarded by
-     osh.crdExists: a `lookup` of an unregistered group/version *errors* (not nil), which
-     would fail the whole render on first install (before the component CRDs exist). The
+{{/* Returns "true" if a Composition of <kind>/<name> reports Ready=True. Takes the cluster's CRD
+     list as its fourth argument; compositions.yaml looks that up ONCE per render and threads it
+     through everything (see osh.crdExists for the measurement that forced this).
+
+     Guarded by osh.crdExists: a `lookup` of an unregistered group/version *errors* (not nil),
+     which would fail the whole render on first install (before the component CRDs exist). The
      guard makes the umbrella self-bootstrapping - on early reconciles deps simply read as
      not-ready until their CRDs appear. */}}
 {{- define "osh.ready" -}}
-{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}
+{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $crds := index . 3 -}}
 {{- $r := "" -}}
-{{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)))) "true" -}}
+{{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)) $crds)) "true" -}}
 {{- $o := lookup (include "osh.apiVersion" (list $top)) $kind $top.Release.Namespace $name -}}
 {{- if $o -}}{{- range ($o.status.conditions | default list) -}}
 {{- /* Reason, not just status. Two of the five conditions this can see carry a status that
@@ -91,9 +94,9 @@
      before the component CRDs exist. Nothing can be paused before its CRD exists, so the
      guard's "" is also the honest answer. */}}
 {{- define "osh.paused" -}}
-{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}
+{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $crds := index . 3 -}}
 {{- $r := "" -}}
-{{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)))) "true" -}}
+{{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)) $crds)) "true" -}}
 {{- $o := lookup (include "osh.apiVersion" (list $top)) $kind $top.Release.Namespace $name -}}
 {{- if $o -}}{{- range ($o.status.conditions | default list) -}}
 {{- if and (eq .type "Ready") (eq (.reason | toString) "ReconcileGracefullyPaused") -}}{{- $r = "true" -}}{{- end -}}
@@ -108,11 +111,39 @@
      chart-version bump - when the CRD still only serves the OLD version - the guard
      stays false instead of green-lighting a CR at a version nothing serves yet
      (which would 500 the render: "no matches for kind ... ensure CRDs are installed
-     first"). */}}
+     first").
+
+     The CRD list is a PARAMETER and this function must never look it up. compositions.yaml
+     fetches it once, above the component range, and threads it through every helper that needs
+     it. That is the whole reason osh.ready, osh.paused, osh.exists, osh.depsReady and
+     osh.depsExist all carry an extra argument they otherwise would not need.
+
+     Why it matters: this is called once per component for the component's own kind, once more
+     through osh.exists, and once per dependency edge through osh.ready / osh.exists /
+     osh.paused. For profile=full that is 154 calls in a single render pass -- 34 components x 2,
+     plus 84 readiness-gated edges, plus 2 for the one existence-gated edge -- and it grows with
+     the DAG, so every component or edge added made it worse. When the fetch lived in here, each
+     of those pulled the cluster's ENTIRE CRD list: a 0.3.28 upgrade on a cluster with 257 CRDs,
+     several carrying megabyte-scale OpenAPI schemas, spent 13 minutes in its render phase.
+
+     Slow is not the whole cost. A `helm template` from a laptop can simply wait, but
+     composition-dynamic-controller renders through chart-inspector under a timeout, so a render
+     this slow WEDGES the umbrella instead of merely delaying it. And the cost is paid on every
+     release, not just on fresh installs: the chart version is encoded in the composition
+     apiVersion, so each bump regenerates every CRD at the new version, the existing CRs stay at
+     the old one, and the DAG walk restarts at level zero -- depth x per-pass render, every time.
+
+     The krateo installer chart fixed the identical problem the identical way: on a cluster with
+     121 CRDs and 42 large widget schemas, hoisting the lookup took its render from ~55s, which
+     blew that same timeout, to a few seconds (D9, 2026-07-08). This cluster has twice the CRDs.
+
+     The per-object lookups in osh.ready / osh.paused / osh.exists are deliberately left alone:
+     each is a single GET of one named object, which is cheap. Only the full-list fetch was the
+     problem. */}}
 {{- define "osh.crdExists" -}}
-{{- $kind := index . 0 -}}{{- $version := index . 1 -}}
+{{- $kind := index . 0 -}}{{- $version := index . 1 -}}{{- $crds := index . 2 -}}
 {{- $found := "" -}}
-{{- range (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "").items -}}
+{{- range ($crds | default list) -}}
 {{- if and (eq .spec.group "composition.krateo.io") (eq .spec.names.kind $kind) -}}
 {{- range (.spec.versions | default list) -}}
 {{- if and (eq .name $version) .served -}}{{- $found = "true" -}}{{- end -}}
@@ -138,9 +169,9 @@
      The CRD check is deliberately NOT latched. If the CRD does not serve the target version
      the CR cannot be rendered at all (the render 500s), so that one must stay a hard gate. */}}
 {{- define "osh.exists" -}}
-{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}
+{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $crds := index . 3 -}}
 {{- $r := "" -}}
-{{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)))) "true" -}}
+{{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)) $crds)) "true" -}}
 {{- if lookup (include "osh.apiVersion" (list $top)) $kind $top.Release.Namespace $name -}}{{- $r = "true" -}}{{- end -}}
 {{- end -}}
 {{- $r -}}
@@ -148,13 +179,16 @@
 
 {{/* "true" if every dependency Composition (by component name) is Ready. The DEFAULT creation
      gate: it is what sequences a dependent behind a dependency that actually works, and 79 of
-     the 80 declared dependency edges are gated this way. */}}
+     the 80 declared dependency edges are gated this way.
+
+     The fourth argument is the cluster's CRD list, passed down to osh.ready so the whole loop
+     reads it from memory instead of fetching it once per dependency. See osh.crdExists. */}}
 {{- define "osh.depsReady" -}}
-{{- $top := index . 0 -}}{{- $deps := index . 1 -}}{{- $comps := index . 2 -}}
+{{- $top := index . 0 -}}{{- $deps := index . 1 -}}{{- $comps := index . 2 -}}{{- $crds := index . 3 -}}
 {{- $all := "true" -}}
 {{- range $d := $deps -}}
   {{- $kind := "" -}}{{- range $c := $comps -}}{{- if eq $c.name $d -}}{{- $kind = $c.kind -}}{{- end -}}{{- end -}}
-  {{- if ne (include "osh.ready" (list $top $kind $d)) "true" -}}{{- $all = "" -}}{{- end -}}
+  {{- if ne (include "osh.ready" (list $top $kind $d $crds)) "true" -}}{{- $all = "" -}}{{- end -}}
 {{- end -}}
 {{- $all -}}
 {{- end -}}
@@ -173,14 +207,18 @@
      Deliberately a separate name from osh.depsReady rather than a redefinition of it. Which
      semantics an edge is in says everything about how the install progresses, so compositions
      .yaml partitions the dependency list and names both predicates at the call site. Reading
-     either one in isolation must not be able to mislead. */}}
+     either one in isolation must not be able to mislead.
+
+     The fourth argument is the cluster's CRD list, passed down to both osh.exists and
+     osh.paused -- two reads of it per dependency, which is exactly why it is threaded rather
+     than fetched. See osh.crdExists. */}}
 {{- define "osh.depsExist" -}}
-{{- $top := index . 0 -}}{{- $deps := index . 1 -}}{{- $comps := index . 2 -}}
+{{- $top := index . 0 -}}{{- $deps := index . 1 -}}{{- $comps := index . 2 -}}{{- $crds := index . 3 -}}
 {{- $all := "true" -}}
 {{- range $d := $deps -}}
   {{- $kind := "" -}}{{- range $c := $comps -}}{{- if eq $c.name $d -}}{{- $kind = $c.kind -}}{{- end -}}{{- end -}}
-  {{- if ne (include "osh.exists" (list $top $kind $d)) "true" -}}{{- $all = "" -}}{{- end -}}
-  {{- if eq (include "osh.paused" (list $top $kind $d)) "true" -}}{{- $all = "" -}}{{- end -}}
+  {{- if ne (include "osh.exists" (list $top $kind $d $crds)) "true" -}}{{- $all = "" -}}{{- end -}}
+  {{- if eq (include "osh.paused" (list $top $kind $d $crds)) "true" -}}{{- $all = "" -}}{{- end -}}
 {{- end -}}
 {{- $all -}}
 {{- end -}}
