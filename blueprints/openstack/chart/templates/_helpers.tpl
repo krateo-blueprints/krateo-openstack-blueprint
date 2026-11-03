@@ -269,3 +269,249 @@
 {{- end -}}
 {{- keys $sel | sortAlpha | join " " -}}
 {{- end -}}
+
+{{/* The name of the ClusterRole and ClusterRoleBinding that let this release read the cluster's
+     nodes. They are NOT rendered by this chart -- they are a release asset
+     (blueprints/openstack/node-reader-rbac.yaml) that an administrator applies alongside the
+     CompositionDefinition, and this chart only reads them back through osh.nodeReadGranted.
+
+     A fixed literal, for the same reason the asset is not templated: the asset has to be
+     installable with `kubectl apply` and the guard has to find it by name, so the name cannot
+     depend on anything either side knows and the other does not. In particular it is NOT
+     stamped with the chart version -- a version-stamped name would leave 0.3.30 hunting for a
+     grant only 0.3.29's asset ever created -- and not with the release name, since one grant
+     per cluster covers every Openstack Composition in the namespace the binding names.
+
+     Both halves of that agreement are checked: hack/validate-node-label-preconditions.py
+     asserts that this literal is the name the asset actually declares, because a rename on
+     either side produces no error anywhere -- the guard simply never finds the grant and the
+     precondition silently stops being enforced. */}}
+{{- define "osh.nodeReaderName" -}}
+krateo-openstack-node-reader
+{{- end -}}
+
+{{/* Returns "true" when this release may list the cluster's nodes, which is the only safe
+     precondition for looking them up.
+
+     Why a guard at all -- the measurement that forced it. `lookup` does NOT return empty when
+     it is refused. Helm returns an empty map only for a NotFound; every other API error,
+     Forbidden included, comes back as a template error and fails the WHOLE render. Measured
+     against a real composition-dynamic-controller identity on a 4-node GKE cluster:
+
+       $ kubectl auth can-i list nodes --as=system:serviceaccount:openstack:keystones-v0-3-29
+       no
+       $ helm template probe . --dry-run=server \
+           --kube-as-user=system:serviceaccount:openstack:keystones-v0-3-29
+       Error: ... at <lookup "v1" "Node" "" "">: error calling lookup: nodes is forbidden:
+       User "system:serviceaccount:openstack:keystones-v0-3-29" cannot list resource "nodes"
+       at the cluster scope
+
+     core-provider's generated role grants the controller `customresourcedefinitions
+     get/list/watch` -- which is why the $crds lookup in compositions.yaml works -- and no
+     `nodes` rule at all. An unguarded node lookup would therefore make every reconcile of this
+     umbrella error, and a Helm release that stops rendering is a Helm release that gets
+     uninstalled: #68, on every cluster, immediately. `helm template` could never have caught
+     it, because with no cluster the lookup is never attempted at all.
+
+     So the permission is granted out of band, by an administrator applying the release asset
+     blueprints/openstack/node-reader-rbac.yaml, and this reads back whether that grant is in
+     place. Not granted: the precondition is not measured and the install behaves exactly as it
+     did before the check existed. Granted: the precondition is measured on every reconcile. The
+     shape is the one osh.crdExists already uses for "the component CRDs do not exist yet" --
+     read the cluster for a prerequisite, and answer honestly when it is absent.
+
+     The chart deliberately does not create the grant for itself. It could: `escalate` and `bind`
+     on clusterroles are both in that generated role, and a server-side dry-run create of those
+     two objects as a real controller service account passes admission. But a chart that widens
+     its own permissions is a decision that belongs to a person who can refuse it, and the grant
+     is cluster-scoped node read for a whole namespace's service accounts. Making it an applied
+     asset also makes it auditable: `kubectl get clusterrole krateo-openstack-node-reader` is the
+     answer to "is this check enforced on this cluster".
+
+     It checks the PERMISSION, not merely that objects of those names exist: the ClusterRole must
+     carry a rule that actually covers nodes/list, and the binding must reference that role with
+     THIS namespace's service-account group as a subject. A name-only guard would green-light a
+     lookup that still 403s, and that 403 is the render-aborting error above -- so a guard that
+     is approximately right is not good enough here. Checking the namespace in the subject is
+     what makes installing into a namespace the asset was not edited for a skip rather than a
+     crash.
+
+     Why the asset's subject is a group rather than the controller's own service account is
+     argued in the asset itself: the account's name embeds an irregular plural and the chart
+     version, and either one being wrong turns this guard into that 403.
+
+     When the asset is never applied, this stays "" forever and the precondition is never
+     measured. That is a real cost of the asset-based design -- it is also why
+     templates/node-preconditions-state.yaml writes the skip and its reason into the cluster, so
+     an unenforced check is visible rather than assumed.
+
+     One residual assumption, stated because it is the only way this can still 403: the grant
+     covers service accounts in the release namespace, so the guard is exact for the Krateo path,
+     where the render identity is composition-dynamic-controller's own service account in that
+     namespace (measured: system:serviceaccount:openstack:keystones-v0-3-29 for a Composition in
+     `openstack`). An operator running `helm install` of this chart BY HAND is a kubeconfig user
+     instead, and is not in that group. Cluster-admins -- the documented case -- read nodes
+     anyway; a restricted human user with the grant applied but no node read of their own would
+     get the Forbidden on their terminal. That is a visible error in an interactive command, not
+     a controller silently losing its release, which is why the group is still the right subject;
+     and verified end to end on a real cluster, including that the namespace check turns a
+     mismatched grant into a skip rather than that 403.
+
+     Two named GETs, called ONCE per render from compositions.yaml above the component range.
+     Never call this from inside that range: see osh.crdExists for what a per-component cluster
+     read costs here. */}}
+{{- define "osh.nodeReadGranted" -}}
+{{- $top := index . 0 -}}
+{{- $name := include "osh.nodeReaderName" $top -}}
+{{- $role := lookup "rbac.authorization.k8s.io/v1" "ClusterRole" "" $name -}}
+{{- $binding := lookup "rbac.authorization.k8s.io/v1" "ClusterRoleBinding" "" $name -}}
+{{- $canList := "" -}}
+{{- range $r := (($role).rules | default list) -}}
+{{- if and (or (has "" ($r.apiGroups | default list)) (has "*" ($r.apiGroups | default list))) (or (has "nodes" ($r.resources | default list)) (has "*" ($r.resources | default list))) (or (has "list" ($r.verbs | default list)) (has "*" ($r.verbs | default list))) -}}
+{{- $canList = "true" -}}
+{{- end -}}
+{{- end -}}
+{{- $bound := "" -}}
+{{- if and $binding (eq (($binding.roleRef).name | toString) $name) (eq (($binding.roleRef).kind | toString) "ClusterRole") -}}
+{{- range $s := ($binding.subjects | default list) -}}
+{{- if and (eq ($s.kind | toString) "Group") (eq ($s.name | toString) (printf "system:serviceaccounts:%s" $top.Release.Namespace)) -}}
+{{- $bound = "true" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and (eq $canList "true") (eq $bound "true") -}}true{{- end -}}
+{{- end -}}
+
+{{/* The node labels that the SELECTED components' pods schedule on, as sorted "key=value"
+     tokens, space-joined. Pure values arithmetic -- no `lookup` -- so it returns the same
+     answer under `helm template` as against a live cluster, and the precondition check and the
+     state ConfigMap read one set from one place.
+
+     Selection-aware on purpose. profile=identity selects five components that only ever ask for
+     openstack-control-plane, so it must not be told to label nodes for a compute plane it is
+     not installing; and .Values.nodeLabelPreconditions carries, per label, exactly the
+     components whose RENDERED pods select on it -- see that block for why rendered pods and not
+     the charts' values keys. */}}
+{{- define "osh.nodeLabelsWanted" -}}
+{{- $top := index . 0 -}}{{- $sel := index . 1 -}}
+{{- $out := list -}}
+{{- range $p := ($top.Values.nodeLabelPreconditions | default list) -}}
+{{- range $c := ($p.components | default list) -}}
+{{- if has $c $sel -}}{{- $out = append $out (printf "%s=%s" $p.key ($p.value | toString)) -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | uniq | sortAlpha | join " " -}}
+{{- end -}}
+
+{{/* Of the labels the selected components want, the ones that NO node in <nodes> carries, as
+     space-joined "key=value" tokens.
+
+     A pure function of its arguments, the node list included, and that is what makes the
+     decision testable without a cluster whose nodes lack a label:
+     hack/validate-node-label-preconditions.py calls it with synthetic node lists and asserts
+     both answers, and calls osh.requireNodeLabels the same way to prove the render really does
+     abort.
+
+     An empty <nodes> therefore reports EVERY wanted label as uncarried, which is the honest
+     answer to the question asked: no node in an empty list carries anything. It is deliberately
+     not where "cannot measure" is handled -- that lives one level up, in osh.requireNodeLabels.
+     Collapsing the skip into this predicate would look equivalent and would not be: a real
+     cluster whose nodes carry none of these labels would then read as "nothing missing" and
+     pass, which is the defect this whole mechanism exists to catch. The gate asserts both
+     halves of that division. */}}
+{{- define "osh.nodeLabelsMissing" -}}
+{{- $top := index . 0 -}}{{- $sel := index . 1 -}}{{- $nodes := index . 2 | default list -}}
+{{- $missing := list -}}
+{{- range $t := (splitList " " (include "osh.nodeLabelsWanted" (list $top $sel)) | compact) -}}
+{{- $parts := splitList "=" $t -}}
+{{- $key := index $parts 0 -}}{{- $value := index $parts 1 -}}
+{{- $carried := "" -}}
+{{- range $n := $nodes -}}
+{{- if eq (index (($n.metadata).labels | default dict) $key | toString) $value -}}{{- $carried = "true" -}}{{- end -}}
+{{- end -}}
+{{- if ne $carried "true" -}}{{- $missing = append $missing $t -}}{{- end -}}
+{{- end -}}
+{{- $missing | join " " -}}
+{{- end -}}
+
+{{/* The operator-facing message for a missing node label. Self-sufficient by construction: the
+     label, its value, which of the SELECTED components want it, the command that fixes it, and
+     what the symptom would have looked like.
+
+     That last part is not padding. This precondition was already documented -- the exact
+     `kubectl label` line is in both of the README's install sequences, with the scheduler's
+     message quoted next to it -- and a fresh GKE install stalled on it anyway, because the
+     scheduler says "N node(s) didn't match Pod's node affinity/selector" and names neither the
+     label nor the chart that wants it. For a DaemonSet there is no message at all: one whose
+     nodeSelector matches no node has desiredNumberScheduled=0 and creates no pod, so there is
+     no Pending pod and no event to find. Measured on a 4-node GKE install of profile=full whose
+     nodes carried only openstack-control-plane: 263 pods, 227 of them selecting that label, and
+     nova-compute, libvirt, cyborg-agent, neutron-ovs-agent and openvswitch all sitting at
+     desiredNumberScheduled=0 -- an OpenStack with no hypervisor and no data plane, reported by
+     nothing. */}}
+{{- define "osh.nodeLabelMessage" -}}
+{{- $top := index . 0 -}}{{- $sel := index . 1 -}}{{- $missing := index . 2 -}}{{- $nodes := index . 3 | default list -}}
+{{- $tokens := splitList " " $missing | compact -}}
+{{- $lines := list "" (printf "node labels missing: none of the %d node(s) this release can see carries %d label(s) that the selected OpenStack components schedule their pods on." (len $nodes) (len $tokens)) "" -}}
+{{- range $t := $tokens -}}
+{{- $who := list -}}
+{{- range $p := ($top.Values.nodeLabelPreconditions | default list) -}}
+{{- if eq (printf "%s=%s" $p.key ($p.value | toString)) $t -}}
+{{- range $c := ($p.components | default list) -}}
+{{- if has $c $sel -}}{{- $who = append $who $c -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $lines = append $lines (printf "    %s  <- wanted by: %s" $t (join ", " ($who | sortAlpha))) -}}
+{{- end -}}
+{{- $lines = append $lines "" -}}
+{{- $lines = append $lines "Label the nodes that should run those components and this render proceeds by itself on the next reconcile, with nothing to re-run:" -}}
+{{- $lines = append $lines "" -}}
+{{- $lines = append $lines (printf "    kubectl label --overwrite nodes --all %s" (join " " $tokens)) -}}
+{{- $lines = append $lines "" -}}
+{{- $lines = append $lines "Label individual nodes instead if only some of them should run OpenStack, or deselect the components listed above through spec.enabled / spec.profile." -}}
+{{- $lines = append $lines "" -}}
+{{- $lines = append $lines "Nothing in the charts creates these labels. This render is refused rather than allowed to proceed because the resulting symptom is not reliably visible: a Deployment, StatefulSet or Job leaves a Pending pod saying \"node(s) didn't match Pod's node affinity/selector\", which names neither the label nor the chart, while a DaemonSet creates NO POD AT ALL -- desiredNumberScheduled=0, no Pending pod, no event. A 4-node profile=full install whose nodes carried only openstack-control-plane ran 227 pods and had no nova-compute, no libvirt and no openvswitch, with nothing anywhere reporting a problem." -}}
+{{- $lines | join "\n" -}}
+{{- end -}}
+
+{{/* The node-label precondition itself: refuse to render when this release can see the
+     cluster's nodes and none of them carries a label the selected components need.
+
+     THREE states, not two, and the middle one is why the node list is an argument rather than
+     something this looks up itself:
+
+       nodes non-empty, some wanted label carried by none of them   FAIL: measured, and bad.
+       nodes non-empty, every wanted label carried by some node     pass.
+       nodes EMPTY                                                  SKIP: not measured.
+
+     The skip covers both ways the measurement can be unavailable: `lookup` returns nothing
+     under `helm template`, which runs in CI on every pull request, and osh.nodeReadGranted
+     withholds the lookup entirely until the chart's own node-read grant exists. Failing on
+     either would break every pull request in this repo and the first reconcile of every
+     install.
+
+     That skip is legitimate here in a way a CI gate's skip is not, and the difference is worth
+     stating because this repo has been bitten by the other kind: four gates printed "SKIP:
+     PyYAML unavailable" and exited 0 for weeks (#120), reporting success on a measurement they
+     could have made at any time. A CI gate's input -- the charts -- is always present, so a
+     gate that skips is a gate that declined to look. This check's input is a live cluster's
+     node list, which genuinely does not exist during `helm template`. And unlike a CI gate this
+     is a runtime precondition re-evaluated on every reconcile, so a pass that could not be
+     measured now is measured again a minute later; nothing is being waved through for good.
+     templates/node-preconditions-state.yaml writes the skip and its reason into the cluster so
+     the unmeasured case is never silent either.
+
+     `fail` rather than a rendered warning, because the operator has to be stopped, not
+     informed: composition-dynamic-controller surfaces a render error on the Composition's own
+     status and events, which is the one place the operator is already looking, whereas a
+     warning in a ConfigMap is the same invisible prose as the README line that failed. */}}
+{{- define "osh.requireNodeLabels" -}}
+{{- $top := index . 0 -}}{{- $sel := index . 1 -}}{{- $nodes := index . 2 | default list -}}
+{{- if gt (len $nodes) 0 -}}
+{{- $missing := include "osh.nodeLabelsMissing" (list $top $sel $nodes) -}}
+{{- if $missing -}}
+{{- fail (include "osh.nodeLabelMessage" (list $top $sel $missing $nodes)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

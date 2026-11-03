@@ -263,6 +263,110 @@ dependencyRelaxations:
       startup, so nothing about the compute/network ordering is lost -- only the creation block
       is.
 
+# nodeLabelPreconditions: the node labels the SELECTED components' pods schedule on. The
+# orchestrator refuses to render when it can see the cluster's nodes and none of them carries a
+# label some selected component needs; templates/compositions.yaml holds the mechanism and the
+# three-state argument behind it.
+#
+# Why this exists as a mechanism rather than a sentence in the README. It WAS a sentence in the
+# README -- `kubectl label --overwrite nodes --all openstack-control-plane=enabled`, in both
+# install sequences, naming the scheduler message verbatim -- and a fresh GKE install still
+# stalled with 5 pods Pending because the scheduler's message names neither the label nor the
+# chart that wants it. The operator found it by diffing a working cluster's node labels against
+# the broken one's. A precondition that can only be noticed by someone reading prose will
+# eventually not be noticed.
+#
+# DERIVED FROM THE RENDERED PODS, NOT FROM THE CHARTS' VALUES KEYS, and the difference is the
+# whole correctness of this list:
+#
+#   labels.<group>.node_selector_key across the 35 charts' values.yaml   6 distinct labels
+#   nodeSelector on a pod spec the charts actually render                4 distinct labels
+#
+# `sriov=enabled` and `openstack-node=enabled` are in the values and in no rendered pod: they
+# belong to manifests disabled by default (neutron's sriov agent, ceilometer's ipmi DaemonSet).
+# Requiring them would refuse an install over a label nothing asks for, which is a worse defect
+# than the one this replaces -- it would block clusters that are perfectly fine. A chart
+# MENTIONING a label and a pod SELECTING on it are different facts, and only the second one can
+# strand a workload.
+#
+# The counts cut the other way too: a values-key scan that stops at labels.<group> misses
+# labels.agent.<name>, one level deeper, which is exactly where nova's and libvirt's
+# openstack-compute-node selectors live. So the shallow scan both over-counts (two labels no pod
+# wants) and under-attributes (the two components that most need one).
+#
+# This list is not hand-maintained: hack/validate-node-label-preconditions.py renders all 35
+# charts, collects every nodeSelector on every Deployment, DaemonSet, StatefulSet, Job, CronJob
+# and Pod, and fails if this block is not exactly that set, per component. So a re-vendor that
+# enables the sriov agent, or a chart that adds a node-pinned DaemonSet, cannot leave the check
+# measuring a stale set.
+#
+# NOT part of the Openstack spec (absent from values.schema.json, like `components` and
+# `dependencyRelaxations` above) because it is a property of these charts, not a deployment
+# choice.
+nodeLabelPreconditions:
+  # 33 of the 35 components. Only libvirt and openvswitch never select on it -- their sole
+  # workload is a compute-node or openvswitch DaemonSet -- so the README's claim that every
+  # chart schedules with openstack-control-plane, "all 35 of them", was wrong in both
+  # directions.
+  - key: openstack-control-plane
+    value: enabled
+    components:
+      - aodh
+      - barbican
+      - blazar
+      - ceilometer
+      - cinder
+      - cloudkitty
+      - cyborg
+      - designate
+      - freezer
+      - glance
+      - gnocchi
+      - heat
+      - horizon
+      - ironic
+      - keystone
+      - magnum
+      - manila
+      - mariadb
+      - masakari
+      - memcached
+      - mistral
+      - neutron
+      - nova
+      - octavia
+      - placement
+      - rabbitmq
+      - redis
+      - skyline
+      - swift
+      - tacker
+      - trove
+      - watcher
+      - zaqar
+  # The compute plane proper: nova-compute and libvirt are the hypervisor. A profile=full
+  # install whose nodes carry only openstack-control-plane has NO nova-compute and NO libvirt
+  # pod at all and cannot boot an instance -- measured on a 4-node GKE install, where both
+  # DaemonSets reported desiredNumberScheduled=0.
+  - key: openstack-compute-node
+    value: enabled
+    components:
+      - ceilometer
+      - cyborg
+      - libvirt
+      - nova
+  # The OVS datapath. neutron's ovs agent and the openvswitch DaemonSet; without them neutron
+  # has no data plane whatever its control plane reports.
+  - key: openvswitch
+    value: enabled
+    components:
+      - neutron
+      - openvswitch
+  - key: openstack-network-node
+    value: enabled
+    components:
+      - octavia
+
 # ---------------------------------------------------------------------------
 # Service integration descriptor (serviceContract).
 # Uniform, machine-readable declaration of how a management platform wires

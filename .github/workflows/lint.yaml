@@ -238,6 +238,27 @@ jobs:
       - name: Rendered config may only reference declared dependencies
         run: python3 hack/validate-component-config-closure.py .
 
+      # The gates above judge what the components point at. None of them asks whether any node
+      # can run the pods at all, and that is how a fresh GKE install came to stall with 5 pods
+      # Pending on a label the README documents in both of its install sequences: the scheduler
+      # says "4 node(s) didn't match Pod's node affinity/selector" and names neither the label
+      # nor the chart, so it was found by diffing a working cluster's node labels against the
+      # broken one's. A precondition that can only be noticed by reading prose eventually is
+      # not noticed.
+      #
+      # It is also not one label. The umbrella now refuses to render when the cluster's nodes
+      # carry none of the labels the SELECTED components need, and this asserts that mechanism:
+      # that the required set is exactly what the 35 charts' rendered pods select on (4 labels,
+      # not the 6 a values-key scan finds -- sriov and openstack-node belong to manifests that
+      # are off by default and requiring them would refuse installs that are fine), that the
+      # node list is looked up once and above the component loop, that the lookup stays guarded
+      # (the controller's generated role cannot list nodes, and a refused `lookup` is a template
+      # error that would fail every reconcile), and that the decision itself fires -- exercised
+      # with synthetic node lists, once per required label, since a check narrowed to the
+      # dominant label would otherwise look green.
+      - name: The node labels the selected components need must be checked, not documented
+        run: python3 hack/validate-node-label-preconditions.py .
+
   image-tags:
     # Gating, and offline. A rebuildable tag -- `latest`, or any variant containing it --
     # resolves forever and may resolve to different bytes each time, so `preflight-refs`

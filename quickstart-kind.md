@@ -13,6 +13,10 @@ Compositions. Compute (Nova/VMs) is **not** possible on kind — see [`quickstar
 
 ```sh
 kind create cluster --config tools/kind-openstack.yaml
+# The identity plane's pods all schedule on this one label, so it is the only one this path
+# needs. The compute plane needs three more (openstack-compute-node, openvswitch,
+# openstack-network-node) and is not possible on kind anyway -- see quickstart-gke.md and the
+# label table in README.md.
 kubectl label --overwrite nodes --all openstack-control-plane=enabled
 
 # core-provider is installed from its OCI chart, not charts.krateo.io: that repo still

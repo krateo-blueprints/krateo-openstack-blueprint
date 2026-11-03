@@ -56,6 +56,27 @@
        site, for the same reason the dependency partition below lives here and not in a
        helper. */ -}}
 {{- $crds := (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "").items }}
+{{- /* The cluster's node list, fetched ONCE for the whole render in the same place and for the
+       same reason as $crds above, and threaded into osh.requireNodeLabels as an argument. It is
+       read here, before any component is emitted, because what it gates is the whole install
+       and not one component: every component chart pins its pods to a node label that nothing
+       in the charts creates, and a component created while no node carries its label does not
+       fail -- it goes missing. No per-component fetch exists and none may be added; one node
+       fetch inside the range below would cost 34 full node-list reads per pass, which is the
+       mistake osh.crdExists carries the 13-minute measurement for.
+
+       Guarded by osh.nodeReadGranted, which is NOT belt-and-braces: the render identity cannot
+       list nodes unless an administrator has applied the node-read grant
+       (blueprints/openstack/node-reader-rbac.yaml, published as a release asset), and a refused
+       `lookup` is a template error, not an empty result -- it would fail this render, every
+       reconcile, and a release that stops rendering gets uninstalled (#68). The guard is what
+       makes an install without that asset skip the check rather than abort. Measured; see
+       osh.nodeReadGranted. */ -}}
+{{- $nodes := list }}
+{{- if eq (include "osh.nodeReadGranted" (list $)) "true" }}
+{{- $nodes = ((lookup "v1" "Node" "" "").items | default list) }}
+{{- end }}
+{{- include "osh.requireNodeLabels" (list $ $sel $nodes) -}}
 {{- range $c := .Values.components }}
 {{- if has $c.name $sel }}
 {{- $crd := include "osh.crdExists" (list $c.kind (include "osh.version" (list $)) $crds) }}

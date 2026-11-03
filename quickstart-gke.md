@@ -14,10 +14,20 @@ gcloud container clusters create osh --zone us-central1-a --num-nodes 1 \
   --disk-type pd-standard --disk-size 100 --no-enable-autoupgrade --no-enable-autorepair
 gcloud container clusters get-credentials osh --zone us-central1-a
 
-# Label the node for all OpenStack roles
+# Label the node for all OpenStack roles. These four are exactly the labels the charts' rendered
+# pods select on -- openstack-control-plane for 33 of the 35 charts, openstack-compute-node for
+# nova-compute and libvirt, openvswitch for the OVS datapath and neutron's ovs agent,
+# openstack-network-node for octavia. Omitting one does not fail loudly: nova-compute, libvirt
+# and the ovs agent are DaemonSets, and a DaemonSet whose nodeSelector matches no node creates no
+# pod at all rather than a Pending one. The orchestrator umbrella refuses to render without them
+# (see README.md); on this path, where blueprints are driven per component, nothing checks.
+#
+# `l3-agent=enabled` was here and is not one of them: neutron's l3 agent schedules on
+# openstack-control-plane like the rest of neutron's agents, so that label was created and
+# selected on by nothing.
 kubectl label --overwrite nodes --all \
   openstack-control-plane=enabled openstack-compute-node=enabled \
-  openvswitch=enabled l3-agent=enabled
+  openvswitch=enabled openstack-network-node=enabled
 ```
 
 The Ubuntu node image already has the `openvswitch` and `vxlan` kernel modules; the OVS chart
