@@ -1,0 +1,9 @@
+apiVersion: core.krateo.io/v1alpha1
+kind: CompositionDefinition
+metadata:
+  name: redis
+  namespace: openstack-system
+spec:
+  chart:
+    url: oci://ghcr.io/krateo-blueprints/charts/redis
+    version: CHART_VERSION

@@ -18,7 +18,7 @@ on:
   # was gated against the base it branched from, never against the result of combining them, so
   # two changes that each pass can merge into a main that does not and nothing says so.
   #
-  # It matters more because release-tag.yaml fires on a tag push: a release publishes 35 charts
+  # It matters more because release-tag.yaml fires on a tag push: a release publishes 36 charts
   # from whatever main happens to contain, and until now that tree had not been linted. 0.3.26
   # was cut that way. It passes -- checked every gate against it by hand -- but passing by luck
   # and passing by construction are different properties, and only one of them holds next time.
@@ -140,6 +140,21 @@ jobs:
       - name: Gnocchi probes must check its backends
         run: python3 hack/validate-gnocchi-readiness.py .
 
+      # The same shape, on the component added in #131, and the one case where this repo's own
+      # precedent points the wrong way. memcached's `tcpSocket 11211` was classified MEANINGFUL
+      # because no realistic state was found in which memcached accepts TCP and cannot serve
+      # get/set; upstream's redis chart ships the analogous `tcpSocket 6379`, and redis has four
+      # such states -- measured in docker.io/library/redis:7.2.17, the image this chart pins:
+      # loading an RDB from disk, a failed BGSAVE with writes stopped, a replica whose master
+      # link is down, and maxmemory reached with noeviction. A tcpSocket passes in all four, and
+      # so does `redis-cli ping` read by exit status, because redis-cli EXITS 0 ON AN ERROR
+      # REPLY. zaqar's message store is this redis and posting a message is a write, so
+      # readiness does SET then GET and reads the reply text. The gate RUNS the rendered probe
+      # scripts against a stub redis-cli reproducing each state, and asserts the converse too:
+      # liveness must stay false only for wedged and gone, the two states a restart repairs.
+      - name: Redis readiness must prove it can serve, and its liveness must not CrashLoop it
+        run: python3 hack/validate-redis-readiness.py .
+
       # Renders every chart and reads the ports its probes actually reach. uwsgi's stats socket
       # is served by the MASTER process, which never imports the application and never handles a
       # request, so with stats-http it answers 200 with every worker wedged -- a liveness probe
@@ -186,7 +201,7 @@ jobs:
       # A dep naming a component that does not exist is never Ready, so the dependent is never
       # emitted and nothing reports an error -- and an install stopped partway looks identical
       # to a healthy install in its first minutes. Same for a cycle, and for a kind that
-      # core-provider does not serve. Also renders all 34 charts; 29 are compute-tier and have
+      # core-provider does not serve. Also renders all 35 charts; 30 are compute-tier and have
       # never been installed anywhere, since libvirt needs /dev/kvm and ovs needs kernel modules.
       - name: Component DAG must be closed, acyclic and renderable
         run: python3 hack/validate-component-dag.py .
@@ -202,11 +217,11 @@ jobs:
       #
       # Readiness is still the default creation gate, because it is what sequences a dependent
       # behind a dependency that works; the edges relaxed to existence are declared in the
-      # umbrella's values. This renders all 34 charts, builds the graph of every wait in them,
+      # umbrella's values. This renders all 35 charts, builds the graph of every wait in them,
       # and checks the relax-set in BOTH directions: every cycle must be broken by a declared
       # relaxation (a new chart that introduces one fails here instead of deadlocking an
       # install), and every declared relaxation must still be inside a cycle (so the set cannot
-      # accrete, and a blanket switch to existence fails as ~79 unnecessary relaxations). The fix
+      # accrete, and a blanket switch to existence fails as ~85 unnecessary relaxations). The fix
       # and its guard are the same change.
       - name: The creation gate's relax-set must be exactly the cycles that need it
         run: python3 hack/validate-readiness-deadlock.py .

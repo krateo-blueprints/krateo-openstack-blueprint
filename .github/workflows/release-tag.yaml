@@ -112,7 +112,7 @@ jobs:
             # every template would fail at install. --skip-refresh because no remote repo
             # is involved and refreshing them is pure latency.
             # `update`, not `build`: build requires a committed Chart.lock, and a lock over a
-            # single file:// path carries no information worth maintaining in 34 copies.
+            # single file:// path carries no information worth maintaining in 35 copies.
             helm dependency update "$dir" --skip-refresh
             helm package "$dir" --version "${VERSION}" --destination .
             # Retry: this push fails transiently. The 0.3.13 release died on

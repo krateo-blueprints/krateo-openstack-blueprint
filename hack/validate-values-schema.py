@@ -108,7 +108,7 @@ def main():
         print("templates already accept the value; fix values.yaml only if it is not vendored.")
         return 1
     if checked == 0:
-        print("FAILED MEASUREMENT: no chart carrying a values.schema.json was found. 35 of them")
+        print("FAILED MEASUREMENT: no chart carrying a values.schema.json was found. 36 of them")
         print("exist in this repository, so finding none means the scan did not look where it")
         print("meant to -- a clean result from an instrument that examined nothing.")
         return 1

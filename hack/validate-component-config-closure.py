@@ -89,6 +89,13 @@ PROVIDED_BY = {
     "rabbit": "rabbitmq",
     "rabbitmq": "rabbitmq",
     "amqp": "rabbitmq",
+    # #131 added a redis component (vendored openstack-helm/redis) because zaqar's message
+    # store is redis and nothing here provided one. `rediss` is the TLS scheme for the same
+    # server; the chart serves plaintext today, so a component configured against rediss is
+    # still pointed at this component and still has to declare it -- the dependency is the
+    # same whether or not the transport is wrapped.
+    "redis": "redis",
+    "rediss": "redis",
 }
 
 # Backends that name a server no component here runs. A component configured against one of
@@ -96,7 +103,6 @@ PROVIDED_BY = {
 NO_COMPONENT_PROVIDES = {
     "postgres", "postgresql", "postgresql+psycopg2",
     "ceph", "rbd",
-    "redis", "rediss",
     "s3", "cassandra", "influxdb", "elasticsearch", "opensearch", "etcd", "mongodb",
 }
 

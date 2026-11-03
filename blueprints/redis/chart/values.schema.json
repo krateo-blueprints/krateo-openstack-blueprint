@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "type": "object",
+  "title": "OpenStack redis",
+  "description": "Configuration for the Redis data store that backs zaqar's message store (OpenStack-Helm redis, release 2025.1). Only the fields here are settable on a Composition; everything else uses the chart defaults in values.yaml. Deploy all the OpenStack component blueprints into one namespace to form a complete install.",
+  "properties": {
+    "images": {
+      "type": "object",
+      "title": "Images",
+      "properties": {
+        "pull_policy": {
+          "type": "string",
+          "title": "Image pull policy",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ],
+          "default": "IfNotPresent"
+        }
+      }
+    }
+  }
+}

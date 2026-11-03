@@ -50,7 +50,7 @@ Composition CRD.
 ### Recommended: one orchestrator Composition
 
 ```sh
-# Every chart schedules with nodeSelector openstack-control-plane=enabled -- all 34 of them, via
+# Every chart schedules with nodeSelector openstack-control-plane=enabled -- all 35 of them, via
 # labels.*.node_selector_key. Nothing in the charts creates that label, so on a cluster whose
 # nodes do not carry it every pod sits Pending indefinitely with
 #

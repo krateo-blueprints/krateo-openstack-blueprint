@@ -183,6 +183,13 @@ metadata:
 spec: {}
 ---
 apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
+kind: Redis
+metadata:
+  name: redis
+  namespace: openstack
+spec: {}
+---
+apiVersion: composition.krateo.io/COMPOSITION_API_VERSION
 kind: Zaqar
 metadata:
   name: zaqar
