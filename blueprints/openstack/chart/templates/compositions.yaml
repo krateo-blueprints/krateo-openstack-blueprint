@@ -43,9 +43,22 @@
        Keystone. Deselection still removes a component, because `has $c.name $sel` below is
        checked first and independently. */ -}}
 {{- $sel := splitList " " (include "osh.selected" (list $)) }}
+{{- /* The cluster's CRD list, fetched ONCE for the whole render and threaded into every helper
+       that needs it. It must not be fetched inside osh.crdExists, which is called 154 times in
+       a profile=full pass: with the fetch in there, a 0.3.28 upgrade against a cluster of 257
+       CRDs -- several with megabyte-scale OpenAPI schemas -- spent 13 minutes rendering, and
+       composition-dynamic-controller renders under a timeout, so that wedges the umbrella rather
+       than just delaying it. osh.crdExists carries the full measurement and the precedent.
+
+       Threaded as an explicit argument rather than cached on .Values with `set`. Caching would
+       avoid changing six signatures, but it hides the dependency inside the helpers and mutates
+       the values the release is rendered from; an argument keeps the cost visible at each call
+       site, for the same reason the dependency partition below lives here and not in a
+       helper. */ -}}
+{{- $crds := (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "").items }}
 {{- range $c := .Values.components }}
 {{- if has $c.name $sel }}
-{{- $crd := include "osh.crdExists" (list $c.kind (include "osh.version" (list $))) }}
+{{- $crd := include "osh.crdExists" (list $c.kind (include "osh.version" (list $)) $crds) }}
 {{- /* Partition this component's dependencies by the gate each edge is in, so that which
        semantics applies to which dependency is visible here and not buried in a helper. */ -}}
 {{- $relaxed := splitList " " (include "osh.depsRelaxed" (list $ $c.name $c.deps)) | compact }}
@@ -53,9 +66,9 @@
 {{- range $d := ($c.deps | default list) }}
 {{- if not (has $d $relaxed) }}{{- $strict = append $strict $d }}{{- end }}
 {{- end }}
-{{- $strictReady := include "osh.depsReady" (list $ $strict $.Values.components) }}
-{{- $relaxedExist := include "osh.depsExist" (list $ $relaxed $.Values.components) }}
-{{- $exists := include "osh.exists" (list $ $c.kind $c.name) }}
+{{- $strictReady := include "osh.depsReady" (list $ $strict $.Values.components $crds) }}
+{{- $relaxedExist := include "osh.depsExist" (list $ $relaxed $.Values.components $crds) }}
+{{- $exists := include "osh.exists" (list $ $c.kind $c.name $crds) }}
 {{- if and (eq $crd "true") (or (and (eq $strictReady "true") (eq $relaxedExist "true")) (eq $exists "true")) }}
 {{- $ov := (index ($.Values.componentValues | default dict) $c.name) | default dict }}
 ---
