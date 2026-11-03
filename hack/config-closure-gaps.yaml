@@ -17,17 +17,6 @@
 #   why        what is actually broken, and why it is not fixed here
 #   tracking   where the reasoning lives
 gaps:
-  - component: ceilometer
-    reference: job:ceilometer-ks-endpoints
-    why: >-
-      ceilometer's dependencies.static lists the ceilometer-ks-endpoints Job in five places,
-      but the chart has no job-ks-endpoints.yaml template and no manifests flag for one --
-      ceilometer serves no API, so it registers no keystone endpoints. Every ceilometer pod
-      therefore waits on a Job that is never created, which never completes. The fix is to
-      drop the five wait entries, which belongs in a ceilometer change rather than a gnocchi
-      one.
-    tracking: 115
-
   - component: neutron
     reference: service:nova-api
     why: >-

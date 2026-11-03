@@ -1246,7 +1246,6 @@ dependencies:
         - ceilometer-db-sync
         - ceilometer-rabbit-init
         - ceilometer-ks-user
-        - ceilometer-ks-endpoints
       services:
         - endpoint: internal
           service: identity
@@ -1257,12 +1256,9 @@ dependencies:
         - ceilometer-db-sync
         - ceilometer-rabbit-init
         - ceilometer-ks-user
-        - ceilometer-ks-endpoints
       services:
         - endpoint: internal
           service: identity
-        - endpoint: internal
-          service: oslo_db
         - endpoint: internal
           service: metric
     ipmi:
@@ -1270,12 +1266,9 @@ dependencies:
         - ceilometer-db-sync
         - ceilometer-rabbit-init
         - ceilometer-ks-user
-        - ceilometer-ks-endpoints
       services:
         - endpoint: internal
           service: identity
-        - endpoint: internal
-          service: oslo_db
         - endpoint: internal
           service: metric
     compute:
@@ -1283,12 +1276,9 @@ dependencies:
         - ceilometer-db-sync
         - ceilometer-rabbit-init
         - ceilometer-ks-user
-        - ceilometer-ks-endpoints
       services:
         - endpoint: internal
           service: identity
-        - endpoint: internal
-          service: oslo_db
         - endpoint: internal
           service: metric
     db_sync:
@@ -1308,12 +1298,9 @@ dependencies:
         - ceilometer-db-sync
         - ceilometer-rabbit-init
         - ceilometer-ks-user
-        - ceilometer-ks-endpoints
       services:
         - endpoint: internal
           service: identity
-        - endpoint: internal
-          service: oslo_db
         - endpoint: internal
           service: metric
     tests:
