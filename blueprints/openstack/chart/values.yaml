@@ -178,11 +178,24 @@ components:
       - rabbitmq
       - mariadb
     tier: compute
+  - name: redis
+    kind: Redis
+    deps: []
+    tier: compute
   - name: zaqar
     kind: Zaqar
     deps:
       - keystone
       - mariadb
+      # redis IS zaqar's message store: the chart ships `[drivers] message_store = redis`
+      # with `[drivers:message_store:redis] uri = redis://redis:6379`, and this blueprint had
+      # no redis component at all, so that host did not resolve -- the same defect as
+      # gnocchi's postgresql indexer in #115. #131 added the component rather than moving the
+      # store to a backend that already exists, so this list says so and zaqar-api now waits
+      # on the redis Service in its own rendered entrypoint. Found by
+      # hack/validate-component-config-closure.py, which carried it as a declared gap until
+      # the component existed.
+      - redis
     tier: compute
   - name: freezer
     kind: Freezer

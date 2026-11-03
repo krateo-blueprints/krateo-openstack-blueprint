@@ -278,3 +278,71 @@ divergences:
           The upstream spelling, named explicitly: restoring any one of the three occurrences
           reintroduces the label mismatch, and a Service with no endpoints looks identical to a
           healthy one from everywhere except `kubectl get endpoints`.
+  - component: redis
+    issue: 131
+    reason: >-
+      Upstream's redis chart pins Redis 4.0.1 (released 2017, unsupported), runs its helm test
+      on docker.io/redislabs/redis-py -- a repository that publishes exactly one tag, `latest`
+      -- and tags kubernetes-entrypoint `latest-ubuntu_noble`. Two of those three are tags this
+      repo forbids by gate (#69); the third is an image nobody should be handed as the message
+      store for a new component.
+    assertions:
+      - file: values.yaml
+        absent: "redis:4.0.1"
+        why: >-
+          Redis 4.0.1 is a 2017 build with no upstream support. preflight-refs cannot catch a
+          revert to it: `4.0.1` is a perfectly immutable tag and the manifest resolves, so only
+          this assertion stands between a re-vendor and shipping it again.
+      - file: values.yaml
+        present: "redis:7.2.17"
+        why: >-
+          The newest patch of the last BSD-3-Clause Redis line, still rebuilt as a Docker
+          Official Image (the amd64 manifest for this tag was rebuilt 2026-10-28) and served as
+          an OCI image index. The probes in templates/deployment.yaml were measured against
+          exactly this image.
+      - file: values.yaml
+        absent: redislabs/redis-py
+        why: >-
+          Published only as `latest`, so it can never satisfy preflight-refs --mutable-only.
+          There is no other tag to pin, which is why the helm test was rewritten against
+          redis-cli instead of being switched off.
+      - file: templates/test/_redis_test.sh.tpl
+        absent: python-tests.py
+        why: >-
+          The python test only runs in the redislabs/redis-py image above. Restoring it makes
+          the helm test exec `python` in docker.io/library/redis, which has no python at all,
+          so the test fails for a reason that has nothing to do with redis.
+      - file: templates/test/_redis_test.sh.tpl
+        present: redis-cli
+        why: >-
+          The replacement, which runs in the server image the chart already pulls and covers
+          the same ground as upstream's python test (reachability, client list, SET/GET/DBSIZE/DEL).
+
+  - component: zaqar
+    issue: 131
+    reason: >-
+      Upstream hardcodes zaqar's message-store uri as `redis://redis:6379` in values and
+      declares no endpoint and no dependency wait for it, so the host it names is written in
+      exactly one place and in no place a kubernetes-entrypoint wait can read. Until #131 this
+      blueprint shipped no redis component at all, so that host did not resolve -- the same
+      defect as gnocchi's postgresql indexer in #115.
+    assertions:
+      - file: values.yaml
+        absent: redis://redis:6379
+        why: >-
+          The hardcoded uri. endpoints.message_store is now the single value that both the
+          rendered uri and the api pod's wait on the redis Service resolve from; restoring the
+          literal makes them two values that can disagree, and the config-closure gate would
+          still pass because the scheme it checks is unchanged.
+      - file: values.yaml
+        present: "service: message_store"
+        why: >-
+          The kubernetes-entrypoint wait that makes a STANDALONE Zaqar Composition order itself
+          behind redis. The umbrella's creation gate covers the orchestrated case; nothing
+          covers the standalone one but this.
+      - file: templates/configmap-etc.yaml
+        present: "drivers:message_store:redis"
+        why: >-
+          Derives the uri from endpoints.message_store, exactly as the block above it derives
+          the management store's uri from endpoints.oslo_db. Without it the uri renders empty
+          and zaqar's redis driver gets no host at all.

@@ -29,6 +29,17 @@ limitations under the License.
 {{- $_ := tuple "oslo_db" "internal" "zaqar" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup"| set (index .Values.conf.zaqar "drivers:management_store:sqlalchemy") "uri" -}}
 {{- end -}}
 
+{{/*
+The message store's uri, derived from endpoints.message_store the same way the management
+store's is derived from endpoints.oslo_db immediately above. Upstream hardcodes
+`redis://redis:6379` in values instead, which names the host in a place no dependency wait can
+read; endpoints.message_store is now the single value that both this uri and
+dependencies.static.api's wait on the redis Service resolve from. See #131.
+*/}}
+{{- if empty (index .Values.conf.zaqar "drivers:message_store:redis").uri -}}
+{{- $_ := tuple "message_store" "internal" "redis" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" | set (index .Values.conf.zaqar "drivers:message_store:redis") "uri" -}}
+{{- end -}}
+
 {{- if and (empty .Values.conf.logging.handler_fluent) (has "fluent" .Values.conf.logging.handlers.keys) -}}
 {{- $fluentd_host := tuple "fluentd" "internal" $envAll | include "helm-toolkit.endpoints.hostname_namespaced_endpoint_lookup" }}
 {{- $fluentd_port := tuple "fluentd" "internal" "service" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" }}

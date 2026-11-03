@@ -1,0 +1,170 @@
+{{/*
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{/*
+Readiness means "redis accepted a write and served it back", not "redis accepted a TCP
+connection". Upstream's probe here was a bare `tcpSocket: 6379`, and for redis -- unlike
+memcached, where tcpSocket was classified meaningful because no realistic state was found in
+which memcached accepts TCP and cannot serve get/set -- there are four such states, all of them
+measured in docker.io/library/redis:7.2.17 under --platform linux/amd64:
+
+    state                               TCP  PING reply    redis-cli  SET reply    this probe
+                                        ---  ------------  exit code  -----------  ----------
+    healthy                             ok   PONG          0          OK           pass
+    loading a 311MB RDB from disk       ok   -LOADING      0          -LOADING     FAIL
+    BGSAVE failed, writes stopped       ok   -MISCONF      0          -MISCONF     FAIL
+    replica, master link down           ok   -MASTERDOWN   0          -READONLY    FAIL
+    maxmemory reached, noeviction       ok   PONG          0          -OOM         FAIL
+    event loop wedged (DEBUG SLEEP)     ok   (no reply)    124        (no reply)   FAIL
+    process gone                        no   n/a           1          n/a          FAIL
+
+Three things follow from that table, and each of them is why this probe is shaped the way it is.
+
+1. tcpSocket passes in every broken state. The kernel completes the handshake from the listen
+   backlog, so it passes even with the event loop wedged.
+
+2. `redis-cli ping` is not enough either, and for two independent reasons. The first is that
+   redis-cli EXITS 0 ON AN ERROR REPLY -- measured: `redis-cli NOSUCHCOMMAND; echo $?` prints
+   the error and exits 0 -- so a probe that runs redis-cli and lets the kubelet read its exit
+   status reports Ready while every command is being refused. The second is the maxmemory row:
+   there PING really does answer PONG, so even checking PING's reply text passes while redis
+   rejects every write. (redis denies PING during LOADING, MISCONF and MASTERDOWN on purpose,
+   for load balancers; it does not deny it on OOM.)
+
+3. So the probe makes the round trip zaqar makes. zaqar's message store IS this redis --
+   `[drivers] message_store = redis`, `uri = redis://redis:6379` -- and posting a message is a
+   write, so a redis that refuses writes serves zaqar nothing at all. SET proves the write path
+   (and fails on LOADING, MISCONF, READONLY and OOM); the GET read-back proves the value
+   actually landed in the keyspace rather than that a status reply was merely parsed. The value
+   is unique per invocation, so a leftover key cannot satisfy the read-back.
+
+The reply is compared as TEXT, never by exit status, because of 2 above. `timeout` supplies the
+budget redis-cli has no option for (7.2 has no connect/read timeout flag), so a wedged server
+fails the probe with a message the kubelet records instead of being killed mid-call -- the
+budget is pod.probes.redis.redis.readiness.reply_timeout and it is spent twice here, which
+hack/validate-redis-readiness.py checks stays under timeoutSeconds.
+
+The canary key is namespaced, carries a 30s TTL, and lives in db 0 where zaqar's own data is.
+Deliberately not a spare database: SELECT would add a failure mode (a `databases 1` override)
+while proving less, and nothing in zaqar's redis driver enumerates the keyspace -- it reaches
+its queues through the `queues_set` ZSET and its messages through per-queue keys -- so an
+unrelated string key is invisible to it.
+*/}}
+{{- define "redisReadinessProbeTemplate" }}
+exec:
+  command:
+    - /bin/sh
+    - -c
+    - |
+      key=krateo.readiness.probe
+      want="$(date +%s).$$"
+      out=$(timeout {{ .Values.pod.probes.redis.redis.readiness.reply_timeout }} redis-cli -h 127.0.0.1 -p {{ .Values.network.port }} SET "$key" "$want" EX 30 2>&1)
+      if [ "$out" != "OK" ]; then
+        echo "redis did not accept a write: SET -> ${out:-no reply at all}"
+        exit 1
+      fi
+      got=$(timeout {{ .Values.pod.probes.redis.redis.readiness.reply_timeout }} redis-cli -h 127.0.0.1 -p {{ .Values.network.port }} GET "$key" 2>&1)
+      if [ "$got" != "$want" ]; then
+        echo "redis did not serve the write back: GET -> ${got:-no reply at all}"
+        exit 1
+      fi
+      echo "redis accepted a write on port {{ .Values.network.port }} and served it back"
+{{- end }}
+
+{{/*
+Liveness asks only "did redis reply AT ALL", and that is the whole point: it must be able to
+fail for the one thing a restart repairs and unable to fail for everything else.
+
+A restart repairs a wedged event loop and a dead process. It repairs none of the other rows in
+the table above -- a read-only or full /data (MISCONF), a reached maxmemory (OOM), a down master
+link (MASTERDOWN), or an RDB that takes minutes to load (LOADING, where a restart makes it
+strictly worse by starting the load again). A liveness probe that failed on those would convert
+a visible unready pod into a CrashLoop and repair nothing, which is the mistake this repo has
+already shipped elsewhere (#110).
+
+Which makes redis-cli's exit status -- useless for readiness, because it is 0 on an error reply
+-- exactly the right signal here. Measured, with `timeout` supplying the budget:
+
+    0    any server reply, INCLUDING -LOADING, -MISCONF, -MASTERDOWN and -OOM   do not restart
+    1    could not connect: the process is gone or not listening yet            restart
+    124  no reply inside the budget: the event loop is wedged                    restart
+
+So this is deliberately the weaker of the two probes, and weaker in the safe direction. The
+readiness probe beside it is what reports a redis that is up and cannot serve.
+
+initialDelaySeconds and failureThreshold in values are sized so that the pre-listen window and
+a slow RDB load are never mistaken for a wedged server: PING during LOADING is an error reply,
+which exits 0 here, so the load itself cannot trip this.
+*/}}
+{{- define "redisLivenessProbeTemplate" }}
+exec:
+  command:
+    - /bin/sh
+    - -c
+    - |
+      if timeout {{ .Values.pod.probes.redis.redis.liveness.reply_timeout }} redis-cli -h 127.0.0.1 -p {{ .Values.network.port }} PING >/dev/null 2>&1; then
+        exit 0
+      fi
+      echo "redis did not reply on port {{ .Values.network.port }} within {{ .Values.pod.probes.redis.redis.liveness.reply_timeout }}s: the server is wedged or gone"
+      exit 1
+{{- end }}
+
+{{- if .Values.manifests.deployment }}
+{{- $envAll := . }}
+
+{{- $serviceAccountName := "redis" }}
+{{ tuple $envAll "redis" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
+  labels:
+{{ tuple $envAll "redis" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+spec:
+  replicas: {{ .Values.pod.replicas.server }}
+  selector:
+    matchLabels:
+{{ tuple $envAll "redis" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
+{{ tuple $envAll | include "helm-toolkit.snippets.kubernetes_upgrades_deployment" | indent 2 }}
+  template:
+    metadata:
+      labels:
+{{ tuple $envAll "redis" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
+    spec:
+      serviceAccountName: {{ $serviceAccountName }}
+      affinity:
+{{ tuple $envAll "redis" "server" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+      nodeSelector:
+        {{ .Values.labels.redis.node_selector_key }}: {{ .Values.labels.redis.node_selector_value | quote }}
+      initContainers:
+{{ tuple $envAll "redis" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
+      containers:
+        - name: redis
+{{ tuple $envAll "redis" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.server | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+          command:
+            - redis-server
+            - --port
+            - {{ .Values.network.port | quote }}
+          ports:
+            - containerPort: {{ .Values.network.port }}
+{{ dict "envAll" $envAll "component" "redis" "container" "redis" "type" "readiness" "probeTemplate" (include "redisReadinessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
+{{ dict "envAll" $envAll "component" "redis" "container" "redis" "type" "liveness" "probeTemplate" (include "redisLivenessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
+{{- end }}

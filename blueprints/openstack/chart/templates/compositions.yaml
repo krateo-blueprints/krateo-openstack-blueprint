@@ -4,7 +4,7 @@
 
        The gate is PER EDGE, and readiness is the default. A dependency must report Ready=True
        before its dependents are created -- that is what sequences a dependent behind a
-       dependency that actually works, and it holds for 79 of the 80 declared dependency edges.
+       dependency that actually works, and it holds for 85 of the 86 declared dependency edges.
        An edge listed in .Values.dependencyRelaxations is gated on EXISTENCE instead, and only
        those.
 

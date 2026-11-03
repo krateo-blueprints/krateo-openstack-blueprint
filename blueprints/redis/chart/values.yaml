@@ -1,0 +1,240 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Full OpenStack-Helm redis defaults (vendored from openstack-helm/redis
+# 2026.2.5+3307478d8) with the blueprint's validated overrides applied: a supported,
+# immutably tagged image, the repo-wide pinned kubernetes-entrypoint, single-replica, and
+# probes that can report failure. A small curated subset is overridable per Composition
+# (see values.schema.json).
+#
+# This component exists because zaqar's message store is redis: zaqar ships
+# `[drivers] message_store = redis` with `uri = redis://redis:6379`, and until now this
+# blueprint had no redis at all, so that host did not resolve (#131, the same defect shape as
+# gnocchi's postgresql indexer in #115). The Service this chart renders is named `redis` on
+# port 6379, so zaqar's upstream uri is already correct against it and is left untouched.
+# Default values for redis.
+# This is a YAML-formatted file.
+# Declare name/value pairs to be passed into your templates.
+# name: value
+
+---
+images:
+  tags:
+    # Upstream ships the official redis image tagged 4.0.1 -- Redis 4.0.1, released 2017 and
+    # long out of support. Written without the `repo:tag` punctuation on purpose: it would
+    # scan as a live reference and hack/preflight-refs.py would report a 2017 image as one of
+    # this repo's own. Pinned here to the newest patch of the 7.2 line, which is the last Redis
+    # released under the BSD-3-Clause licence (7.4 moved to RSALv2/SSPL and 8.x added AGPLv3),
+    # so an Apache-2.0 blueprint does not quietly ship an SSPL server. Still an actively
+    # rebuilt Docker Official Image: the amd64 manifest for this tag was rebuilt 2026-10-28.
+    # Served as an OCI image index, so it satisfies the media-type half of
+    # hack/preflight-refs.py as well as the immutability half.
+    redis: docker.io/library/redis:7.2.17
+    # The same image as the server, deliberately. Upstream's helm test runs a python script
+    # against docker.io/redislabs/redis-py, and that repository publishes exactly ONE tag --
+    # `latest` -- so it can never satisfy hack/preflight-refs.py --mutable-only (#69). The
+    # test is kept and rewritten against redis-cli, which the server image already carries,
+    # rather than disabled: a test that is switched off to dodge an unpinnable image is not a
+    # fix. See hack/upstream-divergences.yaml.
+    helm_tests: docker.io/library/redis:7.2.17
+    # Upstream's `latest-ubuntu_noble` is a rebuildable tag. This is the digest-era tag every
+    # other chart in this repo pins.
+    dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
+    image_repo_sync: quay.io/airshipit/docker:27.5.0
+  pull_policy: IfNotPresent
+  local_registry:
+    active: false
+    exclude:
+      - dep_check
+      - image_repo_sync
+
+pod:
+  affinity:
+    anti:
+      type:
+        default: preferredDuringSchedulingIgnoredDuringExecution
+      topologyKey:
+        default: kubernetes.io/hostname
+      weight:
+        default: 10
+  replicas:
+    # One server. This chart configures no replication between replicas -- each pod would be
+    # an independent, empty redis behind one headless Service -- so more than one replica
+    # would hand zaqar a different keyspace per connection.
+    server: 1
+  # Probes. See the two long comments in templates/deployment.yaml for the measured table of
+  # redis states these are derived from, and hack/validate-redis-readiness.py for the gate.
+  #
+  # reply_timeout is the budget each redis-cli call inside the probe gets, enforced with
+  # `timeout` because redis-cli 7.2 has no connect or read timeout option of its own. It must
+  # expire before the kubelet's timeoutSeconds, so that an unreachable server fails the probe
+  # with a message the kubelet records rather than being killed mid-call -- readiness spends it
+  # twice (SET, then GET), liveness once.
+  probes:
+    redis:
+      redis:
+        readiness:
+          enabled: true
+          reply_timeout: 2
+          params:
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+        liveness:
+          enabled: true
+          reply_timeout: 2
+          params:
+            # Generous, because the only states this probe may fail on are "wedged" and
+            # "gone": 30s + 3 x 15s must comfortably cover the window before redis listens,
+            # on a node that is still pulling or starting.
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+  lifecycle:
+    upgrades:
+      deployments:
+        revision_history: 3
+        pod_replacement_strategy: RollingUpdate
+        rolling_update:
+          max_unavailable: 1
+          max_surge: 3
+  resources:
+    enabled: false
+    server:
+      limits:
+        memory: "128Mi"
+      requests:
+        memory: "128Mi"
+        cpu: "500m"
+    jobs:
+      image_repo_sync:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "1024Mi"
+      tests:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "1024Mi"
+
+labels:
+  redis:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+  job:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+  test:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+
+network:
+  port: 6379
+
+dependencies:
+  dynamic:
+    common:
+      local_image_registry:
+        jobs:
+          - redis-image-repo-sync
+        services:
+          - endpoint: node
+            service: local_image_registry
+  static:
+    image_repo_sync:
+      services:
+        - endpoint: internal
+          service: local_image_registry
+    redis:
+      services: null
+
+secrets:
+  oci_image_registry:
+    redis: redis-oci-image-registry-key
+
+endpoints:
+  cluster_domain_suffix: cluster.local
+  local_image_registry:
+    name: docker-registry
+    namespace: docker-registry
+    hosts:
+      default: localhost
+      internal: docker-registry
+      node: localhost
+    host_fqdn_override:
+      default: null
+    port:
+      registry:
+        node: 5000
+  oci_image_registry:
+    name: oci-image-registry
+    namespace: oci-image-registry
+    auth:
+      enabled: false
+      redis:
+        username: redis
+        password: password
+    hosts:
+      default: localhost
+    host_fqdn_override:
+      default: null
+    port:
+      registry:
+        default: null
+
+manifests:
+  configmap_bin: true
+  deployment: true
+  job_image_repo_sync: true
+  secret_registry: true
+  service: true
+  helm_tests: true
+
+# -- Extra K8s manifests to deploy. Either a list or a map of manifests.
+## Note: Supports use of custom Helm templates
+## Note: Helm replaces (instead of merging) list values when several values
+## files are combined, so if you need to define extraObjects in more than one
+## overrides file, use the map form and make sure the keys are unique across
+## those files. With the list form only the last file takes effect.
+extraObjects: {}
+  # osh_secrets_store:
+  #   apiVersion: secrets-store.csi.x-k8s.io/v1
+  #   kind: SecretProviderClass
+  #   metadata:
+  #     name: osh-secrets-store
+  #   spec:
+  #     provider: aws
+  #     parameters:
+  #       objects: |
+  #         - objectName: "osh"
+  #           objectType: "secretsmanager"
+  #           jmesPath:
+  #               - path: "client_id"
+  #                 objectAlias: "client_id"
+  #               - path: "client_secret"
+  #                 objectAlias: "client_secret"
+  #     secretObjects:
+  #     - data:
+  #       - key: client_id
+  #         objectName: client_id
+  #       - key: client_secret
+  #         objectName: client_secret
+  #       secretName: osh-secrets-store
+  #       type: Opaque
+  #       labels:
+  #         app.kubernetes.io/part-of: osh
+...

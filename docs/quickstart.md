@@ -76,7 +76,7 @@ version is derived from that chart version, so chart `0.3.8` serves
 One `Openstack` Composition = one install. Pick the scope with `spec`:
 
 - `profile: identity` — MariaDB + Memcached + Keystone + Glance + Horizon.
-- `profile: full` — the whole 34-component catalog (needs a large amd64
+- `profile: full` — the whole 35-component catalog (needs a large amd64
   cluster).
 - `spec.enabled` — an explicit component list that overrides `profile` and is
   expanded to its **transitive dependency closure**, so you get exactly what

@@ -33,13 +33,7 @@ gaps:
       Same wait, same cycle, same resolution as service:nova-api above.
     tracking: 115
 
-  - component: zaqar
-    reference: backend:redis
-    why: >-
-      zaqar sets `[drivers] message_store = redis` with
-      `[drivers:message_store:redis] uri = redis://redis:6379`, and this blueprint has no
-      redis component, so zaqar's message store points at a host that does not resolve --
-      the same defect as gnocchi's postgresql indexer in #115, in a different component.
-      Fixing it means either adding a redis component or moving the message store to a
-      backend that exists, which is a zaqar design decision.
-    tracking: 115
+# zaqar / backend:redis was here, and is gone because it was fixed rather than re-waived:
+# #131 added a redis component (vendored openstack-helm/redis) and zaqar now declares it, so
+# the finding no longer occurs and the gate would have failed on a stale entry. That is the
+# mechanism working -- a fix forces the waiver out.

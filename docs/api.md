@@ -78,6 +78,7 @@ PascalCase of that name, in the group version derived from the chart version (ch
 | `Tacker` | NFV orchestration | compute |
 | `Cyborg` | Accelerator management | compute |
 | `Blazar` | Resource reservation | compute |
+| `Redis` | Zaqar's message store | compute |
 | `Zaqar` | Messaging service | compute |
 | `Freezer` | Backup as a service | compute |
 | `Skyline` | Modern dashboard | compute |

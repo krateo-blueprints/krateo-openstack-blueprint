@@ -15,7 +15,7 @@ Also checks `kind`, because the gate matches a component's CRD by Kind. core-pro
 the served kind from the chart name, so `kind` must be the capitalised name -- `MariaDB` instead
 of `Mariadb` means the gate looks for a CRD nobody serves and waits forever, again with no error.
 
-And renders every component chart. 29 of the 34 are compute-tier and have never been installed
+And renders every component chart. 30 of the 35 are compute-tier and have never been installed
 anywhere: libvirt needs /dev/kvm and openvswitch needs kernel modules, so kind cannot run them.
 Rendering is not installing, but it does catch the class that broke 0.3.10 -- a chart that does
 not template -- without needing hardware.

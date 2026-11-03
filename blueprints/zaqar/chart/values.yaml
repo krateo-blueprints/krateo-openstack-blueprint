@@ -81,6 +81,16 @@ dependencies:
           service: oslo_db
         - endpoint: internal
           service: identity
+        # The message store. zaqar-api cannot serve a single message POST without it
+        # (conf.zaqar `[drivers] message_store = redis`), and upstream declared no wait on it
+        # because upstream's zaqar is installed next to a redis chart that is always there.
+        # Here the umbrella already orders zaqar behind redis's Composition, but a STANDALONE
+        # Zaqar Composition has no such ordering, so the wait is what makes the component
+        # correct on its own. Checked by hack/validate-component-config-closure.py: the
+        # Service this resolves to is rendered by the redis component, which is in zaqar's
+        # declared closure.
+        - endpoint: internal
+          service: message_store
     bootstrap:
       services:
         - endpoint: internal
@@ -242,6 +252,32 @@ endpoints:
     port:
       memcache:
         default: 11211
+  # zaqar's message store. Upstream declares no endpoint for it and hardcodes
+  # `redis://redis:6379` in conf.zaqar, which left the host named in exactly one place and
+  # named nowhere that a dependency wait could read -- so zaqar had no entrypoint wait on its
+  # message store and, until #131, the host did not resolve at all because this blueprint
+  # shipped no redis component.
+  #
+  # Declaring it as an endpoint makes the host a single value that both the rendered uri (see
+  # templates/configmap-etc.yaml, which derives it exactly as it already derives the
+  # management store's) and the kubernetes-entrypoint wait in dependencies.static.api read.
+  # `redis` here is the Service the redis blueprint renders, on the port it renders it on.
+  message_store:
+    name: redis
+    namespace: null
+    hosts:
+      default: redis
+    host_fqdn_override:
+      default: null
+    # No path component in a redis uri. Spelled as a map with a null default rather than a
+    # bare `path: null`, because helm-toolkit's path lookup indexes this value and an untyped
+    # nil fails the render.
+    path:
+      default: null
+    scheme: redis
+    port:
+      redis:
+        default: 6379
   fluentd:
     namespace: null
     name: fluentd
@@ -493,7 +529,12 @@ conf:
     drivers:management_store:sqlalchemy:
       uri:
     drivers:message_store:redis:
-      uri: redis://redis:6379
+      # Left empty and derived from endpoints.message_store by templates/configmap-etc.yaml,
+      # exactly as the management store's uri above is derived from endpoints.oslo_db.
+      # Upstream hardcoded `redis://redis:6379` here, which is the right host and port against
+      # the redis blueprint's Service but duplicates it: an operator who moved the endpoint
+      # would move the entrypoint wait and leave the driver pointing at the old host.
+      uri:
     drivers:transport:wsgi:
       bind: 0.0.0.0
       port: 8888
