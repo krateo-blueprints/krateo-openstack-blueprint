@@ -1,6 +1,40 @@
-{{- /* Step 2: emit each Composition once its CRD exists and all its dependency
-       Compositions report Ready=True. On the first pass only zero-dependency components
-       render; later passes unlock the rest in order.
+{{- /* Step 2: emit each Composition once its CRD exists and its dependencies are satisfied.
+       On the first pass only zero-dependency components render; later passes unlock the rest
+       in order.
+
+       The gate is PER EDGE, and readiness is the default. A dependency must report Ready=True
+       before its dependents are created -- that is what sequences a dependent behind a
+       dependency that actually works, and it holds for 79 of the 80 declared dependency edges.
+       An edge listed in .Values.dependencyRelaxations is gated on EXISTENCE instead, and only
+       those.
+
+       Why any edge needs relaxing (#110). openstack-helm's charts order their own startup with
+       kubernetes-entrypoint, and those waits do not follow this DAG: neutron's dhcp, l3 and
+       metadata agents wait for Service nova-api before they will start, which is upstream's own
+       `dependencies.static.{dhcp,l3,metadata}.services` and is byte-identical in upstream
+       master. Upstream does not deadlock on it because it installs every chart at once and the
+       agents simply sit in Init until nova appears. Gating nova's creation on neutron's
+       READINESS turned that soft startup wait into a hard block: neutron cannot become Ready
+       until nova-api exists, nova was not created until neutron was Ready, and so nova-api
+       never existed. Measured on a 4-node GKE install of profile=full -- neutron stuck at
+       "3 of 73 managed children are not ready", no nova workload at all, and ironic and octavia
+       blocked behind the same pair.
+
+       Why only that edge. Readiness is unreachable on an edge whose two endpoints are inside a
+       cycle of the runtime wait graph, and it is perfectly reachable everywhere else: placement
+       does not wait on nova, rabbitmq does not wait on freezer. Relaxing the whole DAG would
+       discard ordering for 75 edges that never had the problem and replace it with "the
+       dependent retries", which is strictly worse than the ordering it had. The lookup was
+       never the bug; applying readiness to an edge where readiness is unreachable was.
+
+       The relax-set is COMPUTED, not guessed. hack/validate-readiness-deadlock.py builds the
+       whole runtime wait graph from the rendered charts -- Composition readiness, managed
+       children, every kubernetes-entrypoint Service/pod/job wait, and these creation edges --
+       and asserts both directions: every declared relaxation is genuinely inside a cycle (so
+       the set cannot accrete) and every cycle is broken by a declared relaxation (so a new
+       chart that introduces one fails CI instead of silently needing another). The declared DAG
+       itself stays closed and acyclic under hack/validate-component-dag.py; this cycle was only
+       ever in the runtime readiness dimension, which is why neither gate alone could see it.
 
        `or $exists` makes the dependency check a precondition for creation, not a condition
        for staying alive. The lookup is re-evaluated every reconcile, so without it a
@@ -12,9 +46,17 @@
 {{- range $c := .Values.components }}
 {{- if has $c.name $sel }}
 {{- $crd := include "osh.crdExists" (list $c.kind (include "osh.version" (list $))) }}
-{{- $deps := include "osh.depsReady" (list $ $c.deps $.Values.components) }}
+{{- /* Partition this component's dependencies by the gate each edge is in, so that which
+       semantics applies to which dependency is visible here and not buried in a helper. */ -}}
+{{- $relaxed := splitList " " (include "osh.depsRelaxed" (list $ $c.name $c.deps)) | compact }}
+{{- $strict := list }}
+{{- range $d := ($c.deps | default list) }}
+{{- if not (has $d $relaxed) }}{{- $strict = append $strict $d }}{{- end }}
+{{- end }}
+{{- $strictReady := include "osh.depsReady" (list $ $strict $.Values.components) }}
+{{- $relaxedExist := include "osh.depsExist" (list $ $relaxed $.Values.components) }}
 {{- $exists := include "osh.exists" (list $ $c.kind $c.name) }}
-{{- if and (eq $crd "true") (or (eq $deps "true") (eq $exists "true")) }}
+{{- if and (eq $crd "true") (or (and (eq $strictReady "true") (eq $relaxedExist "true")) (eq $exists "true")) }}
 {{- $ov := (index ($.Values.componentValues | default dict) $c.name) | default dict }}
 ---
 apiVersion: {{ include "osh.apiVersion" (list $) }}

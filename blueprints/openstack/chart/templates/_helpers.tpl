@@ -62,6 +62,46 @@
 {{- $r -}}
 {{- end -}}
 
+{{/* Returns "true" if an operator has paused reconciliation of the <kind>/<name> Composition.
+
+     osh.ready above already refuses a paused dependency, because Ready=True with reason
+     ReconcileGracefullyPaused is not ready (#95, and see its condition table). This exists for
+     the edges whose creation gate is EXISTENCE rather than readiness: those edges deliberately
+     accept a dependency that is not working, but accepting a dependency an operator has
+     switched off is a different thing. "Do not act on this" has to keep meaning "do not build
+     on this" -- creating a dependent runs its db_init and db_sync against a component nobody
+     is maintaining.
+
+     It cannot reintroduce the deadlock of #110, and that is the whole reason an existence-gated
+     edge may still consult it: a pause is driven by an operator and can never be caused by the
+     absence of the dependent. Existence and pausing are conditions only the operator and this
+     umbrella can change; readiness is a condition the dependency's own charts can hold hostage,
+     which is exactly how neutron's agents held nova's creation hostage.
+
+     ZeroEvidence needs no special case here: it is not a pause, and a dependency that exists
+     but has never been evaluated is exactly the "exists, not yet ready" case an existence-gated
+     edge is meant to let through.
+
+     This never withdraws anything. compositions.yaml consults it only through osh.depsExist,
+     whose result is or'd with osh.exists, so pausing a component cannot uninstall the
+     components already built on it (#68).
+
+     Guarded by osh.crdExists for the same reason osh.exists is: a `lookup` of an unregistered
+     group/version *errors* (not nil), which would fail the whole render on first install,
+     before the component CRDs exist. Nothing can be paused before its CRD exists, so the
+     guard's "" is also the honest answer. */}}
+{{- define "osh.paused" -}}
+{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}
+{{- $r := "" -}}
+{{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)))) "true" -}}
+{{- $o := lookup (include "osh.apiVersion" (list $top)) $kind $top.Release.Namespace $name -}}
+{{- if $o -}}{{- range ($o.status.conditions | default list) -}}
+{{- if and (eq .type "Ready") (eq (.reason | toString) "ReconcileGracefullyPaused") -}}{{- $r = "true" -}}{{- end -}}
+{{- end -}}{{- end -}}
+{{- end -}}
+{{- $r -}}
+{{- end -}}
+
 {{/* Returns "true" if a generated CRD for <kind> in composition.krateo.io exists AND
      serves the target <version> (e.g. "v0-3-1"). Matched by Kind (not a guessed
      plural), so pluralization can never bite. Version-aware so that during a
@@ -82,7 +122,6 @@
 {{- $found -}}
 {{- end -}}
 
-{{/* "true" if every dependency Composition (by component name) is Ready. */}}
 {{/* Returns "true" if the component's own CR exists at all -- Ready or not.
 
      This is what makes the dependency gate a precondition for CREATION rather than an
@@ -107,6 +146,9 @@
 {{- $r -}}
 {{- end -}}
 
+{{/* "true" if every dependency Composition (by component name) is Ready. The DEFAULT creation
+     gate: it is what sequences a dependent behind a dependency that actually works, and 79 of
+     the 80 declared dependency edges are gated this way. */}}
 {{- define "osh.depsReady" -}}
 {{- $top := index . 0 -}}{{- $deps := index . 1 -}}{{- $comps := index . 2 -}}
 {{- $all := "true" -}}
@@ -115,6 +157,52 @@
   {{- if ne (include "osh.ready" (list $top $kind $d)) "true" -}}{{- $all = "" -}}{{- end -}}
 {{- end -}}
 {{- $all -}}
+{{- end -}}
+
+{{/* "true" if every dependency Composition (by component name) EXISTS and none of them is
+     paused. The RELAXED creation gate, used only for the edges listed in
+     .Values.dependencyRelaxations; compositions.yaml's header says why those edges cannot be
+     gated on readiness (#110).
+
+     Readiness is unreachable on such an edge, not merely slow: the dependency's own charts wait
+     at startup for a workload that this umbrella will not create until the dependency is Ready,
+     so the two conditions each hold the other open. Existence is the strongest condition left
+     that only the operator and this umbrella can satisfy, which is what makes it safe -- no
+     chart can hold it hostage.
+
+     Deliberately a separate name from osh.depsReady rather than a redefinition of it. Which
+     semantics an edge is in says everything about how the install progresses, so compositions
+     .yaml partitions the dependency list and names both predicates at the call site. Reading
+     either one in isolation must not be able to mislead. */}}
+{{- define "osh.depsExist" -}}
+{{- $top := index . 0 -}}{{- $deps := index . 1 -}}{{- $comps := index . 2 -}}
+{{- $all := "true" -}}
+{{- range $d := $deps -}}
+  {{- $kind := "" -}}{{- range $c := $comps -}}{{- if eq $c.name $d -}}{{- $kind = $c.kind -}}{{- end -}}{{- end -}}
+  {{- if ne (include "osh.exists" (list $top $kind $d)) "true" -}}{{- $all = "" -}}{{- end -}}
+  {{- if eq (include "osh.paused" (list $top $kind $d)) "true" -}}{{- $all = "" -}}{{- end -}}
+{{- end -}}
+{{- $all -}}
+{{- end -}}
+
+{{/* The dependencies of <component> whose creation gate is relaxed to existence, space-joined,
+     taken from .Values.dependencyRelaxations. Everything NOT returned here stays gated on
+     readiness, so the default is always the strict one: a relaxation has to be declared, with
+     the cycle that forces it, to take effect. hack/validate-readiness-deadlock.py checks that
+     each declared entry is genuinely inside a cycle and that every cycle has one, so the set
+     can neither accrete nor go stale.
+
+     Pure values arithmetic -- no `lookup` -- so unlike every other gate helper this one returns
+     the same answer under `helm template` as it does against a live cluster. */}}
+{{- define "osh.depsRelaxed" -}}
+{{- $top := index . 0 -}}{{- $name := index . 1 -}}{{- $deps := index . 2 -}}
+{{- $out := list -}}
+{{- range $d := ($deps | default list) -}}
+  {{- range $r := ($top.Values.dependencyRelaxations | default list) -}}
+    {{- if and (eq $r.component $name) (eq $r.dependency $d) -}}{{- $out = append $out $d -}}{{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $out | uniq | join " " -}}
 {{- end -}}
 
 {{/* The set of component names to deploy, space-joined. If `enabled` is non-empty it

@@ -192,6 +192,41 @@ components:
       - keystone
     tier: compute
 
+# dependencyRelaxations: the dependency edges whose creation gate is EXISTENCE instead of
+# READINESS. Every other edge waits for the dependency to report Ready=True, which is what
+# sequences a dependent behind a dependency that actually works; see the header of
+# templates/compositions.yaml.
+#
+# An edge belongs here only when readiness is UNREACHABLE on it -- when the dependency cannot
+# become Ready until something that this umbrella will not create until the dependency is Ready
+# becomes ready, so each condition holds the other open. That is a cycle in the runtime wait
+# graph, not in this file's DAG, which stays acyclic.
+#
+# Not a free-form knob, and not guessable: hack/validate-readiness-deadlock.py builds that graph
+# from the rendered charts and checks BOTH directions. An entry that is no longer inside a cycle
+# fails, so the set cannot accrete; a cycle with no entry fails, so a new chart that introduces
+# one cannot pass CI by being overlooked. Deleting an entry is therefore safe to try: CI says
+# whether it was still load-bearing.
+#
+# This is not part of the Openstack spec (it is absent from values.schema.json, like
+# `components` above) because it is an invariant of these charts, not a deployment choice.
+dependencyRelaxations:
+  - component: nova
+    dependency: neutron
+    issue: 110
+    cycle: >-
+      neutron's Composition is Ready only when every managed child is, and its dhcp, l3 and
+      metadata agents wait for Service nova-api to have endpoints before they will start
+      (upstream openstack-helm's own dependencies.static.{dhcp,l3,metadata}.services,
+      byte-identical in upstream master). Service nova-api is backed by nova's own
+      nova-api-osapi Deployment, which cannot run before nova's Composition is created. Gating
+      that creation on neutron being Ready closes the loop: measured on a 4-node GKE install of
+      profile=full, neutron sat at "3 of 73 managed children are not ready" and no nova workload
+      existed at all. nova still waits for neutron's Composition to EXIST, so creation stays
+      ordered, and nova's own nova-compute agents still wait for Service neutron-server at
+      startup, so nothing about the compute/network ordering is lost -- only the creation block
+      is.
+
 # ---------------------------------------------------------------------------
 # Service integration descriptor (serviceContract).
 # Uniform, machine-readable declaration of how a management platform wires
