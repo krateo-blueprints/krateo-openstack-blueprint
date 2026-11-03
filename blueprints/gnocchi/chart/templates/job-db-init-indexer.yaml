@@ -12,7 +12,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- if .Values.manifests.job_db_init_indexer }}
+{{/*
+Gated on the indexer driver, not only on the manifests flag. This Job exists to create a
+database on a *postgresql* server: it waits on dependencies.static.db_init_postgresql
+(endpoints.oslo_db_postgresql) and writes [indexer] url. With `indexer.driver: mysql` the
+indexer database is the mariadb database that gnocchi-db-init already creates, so this Job
+has nothing to do -- and because kubernetes-entrypoint cannot tell "not ready yet" from
+"no such Service", rendering it anyway is what made it sit in Init:0/1 on the GKE install
+reporting `Service postgresql ... has no ready endpoints` (#115).
+
+configmap-etc.yaml already branches on this same value to choose the indexer URL. Keeping
+the manifests and the dependency waits on the same single switch is the point.
+*/}}
+{{- if and .Values.manifests.job_db_init_indexer (eq .Values.conf.gnocchi.indexer.driver "postgresql") }}
 {{- $envAll := . }}
 
 {{- $serviceAccountName := "gnocchi-db-init-indexer" }}

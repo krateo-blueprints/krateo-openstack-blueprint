@@ -169,3 +169,91 @@ divergences:
           The single place the heartbeat path is set. The script's default and the probe's
           fallback agree with it, so losing it from values is the only way the three can drift
           apart without one of them changing.
+
+  - component: gnocchi
+    issue: 115
+    reason: >-
+      Upstream's gnocchi chart is written for a deployment that also runs postgresql and ceph:
+      it ships `indexer.driver: postgresql` and `storage.driver: ceph`, renders the ceph
+      machinery unconditionally, and has no swift storage support at all. This blueprint has
+      neither a postgres nor a ceph component, so upstream's defaults point gnocchi at two
+      backends that cannot exist here -- which is precisely what was observed on a 4-node GKE
+      install of the full profile, with db-init-indexer, db-sync, 4x metricd and 4x statsd stuck
+      in Init on `Service postgresql ... has no ready endpoints` and behind a
+      ceph-keyring-placement init container. gnocchi is now configured against the mariadb it
+      already provisions and the swift this blueprint does ship, and every ceph object is gated
+      on the storage driver.
+    assertions:
+      - file: values.yaml
+        absent: 'driver: ceph'
+        why: >-
+          There is no ceph component in this blueprint. Restoring ceph storage brings back the
+          gnocchi-storage-init Job that loops on `ceph -s` and the ceph-keyring-placement init
+          container in front of the API, metricd, statsd and db-sync, which is the state the
+          GKE install was found in.
+      - file: values.yaml
+        present: 'driver: swift'
+        why: >-
+          swift IS a component here, so this is the one object store gnocchi can reach. It also
+          avoids the ReadWriteMany volume that `file` storage would need across the API and
+          every node's metricd and statsd.
+      - file: values.yaml
+        absent: 'driver: postgresql'
+        why: >-
+          There is no postgres component. The mariadb database that gnocchi-db-init creates and
+          Completes on was being ignored in favour of a postgresql Service nobody serves.
+      - file: values.yaml
+        present: 'driver: mysql'
+        why: >-
+          The indexer runs on the mariadb this chart already provisions. The generated URL
+          carries endpoints.oslo_db.scheme, `mysql+pymysql://`, which gnocchi accepts directly:
+          `gnocchi.indexer` registers mysql+pymysql as a stevedore entry point and the engine's
+          DBAPI module is pymysql, which is present in the Kolla image while MySQLdb is not.
+          Unlike skyline (#116) this needs no per-endpoint scheme split.
+      - file: values.yaml
+        absent: '- gnocchi-storage-init'
+        why: >-
+          A kubernetes-entrypoint job wait on a Job that no longer renders. kubernetes-entrypoint
+          cannot distinguish "not complete yet" from "never created", so restoring this wait
+          blocks the API, metricd, statsd, the resources cleaner and the tests forever, silently.
+      - file: values.yaml
+        absent: '- gnocchi-db-init-indexer'
+        why: >-
+          Same failure mode: the postgresql indexer db-init Job does not render under
+          `indexer.driver: mysql`, so a wait on it never ends.
+      - file: templates/job-storage-init.yaml
+        present: eq .Values.conf.gnocchi.storage.driver "ceph"
+        why: >-
+          Upstream renders this Job unconditionally. Without the gate a swift-backed install
+          still gets a Job whose container runs `ceph -s`, `ceph osd pool create` and
+          `ceph auth get-or-create` against a cluster that does not exist.
+      - file: templates/job-db-init-indexer.yaml
+        present: eq .Values.conf.gnocchi.indexer.driver "postgresql"
+        why: >-
+          Upstream renders this Job unconditionally. Without the gate a mysql-indexer install
+          still gets a Job that waits on endpoints.oslo_db_postgresql, which is the pod that
+          reported `Service postgresql ... has no ready endpoints` on the GKE install.
+      - file: templates/deployment-api.yaml
+        present: eq .Values.conf.gnocchi.storage.driver "ceph"
+        why: >-
+          Gates the ceph-keyring-placement init container and the /etc/ceph mounts. Ungated,
+          gnocchi-api cannot start under swift storage: the pod waits on a ceph keyring Secret
+          that only gnocchi-storage-init creates.
+      - file: templates/daemonset-metricd.yaml
+        present: eq .Values.conf.gnocchi.storage.driver "ceph"
+        why: Same gate, for the metricd DaemonSet -- one pod per control-plane node.
+      - file: templates/daemonset-statsd.yaml
+        present: eq .Values.conf.gnocchi.storage.driver "ceph"
+        why: Same gate, for the statsd DaemonSet.
+      - file: templates/job-db-sync.yaml
+        present: eq .Values.conf.gnocchi.storage.driver "ceph"
+        why: >-
+          Same gate, for the Job that runs gnocchi-upgrade. db-sync creates the storage layout
+          as well as the indexer schema, so it is the one pod that must reach the object store.
+      - file: templates/configmap-etc.yaml
+        present: swift_authurl
+        why: >-
+          Upstream has no swift storage support, so nothing fills gnocchi's swift credentials.
+          Without this block `driver: swift` authenticates with gnocchi's own defaults -- user
+          "admin:admin" against http://localhost:8080/auth/v1.0 -- instead of as gnocchi's
+          keystone service user against this install's keystone.

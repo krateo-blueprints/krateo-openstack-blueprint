@@ -117,6 +117,14 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.api.timeout | default "30" }}
       initContainers:
 {{ tuple $envAll "api" $mounts_gnocchi_api_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
+{{/*
+Ceph-only. This init container writes /etc/ceph/ceph.client.gnocchi.keyring from the
+secrets.rbd Secret, which only gnocchi-storage-init creates and which therefore never
+exists under `storage.driver: swift`. Ungated it is not inert: the pod stays in Init
+forever on a missing Secret volume, which is precisely how the API sat behind
+ceph-keyring-placement on the GKE install (#115).
+*/}}
+{{- if eq .Values.conf.gnocchi.storage.driver "ceph" }}
         - name: ceph-keyring-placement
 {{ tuple $envAll "gnocchi_api" | include "helm-toolkit.snippets.image" | indent 10 }}
           command:
@@ -134,6 +142,7 @@ spec:
               mountPath: /tmp/client-keyring
               subPath: key
               readOnly: true
+{{- end }}
       containers:
         - name: gnocchi-api
 {{ tuple $envAll "gnocchi_api" | include "helm-toolkit.snippets.image" | indent 10 }}
@@ -173,6 +182,7 @@ spec:
               mountPath: /etc/gnocchi/policy.yaml
               subPath: policy.yaml
               readOnly: true
+{{- if eq .Values.conf.gnocchi.storage.driver "ceph" }}
             - name: etcceph
               mountPath: /etc/ceph
             - name: ceph-etc
@@ -183,6 +193,7 @@ spec:
               mountPath: /tmp/client-keyring
               subPath: key
               readOnly: true
+{{- end }}
             - name: gnocchi-bin
               mountPath: /tmp/gnocchi-api.sh
               subPath: gnocchi-api.sh
@@ -207,6 +218,7 @@ spec:
           configMap:
             name: gnocchi-bin
             defaultMode: 0555
+{{- if eq .Values.conf.gnocchi.storage.driver "ceph" }}
         - name: etcceph
           emptyDir: {}
         - name: ceph-etc
@@ -215,5 +227,6 @@ spec:
         - name: ceph-keyring
           secret:
             secretName: {{ .Values.secrets.rbd | quote }}
+{{- end }}
 {{ if $mounts_gnocchi_api.volumes }}{{ toYaml $mounts_gnocchi_api.volumes | indent 8 }}{{ end }}
 {{- end }}
