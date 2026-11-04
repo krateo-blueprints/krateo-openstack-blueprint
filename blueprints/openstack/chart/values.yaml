@@ -86,6 +86,12 @@ components:
       - rabbitmq
       - mariadb
     tier: compute
+    # Needs an authoritative PowerDNS server as Service `powerdns`: pools.yaml renders
+    # nameservers[0].host from ${POWERDNS_SERVICE_HOST} and nothing here creates that Service,
+    # so designate-manage pool update dies on "Field `host' cannot be None" and
+    # designate-worker never leaves Init (41 restarts measured). api/central/mdns/producer/sink
+    # are unaffected. Removed when #165 ships a powerdns blueprint.
+    requiresProvisioning: true
   - name: octavia
     kind: Octavia
     deps:
