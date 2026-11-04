@@ -13,6 +13,29 @@ installable without a ClickHouse data plane.
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  # Whether the two CronJobs below this ConfigMap were rendered, and if not, why.
+  #
+  # The CronJobs are gated on the keystone credentials Secret existing, because they cannot
+  # authenticate without it. That gate is correct -- and it is also invisible: a conditional
+  # render is not a failure, so nothing logs it, and a cluster where the emitter has never run
+  # looks exactly like one where it runs fine. A peer found this chart in that state on a real
+  # cluster with contractEmitter.enabled true, with only this ConfigMap present, and observed
+  # that the consumer of those CronJobs was going to discover it by finding no rows.
+  #
+  # So the gate now states its own verdict here. This key is the difference between "the emitter
+  # is not running" and "the emitter is not running BECAUSE the Secret it needs is absent".
+{{- if lookup "v1" "Secret" $.Release.Namespace $ce.openstack.existingSecret }}
+  emitter-state: |
+    cronjobs: rendered
+    reason: Secret {{ $ce.openstack.existingSecret }} found in namespace {{ $.Release.Namespace }}
+{{- else }}
+  emitter-state: |
+    cronjobs: WITHHELD
+    reason: Secret {{ $ce.openstack.existingSecret }} not found in namespace {{ $.Release.Namespace }}
+    effect: no usage or health records are being emitted, and nothing else will report this
+    remedy: the Secret is created by keystone's release; this resolves by itself once keystone
+      has deployed, and the CronJobs appear on the next reconcile with nothing to re-run
+{{- end }}
   name: {{ $svc }}-contract-emitter
   labels:
     app.kubernetes.io/name: {{ $svc }}
