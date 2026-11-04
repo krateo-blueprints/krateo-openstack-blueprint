@@ -285,6 +285,26 @@ pod:
   probes:
     api:
       gnocchi-api:
+        ## Liveness must not compete with STARTUP. gnocchi-api is uwsgi loading the pecan
+        ## app plus the indexer and storage drivers; until that finishes, /healthcheck does
+        ## not answer. With liveness alone the container is SIGKILLed at
+        ## initialDelaySeconds + failureThreshold x periodSeconds = 60 + 3x30 = 150s.
+        ## Measured on a loaded single-node cluster: the app needed MORE than 150s and less
+        ## than 240s, so it was killed three times before it happened to load inside the
+        ## window. exitCode 137 with NO memory limit set, which reads as OOM and is not.
+        ##
+        ## A startupProbe is the mechanism for precisely this. While it is failing the kubelet
+        ## does not run liveness at all; the moment it passes once, liveness resumes
+        ## UNCHANGED. 10s x 30 = 300s of grace covers the measurement with margin and costs
+        ## nothing after the first success. Raising the liveness budget instead would have
+        ## traded away steady-state detection for the whole life of the pod. mariadb in this
+        ## repo already carries a startup probe built this way. Issue #156.
+        startup:
+          enabled: true
+          params:
+            periodSeconds: 10
+            failureThreshold: 30
+            timeoutSeconds: 10
         liveness:
           enabled: true
           params:
