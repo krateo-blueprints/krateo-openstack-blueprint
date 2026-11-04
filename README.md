@@ -129,8 +129,8 @@ kubectl create namespace openstack-system
 # it onto the previous component, so any render carrying two or more components failed
 # and the release froze at revision 1. Fixed in 0.3.32 (issue #152).
 #
-# DO NOT UPGRADE TO 0.3.33, and do not upgrade an existing install to any release before
-# the fix for #166. Fresh installs of 0.3.33 are fine; UPGRADING to it deletes every
+# DO NOT UPGRADE AN EXISTING INSTALL TO 0.3.33 OR ANYTHING EARLIER. 0.3.34 carries the
+# fix. Fresh installs of 0.3.33 are fine; UPGRADING to it deletes every
 # component Composition CR. The emission gate asked for a CRD serving the chart's NEW
 # version, which no cluster serves at the instant the bump renders -- the
 # CompositionDefinitions in that same pass are what create it -- so every component
@@ -139,6 +139,14 @@ kubectl create namespace openstack-system
 # 0.3.32 -> 0.3.33: 6 CRs left for 37 releases, 27 running workloads orphaned, and three
 # components re-created with new release names that could not patch their own live
 # objects because spec.selector is immutable. See issue #166.
+#
+# What 0.3.34 has actually been run through: NO INSTALL AND NO UPGRADE. Its fix for #166
+# is verified by hack/validate-upgrade-does-not-prune.py against five synthetic cluster
+# states and by four break tests, and the defect it fixes was measured on a real cluster --
+# but nobody has yet performed a successful umbrella upgrade with it. The release exists so
+# that upgrade can be attempted at all; until someone does, "upgrading works now" is a
+# claim about a gate and not about a cluster. BP_VERSION below therefore stays at 0.3.32,
+# which is the newest release that HAS been run through the steps in this document.
 #
 # What 0.3.32 has actually been run through, stated so you know what is NOT covered: the
 # Composition path below, on kind, with a 7-component closure (gnocchi + skyline + zaqar
