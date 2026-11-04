@@ -66,8 +66,13 @@ def check(name: str, body: str, origin: str, findings: list) -> None:
 try:
     import yaml
 except ImportError:
-    print("SKIP: PyYAML unavailable")
-    sys.exit(0)
+    # Exit 2, never 0. These four gates printed this line and exited 0 for weeks
+    # (#120) -- the lint job was green on every run while nothing was measured,
+    # including the gate written to protect the keystone fernet fix. #120 added
+    # `pip install PyYAML` to the workflow, which made them run; it did not remove
+    # the path that passes when they cannot. "Not measured" must not read as "fine".
+    print("FAILED MEASUREMENT: PyYAML unavailable, so nothing was checked")
+    sys.exit(2)
 
 charts = sorted(p for p in ROOT.glob("blueprints/*/chart") if p.is_dir())
 if not charts:
