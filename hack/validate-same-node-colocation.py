@@ -32,6 +32,18 @@ writing down what operators must do about it.
 
 Derived from the render rather than from a list: a new chart that introduces a same-node
 dependency is caught here instead of on someone's cluster.
+
+THE DECLARATION IS KEYED ON THE NODE SELECTORS TOO, and that is not decoration. A matcher has
+two independent properties -- correct and unambiguous -- and the first version of this gate only
+had the first. Its key was (component, waiter, target), which drops both node selectors, so
+changing neutron-dhcp-agent's nodeSelector would leave the derived pair unchanged, still
+declared, still passing -- while the requiredRelation text named labels that were no longer the
+ones in play. The declaration would go stale and the gate would say OK. Four break tests all
+asked whether the gate fires on an undeclared pair; none asked whether a declaration could keep
+matching something it no longer describes.
+
+So an entry must name the labels the render actually found, and a selector change fails until
+the relation is rewritten for the labels that now apply.
 """
 import glob
 import json
@@ -119,10 +131,16 @@ def main():
     decl = yaml.safe_load(open(DECL)) or {}
     declared = {}
     for entry in (decl.get("colocations") or []):
-        for k in ("component", "waiter", "target", "requiredRelation", "why"):
+        for k in ("component", "waiter", "target", "waiterSelector", "targetSelector",
+                  "requiredRelation", "why"):
             if not entry.get(k):
                 sys.exit(f"FAIL: a colocation entry is missing {k!r}: {entry}")
-        declared[(entry["component"], entry["waiter"], entry["target"])] = entry
+        for k in ("waiterSelector", "targetSelector"):
+            if not isinstance(entry[k], dict):
+                sys.exit(f"FAIL: {k!r} must be the nodeSelector mapping, not {entry[k]!r}")
+        declared[(entry["component"], entry["waiter"], entry["target"],
+                  tuple(sorted(entry["waiterSelector"].items())),
+                  tuple(sorted(entry["targetSelector"].items())))] = entry
 
     bp = os.path.join(ROOT, "blueprints")
     charts = sorted(d for d in os.listdir(bp)
@@ -140,18 +158,33 @@ def main():
             found.append((c, waiter, target))
             if wsel == tsel:
                 continue  # same label, satisfiable by construction
-            key = (c, waiter, target)
+            key = (c, waiter, target,
+                   tuple(sorted(wsel.items())), tuple(sorted(tsel.items())))
             if key not in declared:
-                problems.append(
-                    f"{c}: {waiter} (nodeSelector {wsel}) requires a co-located {target} "
-                    f"(nodeSelector {tsel}), and the two labels differ -- so the requirement is "
-                    f"unsatisfiable on any node carrying only one of them. Declare the relation "
-                    f"operators must satisfy in hack/node-colocation.yaml."
-                )
+                # Distinguish "never declared" from "declared for different labels", because the
+                # second is a stale declaration describing a relation that no longer applies and
+                # it is the one the old key could not see.
+                stale = [d for d in declared if d[:3] == (c, waiter, target)]
+                if stale:
+                    was = declared[stale[0]]
+                    problems.append(
+                        f"{c}: {waiter} -> {target} is declared, but for different node labels. "
+                        f"The render now has waiter={wsel} target={tsel}; the declaration says "
+                        f"waiter={was['waiterSelector']} target={was['targetSelector']}. Its "
+                        f"requiredRelation names labels that are no longer the ones in play, so "
+                        f"rewrite the relation for the labels that now apply."
+                    )
+                else:
+                    problems.append(
+                        f"{c}: {waiter} (nodeSelector {wsel}) requires a co-located {target} "
+                        f"(nodeSelector {tsel}), and the two labels differ -- so the requirement "
+                        f"is unsatisfiable on any node carrying only one of them. Declare the "
+                        f"relation operators must satisfy in hack/node-colocation.yaml."
+                    )
 
     if rendered == 0:
         sys.exit("FAIL: no chart rendered, so no same-node dependency was inspected")
-    stale = [k for k in declared if k not in set(found)]
+    stale = [k for k in declared if k[:3] not in set(found)]
     if stale:
         problems.append(
             "declared colocations that no longer exist in any render: "
