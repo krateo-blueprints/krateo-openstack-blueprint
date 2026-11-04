@@ -282,6 +282,20 @@ jobs:
       - name: An existing Composition must be emitted at the version it was created at
         run: python3 hack/validate-origin-version-pin.py .
 
+      # Gating, and the counterpart the pin gate could not be. `helm template` NEVER resolves
+      # `lookup` -- only `--dry-run=server` does -- so offline the umbrella's component gate is
+      # closed and zero component documents are emitted. Every offline check of that template,
+      # the pin gate included, has therefore been comparing empty output against empty output.
+      # Issue #152 lived in exactly that blind spot: a right-trim above the document separator
+      # glued it to the previous document's `spec: {}`, so any render emitting two or more
+      # components failed with "yaml: line 5: did not find expected key" and the umbrella could
+      # create at most ONE component -- while the Composition reported Ready=True.
+      #
+      # This gate manufactures the opportunity: it stubs the three lookup-driven gate helpers
+      # open, renders offline, and parses the result as multi-document YAML.
+      - name: The umbrella must emit well-formed YAML for every component at once
+        run: python3 hack/validate-umbrella-multidoc.py .
+
       # Gating. Three shipped crashes shared one shape: the chart told a process to read a file
       # and nothing in the chart ever put that file there. cyborg passed
       # `--log-config-append /tmp/logging-cyborg.conf` with no conf.logging, no key in its
