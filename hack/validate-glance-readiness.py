@@ -28,6 +28,7 @@ check placed there removes the very signal this gate is about.
 Renders the chart and inspects the probes as the kubelet would receive them, rather than grepping
 the template, because what matters is the object the kubelet acts on.
 """
+import ast
 import json
 import shutil
 import subprocess
@@ -135,9 +136,62 @@ if health_path not in ro_text:
         f"      got: {ro_text[:300]}"
     )
 
+# Writable and HAVING SPACE are different properties and only the first was asserted. Measured
+# on a 4-node GKE install: the store is a 2 GiB PVC which held two images and then refused the
+# next upload -- and glance reports a full store as "413 Request Entity Too Large", which reads
+# as a limit on the request. Three rounds went to uwsgi's limit-post, oslo_middleware's
+# RequestBodySizeLimiter (not in glance's paste pipeline at all) and Keystone unified limits
+# before anyone read glance's own line: "Image storage media is full". Issue #163.
+#
+# PARSED WITH ast, NOT MATCHED AS TEXT. The first version of this check looked for "statvfs",
+# "f_bavail" and "floor" in the probe's JSON -- and a single COMMENT naming all three satisfied
+# it while the probe measured nothing. That is the fourth time in this repo a check has been
+# satisfied by prose about itself, and the third time today. ast does not see comments, so a
+# mention cannot stand in for a call.
+probe_src = (ro.get("exec") or {}).get("command") or []
+probe_src = probe_src[-1] if probe_src else ""
+try:
+    tree = ast.parse(probe_src)
+except SyntaxError as e:
+    fail(f"glance-api's readinessProbe script does not parse as Python: {e}")
+
+calls_statvfs = any(
+    isinstance(n, ast.Call) and (getattr(n.func, "attr", None) == "statvfs"
+                                 or getattr(n.func, "id", None) == "statvfs")
+    for n in ast.walk(tree))
+reads_bavail = any(isinstance(n, ast.Attribute) and n.attr == "f_bavail" for n in ast.walk(tree))
+# a comparison that can FAIL: `free < floor` guarding an exit
+guards_exit = False
+for n in ast.walk(tree):
+    if not isinstance(n, ast.If) or not isinstance(n.test, ast.Compare):
+        continue
+    if not any(isinstance(o, (ast.Lt, ast.LtE)) for o in n.test.ops):
+        continue
+    if any(isinstance(x, ast.Call) and (getattr(x.func, "attr", None) == "exit"
+                                        or getattr(x.func, "id", None) == "exit")
+           for x in ast.walk(n)):
+        guards_exit = True
+
+for ok, needle, why in (
+    (calls_statvfs, "a call to os.statvfs", "free space has to be measured, not assumed"),
+    (reads_bavail, "a read of f_bavail",
+     "the AVAILABLE blocks are the ones a non-root writer can use; f_bfree counts reserved "
+     "blocks it cannot"),
+    (guards_exit, "a `< floor` comparison that exits",
+     "a measurement with no threshold cannot fail, so it reports nothing"),
+):
+    if not ok:
+        fail(
+            f"glance-api's readinessProbe has no {needle}: {why}.\n"
+            f"      A full image store answers every upload with 413 Request Entity Too Large\n"
+            f"      while the pod reports Ready -- measured on a 2 GiB store holding two\n"
+            f"      images (#163). Writable is not the same property as having room.\n"
+            f"      Checked by parsing the script, so a comment naming these cannot satisfy it."
+        )
+
 for kind in ("livenessProbe", "startupProbe"):
     probe = c.get(kind)
-    if probe and store_dir in json.dumps(probe):
+    if probe and ("statvfs" in json.dumps(probe) or store_dir in json.dumps(probe)):
         fail(
             f"glance-api's {kind} references {store_dir}.\n"
             f"      An unwritable store is not repaired by a restart -- the ownership belongs\n"
@@ -164,6 +218,7 @@ if not perms:
         f"      init containers found: {[ic.get('name') for ic in inits]}"
     )
 
-print(f"OK: glance-api readiness requires a writable {store_dir} and still reaches {health_path}")
+print(f"OK: glance-api readiness requires {store_dir} to be writable AND to have room "
+      f"(statvfs against a floor), and still reaches {health_path}")
 print(f"OK: no restarting probe checks the store; {perms[0].get('name')} re-chowns it on every "
       f"pod start")

@@ -539,13 +539,21 @@ def probe_data(out):
     return None
 
 
-# The four selections the install paths actually use. Each is exercised in full, because the
-# required set is selection-dependent and a check that only ever sees the default profile only
-# ever enforces that profile's labels: profile=identity wants one label and profile=full wants
-# all four, so testing the default alone would leave three unenforced and look green.
+# The selections the install paths actually use. Each is exercised in full, because the required
+# set is selection-dependent and a check that only ever sees the default profile only ever
+# enforces that profile's labels: profile=identity wants one label and profile=full wants all
+# four, so testing the default alone would leave three unenforced and look green.
+#
+# profile=full-strict is here for a second reason: the README tells a full-strict operator which
+# labels to apply, and that sentence must be DERIVED. full-strict drops octavia, octavia is the
+# only consumer of openstack-network-node, so full-strict needs three labels and not four -- a
+# fact that stops being true the moment any other chart gains that nodeSelector. EXPECTED below
+# is checked against the rendered set, so the README sentence fails here rather than on a
+# cluster where the operator labelled by it.
 SELECTIONS = (
     ("profile=identity", ("--set", "profile=identity")),
     ("profile=full", ("--set", "profile=full")),
+    ("profile=full-strict", ("--set", "profile=full-strict")),
     ("enabled={nova,neutron}", ("--set", "enabled={nova,neutron}")),
     ("enabled={keystone}", ("--set", "enabled={keystone}")),
 )
@@ -609,6 +617,18 @@ if not wanted_default:
     problems.append("the default profile requires no node label at all, so the check is inert "
                     "on the path the README documents")
 
+# What the README tells an operator to apply, per selection, keyed exactly as above. A selection
+# absent from this map is still exercised; one present here must match the rendered set.
+# Written as the operator types them, value included, because that is what the README prints
+# and what the chart renders -- comparing bare names would silently accept a changed value.
+EXPECTED = {
+    "profile=identity": {"openstack-control-plane=enabled"},
+    "profile=full": {"openstack-control-plane=enabled", "openstack-compute-node=enabled",
+                     "openvswitch=enabled", "openstack-network-node=enabled"},
+    "profile=full-strict": {"openstack-control-plane=enabled",
+                            "openstack-compute-node=enabled", "openvswitch=enabled"},
+}
+
 checks = 0
 enforced = set()
 
@@ -628,6 +648,13 @@ for label, extra in SELECTIONS:
     if not wanted:
         problems.append(f"{label} requires no node label at all, so the check is inert on it")
         continue
+    if label in EXPECTED and set(wanted) != EXPECTED[label]:
+        got, exp = set(wanted), EXPECTED[label]
+        problems.append(
+            f"{label} renders labels {sorted(got)} but the README documents {sorted(exp)}. "
+            f"Extra here: {sorted(got - exp) or 'none'}; missing: {sorted(exp - got) or 'none'}. "
+            "An operator following the README would label the nodes for the wrong set, and the "
+            "symptom is pods that never schedule with no indication which label is absent.")
 
     # Every label carried: must pass. One node carrying all of them, and the realistic shape
     # of a labelled cluster -- several nodes each carrying all of them.

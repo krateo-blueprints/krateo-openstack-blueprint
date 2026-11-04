@@ -451,8 +451,39 @@ krateo.io/composition-origin-version
     {{- end -}}
   {{- end -}}
 {{- else -}}
+  {{/* A PROFILE PROMISES ONLY WHAT CAN WORK ON THE CLUSTER YOU HAVE.
+
+       `requiresProvisioning` components are excluded from every profile, including `full`.
+       They are not unsupported and nothing about them is removed -- they are selectable, and
+       fully gated, through `enabled:`. What they are not is DEFAULT, because each of them waits
+       on infrastructure that no Kubernetes cluster provides and that this blueprint does not
+       create: an interface named ironic-pxe, a Neutron port per host on octavia's management
+       network, a ReadWriteMany StorageClass for swift.
+
+       Measured on a 4-node GKE install of profile=full: six pods at 14 restarts in Init plus
+       four Pending, none of which could EVER become Ready, and `Init:` is the state a pod
+       census can only count -- neither Pending nor CrashLoopBackOff, so "21 in Init" names
+       nothing. A profile that installs components which cannot start is a promise that cannot
+       be kept, and the cost of keeping it is paid by whoever next reads that census.
+
+       hack/validate-provisioning-preconditions.py asserts the flag and the declared
+       precondition agree in BOTH directions, so a flagged component must say what it needs and
+       a declared precondition must belong to a flagged component. Issue #163. */}}
   {{- range $c := $comps -}}
-    {{- if or (eq $top.Values.profile "full") (eq $c.tier "identity") -}}{{- $_ := set $sel $c.name true -}}{{- end -}}
+    {{/* `full` is unchanged and still selects every component, including the three that need
+         infrastructure an operator must provide. `full-strict` selects everything EXCEPT those,
+         so it is the profile that promises only what can start on a cluster as it comes.
+
+         Opt-in rather than a change to `full`, deliberately: a profile silently selecting three
+         fewer components than it did yesterday is a surprise delivered through a patch release,
+         and on 0.3.x the version number cannot signal it. `full-strict` is discoverable, says
+         what it means, and leaves anyone who HAS provisioned a PXE interface, an lb-mgmt-net or
+         an RWX StorageClass exactly where they were. */}}
+    {{- if or (eq $top.Values.profile "full")
+              (and (eq $top.Values.profile "full-strict") (not $c.requiresProvisioning))
+              (eq $c.tier "identity") -}}
+      {{- $_ := set $sel $c.name true -}}
+    {{- end -}}
   {{- end -}}
 {{- end -}}
 {{- keys $sel | sortAlpha | join " " -}}

@@ -65,6 +65,10 @@ Composition CRD.
 # profile: identity -- one label is enough:
 kubectl label --overwrite nodes --all openstack-control-plane=enabled
 
+# profile: full-strict -- three, not four: octavia is the only consumer of
+# openstack-network-node and full-strict does not install it. Asserted against the rendered
+# chart by hack/validate-node-label-preconditions.py, so this stays true or CI says so.
+
 # profile: full -- all four. The --all form below is the safe one, and if you separate the
 # roles by labelling individual nodes, ONE PAIR IS NOT SEPARABLE:
 #
@@ -163,7 +167,52 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 ```
 
 `profile: identity` brings up MariaDB+Memcached+Keystone+Glance+Horizon; `profile: full`
-brings up the whole catalog (needs a large amd64 cluster — see `quickstart-gke.md`).
+brings up **all 35 components** (needs a large amd64 cluster — see `quickstart-gke.md`).
+
+#### `profile: full-strict` — full, minus the three that need provisioning you must do yourself
+
+Three components — `ironic`, `octavia` and `swift` — each wait on infrastructure that no
+Kubernetes cluster provides and that this blueprint does not create. They are in `profile: full`,
+and they stay there. `profile: full-strict` is the same set **minus those three**:
+
+```yaml
+spec:
+  profile: full-strict   # 32 components, every one of which can reach Ready unaided
+```
+
+It also needs one node label fewer — three rather than four, since octavia is the only consumer
+of `openstack-network-node` (see the labelling block above).
+
+| component | needs | symptom when it is absent |
+|---|---|---|
+| `ironic` | an interface named `ironic-pxe` on each conductor node — the bare-metal provisioning NIC | `ironic-conductor-init` exits 1 with `Could not find IP for pxe to bind to`; the pod sits in `Init:CrashLoopBackOff` |
+| `octavia` | `lb-mgmt-net` plus a Neutron port per node, named `octavia-{worker,health-manager}-port-<hostname>` | the `get-port` init containers log `No Port found for octavia-worker-port-…` and never finish |
+| `swift` | a StorageClass offering `ReadWriteMany` (upstream uses an `nfs-provisioner` default this repo does not ship) | `swift-ring-builder` and `swift-storage` stay `Pending`, `swift-proxy` stays in `Init` |
+
+**Why the choice is yours and not ours.** Measured on a 4-node GKE install of `profile: full`:
+six pods at 14 restarts in `Init` plus four `Pending`, none of which could ever become `Ready` on
+that cluster. `Init:` is neither `Pending` nor `CrashLoopBackOff`, so a pod census reports
+`21 in Init` and names nothing — the state is invisible to exactly the command an operator runs
+first. That is the case `full-strict` exists for.
+
+But on a cluster where the PXE NIC, `lb-mgmt-net` and an RWX StorageClass *are* present, those
+same three install and work, and dropping them out of `profile: full` would take components away
+from an install that has them — a behaviour change arriving through a version bump, which is the
+one thing a blueprint must not do. So `full` is unchanged at 35 and `full-strict` is the opt-in.
+
+`hack/provisioning-preconditions.yaml` carries each one with a command you can run to check it,
+and `hack/validate-provisioning-preconditions.py` asserts **both** halves by rendering the chart:
+every flagged component is still selected by `full`, none is selected by `full-strict`, and each
+declares what it needs, its symptom and that check. Neither profile can drift from the other
+silently, and a precondition cannot describe a component that no profile distinguishes.
+
+To take just one of them on top of `full-strict` — say you have the RWX StorageClass but no PXE
+NIC — name it in `enabled:`, which overrides `profile` and resolves its dependency closure:
+
+```yaml
+enabled:
+  - swift
+```
 
 #### The install unlocks over several reconciles, and that is normal
 
