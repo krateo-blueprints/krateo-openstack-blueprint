@@ -173,6 +173,112 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 
 Full install paths and how to access OpenStack/Horizon: [docs/usage.md](docs/usage.md).
 
+## Upgrading an existing install
+
+Bumping the blueprint version on a running install is one `kubectl apply` of the new
+`CompositionDefinition`, and the orchestrator rolls the components forward. Two things about
+that upgrade are worth knowing before you do it, because both of them are silent.
+
+### A component keeps the API version it was created at
+
+The composition API version is derived from the chart version (`0.3.30` → `v0-3-30`), so a
+bump changes it. Helm reads a changed API version as *this resource is gone and a different one
+has appeared*, deletes the old object and creates a new one — and the new object gets a new UID,
+from which Krateo derives the Helm release name. The component then has **two** releases: the
+one whose Deployments are actually running, and a new one that can never succeed, because its
+Deployments would have to change `spec.selector` on objects that already exist under the other
+release's name and Kubernetes forbids that. Measured on a real upgrade: `mariadb-92wd4czz` at
+revisions 4, 5 and 6, all `FAILED`, beside `mariadb-9c847c79` revision 2 `DEPLOYED` and serving
+the database.
+
+So the orchestrator **pins**. A component that already exists is emitted at the version it was
+*created* at, which Krateo records write-once on the object as the annotation
+`krateo.io/composition-origin-version`:
+
+```sh
+kubectl -n openstack get mariadb mariadb \
+  -o jsonpath='{.metadata.annotations.krateo\.io/composition-origin-version}'
+# v0-3-28     <- created by 0.3.28, still emitted at v0-3-28 after later bumps
+```
+
+Only a component that does not exist yet is emitted at the current version. Nothing is needed
+from you; the component's API version simply stops moving, and Helm patches it in place.
+
+### The cost: a value you add later is silently dropped on a pinned component
+
+A pinned component is read and written **through its origin version's schema**, and an older
+schema is a narrower one. The apiserver **prunes** every field a schema does not declare — on
+writes, and, counter-intuitively, on reads as well. Measured on Kubernetes 1.36, with one
+object written through the newer endpoint and read back through both:
+
+```text
+GET /apis/composition.krateo.io/v0-3-30/.../mariadbs/mariadb   ->   spec: {a, b}
+GET /apis/composition.krateo.io/v0-3-28/.../mariadbs/mariadb   ->   spec: {a}
+```
+
+Same object, same storage. `b` is still there; the older endpoint simply does not hand it over.
+
+**Any `spec.componentValues.<name>` property this blueprint adds after a component's origin
+version therefore does nothing on that component.** It is not rejected and it raises no event:
+it is dropped on the way in, and the only symptom is a setting that has no effect. If a value
+you set appears to be ignored, read the annotation above: a component whose
+`composition-origin-version` is older than the release that introduced the value cannot see it.
+
+The fix is to recreate that component rather than to configure it harder — delete its
+Composition and let the orchestrator emit it fresh, which re-stamps the origin at the current
+version and restores the whole value surface. Expect that component's workloads to be recreated.
+
+### Hard incompatibility: do not approve instance migration on these components
+
+The pin works only while the origin version is still served, and what keeps it served is that
+writing an instance through that endpoint keeps marking the version as in use. Approving
+**instance migration** rewrites every instance through the *new* endpoint instead, which
+releases the old version for removal and takes the pin with it.
+
+So, for as long as components are pinned, their `CompositionDefinition`s must **not** approve
+migration:
+
+| `spec.upgradePolicy` | Effect |
+| -------------------- | ------ |
+| `Paused`             | Safe. Migration never runs. |
+| `Manual` *without* the `krateo.io/upgrade-to-version` annotation | Safe. |
+| `Manual` *with* `krateo.io/upgrade-to-version: <new version>` | **Defeats the pin.** |
+| `Automatic`, or unset | **Defeats the pin** — unset is treated as `Automatic`. |
+
+This is an incompatibility, not a recommendation. If migration is approved, the pinned version
+becomes removable and the upgrade behaves as it did before the pin existed: the split-release
+wedge above returns, or an apply lands at a version that is no longer served and fails outright
+with `no matches for kind`. The loud failure is the better of the two and is still a failure.
+
+**Read the row you are actually on.** The component `CompositionDefinition`s this orchestrator
+registers (`templates/definitions.yaml`) set no `upgradePolicy`, which is the last row —
+migration is approved, and the pin above therefore falls back to the current version. Measured
+on a live cluster running 0.3.28: all 35 component definitions report `upgradePolicy:
+Automatic`, and every `composition.krateo.io` CRD on it serves exactly one version, the current
+one, because each bump migrates the instances forward and the retired version is then pruned.
+
+So the pin protects an install whose component definitions do not approve migration, and does
+nothing on one that does:
+
+```sh
+# inspect
+kubectl -n openstack get compositiondefinitions \
+  -o custom-columns='NAME:.metadata.name,VER:.spec.chart.version,POLICY:.spec.upgradePolicy'
+
+# opt a component out of migration, which is what makes the pin effective for it
+kubectl -n openstack patch compositiondefinition mariadb --type=merge \
+  -p '{"spec":{"upgradePolicy":"Paused"}}'
+```
+
+Pausing migration has its own price, and it is the other side of the same coin: a paused
+component's instances stay on their origin version forever, so the CRD keeps every version it
+has ever served instead of retiring them. Decide it per component, not fleet-wide by reflex.
+
+The mechanism and the measurements behind it are in
+`blueprints/openstack/chart/templates/_helpers.tpl` (`osh.pinVersion`), asserted by
+`hack/validate-origin-version-pin.py`, and tracked as
+[krateo-platformops/core-provider#303](https://github.com/krateoplatformops/core-provider/issues/303).
+
 ## Configure
 
 For anything between the profiles, set **`spec.enabled`** to an explicit component list — it

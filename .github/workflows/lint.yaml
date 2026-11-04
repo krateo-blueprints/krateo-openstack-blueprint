@@ -259,6 +259,29 @@ jobs:
       - name: The node labels the selected components need must be checked, not documented
         run: python3 hack/validate-node-label-preconditions.py .
 
+      # The gates above all judge WHAT is installed. This one judges the API version it is
+      # emitted at, which is the only thing that decides whether an upgrade lands on the
+      # release that is already running. The composition apiVersion is derived from the chart
+      # version, so until #303 every bump changed every object's GVK, helm deleted and recreated
+      # each Composition, the new UID produced a new release name, and each component ended up
+      # with two helm releases -- one running its workloads and one that can never succeed,
+      # because its Deployments would have to change a spec.selector Kubernetes will not let
+      # them change. Measured: mariadb-92wd4czz at revisions 4,5,6 all FAILED beside
+      # mariadb-9c847c79 rev 2 DEPLOYED and serving the database.
+      #
+      # So an existing Composition is emitted at its krateo.io/composition-origin-version stamp
+      # and only a new one at the current version, and this asserts the whole mechanism: that
+      # the call site uses it, that the annotation key is core-provider's and written once, that
+      # every branch of the decision is right (including the dangerous one -- a stamped version
+      # the CRD no longer serves must fall back, because emitting it 500s the render and a
+      # release that stops rendering gets uninstalled), that no cluster-wide lookup was added,
+      # and -- differentially, against a counterfactual chart with the pin removed -- that the
+      # offline render is byte-identical. It also asserts the pin's two silent costs are
+      # documented: a narrower origin schema DROPS values properties added after it, and
+      # approving instance migration defeats the pin.
+      - name: An existing Composition must be emitted at the version it was created at
+        run: python3 hack/validate-origin-version-pin.py .
+
   image-tags:
     # Gating, and offline. A rebuildable tag -- `latest`, or any variant containing it --
     # resolves forever and may resolve to different bytes each time, so `preflight-refs`
