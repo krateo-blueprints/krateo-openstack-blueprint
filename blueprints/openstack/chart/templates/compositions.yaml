@@ -123,7 +123,20 @@
             version prunable. Migration must not be approved while the pin is in effect.
 
        No new cluster read of any kind: osh.originVersion does one named GET of the one object,
-       the same cheap shape osh.exists uses, and the CRD list stays the one fetched above. */ -}}
+       the same cheap shape osh.exists uses, and the CRD list stays the one fetched above.
+
+       This comment is closed WITHOUT a right-trim marker, and that is load-bearing. A
+       right trim swallows the newline that follows, so the document separator below is
+       appended to whatever the previous loop iteration printed last -- the previous
+       component's empty spec, giving a line that reads `spec: {}` immediately followed
+       by three dashes -- and the file stops being multi-document YAML. helm then fails
+       the whole render with "error converting YAML to JSON: yaml: line 5: did not find
+       expected key", so the umbrella emits at most ONE component and never a second,
+       while the Composition still reports Ready. See issue #152.
+
+       Do not quote the trim marker itself anywhere in this comment: the literal closing
+       sequence ends a Go template comment wherever it appears, including inside one, and
+       the remaining prose then renders into the manifest as text. */}}
 ---
 apiVersion: {{ include "osh.emitApiVersion" (list $ $c.kind $c.name $crds) }}
 kind: {{ $c.kind }}
