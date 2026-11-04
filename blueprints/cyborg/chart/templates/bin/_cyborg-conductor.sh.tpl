@@ -18,4 +18,4 @@ set -x
 
 exec cyborg-conductor \
       --config-file /etc/cyborg/cyborg.conf \
-      --log-config-append  /tmp/logging-cyborg.conf
+      --log-config-append  /etc/cyborg/logging.conf

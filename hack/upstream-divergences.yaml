@@ -370,3 +370,48 @@ divergences:
           Derives the uri from endpoints.message_store, exactly as the block above it derives
           the management store's uri from endpoints.oslo_db. Without it the uri renders empty
           and zaqar's redis driver gets no host at all.
+  - component: cyborg
+    issue: 147
+    reason: >-
+      Upstream's three cyborg start scripts pass `--log-config-append
+      /tmp/logging-cyborg.conf`, and upstream's chart never creates that file: there is no
+      conf.logging, no logging.conf key in the -etc secret and no mount at that path. oslo_log
+      raises LogConfigError on a missing file, so cyborg-api, cyborg-conductor and cyborg-agent
+      all died at startup on every cluster -- 520 and 447 restarts in 38 hours on the cluster
+      where it was found. /tmp is mounted, which is what makes the path look plausible, but it
+      is an emptyDir and arrives empty.
+    assertions:
+      - file: templates/bin/_cyborg-api.sh.tpl
+        absent: /tmp/logging-cyborg.conf
+        why: >-
+          The path nothing creates. Restoring it reinstates a guaranteed startup crash, and
+          because /tmp IS a mountPath the failure looks like a missing file rather than a
+          missing chart half.
+      - file: templates/bin/_cyborg-api.sh.tpl
+        present: /etc/cyborg/logging.conf
+        why: >-
+          The mounted path. This and the mount below are two halves of one fix: either alone
+          leaves the service reading a file that is not there.
+      - file: templates/bin/_cyborg-conductor.sh.tpl
+        present: /etc/cyborg/logging.conf
+        why: Same flag, same crash; the conductor was restarting 447 times.
+      - file: templates/bin/_cyborg-agent.sh.tpl
+        present: /etc/cyborg/logging.conf
+        why: >-
+          Same flag. The agent is a DaemonSet gated on a node label, so on a cluster with no
+          matching node it creates no pod at all and its crash is invisible -- the divergence
+          has to be asserted rather than observed.
+      - file: templates/configmap-etc.yaml
+        present: "logging.conf:"
+        why: >-
+          Produces the file. Without this key the secret has nothing to project and the mount
+          below renders a path that cannot resolve.
+      - file: templates/deployment-api.yaml
+        present: "subPath: logging.conf"
+        why: Delivers the file to the api container.
+      - file: templates/deployment-conductor.yaml
+        present: "subPath: logging.conf"
+        why: Delivers the file to the conductor container.
+      - file: templates/daemonset-agent.yaml
+        present: "subPath: logging.conf"
+        why: Delivers the file to the agent container.

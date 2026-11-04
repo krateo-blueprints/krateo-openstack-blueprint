@@ -60,23 +60,41 @@ conf:
     userName: clusterUse
     clientCertificateData: null
     clientKeyData: null
+  ## Transcribed from the api-paste.ini the 2026.1 image itself ships at
+  ## /var/lib/openstack/etc/magnum/api-paste.ini. The chart carried a hand-rolled
+  ## pipeline:main predating upstream's composite restructure: it ran healthcheck as
+  ## a FILTER, and oslo_middleware's Healthcheck.factory now raises
+  ## NotImplementedError unconditionally ("should be deployed as an app, not a
+  ## filter"), so the WSGI application could not be built at all. The old pipeline
+  ## also omitted osprofiler and http_proxy_to_wsgi.
+  ## magnum.api.app:load_app() calls deploy.loadapp with no name, so the entry point
+  ## must be `main`.
   paste:
-    pipeline:main:
-      pipeline: cors healthcheck request_id authtoken api_v1
+    composite:main:
+      paste.composite_factory: magnum.api:root_app_factory
+      /: api
+      /healthcheck: healthcheck
+    pipeline:api:
+      pipeline: cors http_proxy_to_wsgi request_id osprofiler authtoken api_v1
     app:api_v1:
       paste.app_factory: magnum.api.app:app_factory
+    app:healthcheck:
+      paste.app_factory: oslo_middleware:Healthcheck.app_factory
+      backends: disable_by_file
+      disable_by_file_path: /etc/magnum/healthcheck_disable
     filter:authtoken:
       acl_public_routes: /, /v1
       paste.filter_factory: magnum.api.middleware.auth_token:AuthTokenMiddleware.factory
+    filter:osprofiler:
+      paste.filter_factory: magnum.common.profiler:WsgiMiddleware.factory
     filter:request_id:
       paste.filter_factory: oslo_middleware:RequestId.factory
     filter:cors:
       paste.filter_factory: oslo_middleware.cors:filter_factory
       oslo_config_project: magnum
-    filter:healthcheck:
-      paste.filter_factory: oslo_middleware:Healthcheck.factory
-      backends: disable_by_file
-      disable_by_file_path: /etc/magnum/healthcheck_disable
+    filter:http_proxy_to_wsgi:
+      paste.filter_factory: oslo_middleware.http_proxy_to_wsgi:HTTPProxyToWSGI.factory
+      oslo_config_project: magnum
   policy: {}
   magnum:
     DEFAULT:
@@ -188,7 +206,10 @@ conf:
       route-user-agent: '^kube-probe.* donotlog:'
       thunder-lock: true
       worker-reload-mercy: 80
-      wsgi-file: /var/lib/openstack/bin/magnum-api-wsgi
+      ## The 2026.1 image does not ship /var/lib/openstack/bin/magnum-api-wsgi.
+      ## magnum.wsgi.api:application is the same pattern the other API charts here
+      ## use and it is what the image provides.
+      module: magnum.wsgi.api:application
       stats: 0.0.0.0:1717
       stats-http: true
 

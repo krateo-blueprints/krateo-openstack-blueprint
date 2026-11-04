@@ -82,6 +82,10 @@ spec:
               mountPath: /etc/cyborg/cyborg.conf
               subPath: cyborg.conf
               readOnly: true
+            - name: cyborg-etc
+              mountPath: /etc/cyborg/logging.conf
+              subPath: logging.conf
+              readOnly: true
       volumes:
         - name: pod-tmp
           emptyDir: {}

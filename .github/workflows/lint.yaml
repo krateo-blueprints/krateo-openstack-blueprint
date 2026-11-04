@@ -282,6 +282,42 @@ jobs:
       - name: An existing Composition must be emitted at the version it was created at
         run: python3 hack/validate-origin-version-pin.py .
 
+      # Gating. Three shipped crashes shared one shape: the chart told a process to read a file
+      # and nothing in the chart ever put that file there. cyborg passed
+      # `--log-config-append /tmp/logging-cyborg.conf` with no conf.logging, no key in its
+      # secret and no mount, so all three of its services died at startup on every cluster --
+      # 520 restarts in 38 hours where it was found. designate and magnum named a uwsgi
+      # `wsgi-file` the 2026.1 images do not ship, so uwsgi answered "no python application
+      # found" forever while the master held the socket open and the pod stayed Running.
+      #
+      # The gate resolves each mountPath back to its volume rather than trusting the path: an
+      # emptyDir supplies a directory and no contents, and the first version of this check
+      # called /tmp/logging-cyborg.conf delivered -- because /tmp IS mounted -- and printed OK
+      # for the exact bug it was written for. A file under a runtime-populated directory counts
+      # only when another script in the same pod writes it, which is what separates
+      # openstack-helm's /tmp/pod-shared idiom from a file nobody creates.
+      - name: Every config file a start script names must be delivered to the container
+        run: python3 hack/validate-config-file-refs.py .
+
+      # Gating. `oslo_middleware:Healthcheck.factory` -- the paste FILTER entry point -- raises
+      # NotImplementedError unconditionally in the shipped library, so a chart declaring
+      # filter:healthcheck cannot build its WSGI application at all. magnum did, and its api
+      # sat Running and 0/1 with uwsgi reporting "no python application found" and its listen
+      # queue filling with probe traffic. Eleven sibling charts and the image's own
+      # api-paste.ini already use app:healthcheck + Healthcheck.app_factory.
+      - name: oslo_middleware Healthcheck must be a paste app, not a filter
+        run: python3 hack/validate-paste-healthcheck.py .
+
+      # Gating. designate registers `workers` in each [service:*] section with NO default and
+      # passes it straight to oslo_service, which lets None past both of its guards and hands
+      # it to cotyledon: ValueError: 'workers' must be an int >= 1, not: None. The chart set it
+      # for service:api only, so five of six designate services crashed on every startup --
+      # 447-452 restarts each over 38 hours -- since the chart first shipped. The gate also
+      # fails a workload deployed with no section at all, which is the worse case: it reads as
+      # "upstream's default is fine" when there is no default.
+      - name: Every service:<name> config section must set workers >= 1
+        run: python3 hack/validate-service-workers.py .
+
   image-tags:
     # Gating, and offline. A rebuildable tag -- `latest`, or any variant containing it --
     # resolves forever and may resolve to different bytes each time, so `preflight-refs`

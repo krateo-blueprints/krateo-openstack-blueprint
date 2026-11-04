@@ -493,6 +493,69 @@ conf:
       oslo_config_project: cyborg
 
   policy: {}
+  ## Upstream's three cyborg start scripts pass
+  ## `--log-config-append /tmp/logging-cyborg.conf`, but the chart never produced
+  ## that file: no conf.logging, no logging.conf key in the secret, no mount.
+  ## oslo_log raises LogConfigError on a missing file, so cyborg-api,
+  ## cyborg-conductor and cyborg-agent died at startup on every cluster, always.
+  ## This is the conf.logging -> logging.conf -> /etc/cyborg/logging.conf wiring
+  ## the other charts in this repo already use.
+  logging:
+    loggers:
+      keys:
+        - root
+        - cyborg
+    handlers:
+      keys:
+        - stdout
+        - stderr
+        - "null"
+    formatters:
+      keys:
+        - context
+        - default
+    logger_root:
+      level: WARNING
+      handlers: 'null'
+    logger_cyborg:
+      level: INFO
+      handlers:
+        - stdout
+      qualname: cyborg
+    logger_amqp:
+      level: WARNING
+      handlers: stderr
+      qualname: amqp
+    logger_amqplib:
+      level: WARNING
+      handlers: stderr
+      qualname: amqplib
+    logger_eventletwsgi:
+      level: WARNING
+      handlers: stderr
+      qualname: eventlet.wsgi.server
+    logger_sqlalchemy:
+      level: WARNING
+      handlers: stderr
+      qualname: sqlalchemy
+    handler_null:
+      class: logging.NullHandler
+      formatter: default
+      args: ()
+    handler_stdout:
+      class: StreamHandler
+      args: (sys.stdout,)
+      formatter: context
+    handler_stderr:
+      class: StreamHandler
+      args: (sys.stderr,)
+      formatter: context
+    formatter_context:
+      class: oslo_log.formatters.ContextFormatter
+      datefmt: '%Y-%m-%d %H:%M:%S'
+    formatter_default:
+      format: '%(message)s'
+      datefmt: '%Y-%m-%d %H:%M:%S'
   cyborg:
     DEFAULT:
       use_syslog: false
