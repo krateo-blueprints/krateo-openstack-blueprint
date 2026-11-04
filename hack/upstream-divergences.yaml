@@ -387,11 +387,15 @@ divergences:
           The path nothing creates. Restoring it reinstates a guaranteed startup crash, and
           because /tmp IS a mountPath the failure looks like a missing file rather than a
           missing chart half.
-      - file: templates/bin/_cyborg-api.sh.tpl
-        present: /etc/cyborg/logging.conf
+      - file: values.yaml
+        present: "log_config_append: /etc/cyborg/logging.conf"
         why: >-
-          The mounted path. This and the mount below are two halves of one fix: either alone
-          leaves the service reading a file that is not there.
+          Where the API container asks for the file. It is served by uwsgi (#158), which takes no
+          --log-config-append, so the request moved from the start script to cyborg.conf -- the
+          same route designate uses. The file and the mount are unchanged; only the request
+          moved. This assertion replaced one against _cyborg-api.sh.tpl, which fired correctly
+          when the uwsgi change removed the flag and would otherwise have let #147's fix be
+          dropped for this one container in silence.
       - file: templates/bin/_cyborg-conductor.sh.tpl
         present: /etc/cyborg/logging.conf
         why: Same flag, same crash; the conductor was restarting 447 times.
@@ -415,3 +419,50 @@ divergences:
       - file: templates/daemonset-agent.yaml
         present: "subPath: logging.conf"
         why: Delivers the file to the agent container.
+  - component: cyborg
+    issue: 158
+    reason: >-
+      cyborg-api cannot start on 2026.1. The `cyborg-api` CLI builds oslo_service.wsgi.Server and
+      the shipped oslo_service refuses it outright -- UnsupportedBackendError from
+      oslo_service/wsgi.py:57, raised before any cyborg code runs, so no configuration makes the
+      CLI work. Measured: CrashLoopBackOff with 9 restarts on a 35-component install at 0.3.32,
+      while cyborg-agent and cyborg-conductor, which build no WSGI server, were 1/1 Running. The
+      image ships cyborg/wsgi/api.py and /var/lib/openstack/bin/uwsgi, and
+      cyborg.wsgi.api:application was verified to LOAD in a debug copy of the real cyborg-api pod
+      (type is oslo_middleware.cors.CORS), not merely to exist -- the distinction magnum cost us
+      in #149. Same family as designate's #148: 2026.1's oslo_service removed the eventlet-era
+      serving paths and each chart using one breaks at its own call site.
+    assertions:
+      - file: templates/bin/_cyborg-api.sh.tpl
+        absent: exec cyborg-api
+        why: >-
+          Restoring the CLI reinstates a guaranteed startup crash that no configuration can
+          avoid, and the error names oslo_service rather than cyborg, so the next reader looks in
+          the wrong place.
+      - file: templates/bin/_cyborg-api.sh.tpl
+        present: exec uwsgi --ini /etc/cyborg/cyborg-api-uwsgi.ini
+        why: >-
+          uwsgi is in the image and is how every other API chart here is served. The ini path is
+          asserted too: the script and the mount below are two halves of one fix.
+      - file: templates/configmap-etc.yaml
+        present: "cyborg-api-uwsgi.ini:"
+        why: >-
+          Produces the ini. Without this key the secret has nothing to project and the mount
+          renders a path that cannot resolve, which is exactly the shape of #147.
+      - file: templates/configmap-etc.yaml
+        present: http-socket
+        why: >-
+          The listen socket is derived from endpoints.accelerator rather than written as a
+          literal, so the port cannot drift from the Service, the containerPort and the probes.
+      - file: templates/deployment-api.yaml
+        present: "subPath: cyborg-api-uwsgi.ini"
+        why: Delivers the ini to the container that execs uwsgi.
+      - file: templates/deployment-api.yaml
+        absent: "tcpSocket"
+        why: >-
+          Under uwsgi a tcpSocket probe is answered by the HTTP router in the MASTER process, so
+          it passes with every worker wedged or no application loaded -- gnocchi-api's #110 and
+          designate/magnum's 38 hours of "no python application found" in #149. An httpGet on /
+          traverses a worker, and / is in cyborg's acl_public_routes so it needs no token.
+          hack/validate-uwsgi-probe-traverses-worker.py enforces this for all 16 uwsgi-served
+          containers; this entry keeps it true for cyborg across a re-vendor.

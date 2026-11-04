@@ -78,12 +78,20 @@ spec:
           ports:
             - name: cyborg-api
               containerPort: {{ tuple "accelerator" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+{{/* HTTP and not tcpSocket, now that uwsgi serves this container.
+     `uwsgi --http`'s router is a separate process from its workers and accepts the TCP
+     connection itself, so a tcpSocket probe succeeds while every worker is wedged -- the
+     mistake gnocchi-api shipped and the reason heat, neutron and placement are wrong today.
+     A GET traverses a worker. `/` is in cyborg's acl_public_routes, so it needs no token.
+     Issue #158. */}}
           readinessProbe:
-            tcpSocket:
-              port: {{ tuple "accelerator" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+            httpGet:
+              path: /
+              port: {{ tuple "accelerator" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
           livenessProbe:
-            tcpSocket:
-              port: {{ tuple "accelerator" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+            httpGet:
+              path: /
+              port: {{ tuple "accelerator" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
           volumeMounts:
             - name: pod-tmp
               mountPath: /tmp
@@ -98,6 +106,10 @@ spec:
             - name: cyborg-etc
               mountPath: /etc/cyborg/cyborg.conf
               subPath: cyborg.conf
+              readOnly: true
+            - name: cyborg-etc
+              mountPath: /etc/cyborg/cyborg-api-uwsgi.ini
+              subPath: cyborg-api-uwsgi.ini
               readOnly: true
             - name: cyborg-etc
               mountPath: /etc/cyborg/logging.conf

@@ -493,6 +493,48 @@ conf:
       oslo_config_project: cyborg
 
   policy: {}
+  ## cyborg-api must be served by uwsgi, not by the cyborg-api CLI.
+  ##
+  ## `cyborg-api` builds oslo_service.wsgi.Server, and the oslo_service shipped in 2026.1
+  ## refuses it outright:
+  ##
+  ##   oslo_service.backend.exceptions.UnsupportedBackendError: The oslo.service.wsgi.Server
+  ##   class is deprecated and cannot be used with the threading backend. Please switch to
+  ##   deploying your application via standard WSGI servers instead.
+  ##
+  ## raised from oslo_service/wsgi.py:57 before any cyborg code runs, so there is no
+  ## configuration that makes the CLI work. Measured: cyborg-api CrashLoopBackOff with 9
+  ## restarts on a 35-component install at 0.3.32, while cyborg-agent and cyborg-conductor --
+  ## which do not build a WSGI server -- were 1/1 Running. Issue #158.
+  ##
+  ## Same family as designate's #148: 2026.1's oslo_service removed the eventlet-era serving
+  ## paths, and each chart still using one breaks at its own call site. designate's was
+  ## workers=None; cyborg's is wsgi.Server refused.
+  ##
+  ## cyborg.wsgi.api:application was verified to LOAD in the shipped image, not merely exist --
+  ## `type(m.application)` is oslo_middleware.cors.CORS, built from the chart's own
+  ## api-paste.ini in a debug copy of the real cyborg-api pod. That distinction cost us a cycle
+  ## on magnum (#149), where the module existed and Healthcheck.factory raised behind it.
+  ## cyborg's paste declares no healthcheck at all, so that particular trap does not apply here.
+  ##
+  ## http-socket is derived in configmap-etc from endpoints.accelerator, exactly as designate
+  ## derives its own, so the port cannot drift from the Service and the probes.
+  cyborg_api_uwsgi:
+    uwsgi:
+      add-header: "Connection: close"
+      buffer-size: 65535
+      die-on-term: true
+      enable-threads: true
+      exit-on-reload: false
+      hook-master-start: unix_signal:15 gracefully_kill_them_all
+      lazy-apps: true
+      log-x-forwarded-for: true
+      master: true
+      module: cyborg.wsgi.api:application
+      procname-prefix-spaced: "cyborg-api:"
+      route-user-agent: '^kube-probe.* donotlog:'
+      thunder-lock: true
+      worker-reload-mercy: 80
   ## Upstream's three cyborg start scripts pass
   ## `--log-config-append /tmp/logging-cyborg.conf`, but the chart never produced
   ## that file: no conf.logging, no logging.conf key in the secret, no mount.
@@ -561,6 +603,16 @@ conf:
       use_syslog: false
       state_path: /var/lib/cyborg
       debug: true
+      ## cyborg-api is served by uwsgi (see conf.cyborg_api_uwsgi, issue #158), and uwsgi does
+      ## not take --log-config-append. So the api container requests the logging config through
+      ## cyborg.conf instead of on the command line, exactly as designate does. The conductor
+      ## and the agent still run the CLI and still pass the flag.
+      ##
+      ## This is the same file #147 added and mounted; only how it is REQUESTED changes. Dropping
+      ## the flag without adding this key would have silently reverted #147 for the api
+      ## container, and hack/validate-upstream-divergences.py caught exactly that when the uwsgi
+      ## change first removed the exec line.
+      log_config_append: /etc/cyborg/logging.conf
     api:
       host_ip: 0.0.0.0
       api_workers: 3

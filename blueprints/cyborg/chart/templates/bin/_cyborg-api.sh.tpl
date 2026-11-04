@@ -19,10 +19,7 @@ COMMAND="${@:-start}"
 
 
 function start () {
-  exec cyborg-api \
-        --config-file /etc/cyborg/cyborg.conf \
-        --log-config-append  /etc/cyborg/logging.conf \
-        ${OPTIONS}
+  exec uwsgi --ini /etc/cyborg/cyborg-api-uwsgi.ini
 }
 
 function stop () {
