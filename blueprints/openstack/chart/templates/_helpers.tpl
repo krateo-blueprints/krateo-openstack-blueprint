@@ -592,8 +592,21 @@ krateo-openstack-node-reader
 
      Why a guard at all -- the measurement that forced it. `lookup` does NOT return empty when
      it is refused. Helm returns an empty map only for a NotFound; every other API error,
-     Forbidden included, comes back as a template error and fails the WHOLE render. Measured
-     against a real composition-dynamic-controller identity on a 4-node GKE cluster:
+     Forbidden included, comes back as a template error and fails the WHOLE render.
+
+     That sentence says "every other API error" but the repro below exercises ONE kind, so read
+     on its own it is a measurement of the node lookup generalised by assertion. The source is
+     what actually generalises it: helm/helm v3.19.0, pkg/engine/lookup_func.go, is a single
+     function behind every `lookup` -- Get and List, every GVK -- and it returns
+     empty-with-nil-error only under `apierrors.IsNotFound(err)`, propagating everything else.
+     There is no 403 branch and IsNotFound is false for one. So EMPTY MEANS LOOKUP DISABLED
+     (`helm template`, no cluster), NEVER DENIED, for CRDs and Compositions as much as for
+     nodes -- which is what makes the two-state existence checks in this file safe. Cited
+     rather than restated so the next reader can check it: the version is pinned and the
+     function is named. (Found by installer, reading the source at the installed version after
+     this comment's claim was offered to them second-hand.)
+
+     Measured against a real composition-dynamic-controller identity on a 4-node GKE cluster:
 
        $ kubectl auth can-i list nodes --as=system:serviceaccount:openstack:keystones-v0-3-29
        no
