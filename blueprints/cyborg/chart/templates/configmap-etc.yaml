@@ -119,6 +119,15 @@ limitations under the License.
 {{- end -}}
 
 
+{{/* Derive uwsgi's listen socket from endpoints.accelerator rather than writing a literal, so
+     the port cannot drift from the Service, the containerPort and the probes. Same construction
+     designate uses. See conf.cyborg_api_uwsgi in values.yaml for why cyborg-api is served by
+     uwsgi at all (issue #158). */}}
+{{- if empty (index .Values.conf.cyborg_api_uwsgi.uwsgi "http-socket") -}}
+{{- $http_socket_port := tuple "accelerator" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" | toString }}
+{{- $_ := set .Values.conf.cyborg_api_uwsgi.uwsgi "http-socket" (printf "0.0.0.0:%s" $http_socket_port) -}}
+{{- end -}}
+
 ---
 apiVersion: v1
 kind: Secret
@@ -127,6 +136,7 @@ metadata:
 type: Opaque
 data:
   cyborg.conf: {{ include "helm-toolkit.utils.to_oslo_conf" .Values.conf.cyborg | b64enc }}
+  cyborg-api-uwsgi.ini: {{ include "helm-toolkit.utils.to_oslo_conf" .Values.conf.cyborg_api_uwsgi | b64enc }}
   logging.conf: {{ include "helm-toolkit.utils.to_oslo_conf" .Values.conf.logging | b64enc }}
   policy.yaml: {{ toYaml .Values.conf.policy | b64enc }}
   api-paste.ini: {{ include "helm-toolkit.utils.to_ini" .Values.conf.paste | b64enc }}

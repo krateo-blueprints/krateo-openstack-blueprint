@@ -327,6 +327,19 @@ jobs:
       # exist across 36 charts today -- so a fourth cannot appear undeclared.
       - name: Every requireSameNode pair must be satisfiable by the documented node labels
         run: python3 hack/validate-same-node-colocation.py .
+      # Gating, and the general form of the stats-port check above. `uwsgi --http` runs its HTTP
+      # router in the MASTER process, so a bare tcpSocket probe against the service port is
+      # answered by a process that is still fine while every worker is wedged or no application
+      # ever loaded. gnocchi-api shipped that and reported Ready through 500s (#110);
+      # designate-api and magnum-api answered "no python application found" for 38 hours with
+      # Running pods and zero restarts (#149). An httpGet traverses a worker.
+      #
+      # Derived, not listed: a container counts as uwsgi-served when its command runs a script
+      # from this chart's own ConfigMaps containing `exec uwsgi`. 16 qualify today and none has a
+      # bare tcpSocket, so there are no waivers. The gate also fails when it recognises ZERO
+      # uwsgi-served containers, because that would make every later run a pass over nothing.
+      - name: A uwsgi-served container may not be probed with a bare tcpSocket
+        run: python3 hack/validate-uwsgi-probe-traverses-worker.py .
 
       # Gating. Three shipped crashes shared one shape: the chart told a process to read a file
       # and nothing in the chart ever put that file there. cyborg passed
