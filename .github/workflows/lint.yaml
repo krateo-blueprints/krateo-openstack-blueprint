@@ -296,6 +296,21 @@ jobs:
       - name: The umbrella must emit well-formed YAML for every component at once
         run: python3 hack/validate-umbrella-multidoc.py .
 
+      # Gating, and it guards the other gates. Four checks here printed "SKIP: PyYAML
+      # unavailable" and exited 0 for weeks (#120) -- the lint job green on every run while
+      # nothing was measured, including the gate written to protect the keystone fernet fix.
+      # #120 added `pip install PyYAML` above, which made them run; it did not remove the path
+      # that passes when they cannot, and that path was still in all four until now. Delete one
+      # line from this workflow and the suite would have gone quiet and green again.
+      #
+      # Checked with ast rather than by grepping for "SKIP": a text search over these files also
+      # matches the comments documenting this history, which has produced false readings here
+      # twice. It follows one level of indirection, because most gates route through a
+      # measurement_failed() helper -- the first version did not, and reported six
+      # already-correct gates as defective.
+      - name: No gate may exit 0 when it could not measure anything
+        run: python3 hack/validate-gates-cannot-skip.py .
+
       # Gating. Three shipped crashes shared one shape: the chart told a process to read a file
       # and nothing in the chart ever put that file there. cyborg passed
       # `--log-config-append /tmp/logging-cyborg.conf` with no conf.logging, no key in its

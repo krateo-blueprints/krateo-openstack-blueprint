@@ -37,6 +37,35 @@ repair nothing. Readiness is the honest signal: do not route to me, do not count
 The directory is a Secret volume, so it always holds ..data and a timestamped directory even
 when the Secret is empty; the keys themselves appear as entries not starting with a dot.
 Filtering on that distinguishes empty-but-mounted from populated.
+
+It ALSO requires the configured database to be reachable, for the same reason one step on.
+Measured on a0-openstack-d3: keystone-api 1/1 Running with 0 restarts for 40 hours while
+every POST /v3/auth/tokens returned 500 from sqlalchemy's connection pool, because all three
+mariadb Services selected a release whose pods no longer existed and had zero endpoints. The
+probe above could not see it -- the fernet keys were present and /healthcheck returned 200,
+since neither touches the database. 13 contract-emitter CronJob pods failed every minute for
+those 40 hours, cloudkitty-processor could not authenticate at all, and 36 pods sat in Init
+behind it, with nothing anywhere reporting unhealthy. Issue #154.
+
+The check is a TCP connect, not a query: it needs no credential, writes nothing, and answers
+the exact question that was false -- can this process open a socket to its database. The
+connection string is read from keystone.conf and from keystone.conf.d/*.conf, with the last
+one winning, so an operator-supplied snippet (the documented mariadb-operator case, where
+conf.database.connection is null) is honoured rather than ignored. host:port is taken by
+regex after the LAST `@` so a password containing `@` or `%` cannot break the parse, which
+urllib.parse and configparser both would.
+
+READINESS and not liveness, again deliberately, and for a different reason than above:
+restarting keystone cannot repair an unreachable database, so a liveness probe here would
+turn one outage into a CrashLoop plus an outage. Unready is the honest signal, and with
+periodSeconds 60 / failureThreshold 3 it takes three minutes of sustained unreachability to
+act -- a blip does not flap it. The consequence is intended: keystone's Service loses its
+endpoints and its dependents fail immediately and visibly instead of collecting 500s for two
+days while every layer calls itself healthy.
+
+No connection string found anywhere is a FAILURE, not a skip. A keystone with no database
+configured cannot serve either, and a probe that passes when it found nothing to check is
+the defect this repo has already shipped.
 */}}
 {{- define "apiReadinessProbeTemplate" }}
 exec:
@@ -44,7 +73,7 @@ exec:
     - python3
     - -c
     - |
-      import os, sys, urllib.request
+      import glob, os, re, socket, sys, urllib.request
       d = "/etc/keystone/fernet-keys"
       try:
           keys = [f for f in os.listdir(d) if not f.startswith(".")]
@@ -52,6 +81,32 @@ exec:
           sys.exit("fernet key dir %s unreadable: %s" % (d, e))
       if not keys:
           sys.exit("no fernet keys in %s: keystone cannot issue tokens" % d)
+      conn = None
+      src = None
+      for cf in ["/etc/keystone/keystone.conf"] + sorted(
+              glob.glob("/etc/keystone/keystone.conf.d/*.conf")):
+          try:
+              text = open(cf).read()
+          except OSError:
+              continue
+          for m in re.finditer(r"^connection\s*=\s*(\S+)", text, re.M):
+              conn, src = m.group(1), cf
+      if not conn:
+          sys.exit("no [database] connection in keystone.conf or keystone.conf.d: "
+                   "keystone cannot reach a database")
+      hp = re.search(r"^.*@([^@/]+)/", conn)
+      if not hp:
+          sys.exit("cannot read host:port from the connection string in %s" % src)
+      target = hp.group(1)
+      if target.startswith("["):
+          host, _, port = target[1:].partition("]:")
+      else:
+          host, _, port = target.partition(":")
+      try:
+          socket.create_connection((host, int(port or 3306)), timeout=5).close()
+      except OSError as e:
+          sys.exit("database %s unreachable from keystone (%s): "
+                   "every token request will return 500" % (target, e))
       urllib.request.urlopen(
           "{{ tuple "identity" "service" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" }}://localhost:{{ tuple "identity" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}{{ tuple "identity" "healthcheck" "internal" . | include "helm-toolkit.endpoints.keystone_endpoint_path_lookup" }}",
           timeout=10).read()

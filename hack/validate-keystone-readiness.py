@@ -61,8 +61,13 @@ with tempfile.TemporaryDirectory() as tmp:
 try:
     import yaml
 except ImportError:
-    print("SKIP: PyYAML unavailable")
-    sys.exit(0)
+    # Exit 2, never 0. These four gates printed this line and exited 0 for weeks
+    # (#120) -- the lint job was green on every run while nothing was measured,
+    # including the gate written to protect the keystone fernet fix. #120 added
+    # `pip install PyYAML` to the workflow, which made them run; it did not remove
+    # the path that passes when they cannot. "Not measured" must not read as "fine".
+    print("FAILED MEASUREMENT: PyYAML unavailable, so nothing was checked")
+    sys.exit(2)
 
 docs = [d for d in yaml.safe_load_all(out.stdout) if d]
 if not docs:
@@ -91,7 +96,44 @@ if KEY_DIR not in ro_text:
         f"      got: {ro_text[:300]}"
     )
 
+# The second blind spot, found the same way as the first: by reading a cluster rather than the
+# chart. keystone-api ran 1/1 with 0 restarts for 40 hours on a0-openstack-d3 while every
+# POST /v3/auth/tokens returned 500 from sqlalchemy's connection pool, because all three mariadb
+# Services selected a release whose pods no longer existed. The probe could not see it -- the
+# fernet keys were present and /healthcheck returned 200, and NEITHER touches the database. The
+# control is what makes this conclusive: on that same pod, at that same moment, the old probe
+# script printed PASS and the new one printed "database ... unreachable". Issue #154.
+#
+# Asserted on the script's behaviour, not on a string: it must open a socket (socket module and
+# create_connection) and it must derive the target from keystone's own config rather than from a
+# hardcoded host, or it stops being true the moment endpoints.oslo_db changes.
+ro_probe = json.dumps(ro)
+for needle, why in (
+    ("socket", "it must import socket to test reachability at all"),
+    ("create_connection", "a TCP connect is the check: no credential, no write, and it answers "
+                          "the exact question that was false"),
+    ("keystone.conf", "the target must come from keystone's own config, not a hardcoded host, "
+                      "or it stops being true when endpoints.oslo_db changes"),
+    ("keystone.conf.d", "an operator-supplied connection snippet (the documented "
+                        "mariadb-operator case) must be honoured, not ignored"),
+):
+    if needle not in ro_probe:
+        fail(
+            f"keystone-api's readinessProbe does not reference {needle!r}: {why}.\n"
+            f"      A keystone that cannot reach its database answers 500 to every client while\n"
+            f"      the fernet check and /healthcheck both pass -- measured for 40 hours on\n"
+            f"      a0-openstack-d3, with 13 CronJobs failing every minute behind it (#154).\n"
+            f"      got: {ro_probe[:300]}"
+        )
+
 lv = c.get("livenessProbe")
+if lv and ("create_connection" in json.dumps(lv) or "socket" in json.dumps(lv)):
+    fail(
+        "keystone-api's livenessProbe tests database reachability.\n"
+        "      Restarting keystone cannot repair an unreachable database, so this turns one\n"
+        "      outage into a CrashLoop plus an outage. Check it in readiness only (#154)."
+    )
+
 if lv and KEY_DIR in json.dumps(lv):
     fail(
         f"keystone-api's livenessProbe references {KEY_DIR}.\n"
@@ -148,6 +190,6 @@ if wide:
         + "      restricted by resourceName, so it must not be granted here at all."
     )
 
-print(f"OK: keystone-api readiness requires {KEY_DIR}; liveness does not")
+print(f"OK: keystone-api readiness requires {KEY_DIR} AND a TCP connect to the database\n    from keystone.conf / keystone.conf.d; liveness does neither")
 print(f"OK: fernet_setup init container present ({ensure[0].get('name')}); "
       f"secret write access is resourceNames-scoped")
