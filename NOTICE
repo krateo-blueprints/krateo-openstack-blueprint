@@ -1,0 +1,27 @@
+Krateo OpenStack Blueprint
+Copyright 2026 Krateo S.r.l.
+
+This product includes software developed by the OpenStack Foundation and the
+openstack-helm contributors (https://opendev.org/openstack/openstack-helm and
+https://opendev.org/openstack/openstack-helm-infra), licensed under the
+Apache License, Version 2.0.
+
+Everything under blueprints/<component>/chart/ other than the openstack
+umbrella is vendored from those projects. Those files retain their own
+Apache-2.0 headers and copyright lines, which name among others:
+
+  The Openstack Authors
+  Wind River Systems, Inc.
+  Samsung Electronics Co., Ltd.
+  Intel Corporation
+  Mirantis Inc.
+  Vexxhost Inc.
+
+That list is not exhaustive and is not a substitute for the headers: 815 files
+under blueprints/*/chart/templates/ carry an Apache-2.0 header, and the header
+in each file is authoritative for that file. Do not strip them when rebasing
+onto a newer upstream.
+
+The umbrella chart (blueprints/openstack/chart/), the CompositionDefinitions,
+the CI gates under hack/ and tools/, and the documentation are original work of
+this repository under the same license.

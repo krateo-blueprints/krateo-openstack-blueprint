@@ -522,3 +522,18 @@ schema is in sync (`hack/gen-componentvalues-schema.py`), runs `helm lint` + a *
 (two byte-identical renders) and **hook-free** gate on every chart, compiles and conformance-
 tests the contract emitter, resolves the service-contract SSO deep-link, and runs the shared
 `lint-docs` documentation-standard job. See [docs/release.md](docs/release.md).
+
+## License
+
+Apache License 2.0 — see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+
+Everything under `blueprints/<component>/chart/` except the `openstack` umbrella is vendored
+from [openstack-helm](https://opendev.org/openstack/openstack-helm) and
+[openstack-helm-infra](https://opendev.org/openstack/openstack-helm-infra), which are
+Apache-2.0. 815 files under `blueprints/*/chart/templates/` carry their own Apache-2.0 header
+and copyright line, and those headers are authoritative for those files — the `NOTICE` names
+the upstream copyright holders it can but is explicitly not exhaustive. Keep the headers when
+rebasing onto a newer upstream.
+
+The umbrella chart, the CompositionDefinitions, the gates under `hack/` and `tools/`, and this
+documentation are original work of this repository, under the same license.
