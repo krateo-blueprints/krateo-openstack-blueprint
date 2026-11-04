@@ -173,6 +173,51 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 
 Full install paths and how to access OpenStack/Horizon: [docs/usage.md](docs/usage.md).
 
+## swift needs a ReadWriteMany StorageClass
+
+swift's ring is a shared volume across its pods, so its PVC asks for `ReadWriteMany`:
+
+```yaml
+# blueprints/swift/chart/values.yaml -- upstream's default, unchanged here
+ring:
+  shared_storage:
+    storageClassName: nfs-provisioner
+```
+
+**That default is upstream openstack-helm's, byte-for-byte**, and it is reasonable where an
+openstack-helm deployment runs its own NFS provisioner. It is not reasonable everywhere, and
+nothing in this blueprint provides one. On a stock GKE cluster the PVC never binds:
+
+```
+PVC swift-shared-storage  accessModes=[ReadWriteMany]  storageClassName=nfs-provisioner
+  ProvisioningFailed x42: storageclass.storage.k8s.io "nfs-provisioner" not found
+-> 4 x swift-storage Pending, swift never Ready
+```
+
+GKE's default `standard-rwo` cannot be substituted: it is block storage and **cannot do RWX at
+all**. The RWX-capable classes there are Filestore-backed and are not the default.
+
+So **before selecting swift, make sure the cluster has an RWX StorageClass, and name it**:
+
+```yaml
+spec:
+  componentValues:
+    swift:
+      ring:
+        shared_storage:
+          storageClassName: my-filestore-rwx    # whatever your platform calls it
+```
+
+It is a values key, so this needs no change to the chart and no divergence from upstream — only
+the knowledge that the default assumes infrastructure your cluster may not have. Nothing checks
+it: an unbound PVC leaves pods `Pending` with an event on the PVC, which is quieter than it
+sounds if you are watching Composition readiness rather than individual pods.
+
+**gnocchi no longer depends on this.** Its metric store briefly used swift for exactly the reason
+swift looked attractive — it is a component this blueprint provides — and moved to redis once the
+PVC proved unprovisionable here. If you select swift, you select it because you want object
+storage.
+
 ## One install per cluster
 
 **A second OpenStack blueprint cannot be installed onto a cluster that already has one**, in any
