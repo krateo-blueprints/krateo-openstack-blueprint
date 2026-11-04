@@ -100,6 +100,10 @@ spec:
               subPath: cyborg.conf
               readOnly: true
             - name: cyborg-etc
+              mountPath: /etc/cyborg/logging.conf
+              subPath: logging.conf
+              readOnly: true
+            - name: cyborg-etc
               mountPath: /etc/cyborg/api-paste.ini
               subPath: api-paste.ini
               readOnly: true

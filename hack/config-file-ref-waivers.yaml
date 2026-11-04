@@ -1,0 +1,6 @@
+# Paths a start script names that no volumeMount delivers, and why that is correct.
+#
+# The default answer is that this is a bug: see hack/validate-config-file-refs.py for the three
+# shipped crashes that motivated the gate. A waiver is for a path the IMAGE provides, or one the
+# container writes itself before reading it. Every entry needs a reason a reader can check.
+waivers: {}

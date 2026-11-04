@@ -481,9 +481,27 @@ conf:
       enable_api_admin: true
       enabled_extensions_v2: quotas,reports
       workers: 2
+    ## Every designate service reads `workers` from its own section and registers
+    ## it as an IntOpt with NO default, so an unset value arrives as None.
+    ## oslo_service's threading backend lets None past both of its validation
+    ## guards (`workers is not None and ...`) and then hands it to
+    ## cotyledon.check_workers, which raises
+    ##   ValueError: 'workers' must be an int >= 1, not: None
+    ## Upstream sets it for service:api only, so central, mdns, producer, sink and
+    ## worker crash on startup every time. 1 also selects ServiceLauncher over
+    ## ProcessLauncher, which is the right shape here: scale with replicas, not forks.
+    service:central:
+      workers: 1
+    service:mdns:
+      workers: 1
+    service:producer:
+      workers: 1
+    service:sink:
+      workers: 1
     service:worker:
       enabled: true
       notify: false
+      workers: 1
     oslo_middleware:
       enable_proxy_headers_parsing: true
     oslo_policy:
@@ -584,7 +602,11 @@ conf:
       route-user-agent: '^kube-probe.* donotlog:'
       thunder-lock: true
       worker-reload-mercy: 80
-      wsgi-file: /var/lib/openstack/bin/designate-api-wsgi
+      ## The 2026.1 image does not ship /var/lib/openstack/bin/designate-api-wsgi,
+      ## so uwsgi reported "no python application found" on every request while the
+      ## master kept accepting connections. designate.wsgi.api:application is the
+      ## same pattern the other API charts here use and it loads in the image.
+      module: designate.wsgi.api:application
       stats: 0.0.0.0:1717
       stats-http: true
 

@@ -69,12 +69,16 @@ collect() {
       rm -rf "$d"
       return 1
     fi
-    # Three anchored substitutions rather than one regex using \s: BSD sed (macOS, which is the
-    # ONLY platform this script exists for) does not treat \s as whitespace, so the original left
-    # a leading space and, for quoted values, a trailing quote. `docker pull` then fails with
-    # "invalid reference format". POSIX classes and anchors behave identically on BSD and GNU.
-    grep -oE 'image: .*' "$d/rendered" \
-      | sed -e 's/^image:[[:space:]]*//' -e 's/^"//' -e 's/"$//' >> "$out"
+    # Parse the manifests instead of grepping them. A text search for `image: ` cannot tell a
+    # container's image field from the same characters inside a ConfigMap's payload, and the
+    # charts here ship shell and python in ConfigMaps with explanatory comments. gnocchi's probe
+    # script contains the sentence "Measured in this image: with both uwsgi workers SIGSTOPped",
+    # which the old grep turned into the image reference `with` -- `docker pull with` then failed
+    # with "pull access denied for with", a message that points at a registry and not at a
+    # comment. Walking the YAML has no such failure mode, and it also picks up images nested
+    # anywhere (initContainers, ephemeralContainers, CronJob job templates) without a second
+    # pattern. python3 is already required by the other tools in this directory.
+    python3 "$HERE/tools/collect-images.py" "$d/rendered" >> "$out"
     rm -rf "$d"
   done
   sort -u -o "$out" "$out"
