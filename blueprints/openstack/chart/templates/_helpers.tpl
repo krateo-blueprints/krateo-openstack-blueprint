@@ -23,12 +23,200 @@
 {{- printf "v%s" ($top.Values.chartVersion | toString | replace "." "-") -}}
 {{- end -}}
 
+{{/* The composition.krateo.io apiVersion at an EXPLICIT version ("v0-3-28" ->
+     "composition.krateo.io/v0-3-28"). The group prefix is written here and nowhere else, so
+     osh.apiVersion below -- the CURRENT version -- and osh.emitApiVersion -- which may answer
+     with an older one -- can never disagree about what a version string means. */}}
+{{- define "osh.apiVersionAt" -}}
+{{- printf "composition.krateo.io/%s" (index . 0 | toString) -}}
+{{- end -}}
+
 {{/* The composition.krateo.io apiVersion served by the component CRDs, derived
      from chartVersion (crdgen maps version 0.1.1 -> apiVersion v0-1-1). Keeping
-     this in one place means a version bump never strands a hardcoded v0-1-0. */}}
+     this in one place means a version bump never strands a hardcoded v0-1-0.
+
+     This is "the version this chart IS", and it is the right answer for a Composition being
+     created for the first time and for every per-object `lookup` in this file. It is NOT
+     automatically the right answer for a Composition that already exists: see
+     osh.emitApiVersion. */}}
 {{- define "osh.apiVersion" -}}
 {{- $top := index . 0 -}}
-{{- printf "composition.krateo.io/%s" (include "osh.version" (list $top)) -}}
+{{- include "osh.apiVersionAt" (list (include "osh.version" (list $top))) -}}
+{{- end -}}
+
+{{/* The annotation core-provider's engine stamps on a Composition the first time it reconciles
+     it, recording the served version the object was CREATED at ("v0-3-28").
+
+     Write-once by construction, and that is its whole value: pkg/meta.SetOriginVersion returns
+     early when the key is already present, so a later reconcile through a re-pointed endpoint
+     cannot overwrite it. Nothing else on the object answers "where did this come from" --
+     .apiVersion is whatever endpoint delivered the object just now, and the sibling label
+     krateo.io/composition-version is re-stamped on EVERY write by the cluster-wide
+     krateo-composition-version MutatingAdmissionPolicy, which is exactly what makes it useless
+     as an origin.
+
+     A literal here rather than at the call site, and read back by
+     hack/validate-origin-version-pin.py from this one definition, for the same reason
+     osh.nodeReaderName is a literal: it is an agreement with another component, and a rename on
+     either side produces no error anywhere. The umbrella would simply stop finding a stamp,
+     fall back to the current version on every component, and silently reinstate the split-
+     release upgrade wedge this pin exists to prevent. Confirmed against core-provider
+     pkg/meta/meta.go (AnnotationKeyOriginVersion) and against a live CR on a0-openstack-d3. */}}
+{{- define "osh.originVersionAnnotation" -}}
+krateo.io/composition-origin-version
+{{- end -}}
+
+{{/* The version an EXISTING <kind>/<name> Composition was created at, read from its origin
+     annotation, or "" when no such object exists or it carries no stamp.
+
+     One named GET of one object, guarded by osh.crdExists exactly as osh.exists is and for the
+     same reason: a `lookup` of an unregistered group/version ERRORS rather than returning nil,
+     which would fail the whole render on first install. The CRD list is the parameter this
+     file threads everywhere; nothing here fetches it. See osh.crdExists for the 13-minute
+     measurement that made that a rule.
+
+     It is a second GET of the object osh.exists already fetched, and that is deliberate rather
+     than overlooked. The alternative -- hoisting one `lookup` per component into
+     compositions.yaml and deriving both answers from it -- would make the component's own
+     existence test a different piece of code from the one every DEPENDENCY edge uses, which is
+     the kind of divergence this file has paid for before. One extra named GET per SELECTED
+     component is 34 in the largest profile, against the 154 crdExists calls and the ~120 named
+     GETs the dependency walk already makes; osh.crdExists records that the named GETs were
+     never the cost, the full-list fetch was.
+
+     Read through the CURRENT endpoint, which is the one osh.crdExists has just proved is
+     served. That is safe for this purpose even when the current schema is narrower than the
+     object's own: the apiserver's structural pruning applies to the schema'd spec, and
+     metadata.annotations is not schema'd. The stamp is readable through any served version. */}}
+{{- define "osh.originVersion" -}}
+{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $crds := index . 3 -}}
+{{- $v := "" -}}
+{{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)) $crds)) "true" -}}
+{{- $o := lookup (include "osh.apiVersion" (list $top)) $kind $top.Release.Namespace $name -}}
+{{- if $o -}}
+{{- $ann := (($o.metadata).annotations) | default dict -}}
+{{- $v = (index $ann (include "osh.originVersionAnnotation" $top)) | default "" -}}
+{{- end -}}
+{{- end -}}
+{{- $v -}}
+{{- end -}}
+
+{{/* The version a Composition must be EMITTED at: its origin version when it has one and the
+     CRD still serves it, otherwise the current version.
+
+     A pure function of its four arguments -- no `lookup` -- which is what makes the decision
+     testable without a cluster: hack/validate-origin-version-pin.py calls it from a probe
+     template with synthetic origins and synthetic CRD lists and asserts every branch.
+
+     # Why pinning exists at all (krateo-platformops/core-provider#303)
+
+     The emitted apiVersion is derived from the chart version, so a chart bump changes the
+     emitted object's GVK. Helm does not see one object moving; it sees the old resource gone
+     and a new resource added, and it deletes and creates accordingly. The replacement gets a
+     NEW UID, and core-provider's CalculateReleaseName is <CR name>-<hash of UID>, so the
+     component acquires a SECOND helm release beside the one already running its workloads.
+     That second release's Deployments carry its own name in spec.selector (release_group,
+     app.kubernetes.io/instance), which Kubernetes forbids changing on an existing object, so
+     its every attempt fails and keeps failing.
+
+     Measured on a0-openstack-d3, 2026-11-03, after a 0.3.28 bump:
+
+       composition CRs for mariadb : 1, uid 5eb8f7dd-..., created AFTER the bump,
+                                     apiVersion composition.krateo.io/v0-3-28
+       helm releases for mariadb   : TWO -- mariadb-92wd4czz (rev 4,5,6, all FAILED, owned by
+                                     the surviving CR) and mariadb-9c847c79 (rev 2 DEPLOYED,
+                                     chart mariadb-0.3.28, actually running the database)
+
+     Emitting an existing object at the version it was born at keeps its GVK constant across
+     bumps, so helm patches in place, the UID survives, and the release name never moves.
+
+     # Why it is safe to ask for an older version
+
+     core-provider's CRD generation ACCUMULATES versions: generation.AppendVersion appends the
+     new one and then sets Served=true on every non-vacuum version, so after a bump the CRD
+     serves the old version and the new one. The third condition below checks exactly that,
+     against the CRD list already in hand, and falls back to the current version if the origin
+     is no longer served -- because emitting at a version nothing serves does not degrade, it
+     500s the render ("no matches for kind"), and a release that stops rendering is a release
+     that gets uninstalled (#68). A reinstated wedge is recoverable; that is not.
+
+     # THE COST, which is real and silent
+
+     Reading and writing an object through an OLDER version means reading and writing it
+     through that version's schema, and a narrower schema PRUNES. core-provider's fieldloss
+     package records the counter-intuitive half, verified against kind v1.36.4: "READS through
+     a narrow endpoint are pruned too, not only writes." Reproduced for this change on kind
+     v1.36.1, with a CRD serving a narrow v0-3-28 and a wide v0-3-30 over one object written
+     through the wide endpoint:
+
+       GET /apis/composition.krateo.io/v0-3-30/.../mariadbs/mariadb -> spec {a, b}
+       GET /apis/composition.krateo.io/v0-3-28/.../mariadbs/mariadb -> spec {a}
+
+     Same object, same storage, one field gone on the way out. So any `values` property this chart
+     adds AFTER a pinned component's origin version is silently DROPPED for that component --
+     not rejected, not warned about, dropped. The only symptom is that the setting does
+     nothing. A component that needs a newly added field has to be recreated (delete its
+     Composition and let the umbrella emit it fresh, which re-stamps the origin at the current
+     version) and not merely configured. README, "Upgrading an existing install", carries this
+     in operator terms.
+
+     # THE INCOMPATIBILITY, which is not advice
+
+     Pinning holds only while the origin version stays unpruned, and what keeps it unpruned is
+     a coincidence: the krateo.io/composition-version label is re-stamped on every write to
+     request.requestKind.version by a cluster-wide MutatingAdmissionPolicy, so writing through
+     the origin endpoint keeps re-asserting that the origin version still has instances, and
+     core-provider's prune predicate therefore never prunes it. Nothing records that this chart
+     depends on that. One switch removes it: approving instance migration for a new version
+     (CompositionDefinition upgradePolicy Automatic, or Manual plus
+     krateo.io/upgrade-to-version) makes the engine rewrite every instance through the NEW
+     endpoint, the label flips, and the origin version becomes prunable. So migration must not
+     be approved for these components while the pin is in effect. The failure if it is, is at
+     least loud rather than silent -- this falls back to the current version and the wedge
+     returns, or, between the flip and the next render, an apply at a pruned version errors.
+
+     AND THAT IS THE DEFAULT TODAY, which is the honest limit of this change. templates/
+     definitions.yaml registers every component CompositionDefinition with no upgradePolicy,
+     and an unset policy is treated as Automatic, so migration IS approved. Measured on
+     a0-openstack-d3 running 0.3.28: all 35 component definitions report upgradePolicy
+     Automatic, and every composition.krateo.io CRD on that cluster serves exactly ONE version
+     -- each bump migrated the instances forward and the retired version was then pruned. On
+     such an install the third condition above is false for every component and this answers
+     the current version, exactly as the unpinned chart did.
+
+     The pin is therefore the mechanism and not yet the policy: it makes "emit at the origin"
+     possible and correct, and whether a component is allowed to stay at its origin is a
+     per-component upgradePolicy decision with a real cost on the other side (a paused
+     component's versions are never retired, so its CRD accumulates one served version per
+     release, and core-provider runs a controller per served version). Flipping 35 definitions
+     to Paused inside this chart would trade a visible upgrade failure for an invisible,
+     unbounded growth, which is not a trade a template should make silently. README,
+     "Hard incompatibility", states the default and how to opt a component out. */}}
+{{- define "osh.pinVersion" -}}
+{{- $current := index . 0 -}}{{- $origin := index . 1 -}}{{- $kind := index . 2 -}}{{- $crds := index . 3 -}}
+{{- if and (ne $origin "") (ne $origin $current) (eq (include "osh.crdExists" (list $kind $origin $crds)) "true") -}}
+{{- $origin -}}
+{{- else -}}
+{{- $current -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The apiVersion compositions.yaml emits <kind>/<name> at: pinned to the object's origin
+     version when it already exists and is stamped, the current version otherwise.
+
+     Under `helm template` there is no cluster, so osh.originVersion finds nothing and this is
+     the current version for every component -- the offline render is byte-identical to one
+     with no pinning at all, which is what hack/validate-origin-version-pin.py asserts across
+     all four install selections.
+
+     Read osh.pinVersion before changing anything here: it carries the measurement that forced
+     the pin, the pruning cost an older schema imposes, and the one upgrade setting that
+     silently defeats it. */}}
+{{- define "osh.emitApiVersion" -}}
+{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $crds := index . 3 -}}
+{{- $current := include "osh.version" (list $top) -}}
+{{- $origin := include "osh.originVersion" (list $top $kind $name $crds) -}}
+{{- include "osh.apiVersionAt" (list (include "osh.pinVersion" (list $current $origin $kind $crds))) -}}
 {{- end -}}
 
 {{/* Returns "true" if a Composition of <kind>/<name> reports Ready=True. Takes the cluster's CRD

@@ -92,8 +92,40 @@
 {{- $exists := include "osh.exists" (list $ $c.kind $c.name $crds) }}
 {{- if and (eq $crd "true") (or (and (eq $strictReady "true") (eq $relaxedExist "true")) (eq $exists "true")) }}
 {{- $ov := (index ($.Values.componentValues | default dict) $c.name) | default dict }}
+{{- /* The apiVersion is PINNED to the version this object was born at, when it has one.
+
+       A new component renders at the current version; one that already exists renders at its
+       krateo.io/composition-origin-version stamp. That keeps a component's GVK constant across
+       a chart bump, and a constant GVK is the whole point: the emitted apiVersion is derived
+       from the chart version, so a bump used to change the GVK, and helm answers a changed GVK
+       by deleting the old object and creating a new one. The new object gets a new UID,
+       core-provider's release name is <CR name>-<hash of UID>, and the component ends up with a
+       SECOND helm release whose workloads cannot be patched -- their spec.selector carries the
+       other release's name, which Kubernetes forbids changing. Measured on a0-openstack-d3:
+       mariadb-92wd4czz at revisions 4,5,6 all FAILED beside mariadb-9c847c79 rev 2 DEPLOYED and
+       actually running the database. See krateo-platformops/core-provider#303.
+
+       TWO COSTS, both documented in osh.pinVersion and in the README's "Upgrading an existing
+       install", and neither of them is a footnote:
+
+         1. A pinned component is read and written through its origin version's schema, and a
+            NARROWER SCHEMA PRUNES -- reads included, which core-provider's fieldloss package
+            verified against kind v1.36.4 and which was reproduced for this change on kind
+            v1.36.1: a property written through the wide endpoint reads back MISSING through
+            the narrow one while still being present in storage and through the wide one. Any
+            `values` property this chart adds after a component's origin version is SILENTLY
+            DROPPED for that component. Not an error: the setting just does nothing. Recreating
+            the component's Composition re-stamps the origin and restores the full surface.
+
+         2. Approving instance migration (upgradePolicy Automatic, or Manual plus
+            krateo.io/upgrade-to-version) rewrites instances through the new endpoint, flips the
+            krateo.io/composition-version label the prune predicate reads, and makes the origin
+            version prunable. Migration must not be approved while the pin is in effect.
+
+       No new cluster read of any kind: osh.originVersion does one named GET of the one object,
+       the same cheap shape osh.exists uses, and the CRD list stays the one fetched above. */ -}}
 ---
-apiVersion: {{ include "osh.apiVersion" (list $) }}
+apiVersion: {{ include "osh.emitApiVersion" (list $ $c.kind $c.name $crds) }}
 kind: {{ $c.kind }}
 metadata:
   name: {{ $c.name }}
