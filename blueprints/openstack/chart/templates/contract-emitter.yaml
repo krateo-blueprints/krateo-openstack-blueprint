@@ -96,7 +96,9 @@ spec:
             - name: emit-{{ $mode }}
               image: {{ $ce.image }}
               imagePullPolicy: {{ $ce.imagePullPolicy }}
-              command: ["python3", "/opt/emitter/contract-emitter.py"]
+              command:
+                - python3
+                - /opt/emitter/contract-emitter.py
               envFrom:
                 # OpenStack-Helm admin openrc secret (OS_AUTH_URL, OS_USERNAME,
                 # OS_PASSWORD, OS_PROJECT_NAME, OS_*_DOMAIN_NAME, OS_REGION_NAME).

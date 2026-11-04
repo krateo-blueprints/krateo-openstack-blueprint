@@ -31,17 +31,65 @@ componentValues:
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
 components:
-  - {name: mariadb,     kind: Mariadb,     deps: [],                                          tier: identity}
-  - {name: memcached,   kind: Memcached,   deps: [],                                          tier: identity}
-  - {name: keystone,    kind: Keystone,    deps: [mariadb, memcached],                        tier: identity}
-  - {name: glance,      kind: Glance,      deps: [keystone],                                  tier: identity}
-  - {name: horizon,     kind: Horizon,     deps: [keystone],                                  tier: identity}
-  - {name: rabbitmq,    kind: Rabbitmq,    deps: [],                                          tier: compute}
-  - {name: openvswitch, kind: Openvswitch, deps: [],                                          tier: compute}
-  - {name: placement,   kind: Placement,   deps: [keystone],                                  tier: compute}
-  - {name: libvirt,     kind: Libvirt,     deps: [openvswitch],                               tier: compute}
-  - {name: neutron,     kind: Neutron,     deps: [keystone, rabbitmq, openvswitch],           tier: compute}
-  - {name: nova,        kind: Nova,        deps: [keystone, placement, rabbitmq, glance, neutron, libvirt], tier: compute}
+  - name: mariadb
+    kind: Mariadb
+    deps: []
+    tier: identity
+  - name: memcached
+    kind: Memcached
+    deps: []
+    tier: identity
+  - name: keystone
+    kind: Keystone
+    deps:
+      - mariadb
+      - memcached
+    tier: identity
+  - name: glance
+    kind: Glance
+    deps:
+      - keystone
+    tier: identity
+  - name: horizon
+    kind: Horizon
+    deps:
+      - keystone
+    tier: identity
+  - name: rabbitmq
+    kind: Rabbitmq
+    deps: []
+    tier: compute
+  - name: openvswitch
+    kind: Openvswitch
+    deps: []
+    tier: compute
+  - name: placement
+    kind: Placement
+    deps:
+      - keystone
+    tier: compute
+  - name: libvirt
+    kind: Libvirt
+    deps:
+      - openvswitch
+    tier: compute
+  - name: neutron
+    kind: Neutron
+    deps:
+      - keystone
+      - rabbitmq
+      - openvswitch
+    tier: compute
+  - name: nova
+    kind: Nova
+    deps:
+      - keystone
+      - placement
+      - rabbitmq
+      - glance
+      - neutron
+      - libvirt
+    tier: compute
   - name: ironic
     kind: Ironic
     deps:
@@ -548,7 +596,8 @@ serviceContract:
             - update
       abac:
         match:
-          kinds: ["Openstack"]
+          kinds:
+            - "Openstack"
         celExpression: >-
           !has(object.spec.profile) || object.spec.profile != 'full' ||
           ('openstack.krateo.io/compute-approved' in object.metadata.annotations)
@@ -572,7 +621,8 @@ serviceContract:
         unit: count
         kind: gauge
         description: Running Nova instances.
-        dimensions: [flavor]
+        dimensions:
+          - flavor
       - name: vcpu.used
         unit: cores
         kind: gauge
@@ -588,7 +638,8 @@ serviceContract:
       - name: storage.used
         unit: GiB
         kind: gauge
-        dimensions: [volume_type]
+        dimensions:
+          - volume_type
       - name: storage.capacity
         unit: GiB
         kind: capacity
@@ -665,5 +716,9 @@ contractEmitter:
     # optional secret with keys: username, password.
     existingSecret: ""
   resources:
-    requests: {cpu: 10m, memory: 32Mi}
-    limits: {cpu: 100m, memory: 128Mi}
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi

@@ -9,7 +9,8 @@ name: release-tag
 
 on:
   push:
-    tags: ["[0-9]+.[0-9]+.[0-9]+"]
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
   contents: write # the CompositionDefinition release assets
