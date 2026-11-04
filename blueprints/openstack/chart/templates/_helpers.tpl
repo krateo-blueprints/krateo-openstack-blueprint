@@ -35,10 +35,20 @@
      from chartVersion (crdgen maps version 0.1.1 -> apiVersion v0-1-1). Keeping
      this in one place means a version bump never strands a hardcoded v0-1-0.
 
-     This is "the version this chart IS", and it is the right answer for a Composition being
-     created for the first time and for every per-object `lookup` in this file. It is NOT
-     automatically the right answer for a Composition that already exists: see
-     osh.emitApiVersion. */}}
+     This is "the version this chart IS". NOTHING IN THIS FILE CALLS IT, and nothing should.
+
+     The sentence that used to stand here said it was "the right answer for every per-object
+     `lookup` in this file". That sentence was the instruction that produced #166: every such
+     lookup asked about the chart's current version, no CRD serves that version at the instant
+     a bump renders, and the emission gate closed for all 34 components and pruned their live
+     CRs. Per-object lookups now resolve through osh.servedVersion, and the version a component
+     is emitted at comes from osh.emitVersion.
+
+     It survives for exactly one consumer: hack/validate-origin-version-pin.py substitutes this
+     call for osh.emitApiVersion to render the deliberately UNPINNED counterfactual it compares
+     the pinned render against. Deleting it would break that differential. So it is kept as the
+     thing a gate needs to be able to name, not as a helper to reach for -- if you are reading
+     this because you wanted a version to look an object up at, you want osh.servedVersion. */}}
 {{- define "osh.apiVersion" -}}
 {{- $top := index . 0 -}}
 {{- include "osh.apiVersionAt" (list (include "osh.version" (list $top))) -}}
