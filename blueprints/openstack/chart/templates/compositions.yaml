@@ -79,7 +79,27 @@
 {{- include "osh.requireNodeLabels" (list $ $sel $nodes) -}}
 {{- range $c := .Values.components }}
 {{- if has $c.name $sel }}
-{{- $crd := include "osh.crdExists" (list $c.kind (include "osh.version" (list $)) $crds) }}
+{{- /* The version this component will be EMITTED at, resolved before anything is decided
+       about it: its origin version when it has one and the CRD still serves it, otherwise the
+       current one. osh.emitApiVersion resolves the same thing further down, from the same
+       inputs, so the gate and the emitter now agree by construction.
+
+       This used to be `osh.crdExists $c.kind (osh.version $)` -- the CHART's current version.
+       At the first render after a version bump no component CRD serves that version yet,
+       because the CompositionDefinitions rendered in this same pass are what create it. So
+       $crd was "" for every component, and $crd is the OUTER conjunct of the gate below: the
+       $exists escape was never reached, all 34 documents vanished from the manifest, and helm
+       pruned 34 live CRs. On a0-openstack-d4 that left 6 CRs for 37 releases, 27 of them
+       running with nothing reconciling them. See issue #166.
+
+       The tie-break, written down because an unstated one is how osh.version became
+       load-bearing here without anyone choosing it: osh.servedVersion exists only to make the
+       write-once origin annotation READABLE, never to choose a version. It prefers the current
+       version so that ordinary renders are unchanged, and falls back to whatever is served
+       only at the bump instant. The annotation then decides, through osh.pinVersion. A probe
+       that chose the newest served version instead would reproduce #166 on the next bump. */ -}}
+{{- $emitVer := include "osh.emitVersion" (list $ $c.kind $c.name $crds) }}
+{{- $crd := include "osh.crdExists" (list $c.kind $emitVer $crds) }}
 {{- /* Partition this component's dependencies by the gate each edge is in, so that which
        semantics applies to which dependency is visible here and not buried in a helper. */ -}}
 {{- $relaxed := splitList " " (include "osh.depsRelaxed" (list $ $c.name $c.deps)) | compact }}

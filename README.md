@@ -129,6 +129,17 @@ kubectl create namespace openstack-system
 # it onto the previous component, so any render carrying two or more components failed
 # and the release froze at revision 1. Fixed in 0.3.32 (issue #152).
 #
+# DO NOT UPGRADE TO 0.3.33, and do not upgrade an existing install to any release before
+# the fix for #166. Fresh installs of 0.3.33 are fine; UPGRADING to it deletes every
+# component Composition CR. The emission gate asked for a CRD serving the chart's NEW
+# version, which no cluster serves at the instant the bump renders -- the
+# CompositionDefinitions in that same pass are what create it -- so every component
+# document left the manifest and helm pruned the live CRs. Their Helm releases survive
+# with nothing reconciling them. Measured on a 4-node GKE install upgrading
+# 0.3.32 -> 0.3.33: 6 CRs left for 37 releases, 27 running workloads orphaned, and three
+# components re-created with new release names that could not patch their own live
+# objects because spec.selector is immutable. See issue #166.
+#
 # What 0.3.32 has actually been run through, stated so you know what is NOT covered: the
 # Composition path below, on kind, with a 7-component closure (gnocchi + skyline + zaqar
 # and their dependencies). keystone issued a real token, skyline and zaqar served, the
