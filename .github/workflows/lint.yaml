@@ -311,6 +311,23 @@ jobs:
       - name: No gate may exit 0 when it could not measure anything
         run: python3 hack/validate-gates-cannot-skip.py .
 
+      # Gating. kubernetes-entrypoint can require a dependency pod ON THE SAME NODE. When the
+      # waiting workload and the required workload are scheduled by DIFFERENT node labels, the
+      # requirement is satisfiable only on nodes carrying both -- and unsatisfiable, forever and
+      # silently, on any node carrying one. Measured on a 4-node GKE install of profile=full:
+      # openstack-control-plane on a 4-node pool, openvswitch on a separate 2-node pool,
+      # DISJOINT, so all twelve neutron dhcp/l3/metadata pods waited forever for a co-located
+      # ovs-agent. They sit in Init:0/2 -- neither Pending nor CrashLoopBackOff -- so a pod
+      # census reports "19 in Init" and names nothing.
+      #
+      # validate-node-label-preconditions.py asserts the four labels EXIST. The precondition is
+      # a RELATIONSHIP between node sets, and that is what this checks: every same-node pair
+      # whose halves use different node selectors must be declared in hack/node-colocation.yaml
+      # with the relation operators have to satisfy. Derived from the renders -- exactly 3 pairs
+      # exist across 36 charts today -- so a fourth cannot appear undeclared.
+      - name: Every requireSameNode pair must be satisfiable by the documented node labels
+        run: python3 hack/validate-same-node-colocation.py .
+
       # Gating. Three shipped crashes shared one shape: the chart told a process to read a file
       # and nothing in the chart ever put that file there. cyborg passed
       # `--log-config-append /tmp/logging-cyborg.conf` with no conf.logging, no key in its

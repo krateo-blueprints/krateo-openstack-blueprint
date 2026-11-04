@@ -65,8 +65,32 @@ Composition CRD.
 # profile: identity -- one label is enough:
 kubectl label --overwrite nodes --all openstack-control-plane=enabled
 
-# profile: full -- all four. (Label individual nodes instead of --all if you are separating the
-# roles; the compute label is what decides which nodes run VMs.)
+# profile: full -- all four. The --all form below is the safe one, and if you separate the
+# roles by labelling individual nodes, ONE PAIR IS NOT SEPARABLE:
+#
+#   EVERY node carrying openstack-control-plane=enabled must ALSO carry openvswitch=enabled.
+#
+# Not a preference. neutron's dhcp, l3 and metadata agents are scheduled by
+# openstack-control-plane, and each one refuses to start until a neutron-ovs-agent pod is Ready
+# ON ITS OWN NODE (kubernetes-entrypoint's requireSameNode). The ovs agent is scheduled by
+# openvswitch. So a node with the first label and not the second runs three agents that wait
+# forever for a pod that will never be scheduled beside them -- in Init:0/2, which is neither
+# Pending nor CrashLoopBackOff, so a pod census shows "19 in Init" and names nothing, and
+# neutron's Composition reports "3 of 73 managed children are not ready" indefinitely.
+#
+# Measured: a 4-node GKE install of profile=full with openstack-control-plane on a 4-node
+# default pool and openvswitch on a separate 2-node pool. DISJOINT -- so the requirement was
+# unsatisfiable for all twelve agent pods, not merely some. hack/node-colocation.yaml declares
+# the three pairs and hack/validate-same-node-colocation.py fails CI if a fourth appears
+# undeclared.
+#
+# AND THE CONSEQUENCE IS ABOUT THE NODE IMAGE, NOT JUST THE LABELS: openvswitch needs the
+# openvswitch kernel module, which Container-Optimized OS does not ship. So on GKE, every node
+# you label openstack-control-plane=enabled must be UBUNTU_CONTAINERD when neutron is selected.
+# Putting openvswitch on a separate Ubuntu pool because COS cannot run it is a correct decision
+# against an incomplete precondition -- which is exactly how that cluster came to be built.
+#
+# (The compute label is what decides which nodes run VMs, and it IS separable.)
 kubectl label --overwrite nodes --all openstack-control-plane=enabled \
   openstack-compute-node=enabled openvswitch=enabled openstack-network-node=enabled
 
