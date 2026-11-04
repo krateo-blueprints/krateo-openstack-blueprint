@@ -287,11 +287,25 @@ for container_name, (kind, workload, _required) in EXPECTED.items():
                 f"turns a visible unready pod into a CrashLoop and fixes nothing. Check "
                 f"backends in readiness."
             )
-    if c.get("startupProbe"):
+    # A startupProbe is PERMITTED, and the backend rule above still applies to it. The earlier
+    # version of this gate banned it outright, reasoning that it suppresses both liveness and
+    # readiness until it succeeds and so hides the readiness signal. That is right about the
+    # mechanism and wrong about the magnitude: during startup the readiness answer would be
+    # "not ready" anyway, and it resumes in full the moment the startupProbe passes once -- so
+    # the cost is one bounded window. Against it, measured: with liveness alone gnocchi-api was
+    # SIGKILLed three times at 60 + 3x30 = 150s because uwsgi needed longer than that to load
+    # the pecan app and the storage drivers (#156).
+    #
+    # What the ban was really protecting against survives, split into its two real parts: a
+    # startupProbe must not check a backend (asserted in the loop above, which includes
+    # startupProbe), and readiness must still exist and still check every backend -- so a
+    # startupProbe can never become a substitute for the readiness signal this gate is about.
+    if c.get("startupProbe") and not c.get("readinessProbe"):
         fail(
-            f"{container_name} has a startupProbe.\n"
-            f"      A startupProbe suppresses BOTH liveness and readiness until it succeeds, "
-            f"so it hides the readiness signal this whole gate is about."
+            f"{container_name} has a startupProbe and NO readinessProbe.\n"
+            f"      A startupProbe suppresses readiness until it succeeds; with no readiness "
+            f"probe at all there is nothing to resume, and the backend round trip this gate "
+            f"exists to require would never happen."
         )
 
 # ---------------------------------------------------------------------------------------------
@@ -305,6 +319,38 @@ if api is not None:
         fail(
             "gnocchi-api has no livenessProbe. A wedged uwsgi worker set IS repaired by a "
             "restart, which is what liveness is for here."
+        )
+
+    # And liveness must not be what gates STARTUP. gnocchi-api is uwsgi loading the pecan app
+    # plus the indexer and storage drivers; measured on a loaded single-node cluster that took
+    # more than 150s, which is exactly liveness's budget here (initialDelaySeconds 60 +
+    # failureThreshold 3 x periodSeconds 30), so the kubelet SIGKILLed it three times before it
+    # happened to load in time -- exitCode 137 with no memory limit, which reads as OOM and is
+    # not. The startupProbe suspends liveness until the app answers once and then gets out of
+    # the way; raising the liveness budget instead would trade steady-state detection away for
+    # the whole life of the pod. Issue #156. mariadb in this repo does the same thing.
+    startup = api.get("startupProbe")
+    if not startup:
+        fail(
+            "gnocchi-api has no startupProbe, so liveness competes with startup.\n"
+            "      Measured: uwsgi needed >150s to answer /healthcheck on a loaded node and "
+            "liveness killed the container three times (exitCode 137, no memory limit set, "
+            "NOT OOM) before it started inside the window (#156)."
+        )
+    elif startup.get("httpGet", {}).get("path") != (liveness or {}).get("httpGet", {}).get("path"):
+        fail(
+            "gnocchi-api's startupProbe does not fetch the same path as its liveness probe.\n"
+            f"      startup={startup.get('httpGet', {}).get('path')!r} "
+            f"liveness={(liveness or {}).get('httpGet', {}).get('path')!r}. The startup probe "
+            "exists to answer the same question earlier, not a different one."
+        )
+    elif (liveness or {}).get("initialDelaySeconds", 0) > 120 or (liveness or {}).get("failureThreshold", 3) > 3:
+        fail(
+            "gnocchi-api's liveness budget has been widened.\n"
+            f"      initialDelaySeconds={(liveness or {}).get('initialDelaySeconds')} "
+            f"failureThreshold={(liveness or {}).get('failureThreshold', 3)}. With a "
+            "startupProbe present this is unnecessary, and it delays detection of a wedge for "
+            "the entire life of the pod -- the trade the startupProbe exists to avoid (#156)."
         )
     elif "httpGet" not in liveness:
         fail(
@@ -427,7 +473,7 @@ if failures:
 
 print(f"OK: readiness on all {checked} long-lived gnocchi containers makes a real round trip "
       f"to every backend it needs")
-print("OK: no restarting probe checks a backend, none is a startupProbe, and none points at "
+print("OK: no restarting probe checks a backend -- startupProbe included -- every container\n      with a startupProbe still has a readiness probe, and nothing points at "
       f"uwsgi's stats port {UWSGI_STATS_PORT}")
 print(f"OK: {PROBE_KEY} refuses to pass when asked to check nothing")
 print(f"OK: api-paste.ini still names composite gnocchi+{auth_mode} and maps {health_path}")

@@ -95,7 +95,19 @@ kubectl create namespace openstack-system
 # complete a fresh keystone install at all, and for the hours they were `latest` this
 # document handed them to anyone who followed it. Bump this line when a newer release
 # has actually been run through these steps.
-BP_VERSION=0.3.26
+#
+# DO NOT USE 0.3.29, 0.3.30 or 0.3.31. Their umbrella emits at most ONE component and
+# then reports Ready=True forever: a right-trim above the YAML document separator glued
+# it onto the previous component, so any render carrying two or more components failed
+# and the release froze at revision 1. Fixed in 0.3.32 (issue #152).
+#
+# What 0.3.32 has actually been run through, stated so you know what is NOT covered: the
+# Composition path below, on kind, with a 7-component closure (gnocchi + skyline + zaqar
+# and their dependencies). keystone issued a real token, skyline and zaqar served, the
+# umbrella reached revision 2 with all seven component documents and exactly one Helm
+# release per component. NOT verified at this version: the 35-component `profile: full`,
+# the compute tier, and the direct-helm route further down.
+BP_VERSION=0.3.32
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 
@@ -164,7 +176,7 @@ kubectl label --overwrite nodes --all openstack-control-plane=enabled
 
 kubectl create namespace openstack-system
 for c in mariadb memcached keystone glance horizon; do
-BP_VERSION=0.3.26   # the release this path is verified against; see the note above
+BP_VERSION=0.3.32   # the release this path is verified against; see the note above
   kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-$c.yaml; done
 kubectl create namespace openstack
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-01-identity.yaml

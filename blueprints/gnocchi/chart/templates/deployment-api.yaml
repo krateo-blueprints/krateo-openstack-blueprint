@@ -160,6 +160,14 @@ ceph-keyring-placement on the GKE install (#115).
             - name: gn-api
               containerPort: {{ tuple "metric" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
 {{ dict "envAll" $envAll "component" "api" "container" "gnocchi-api" "type" "readiness" "probeTemplate" (include "apiReadinessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
+{{/* The startup probe runs the SAME check as liveness and exists only to suspend liveness
+     until the app has answered once. uwsgi loading pecan plus the indexer and storage
+     drivers took longer than liveness's 150s budget on a loaded node, so the container
+     was killed three times before it happened to start in time -- exitCode 137 with no
+     memory limit, which invites an OOM reading it does not deserve. After the first
+     success liveness resumes unchanged, so steady-state detection is not weakened the
+     way a larger liveness budget would weaken it. Issue #156. */}}
+{{ dict "envAll" $envAll "component" "api" "container" "gnocchi-api" "type" "startup" "probeTemplate" (include "apiLivenessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
 {{ dict "envAll" $envAll "component" "api" "container" "gnocchi-api" "type" "liveness" "probeTemplate" (include "apiLivenessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | trim | indent 10 }}
           volumeMounts:
             - name: pod-tmp
