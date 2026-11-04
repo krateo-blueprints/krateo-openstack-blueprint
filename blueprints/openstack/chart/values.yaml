@@ -31,18 +31,81 @@ componentValues:
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
 components:
-  - {name: mariadb,     kind: Mariadb,     deps: [],                                          tier: identity}
-  - {name: memcached,   kind: Memcached,   deps: [],                                          tier: identity}
-  - {name: keystone,    kind: Keystone,    deps: [mariadb, memcached],                        tier: identity}
-  - {name: glance,      kind: Glance,      deps: [keystone],                                  tier: identity}
-  - {name: horizon,     kind: Horizon,     deps: [keystone],                                  tier: identity}
-  - {name: rabbitmq,    kind: Rabbitmq,    deps: [],                                          tier: compute}
-  - {name: openvswitch, kind: Openvswitch, deps: [],                                          tier: compute}
-  - {name: placement,   kind: Placement,   deps: [keystone],                                  tier: compute}
-  - {name: libvirt,     kind: Libvirt,     deps: [openvswitch],                               tier: compute}
-  - {name: neutron,     kind: Neutron,     deps: [keystone, rabbitmq, openvswitch],           tier: compute}
-  - {name: nova,        kind: Nova,        deps: [keystone, placement, rabbitmq, glance, neutron, libvirt], tier: compute}
-  - {name: ironic,      kind: Ironic,      deps: [keystone, mariadb, rabbitmq, glance, neutron], tier: compute}
+  - name: mariadb
+    kind: Mariadb
+    deps: []
+    tier: identity
+  - name: memcached
+    kind: Memcached
+    deps: []
+    tier: identity
+  - name: keystone
+    kind: Keystone
+    deps:
+      - mariadb
+      - memcached
+    tier: identity
+  - name: glance
+    kind: Glance
+    deps:
+      - keystone
+    tier: identity
+  - name: horizon
+    kind: Horizon
+    deps:
+      - keystone
+    tier: identity
+  - name: rabbitmq
+    kind: Rabbitmq
+    deps: []
+    tier: compute
+  - name: openvswitch
+    kind: Openvswitch
+    deps: []
+    tier: compute
+  - name: placement
+    kind: Placement
+    deps:
+      - keystone
+    tier: compute
+  - name: libvirt
+    kind: Libvirt
+    deps:
+      - openvswitch
+    tier: compute
+  - name: neutron
+    kind: Neutron
+    deps:
+      - keystone
+      - rabbitmq
+      - openvswitch
+    tier: compute
+  - name: nova
+    kind: Nova
+    deps:
+      - keystone
+      - placement
+      - rabbitmq
+      - glance
+      - neutron
+      - libvirt
+    tier: compute
+  - name: ironic
+    kind: Ironic
+    deps:
+      - keystone
+      - mariadb
+      - rabbitmq
+      - glance
+      - neutron
+    tier: compute
+    ## Not selected by `profile: full`. ironic-conductor binds its PXE and TFTP services to an
+    ## interface NAMED ironic-pxe -- `ip addr | awk '/inet / && /ironic-pxe/'` -- which is the
+    ## bare-metal provisioning NIC. A cloud node has none and cannot grow one, so the init
+    ## container exits 1 with "Could not find IP for pxe to bind to" and the pod sits in Init
+    ## forever. Measured on a 4-node GKE install: 14 restarts, and the three init containers
+    ## behind it never ran. See hack/provisioning-preconditions.yaml and issue #163.
+    requiresProvisioning: true
   - name: cinder
     kind: Cinder
     deps:
@@ -71,6 +134,12 @@ components:
       - rabbitmq
       - mariadb
     tier: compute
+    # Needs an authoritative PowerDNS server as Service `powerdns`: pools.yaml renders
+    # nameservers[0].host from ${POWERDNS_SERVICE_HOST} and nothing here creates that Service,
+    # so designate-manage pool update dies on "Field `host' cannot be None" and
+    # designate-worker never leaves Init (41 restarts measured). api/central/mdns/producer/sink
+    # are unaffected. Removed when #165 ships a powerdns blueprint.
+    requiresProvisioning: true
   - name: octavia
     kind: Octavia
     deps:
@@ -78,7 +147,14 @@ components:
       - rabbitmq
       - mariadb
       - neutron
-    tier: compute
+    tier: compute    ## Not selected by `profile: full`. Each octavia worker and health-manager waits for a
+    ## Neutron port named after its own node on the load-balancer management network --
+    ## `openstack port show octavia-worker-port-<hostname>` -- and nothing in this blueprint
+    ## creates lb-mgmt-net or those per-host ports. Measured on a 4-node GKE install: four pods
+    ## at 14 restarts in Init, logging "No Port found for octavia-worker-port-...".
+    ## See hack/provisioning-preconditions.yaml and issue #163.
+    requiresProvisioning: true
+
   - name: magnum
     kind: Magnum
     deps:
@@ -233,6 +309,12 @@ components:
     deps:
       - keystone
     tier: compute
+    ## Not selected by `profile: full`. swift-shared-storage asks for ReadWriteMany, which GKE
+    ## does not provide; upstream satisfies it with an nfs-provisioner default this repo does
+    ## not ship. Measured: swift-ring-builder and three swift-storage pods Pending, swift-proxy
+    ## in Init, on six nodes and then on two -- unchanged by node count because it is the
+    ## StorageClass that is missing. Issue #141, and hack/provisioning-preconditions.yaml.
+    requiresProvisioning: true
 
 # dependencyRelaxations: the dependency edges whose creation gate is EXISTENCE instead of
 # READINESS. Every other edge waits for the dependency to report Ready=True, which is what
@@ -514,7 +596,8 @@ serviceContract:
             - update
       abac:
         match:
-          kinds: ["Openstack"]
+          kinds:
+            - "Openstack"
         celExpression: >-
           !has(object.spec.profile) || object.spec.profile != 'full' ||
           ('openstack.krateo.io/compute-approved' in object.metadata.annotations)
@@ -538,7 +621,8 @@ serviceContract:
         unit: count
         kind: gauge
         description: Running Nova instances.
-        dimensions: [flavor]
+        dimensions:
+          - flavor
       - name: vcpu.used
         unit: cores
         kind: gauge
@@ -554,7 +638,8 @@ serviceContract:
       - name: storage.used
         unit: GiB
         kind: gauge
-        dimensions: [volume_type]
+        dimensions:
+          - volume_type
       - name: storage.capacity
         unit: GiB
         kind: capacity
@@ -631,5 +716,9 @@ contractEmitter:
     # optional secret with keys: username, password.
     existingSecret: ""
   resources:
-    requests: {cpu: 10m, memory: 32Mi}
-    limits: {cpu: 100m, memory: 128Mi}
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi

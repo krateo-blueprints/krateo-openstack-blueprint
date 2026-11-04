@@ -81,6 +81,29 @@ exec:
           os.unlink(canary)
       except OSError as e:
           sys.exit("image store %s not writable: %s" % (d, e))
+      # Writable and HAVING SPACE are different properties, and only the first was checked.
+      # Measured on a 4-node GKE install: the store is a 2 GiB PVC
+      # (volume.size, upstream's default) which held two images and then refused the next
+      # upload -- and glance reports a full store as "413 Request Entity Too Large", which
+      # reads as a limit on the request. I spent three rounds on uwsgi's limit-post,
+      # oslo_middleware's RequestBodySizeLimiter (not in glance's paste pipeline at all) and
+      # Keystone unified limits before reading glance's own line:
+      #   HTTPRequestEntityTooLarge: Image storage media is full: There is not enough disk
+      #   space on the image storage media.
+      # A store with no room is a glance that cannot serve its main verb, so readiness is
+      # where it belongs -- and reporting unready beats handing the next uploader a 413.
+      # NOT liveness: restarting the pod frees no disk. Issue #163.
+      free = None
+      try:
+          st = os.statvfs(d)
+          free = st.f_bavail * st.f_frsize
+      except OSError as e:
+          sys.exit("cannot measure free space on image store %s: %s" % (d, e))
+      floor = {{ (index .Values.pod.probes.api "glance-api" "readiness").minFreeBytes | default 536870912 | int64 }}
+      if free < floor:
+          sys.exit(
+              "image store %s has %d bytes free, below the %d floor: an upload will fail with "
+              "413 Request Entity Too Large, which glance reports for a full store" % (d, free, floor))
       urllib.request.urlopen(
           "{{ tuple "image" "service" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" }}://localhost:{{ tuple "image" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}{{ tuple "image" "healthcheck" "internal" . | include "helm-toolkit.endpoints.keystone_endpoint_path_lookup" }}",
           timeout=3).read()

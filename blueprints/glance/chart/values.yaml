@@ -909,6 +909,18 @@ pod:
             timeoutSeconds: 5
         readiness:
           enabled: true
+          ## The floor below which the image store counts as unready, in bytes. 512 MiB.
+          ## Chosen to be smaller than any single image worth storing and larger than the
+          ## slack a nearly-full store leaves: the point is to report unready BEFORE an
+          ## upload fails, not after. See the probe in templates/deployment-api.yaml for why
+          ## free space is checked at all -- glance reports a full store as
+          ## "413 Request Entity Too Large", which reads as a limit on the request and sends
+          ## you looking at uwsgi and middleware. Issue #163.
+          ##
+          ## This does NOT raise volume.size, which stays at upstream's 2Gi: a capacity
+          ## default is environment-dependent and a single-node test cluster should not be
+          ## made to provision tens of gigabytes. What changes is that a full store says so.
+          minFreeBytes: 536870912
           params:
             periodSeconds: 10
             timeoutSeconds: 5

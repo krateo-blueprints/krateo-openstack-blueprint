@@ -327,6 +327,25 @@ jobs:
       # exist across 36 charts today -- so a fourth cannot appear undeclared.
       - name: Every requireSameNode pair must be satisfiable by the documented node labels
         run: python3 hack/validate-same-node-colocation.py .
+
+      # Gating. `profile: full` used to select all 35 components, including three that cannot
+      # start on any Kubernetes cluster: ironic wants an interface named ironic-pxe, octavia
+      # wants a Neutron port per host on its management network, swift wants a ReadWriteMany
+      # StorageClass. Measured on a 4-node GKE install of profile=full: six pods at 14 restarts
+      # in Init plus four Pending, none of which could ever become Ready -- and `Init:` is
+      # neither Pending nor CrashLoopBackOff, so a pod census reports "21 in Init" and names
+      # nothing.
+      #
+      # They are now excluded from every profile and selectable through `enabled:`. This gate
+      # asserts the flag and the declaration agree in BOTH directions, and verifies the
+      # exclusion by RENDERING the chart rather than by looking for the flag's name in the
+      # template -- the first version grepped _helpers.tpl, which its own explanatory comment
+      # satisfied.
+      - name: full-strict omits what needs provisioning; full still includes it
+        run: python3 hack/validate-provisioning-preconditions.py .
+
+      - name: YAML this repo authors uses block style
+        run: python3 hack/validate-yaml-block-style.py .
       # Gating, and the general form of the stats-port check above. `uwsgi --http` runs its HTTP
       # router in the MASTER process, so a bare tcpSocket probe against the service port is
       # answered by a process that is still fine while every worker is wedged or no application
