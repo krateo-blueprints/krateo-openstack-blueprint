@@ -91,8 +91,15 @@ krateo.io/composition-origin-version
 {{- define "osh.originVersion" -}}
 {{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $crds := index . 3 -}}
 {{- $v := "" -}}
-{{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)) $crds)) "true" -}}
-{{- $o := lookup (include "osh.apiVersion" (list $top)) $kind $top.Release.Namespace $name -}}
+{{- /* Read through a version the cluster SERVES, not the chart's current version. This guard
+       used to be osh.crdExists at the current version, which made this return "" at the bump
+       instant -- so osh.pinVersion fell back to current and the origin pin was inert in exactly
+       the instant it was written for. The stamp is an annotation, annotations are not schema'd,
+       so it is readable through any served version: the comment above already said so and
+       nothing in the code relied on it. #166. */ -}}
+{{- $sv := include "osh.servedVersion" (list $kind (include "osh.version" (list $top)) $crds) -}}
+{{- if ne $sv "" -}}
+{{- $o := lookup (include "osh.apiVersionAt" (list $sv)) $kind $top.Release.Namespace $name -}}
 {{- if $o -}}
 {{- $ann := (($o.metadata).annotations) | default dict -}}
 {{- $v = (index $ann (include "osh.originVersionAnnotation" $top)) | default "" -}}
@@ -212,11 +219,20 @@ krateo.io/composition-origin-version
      Read osh.pinVersion before changing anything here: it carries the measurement that forced
      the pin, the pruning cost an older schema imposes, and the one upgrade setting that
      silently defeats it. */}}
-{{- define "osh.emitApiVersion" -}}
+{{- define "osh.emitVersion" -}}
 {{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $crds := index . 3 -}}
 {{- $current := include "osh.version" (list $top) -}}
 {{- $origin := include "osh.originVersion" (list $top $kind $name $crds) -}}
-{{- include "osh.apiVersionAt" (list (include "osh.pinVersion" (list $current $origin $kind $crds))) -}}
+{{- include "osh.pinVersion" (list $current $origin $kind $crds) -}}
+{{- end -}}
+
+{{/* The apiVersion form of the above. A thin wrapper ON PURPOSE: compositions.yaml's emission
+     GATE and the apiVersion it emits must resolve the same version, and before #166 they did
+     not -- the gate asked osh.version while the emitter asked osh.pinVersion. Two call sites
+     deriving the same fact independently is how they came to disagree, so there is now exactly
+     one resolution and both call it. */}}
+{{- define "osh.emitApiVersion" -}}
+{{- include "osh.apiVersionAt" (list (include "osh.emitVersion" .)) -}}
 {{- end -}}
 
 {{/* Returns "true" if a Composition of <kind>/<name> reports Ready=True. Takes the cluster's CRD
@@ -230,8 +246,13 @@ krateo.io/composition-origin-version
 {{- define "osh.ready" -}}
 {{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $crds := index . 3 -}}
 {{- $r := "" -}}
-{{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)) $crds)) "true" -}}
-{{- $o := lookup (include "osh.apiVersion" (list $top)) $kind $top.Release.Namespace $name -}}
+{{- /* Served version, as in osh.exists. A dependency's Ready condition is a property of the
+       OBJECT, not of the chart's version. Read at the current version it made every dependency
+       read not-ready at the bump instant, which compounded #166 rather than causing it -- the
+       outer `$crd` had already closed the gate. */ -}}
+{{- $sv := include "osh.servedVersion" (list $kind (include "osh.version" (list $top)) $crds) -}}
+{{- if ne $sv "" -}}
+{{- $o := lookup (include "osh.apiVersionAt" (list $sv)) $kind $top.Release.Namespace $name -}}
 {{- if $o -}}{{- range ($o.status.conditions | default list) -}}
 {{- /* Reason, not just status. Two of the five conditions this can see carry a status that
        is not False, and they mean opposite things:
@@ -284,8 +305,13 @@ krateo.io/composition-origin-version
 {{- define "osh.paused" -}}
 {{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $crds := index . 3 -}}
 {{- $r := "" -}}
-{{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)) $crds)) "true" -}}
-{{- $o := lookup (include "osh.apiVersion" (list $top)) $kind $top.Release.Namespace $name -}}
+{{- /* Served version, for the same reason as osh.ready. This one did not contribute to #166
+       -- "" is the permissive answer here, so a mis-read could not prune anything -- but it
+       would have reported a genuinely paused dependency as not paused at the bump instant,
+       which is the relaxed gate silently losing its only safety condition. */ -}}
+{{- $sv := include "osh.servedVersion" (list $kind (include "osh.version" (list $top)) $crds) -}}
+{{- if ne $sv "" -}}
+{{- $o := lookup (include "osh.apiVersionAt" (list $sv)) $kind $top.Release.Namespace $name -}}
 {{- if $o -}}{{- range ($o.status.conditions | default list) -}}
 {{- if and (eq .type "Ready") (eq (.reason | toString) "ReconcileGracefullyPaused") -}}{{- $r = "true" -}}{{- end -}}
 {{- end -}}{{- end -}}
@@ -328,6 +354,43 @@ krateo.io/composition-origin-version
      The per-object lookups in osh.ready / osh.paused / osh.exists are deliberately left alone:
      each is a single GET of one named object, which is cheap. Only the full-list fetch was the
      problem. */}}
+{{/* A version of <kind>'s CRD that the cluster ACTUALLY SERVES, preferring <current>; "" when
+     the kind has no served version at all.
+
+     This exists because every other version-sensitive helper here used to ask about the chart's
+     CURRENT version, and at the one instant that matters the cluster does not serve it yet. On
+     the first render after a version bump the new CompositionDefinitions -- rendered in that
+     same pass -- are what create the new CRD version, so a question about the current version is
+     a question whose answer that very render establishes. osh.crdExists answered "" for all 34
+     components, `$crd` is an outer conjunct in compositions.yaml's gate, the `$exists` escape
+     was never reached, and helm pruned 34 live CRs. Measured on a0-openstack-d4 during
+     0.3.32 -> 0.3.33: 6 CRs left for 37 releases, 27 of them running with nothing reconciling
+     them. See issue #166.
+
+     PREFERRING current rather than taking any served version is the whole subtlety. A component
+     that exists keeps being read and emitted at the version it was born at (osh.pinVersion), so
+     answering with some arbitrary served version would move a component's GVK on a render where
+     nothing about it changed. Current-if-served, else whatever is served, means: normal renders
+     behave exactly as before, and only the bump instant -- where current is NOT served -- falls
+     back, which is the case that used to answer "nothing is here".
+
+     A pure function of its arguments, no `lookup`, so every branch is testable without a
+     cluster. hack/validate-upgrade-does-not-prune.py does that. */}}
+{{- define "osh.servedVersion" -}}
+{{- $kind := index . 0 -}}{{- $current := index . 1 -}}{{- $crds := index . 2 -}}
+{{- $found := "" -}}
+{{- range ($crds | default list) -}}
+{{- if and (eq .spec.group "composition.krateo.io") (eq .spec.names.kind $kind) -}}
+{{- range (.spec.versions | default list) -}}
+{{- if .served -}}
+{{- if eq .name $current -}}{{- $found = .name -}}{{- else if eq $found "" -}}{{- $found = .name -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $found -}}
+{{- end -}}
+
 {{- define "osh.crdExists" -}}
 {{- $kind := index . 0 -}}{{- $version := index . 1 -}}{{- $crds := index . 2 -}}
 {{- $found := "" -}}
@@ -359,8 +422,13 @@ krateo.io/composition-origin-version
 {{- define "osh.exists" -}}
 {{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $crds := index . 3 -}}
 {{- $r := "" -}}
-{{- if eq (include "osh.crdExists" (list $kind (include "osh.version" (list $top)) $crds)) "true" -}}
-{{- if lookup (include "osh.apiVersion" (list $top)) $kind $top.Release.Namespace $name -}}{{- $r = "true" -}}{{- end -}}
+{{- /* Asked at a SERVED version. "Is there a live CR here that must not be pruned" does not
+       depend on which version the chart is at, and asking it at the current version answered
+       "no" for every component at the bump instant -- the one time the answer had to be yes.
+       This is the escape clause in #166 that was never reached. */ -}}
+{{- $sv := include "osh.servedVersion" (list $kind (include "osh.version" (list $top)) $crds) -}}
+{{- if ne $sv "" -}}
+{{- if lookup (include "osh.apiVersionAt" (list $sv)) $kind $top.Release.Namespace $name -}}{{- $r = "true" -}}{{- end -}}
 {{- end -}}
 {{- $r -}}
 {{- end -}}
