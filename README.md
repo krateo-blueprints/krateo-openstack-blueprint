@@ -277,7 +277,7 @@ has ever served instead of retiring them. Decide it per component, not fleet-wid
 The mechanism and the measurements behind it are in
 `blueprints/openstack/chart/templates/_helpers.tpl` (`osh.pinVersion`), asserted by
 `hack/validate-origin-version-pin.py`, and tracked as
-[krateo-platformops/core-provider#303](https://github.com/krateoplatformops/core-provider/issues/303).
+[krateo-platformops/core-provider#303](https://github.com/krateo-platformops/core-provider/issues/303).
 
 ## Configure
 
