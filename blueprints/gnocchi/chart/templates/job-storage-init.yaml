@@ -15,9 +15,9 @@ limitations under the License.
 {{/*
 Gated on the storage driver. Everything this Job does is ceph: `ceph -s`,
 `ceph osd pool create`, `ceph auth get-or-create client.gnocchi`, behind a
-ceph-keyring-placement init container that needs an admin keyring. With `storage.driver:
-swift` there is no ceph cluster to talk to -- this blueprint ships no ceph component -- and
-gnocchi-upgrade (the gnocchi-db-sync Job) creates the swift containers itself.
+ceph-keyring-placement init container that needs an admin keyring. Under any other storage
+driver -- `redis` here -- there is no ceph cluster to talk to, this blueprint ships no ceph
+component, and gnocchi-upgrade (the gnocchi-db-sync Job) initialises the store itself.
 
 Rendering it anyway is not merely useless: it was named in dependencies.static.*.jobs, so
 the API, metricd, statsd, the resources cleaner and the tests all waited on a Job that

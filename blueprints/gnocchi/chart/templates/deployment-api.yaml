@@ -120,7 +120,7 @@ spec:
 {{/*
 Ceph-only. This init container writes /etc/ceph/ceph.client.gnocchi.keyring from the
 secrets.rbd Secret, which only gnocchi-storage-init creates and which therefore never
-exists under `storage.driver: swift`. Ungated it is not inert: the pod stays in Init
+exists under any other storage driver. Ungated it is not inert: the pod stays in Init
 forever on a missing Secret volume, which is precisely how the API sat behind
 ceph-keyring-placement on the GKE install (#115).
 */}}

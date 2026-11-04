@@ -32,8 +32,8 @@ data:
 Ceph-only scripts. storage-init.sh is `ceph -s` / `ceph osd pool create` /
 `ceph auth get-or-create`, and clean-secrets.sh deletes the rbd keyring Secret that
 storage-init creates; the two Jobs that mount them render only under
-`storage.driver: ceph`. Gated with them so that a swift-backed install ships no ceph
-tooling at all -- "the driver value changed" and "nothing ceph is left" are different
+`storage.driver: ceph`. Gated with them so that an install on any other driver ships no
+ceph tooling at all -- "the driver value changed" and "nothing ceph is left" are different
 claims, and only the second one is checkable. What remains after this is prose: the word
 appears in gnocchi-probe.py's docstring, which lists the drivers its storage check
 supports. Nothing mounts or executes ceph here.

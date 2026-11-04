@@ -214,13 +214,19 @@ components:
     deps:
       - keystone
       - mariadb
-      # swift holds gnocchi's metric storage (conf.gnocchi.storage.driver). Before #115
-      # gnocchi declared keystone and mariadb while its rendered config named postgresql
-      # and ceph, neither of which is a component here, so it waited forever on backends
-      # that could not exist. It is now configured against mariadb and swift only, and
-      # this list says so. swift's own deps add nothing new: swift depends on keystone,
-      # which is already in gnocchi's closure.
-      - swift
+      # redis holds gnocchi's metric storage, both the aggregated timeseries
+      # (conf.gnocchi.storage.driver) and the incoming measure queue, which follows it.
+      # Before #115 gnocchi declared keystone and mariadb while its rendered config named
+      # postgresql and ceph, neither of which is a component here, so it waited forever on
+      # backends that could not exist. #129 moved the store to swift, which IS a component
+      # -- but swift cannot become Ready on a stock cluster: its swift-shared-storage PVC
+      # asks ReadWriteMany of a `nfs-provisioner` StorageClass that GKE does not have, four
+      # swift-storage pods stay Pending, and because this edge gates on READINESS gnocchi
+      # then got no Composition at all and ceilometer sat blocked behind gnocchi. redis
+      # needs no volume, so it is a dependency that can actually report Ready.
+      # redis's own deps add nothing new -- it has none -- so this list is strictly smaller
+      # than with swift: swift also pulled in keystone, which gnocchi already has.
+      - redis
     tier: compute
   - name: swift
     kind: Swift

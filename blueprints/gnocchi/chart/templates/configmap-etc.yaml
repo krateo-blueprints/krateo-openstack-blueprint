@@ -59,35 +59,34 @@ limitations under the License.
 {{- end -}}
 
 {{/*
-Swift storage credentials, filled from endpoints.identity exactly as keystone_authtoken is
-above. gnocchi's swift driver authenticates to keystone as gnocchi's own service user and
-then resolves the object-store endpoint from the catalogue, so these are keystone
-credentials and not a swift endpoint: see gnocchi/common/swift.py, which passes them
-straight to swiftclient.Connection(authurl=, user=, key=, tenant_name=, os_options=).
+The metric store's redis URL, derived from endpoints.metric_store exactly as zaqar's message
+store is derived from its own endpoints.message_store (#138) and as the indexer URL below is
+derived from endpoints.oslo_db. endpoints.metric_store is then the single value that both this
+URL and the kubernetes-entrypoint waits in dependencies.static.{api,db_sync,metricd,statsd}
+resolve from, so moving the store moves the wait with it.
 
-Upstream's chart has no swift storage support at all -- it ships `storage.driver: ceph`
-and nothing fills these -- so this block is a deliberate divergence, recorded in
-hack/upstream-divergences.yaml. Without it `driver: swift` would authenticate as
-gnocchi's upstream default user, the literal string "admin:admin", against
-http://localhost:8080/auth/v1.0.
+One key is all gnocchi's redis storage takes. gnocchi/common/redis.py get_client() parses
+`redis_url` and nothing else: hostname and port become the redis-py client's host/port, any
+userinfo becomes username/password, and every remaining client argument (db, socket_timeout,
+ssl, sentinel, ...) is read from the URL's query string. There is no second option to fill --
+verified in quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble, where
+gnocchi.common.redis.OPTS is exactly one StrOpt named redis_url.
+
+Upstream's chart ships `storage.driver: ceph` and fills nothing here, so this block is a
+deliberate divergence recorded in hack/upstream-divergences.yaml. Without it `driver: redis`
+would silently fall back to gnocchi's own default, `redis://localhost:6379/` -- which resolves
+inside the gnocchi pod itself, where no redis is listening, and which no dependency wait could
+ever have told you about.
+
+[incoming] is deliberately left unset. gnocchi/opts.py builds the incoming option list by
+deep-copying the storage list and setting each option's default to '${storage.<name>}', so an
+absent [incoming] section means "incoming is whatever storage is" -- redis here, for both the
+driver and the URL. Measured in the same image with this chart's own rendered config:
+`conf.incoming.driver` resolves to redis and `conf.incoming.redis_url` to this URL, with
+neither key present in the file.
 */}}
-{{- if empty .Values.conf.gnocchi.storage.swift_authurl -}}
-{{- $_ := tuple "identity" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" | set .Values.conf.gnocchi.storage "swift_authurl" -}}
-{{- end -}}
-{{- if empty .Values.conf.gnocchi.storage.swift_user -}}
-{{- $_ := set .Values.conf.gnocchi.storage "swift_user" .Values.endpoints.identity.auth.gnocchi.username -}}
-{{- end -}}
-{{- if empty .Values.conf.gnocchi.storage.swift_key -}}
-{{- $_ := set .Values.conf.gnocchi.storage "swift_key" .Values.endpoints.identity.auth.gnocchi.password -}}
-{{- end -}}
-{{- if empty .Values.conf.gnocchi.storage.swift_project_name -}}
-{{- $_ := set .Values.conf.gnocchi.storage "swift_project_name" .Values.endpoints.identity.auth.gnocchi.project_name -}}
-{{- end -}}
-{{- if empty .Values.conf.gnocchi.storage.swift_user_domain_name -}}
-{{- $_ := set .Values.conf.gnocchi.storage "swift_user_domain_name" .Values.endpoints.identity.auth.gnocchi.user_domain_name -}}
-{{- end -}}
-{{- if empty .Values.conf.gnocchi.storage.swift_project_domain_name -}}
-{{- $_ := set .Values.conf.gnocchi.storage "swift_project_domain_name" .Values.endpoints.identity.auth.gnocchi.project_domain_name -}}
+{{- if empty .Values.conf.gnocchi.storage.redis_url -}}
+{{- $_ := tuple "metric_store" "internal" "redis" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" | set .Values.conf.gnocchi.storage "redis_url" -}}
 {{- end -}}
 
 {{- if and (not (kindIs "invalid" .Values.conf.gnocchi.indexer.url)) (empty .Values.conf.gnocchi.indexer.url) -}}

@@ -120,8 +120,11 @@ dependencies:
           service: identity
         - endpoint: internal
           service: oslo_db
+        # The metric store. gnocchi-api writes every POSTed measure into the incoming driver
+        # and reads the aggregates back out of the storage driver, and both are redis
+        # (conf.gnocchi.storage.driver, with [incoming] following it).
         - endpoint: internal
-          service: object_store
+          service: metric_store
     clean:
       services: null
     db_init:
@@ -139,10 +142,11 @@ dependencies:
       services:
         - endpoint: internal
           service: oslo_db
-        # gnocchi-upgrade creates the storage layout as well as the indexer schema, so
-        # db-sync needs the object store up, not just the database.
+        # gnocchi-upgrade creates the storage layout as well as the indexer schema -- it is
+        # what writes the `gnocchi-config` sack object the measure store is indexed by -- so
+        # db-sync needs the metric store up, not just the database.
         - endpoint: internal
-          service: object_store
+          service: metric_store
     ks_endpoints:
       jobs:
         - gnocchi-ks-service
@@ -166,8 +170,12 @@ dependencies:
       services:
         - endpoint: internal
           service: oslo_db
+        # metricd's whole job is to drain the incoming measure queue and write aggregates to
+        # the storage driver, both of which are redis here. Its own readiness probe makes a
+        # real read through that driver (--storage), so without this wait the DaemonSet would
+        # start and then sit unready until redis appeared.
         - endpoint: internal
-          service: object_store
+          service: metric_store
         - endpoint: internal
           service: metric
     statsd:
@@ -180,7 +188,7 @@ dependencies:
         - endpoint: internal
           service: oslo_db
         - endpoint: internal
-          service: object_store
+          service: metric_store
         - endpoint: internal
           service: metric
     resources_cleaner:
@@ -603,38 +611,76 @@ conf:
       ## the connection string via a mounted configuration snippet.
       connection: ""
     storage:
-      # swift, not ceph. There is no ceph component in this blueprint -- no
-      # blueprints/ceph directory, no CompositionDefinition, nothing in the catalogue --
-      # so `driver: ceph` pointed the API, 4x metricd and 4x statsd at a backend that
-      # cannot exist here, and gnocchi-storage-init looped on `ceph -s` forever (#115).
-      # swift IS a component, so gnocchi now depends only on things this blueprint ships.
+      # redis, not ceph and not swift. This is the third backend gnocchi has been pointed at
+      # here, so the reasoning for each is worth keeping:
       #
-      # `file` was the other candidate and is worse: metricd and statsd are DaemonSets, so
-      # a file store has to be one ReadWriteMany volume shared by the API and every node's
-      # metricd and statsd, and RWX is exactly what a stock GKE/kind cluster does not have.
-      # swift needs no shared filesystem.
-      driver: swift
-      # swift_authurl/user/key/project_name/*_domain_name are auto-generated from
-      # endpoints.identity by configmap-etc.yaml when left empty, the same way
-      # keystone_authtoken is -- gnocchi authenticates to keystone as its own service
-      # user and then finds the object-store endpoint in the catalogue.
-      swift_auth_version: "3"
-      swift_authurl: ""
-      swift_user: ""
-      swift_key: ""
-      swift_project_name: ""
-      swift_user_domain_name: ""
-      swift_project_domain_name: ""
-      # internalURL, not gnocchi's publicURL default. The public object-store endpoint is
-      # http://swift/ -- the ingress Service, which only exists when an ingress controller
-      # is installed. The internal one is swift-proxy:8080, a plain ClusterIP Service that
-      # swift always renders. keystoneclient's ServiceCatalogV3 normalises the trailing
-      # "URL" away, verified against a v3 catalogue in the image.
-      swift_endpoint_type: internalURL
-      swift_service_type: object-store
-      swift_container_prefix: gnocchi
+      #   ceph    Upstream's default. There is no ceph component in this blueprint -- no
+      #           blueprints/ceph directory, no CompositionDefinition, nothing in the
+      #           catalogue -- so `driver: ceph` pointed the API, 4x metricd and 4x statsd at
+      #           a backend that cannot exist here, and gnocchi-storage-init looped on
+      #           `ceph -s` forever (#115).
+      #   swift   #129's answer, because swift IS a component here. But swift itself cannot
+      #           come up on a stock cluster: its swift-shared-storage PVC asks for
+      #           ReadWriteMany from a StorageClass named `nfs-provisioner`, and on GKE that
+      #           class does not exist while the default `standard-rwo` is block storage that
+      #           cannot do RWX at all. Observed on a real GKE install: four swift-storage
+      #           pods Pending, swift Ready=False, so gnocchi got no Composition and
+      #           ceilometer sat blocked behind gnocchi. That is swift's own defect and is
+      #           tracked separately, but it makes swift the wrong thing for gnocchi to
+      #           depend on.
+      #   file    Worse than either: metricd and statsd are DaemonSets, so a file store has
+      #           to be one ReadWriteMany volume shared by the API and every node's metricd
+      #           and statsd -- the same RWX that swift cannot get.
+      #   redis   A component since 0.3.30 (upstream's own redis/ chart, vendored, with a
+      #           verified readiness probe), and it needs no volume at all, let alone an RWX
+      #           one. Same rule as the indexer: depend only on what this blueprint actually
+      #           provides, and on something that can actually become Ready.
+      #
+      # Verified in quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble rather than
+      # assumed: `redis` is a registered gnocchi.storage AND gnocchi.incoming stevedore entry
+      # point (gnocchi.storage.redis:RedisStorage / gnocchi.incoming.redis:RedisStorage), and
+      # the `redis` python package is installed (7.2.0). gnocchi/common/redis.py raises
+      # RuntimeError("Redis Python module is unavailable") without it.
+      driver: redis
+      # -- Metric-store redis URL. When empty the URL is auto-generated from
+      ## endpoints.metric_store by configmap-etc.yaml, the same way indexer.url is
+      ## auto-generated from endpoints.oslo_db. Set to null to disable auto-generation.
+      ##
+      ## This is the only key gnocchi's redis storage takes: gnocchi.common.redis.OPTS is one
+      ## StrOpt, and get_client() reads host, port, username, password and every other client
+      ## argument (db, socket_timeout, ssl, sentinel, ...) out of this one URL's authority and
+      ## query string. Deliberately NOT hardcoded to redis://redis:6379 -- that would name the
+      ## host in a place no kubernetes-entrypoint wait can read, which is exactly the defect
+      ## #138 removed from zaqar's message store.
+      redis_url: ""
+      # [incoming] is deliberately absent from this file. gnocchi has three stores -- storage
+      # (aggregates), incoming (the measure queue) and indexer -- and gnocchi/opts.py builds
+      # the incoming option list by deep-copying the storage one and rewriting every default
+      # to '${storage.<name>}'. So no [incoming] section means incoming follows storage, both
+      # the driver and the URL. install.rst in this image says the same in words: "If no
+      # incoming storage is set, the default is to use the configured storage driver."
+      # Measured with this chart's own rendered config inside the api image:
+      # conf.incoming.driver resolves to 'redis' and conf.incoming.redis_url to the URL
+      # above, with neither key written anywhere.
+      #
+      # Letting it follow is also the better answer on its own merits, which is why it is left
+      # implicit rather than being pinned to something else. Two statements from gnocchi's own
+      # documentation, shipped in this image at
+      # /gnocchi-base-source/gnocchi-base-archive-4.7.0/doc/source/:
+      #   * intro.rst: "A typical recommendation for medium to large scale deployment is to
+      #     use Redis as an incoming measure storage and Ceph as an aggregate storage."  Redis
+      #     is the recommended INCOMING driver outright; only the aggregate half of that
+      #     sentence is unavailable here.
+      #   * operating.rst: "Some incoming driver (only Redis currently) are able to inform
+      #     metricd that new measures are available for processing. In that case, metricd will
+      #     not respect the [metricd]metric_processing_delay parameter and start processing the
+      #     new measures right away."  So redis is the one incoming driver for which
+      #     conf.metricd.greedy (default True) does anything at all: measures are aggregated
+      #     on notification instead of up to metric_processing_delay -- 60s -- later.
+      #     gnocchi/incoming/redis.py implements it, in iter_on_sacks_to_process.
+      #
       # The ceph options below are inert under any other driver -- gnocchi registers them in
-      # the [storage] group whatever the driver is, and the swift driver never reads them.
+      # the [storage] group whatever the driver is, and the redis driver never reads them.
       # They are kept so that a ceph-backed install stays a values change rather than a
       # re-vendor, and because hack/revendor.py would re-add them from upstream anyway.
       # Every ceph *Kubernetes object* (the gnocchi-storage-init and gnocchi-clean Jobs, the
@@ -642,6 +688,13 @@ conf:
       # `driver: ceph` in the templates. NOTE: the dependency waits are not gated -- turning
       # ceph back on also means restoring `gnocchi-storage-init` to the
       # dependencies.static.*.jobs lists below, which nothing else will tell you.
+      #
+      # The swift options #129 added are gone rather than gated off, which is the opposite of
+      # how ceph is treated here, for one reason: upstream's values.yaml never had them.
+      # revendor.py's three-way merge only protects a leaf that upstream also carries, so the
+      # swift keys were this repo's own and leaving them would leave dead configuration that
+      # nothing re-derives. The ceph keys are upstream's, so deleting them would be undone by
+      # the next re-vendor anyway.
       ceph_pool: gnocchi.metrics
       ceph_username: gnocchi
       ceph_keyring: /etc/ceph/ceph.client.gnocchi.keyring
@@ -795,26 +848,33 @@ endpoints:
     port:
       statsd:
         default: 8125
-  # The object store gnocchi's metric storage lives in. Mirrors endpoints.object_store in
-  # blueprints/swift/chart/values.yaml, because the two have to agree: the hosts/port here
-  # are what kubernetes-entrypoint waits on (swift-proxy:8080) and what swift's own
-  # ks-endpoints job registers in the catalogue. gnocchi reaches the store through the
-  # catalogue rather than this entry, so only the wait depends on it.
-  object_store:
-    name: swift
+  # The store gnocchi's metrics live in: both the aggregated timeseries ([storage]) and the
+  # incoming measure queue ([incoming], which follows storage). Declared as an endpoint, and
+  # not hardcoded in conf.gnocchi.storage.redis_url, so that one value feeds both the rendered
+  # URL (templates/configmap-etc.yaml) and the kubernetes-entrypoint waits in
+  # dependencies.static.{api,db_sync,metricd,statsd}. This is zaqar's endpoints.message_store
+  # (#138) applied to gnocchi; `redis` here is the Service the redis blueprint renders, on the
+  # port it renders it on.
+  #
+  # Unlike the swift endpoint this replaces, gnocchi talks to this host directly rather than
+  # finding it in the keystone catalogue, so this entry is what gnocchi actually connects to
+  # and not only what the wait resolves.
+  metric_store:
+    name: redis
+    namespace: null
     hosts:
-      default: swift-proxy
-      public: swift
+      default: redis
     host_fqdn_override:
       default: null
+    # No path component in a redis URL. Spelled as a map with a null default rather than a
+    # bare `path: null`, because helm-toolkit's path lookup indexes this value and an untyped
+    # nil fails the render -- the same shape zaqar's endpoints.message_store uses.
     path:
-      default: /v1/AUTH_%(tenant_id)s
-    scheme:
-      default: http
+      default: null
+    scheme: redis
     port:
-      api:
-        default: 8080
-        public: 80
+      redis:
+        default: 6379
   # Only the postgresql-indexer path reads this, and that path is off: see
   # conf.gnocchi.indexer.driver. Kept so the path stays renderable.
   oslo_db_postgresql:
