@@ -173,6 +173,40 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 
 Full install paths and how to access OpenStack/Horizon: [docs/usage.md](docs/usage.md).
 
+## One install per cluster
+
+**A second OpenStack blueprint cannot be installed onto a cluster that already has one**, in any
+namespace. The install fails in about fifteen seconds:
+
+```
+Error: INSTALLATION FAILED: Unable to continue with install:
+  ClusterRole "openstack-view" in namespace "" exists and cannot be imported into the
+  current release: invalid ownership metadata; annotation validation error:
+  key "meta.helm.sh/release-namespace" must equal "openstack2": current value is "openstack"
+```
+
+The charts themselves are namespace-agnostic — released into `testns`, every
+`kubernetes-entrypoint` wait resolves to `testns:keystone-api`, `testns:mariadb` and so on, and no
+chart reaches back into a hardcoded `openstack`. That is not what blocks a second install.
+**Cluster-scoped objects are.** They are singletons on the cluster, Helm records the installing
+namespace in their ownership annotations, and a second release can neither adopt nor overwrite
+them. There are eight:
+
+| object | from |
+| ------ | ---- |
+| `ClusterRole/openstack-view`, `-provision`, `-decommission`, `-compute-tier-guard` | this orchestrator's capability roles |
+| `ClusterRole/nova-bootstrap`, `nova-cell-setup` and both `ClusterRoleBinding`s | upstream openstack-helm's nova chart |
+
+Only the first four are ours. **Nova's are upstream's**, and this repo tracks upstream except
+where upstream is demonstrably broken — an unnamespaced bootstrap role is an upstream design
+choice, not a defect. So renaming our four would reduce the collision surface from eight objects
+to four and change where the failure happens, without making a second install work. That is why
+this is documented rather than fixed.
+
+The failure message is accurate and names the conflicting object, which is the useful half. What
+it does not say is that the limit is structural, so: **one OpenStack blueprint per cluster.** A
+second environment needs a second cluster.
+
 ## Upgrading an existing install
 
 Bumping the blueprint version on a running install is one `kubectl apply` of the new
