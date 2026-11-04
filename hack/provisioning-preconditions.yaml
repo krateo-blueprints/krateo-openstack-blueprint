@@ -45,22 +45,3 @@ preconditions:
       missing is the StorageClass and not capacity.
     check: kubectl get storageclass -o custom-columns=NAME:.metadata.name,PROVISIONER:.provisioner
     issue: 141
-  - component: designate
-    requires: >-
-      An authoritative PowerDNS server reachable in the namespace as Service `powerdns`, serving
-      DNS on 53 and its HTTP API on 8081. `pdns4` is the pool's target type and
-      endpoints.powerdns.hosts.default is `powerdns`, but no template in this repo creates that
-      Service and there is no powerdns blueprint -- upstream openstack-helm expects PowerDNS to
-      be deployed out of band. Issue #165 ships it, after which this entry is removed.
-    symptom: >-
-      designate-worker sits at Init:1/2 forever -- the kubernetes-entrypoint container exits 0,
-      and designate-worker-init is the one restarting. `designate-manage pool update` fails with
-      InvalidObject and "Field `host' cannot be None", because pools.yaml renders
-      nameservers[0].host and targets[0].options.host from ${POWERDNS_SERVICE_HOST}, which
-      Kubernetes never injects for a Service that does not exist. The init command is an
-      `eval`, so the unset variable becomes the empty string silently; the same gap is visible
-      in the rendered api_endpoint as `http://:8081`. masters[0].host resolves correctly to
-      minidns's ClusterIP, so the template itself works. Measured on a 4-node GKE install: 41
-      restarts. designate's api, central, mdns, producer and sink are unaffected and serve.
-    check: kubectl -n openstack get svc powerdns
-    issue: 165

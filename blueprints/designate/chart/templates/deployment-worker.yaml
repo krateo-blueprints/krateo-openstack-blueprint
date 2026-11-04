@@ -59,6 +59,16 @@ spec:
             - bash
             - -c
             - 'eval "echo \"$(cat /tmp/designate_pools.template)\"" > /etc/designate/pools.yaml && designate-manage pool update'
+          {{- /* The pool template is shell-expanded by the `eval` above, so the API key reaches
+                 pools.yaml the same way the service hosts do -- as an environment variable. It
+                 is never a chart value and never lands in a ConfigMap; powerdns's
+                 api-key-init Job is the only thing that knows it. */}}
+          env:
+            - name: PDNS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $envAll.Values.secrets.powerdns.api_key }}
+                  key: PDNS_API_KEY
           volumeMounts:
             - name: designate-etc
               mountPath: /tmp/designate_pools.template

@@ -1,0 +1,104 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+{{- if (.Values.global).subchart_release_name }}
+{{- $_ := set . "deployment_name" .Chart.Name }}
+{{- else }}
+{{- $_ := set . "deployment_name" .Release.Name }}
+{{- end }}
+
+{{- if .Values.manifests.job_db_sync }}
+{{- $envAll := . }}
+{{- $serviceName := "powerdns" }}
+{{- $configMapBinName := printf "%s-%s" $envAll.deployment_name "powerdns-bin" }}
+{{- $serviceAccountName := printf "%s-%s" $envAll.deployment_name "powerdns-db-sync" }}
+{{ tuple $envAll "db_sync" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: powerdns-db-sync
+  labels:
+{{ tuple $envAll "powerdns" "db-sync" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+{{ tuple $envAll "powerdns" "db-sync" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+{{ dict "envAll" $envAll "podName" "powerdns-db-sync" "containerNames" (list "init" "powerdns-schema-copy" "powerdns-db-sync") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 8 }}
+    spec:
+      serviceAccountName: {{ $serviceAccountName | quote }}
+      restartPolicy: OnFailure
+      nodeSelector:
+        {{ .Values.labels.job.node_selector_key }}: {{ .Values.labels.job.node_selector_value }}
+      initContainers:
+{{ tuple $envAll "db_sync" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
+        {{- /* The schema comes OUT OF THE POWERDNS IMAGE, not out of this chart. If a future
+               image moves the file this container fails here, loudly, instead of leaving the
+               next container to apply a stale copy the chart had been carrying. */}}
+        - name: powerdns-schema-copy
+{{ tuple $envAll "powerdns" | include "helm-toolkit.snippets.image" | indent 10 }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -ex
+              SRC=/usr/local/share/doc/pdns/schema.mysql.sql
+              if [ ! -s "$SRC" ]; then
+                echo "FATAL: $SRC absent from the powerdns image. The gmysql schema must come" >&2
+                echo "from the same build as the server that will read the database." >&2
+                exit 1
+              fi
+              cp "$SRC" /tmp/pdns-schema/schema.mysql.sql
+          volumeMounts:
+            - name: pdns-schema
+              mountPath: /tmp/pdns-schema
+      containers:
+        - name: powerdns-db-sync
+{{ tuple $envAll "powerdns_db_sync" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.jobs.db_sync | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+          command:
+            - /bin/bash
+            - /tmp/db-sync.sh
+          env:
+            - name: DB_HOST
+              value: {{ tuple "oslo_db" "internal" $envAll | include "helm-toolkit.endpoints.hostname_fqdn_endpoint_lookup" | quote }}
+            - name: DB_PORT
+              value: {{ tuple "oslo_db" "internal" "mysql" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" | quote }}
+            - name: DB_NAME
+              value: {{ $envAll.Values.endpoints.oslo_db.path | trimPrefix "/" | quote }}
+            - name: DB_USER
+              value: {{ $envAll.Values.endpoints.oslo_db.auth.powerdns.username | quote }}
+            - name: DB_PASSWORD
+              value: {{ $envAll.Values.endpoints.oslo_db.auth.powerdns.password | quote }}
+          volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
+            - name: powerdns-bin
+              mountPath: /tmp/db-sync.sh
+              subPath: db-sync.sh
+              readOnly: true
+            - name: pdns-schema
+              mountPath: /tmp/pdns-schema
+      volumes:
+        - name: pod-tmp
+          emptyDir: {}
+        - name: pdns-schema
+          emptyDir: {}
+        - name: powerdns-bin
+          configMap:
+            name: {{ $configMapBinName }}
+            defaultMode: 0555
+{{- end }}
