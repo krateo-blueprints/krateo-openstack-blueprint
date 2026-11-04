@@ -53,7 +53,7 @@ Composition CRD.
 # Every component chart pins its pods to a node label, and nothing in the charts creates those
 # labels. It is NOT one label: how many you need depends on which components you select.
 #
-#   openstack-control-plane=enabled   33 of the 35 charts -- every API, database, queue,
+#   openstack-control-plane=enabled   34 of the 36 charts -- every API, database, queue,
 #                                     scheduler and conductor. BOTH profiles need it.
 #   openstack-compute-node=enabled    the hypervisor: nova-compute, libvirt, plus
 #                                     ceilometer-compute and cyborg-agent.   | profile: full
@@ -186,17 +186,17 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 ```
 
 `profile: identity` brings up MariaDB+Memcached+Keystone+Glance+Horizon; `profile: full`
-brings up **all 35 components** (needs a large amd64 cluster — see `quickstart-gke.md`).
+brings up **all 36 components** (needs a large amd64 cluster — see `quickstart-gke.md`).
 
-#### `profile: full-strict` — full, minus the four that need provisioning you must do yourself
+#### `profile: full-strict` — full, minus the three that need provisioning you must do yourself
 
-Four components — `designate`, `ironic`, `octavia` and `swift` — each wait on infrastructure that
-no Kubernetes cluster provides and that this blueprint does not create. They are in
-`profile: full`, and they stay there. `profile: full-strict` is the same set **minus those four**:
+Three components — `ironic`, `octavia` and `swift` — each wait on infrastructure that no
+Kubernetes cluster provides and that this blueprint does not create. They are in `profile: full`,
+and they stay there. `profile: full-strict` is the same set **minus those three**:
 
 ```yaml
 spec:
-  profile: full-strict   # 31 components, every one of which can reach Ready unaided
+  profile: full-strict   # 33 components, every one of which can reach Ready unaided
 ```
 
 It also needs one node label fewer — three rather than four, since octavia is the only consumer
@@ -204,7 +204,6 @@ of `openstack-network-node` (see the labelling block above).
 
 | component | needs | symptom when it is absent |
 |---|---|---|
-| `designate` | an authoritative PowerDNS server as Service `powerdns` — `pdns4` is the pool's target and nothing here deploys it ([#165](https://github.com/krateo-blueprints/krateo-openstack-blueprint/issues/165) ships it, after which the flag comes off) | `designate-worker` sits at `Init:1/2`: `designate-manage pool update` fails with `` Field `host' cannot be None ``, because `pools.yaml` renders `nameservers[0].host` from `${POWERDNS_SERVICE_HOST}` and the Service does not exist. Visible in the same render as `api_endpoint: http://:8081`. api/central/mdns/producer/sink are unaffected |
 | `ironic` | an interface named `ironic-pxe` on each conductor node — the bare-metal provisioning NIC | `ironic-conductor-init` exits 1 with `Could not find IP for pxe to bind to`; the pod sits in `Init:CrashLoopBackOff` |
 | `octavia` | `lb-mgmt-net` plus a Neutron port per node, named `octavia-{worker,health-manager}-port-<hostname>` | the `get-port` init containers log `No Port found for octavia-worker-port-…` and never finish |
 | `swift` | a StorageClass offering `ReadWriteMany` (upstream uses an `nfs-provisioner` default this repo does not ship) | `swift-ring-builder` and `swift-storage` stay `Pending`, `swift-proxy` stays in `Init` |
@@ -221,10 +220,13 @@ away from an install that has them — a behaviour change arriving through a ver
 the one thing a blueprint must not do. So `full` is unchanged at 35 and `full-strict` is the
 opt-in.
 
-An entry in that list is a statement about today and not a verdict. designate's is the first with
-a named fix: once [#165](https://github.com/krateo-blueprints/krateo-openstack-blueprint/issues/165)
-ships a `powerdns` blueprint, designate needs no precondition, the flag comes off and
-`full-strict` goes back up by one.
+An entry in that list is a statement about today and not a verdict, and designate is the proof:
+it was flagged here until [#165](https://github.com/krateo-blueprints/krateo-openstack-blueprint/issues/165)
+shipped a `powerdns` blueprint. designate's pool declares a `pdns4` target and reaches it at
+Service `powerdns`; nothing created that Service, so `${POWERDNS_SERVICE_HOST}` was never
+injected and `designate-manage pool update` died on `` Field `host' cannot be None ``. The fix
+was to deploy the thing it needs rather than to document the need, and `full-strict` went up by
+two — designate back in, and powerdns itself.
 
 `hack/provisioning-preconditions.yaml` carries each one with a command you can run to check it,
 and `hack/validate-provisioning-preconditions.py` asserts **both** halves by rendering the chart:

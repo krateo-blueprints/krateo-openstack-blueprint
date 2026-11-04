@@ -1,0 +1,109 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{- if (.Values.global).subchart_release_name }}
+{{- $_ := set . "deployment_name" .Chart.Name }}
+{{- else }}
+{{- $_ := set . "deployment_name" .Release.Name }}
+{{- end }}
+
+{{- if .Values.manifests.job_api_key_init }}
+{{- $envAll := . }}
+{{- $configMapBinName := printf "%s-%s" $envAll.deployment_name "powerdns-bin" }}
+{{- $saName := printf "%s-%s" $envAll.deployment_name "powerdns-api-key-init" }}
+{{- $secretName := $envAll.Values.secrets.powerdns.api_key }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $saName }}
+---
+{{- /* Narrow on purpose: this identity may create a Secret and read and patch ONE Secret by
+       name. `create` cannot be restricted to a resourceName by the RBAC API -- that is a
+       Kubernetes limitation, not a choice here -- so the verb is granted at namespace scope
+       while get and patch are pinned to the single object. Nothing here can read any other
+       Secret in the namespace, which is the property that matters: this job runs beside
+       keystone's and mariadb's credentials. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $saName }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ $secretName | quote }}]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $saName }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $saName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ $envAll.Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: powerdns-api-key-init
+  labels:
+{{ tuple $envAll "powerdns" "api-key-init" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+{{ tuple $envAll "powerdns" "api-key-init" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+{{ dict "envAll" $envAll "podName" "powerdns-api-key-init" "containerNames" (list "powerdns-api-key-init") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 8 }}
+    spec:
+      serviceAccountName: {{ $saName | quote }}
+      restartPolicy: OnFailure
+      nodeSelector:
+        {{ .Values.labels.job.node_selector_key }}: {{ .Values.labels.job.node_selector_value }}
+      containers:
+        - name: powerdns-api-key-init
+{{ tuple $envAll "db_init" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.jobs.db_init | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+          command:
+            - python3
+            - /tmp/api-key-init.py
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: SECRET_NAME
+              value: {{ $secretName | quote }}
+          volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
+            - name: powerdns-bin
+              mountPath: /tmp/api-key-init.py
+              subPath: api-key-init.py
+              readOnly: true
+      volumes:
+        - name: pod-tmp
+          emptyDir: {}
+        - name: powerdns-bin
+          configMap:
+            name: {{ $configMapBinName }}
+            defaultMode: 0555
+{{- end }}

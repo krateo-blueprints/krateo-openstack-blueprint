@@ -424,7 +424,7 @@ conf:
             host: ${POWERDNS_SERVICE_HOST}
             port: {{ tuple "powerdns" "internal" "powerdns" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
             api_endpoint: http://${POWERDNS_SERVICE_HOST}:{{ tuple "powerdns" "internal" "powerdns_api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
-            api_token: {{ tuple "powerdns" "service" . | include "helm-toolkit.endpoints.endpoint_token_lookup" }}
+            api_token: ${PDNS_API_KEY}
   paste:
     composite:osapi_dns:
       use: egg:Paste#urlmap
@@ -612,6 +612,10 @@ conf:
 
 # Names of secrets used by bootstrap and environmental checks
 secrets:
+  powerdns:
+    # Minted and owned by the powerdns chart's api-key-init Job. Named here so designate-worker
+    # can mount it; designate never writes it.
+    api_key: powerdns-api-key
   identity:
     admin: designate-keystone-admin
     designate: designate-keystone-user
@@ -788,7 +792,11 @@ endpoints:
   powerdns:
     auth:
       service:
-        token: chiave_segreta
+        # Deliberately null. The key is minted by powerdns's api-key-init Job into the
+        # Secret named below and reaches designate-worker as $PDNS_API_KEY; it is never a
+        # chart value. Until #165 this field held a literal `chiave_segreta`, in a public
+        # repository, which every install shared.
+        token: null
     hosts:
       default: powerdns
     host_fqdn_override:

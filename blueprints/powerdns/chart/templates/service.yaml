@@ -1,0 +1,48 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+{{- if (.Values.global).subchart_release_name }}
+{{- $_ := set . "deployment_name" .Chart.Name }}
+{{- else }}
+{{- $_ := set . "deployment_name" .Release.Name }}
+{{- end }}
+
+{{- if .Values.manifests.service }}
+{{- $envAll := . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ tuple "powerdns" "internal" $envAll | include "helm-toolkit.endpoints.hostname_short_endpoint_lookup" }}
+  labels:
+{{ tuple $envAll "powerdns" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+spec:
+  ports:
+    {{- /* 53 on BOTH protocols. A DNS server reachable only over TCP answers designate's
+           health checks and fails real resolution, which is the kind of half-working that
+           reads as healthy. */}}
+    - name: dns-udp
+      port: {{ tuple "powerdns" "internal" "powerdns" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+      protocol: UDP
+      targetPort: dns-udp
+    - name: dns-tcp
+      port: {{ tuple "powerdns" "internal" "powerdns" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+      protocol: TCP
+      targetPort: dns-tcp
+    - name: api
+      port: {{ tuple "powerdns" "internal" "powerdns_api" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+      protocol: TCP
+      targetPort: api
+  selector:
+{{ tuple $envAll "powerdns" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+{{- end }}

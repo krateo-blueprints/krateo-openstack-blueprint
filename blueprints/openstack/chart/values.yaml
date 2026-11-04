@@ -127,19 +127,19 @@ components:
       - rabbitmq
       - mariadb
     tier: compute
+  - name: powerdns
+    kind: Powerdns
+    deps:
+      - mariadb
+    tier: compute
   - name: designate
     kind: Designate
     deps:
       - keystone
       - rabbitmq
       - mariadb
+      - powerdns
     tier: compute
-    # Needs an authoritative PowerDNS server as Service `powerdns`: pools.yaml renders
-    # nameservers[0].host from ${POWERDNS_SERVICE_HOST} and nothing here creates that Service,
-    # so designate-manage pool update dies on "Field `host' cannot be None" and
-    # designate-worker never leaves Init (41 restarts measured). api/central/mdns/producer/sink
-    # are unaffected. Removed when #165 ships a powerdns blueprint.
-    requiresProvisioning: true
   - name: octavia
     kind: Octavia
     deps:
@@ -392,10 +392,12 @@ dependencyRelaxations:
 # `dependencyRelaxations` above) because it is a property of these charts, not a deployment
 # choice.
 nodeLabelPreconditions:
-  # 33 of the 35 components. Only libvirt and openvswitch never select on it -- their sole
+  # 34 of the 36 components. Only libvirt and openvswitch never select on it -- their sole
   # workload is a compute-node or openvswitch DaemonSet -- so the README's claim that every
   # chart schedules with openstack-control-plane, "all 35 of them", was wrong in both
-  # directions.
+  # directions. The gate derives the true set from the rendered pod specs and fails on any
+  # disagreement, which is how powerdns's absence from this list was caught rather than
+  # shipped.
   - key: openstack-control-plane
     value: enabled
     components:
@@ -424,6 +426,7 @@ nodeLabelPreconditions:
       - nova
       - octavia
       - placement
+      - powerdns
       - rabbitmq
       - redis
       - skyline

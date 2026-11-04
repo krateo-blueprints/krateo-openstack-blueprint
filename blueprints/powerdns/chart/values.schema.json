@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "type": "object",
+  "title": "PowerDNS Authoritative Server",
+  "description": "Configuration for PowerDNS, the pdns4 pool target designate provisions zones into. Only the fields here are settable on a Composition; everything else uses the chart defaults in values.yaml. The API key designate authenticates with is NOT settable and is not a chart default: a Job mints it into a Secret on first install and leaves it alone afterwards, so it is never rendered into a manifest or committed to this repository. Deploy all the OpenStack component blueprints into one namespace to form a complete install.",
+  "properties": {
+    "images": {
+      "type": "object",
+      "title": "Images",
+      "properties": {
+        "pull_policy": {
+          "type": "string",
+          "title": "Image pull policy",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ],
+          "default": "IfNotPresent"
+        }
+      }
+    },
+    "pod": {
+      "type": "object",
+      "title": "Pod",
+      "properties": {
+        "replicas": {
+          "type": "object",
+          "title": "Replicas",
+          "properties": {
+            "powerdns": {
+              "type": "integer",
+              "title": "PowerDNS replicas",
+              "description": "Authoritative servers. All replicas read the same gmysql database, so they serve identical zone data.",
+              "minimum": 1,
+              "default": 1
+            }
+          }
+        }
+      }
+    },
+    "conf": {
+      "type": "object",
+      "title": "PowerDNS configuration",
+      "properties": {
+        "pdns": {
+          "type": "object",
+          "title": "pdns.conf",
+          "properties": {
+            "webserver-allow-from": {
+              "type": "string",
+              "title": "API clients allowed",
+              "description": "CIDRs permitted to reach the HTTP API on 8081. The default 0.0.0.0/0 is permissive because a pod CIDR is not knowable from a chart; narrow it to your cluster's pod CIDR. designate-worker is the only client that needs it.",
+              "default": "0.0.0.0/0"
+            }
+          }
+        }
+      }
+    }
+  }
+}

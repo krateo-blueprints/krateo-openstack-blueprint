@@ -1,0 +1,285 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+---
+# PowerDNS Authoritative Server. designate's pool declares a `pdns4` target and reaches it at
+# Service `powerdns`; before this chart existed nothing created that Service, so
+# ${POWERDNS_SERVICE_HOST} was never injected, designate's pools.yaml rendered
+# `nameservers[0].host: None` and designate-worker never left Init. See issue #165.
+
+chartVersion: CHART_VERSION
+
+release_group: null
+
+labels:
+  server:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+  job:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+
+images:
+  pull_policy: IfNotPresent
+  tags:
+    # The schema this chart applies is read OUT OF THIS IMAGE at
+    # /usr/local/share/doc/pdns/schema.mysql.sql rather than transcribed into the chart, so the
+    # DDL and the server that reads the database always come from the same build.
+    powerdns: docker.io/powerdns/pdns-auth-49:4.9.18
+    # The powerdns image ships NO mysql client (measured), and the mariadb image's client is
+    # named `mariadb` -- there is no `mysql` binary in it at all. Both facts are load-bearing
+    # for db_sync below.
+    powerdns_db_sync: quay.io/airshipit/mariadb:ubuntu_noble-20261030
+    db_init: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+    db_drop: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+    dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
+    image_repo_sync: quay.io/airshipit/docker:27.5.0
+  local_registry:
+    active: false
+    exclude:
+      - dep_check
+      - image_repo_sync
+
+endpoints:
+  cluster_domain_suffix: cluster.local
+  local_image_registry:
+    name: docker-registry
+    namespace: docker-registry
+    hosts:
+      default: localhost
+      internal: docker-registry
+      node: localhost
+    host_fqdn_override:
+      default: null
+    port:
+      registry:
+        node: 5000
+  oci_image_registry:
+    auth:
+      enabled: false
+      memcached:
+        password: password
+        username: memcached
+    host_fqdn_override:
+      default: null
+    hosts:
+      default: localhost
+    name: oci-image-registry
+    namespace: oci-image-registry
+    port:
+      registry:
+        default: null
+  oslo_db:
+    auth:
+      admin:
+        username: root
+        password: password
+      powerdns:
+        username: powerdns
+        password: password
+    hosts:
+      default: mariadb
+    host_fqdn_override:
+      default: null
+    path: /powerdns
+    scheme: mysql+pymysql
+    port:
+      mysql:
+        default: 3306
+  powerdns:
+    # designate reads these three. Its endpoints.powerdns block must agree with this one, and
+    # hack/validate-component-config-closure.py is what holds the two together.
+    auth:
+      service:
+        token: null
+    hosts:
+      default: powerdns
+    host_fqdn_override:
+      default: null
+    port:
+      powerdns:
+        default: 53
+      powerdns_api:
+        default: 8081
+
+conf:
+  # Rendered into /etc/powerdns/pdns.conf. `api-key` is NOT here: it is injected from a Secret
+  # as an environment variable, because this file lands in a ConfigMap and a ConfigMap is
+  # readable by anything that can read the namespace.
+  pdns:
+    launch: gmysql
+    local-address: 0.0.0.0
+    local-port: 53
+    api: "yes"
+    webserver: "yes"
+    webserver-address: 0.0.0.0
+    webserver-port: 8081
+    # designate talks to the API from inside the cluster. Narrow this to your pod CIDR in a
+    # real deployment; the default is permissive because the pod CIDR is not knowable here.
+    webserver-allow-from: 0.0.0.0/0
+    # designate drives zone contents over the API and by AXFR from designate-mdns, so the
+    # server must accept both.
+    master: "no"
+    slave: "yes"
+    superslave: "no"
+    disable-axfr: "no"
+    log-dns-details: "yes"
+    loglevel: 4
+
+secrets:
+  oslo_db:
+    admin: powerdns-db-admin
+    powerdns: powerdns-db-user
+  powerdns:
+    api_key: powerdns-api-key
+  identity: {}
+
+pod:
+  security_context:
+    powerdns:
+      pod:
+        runAsUser: 953
+      container:
+        powerdns:
+          runAsUser: 953
+          readOnlyRootFilesystem: false
+          allowPrivilegeEscalation: false
+  affinity:
+    anti:
+      type:
+        default: preferredDuringSchedulingIgnoredDuringExecution
+      topologyKey:
+        default: kubernetes.io/hostname
+      weight:
+        default: 10
+  replicas:
+    powerdns: 1
+  lifecycle:
+    upgrades:
+      deployments:
+        revision_history: 3
+        pod_replacement_strategy: RollingUpdate
+        rolling_update:
+          max_unavailable: 1
+          max_surge: 3
+    termination_grace_period:
+      powerdns:
+        timeout: 30
+  probes:
+    powerdns:
+      powerdns:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+        liveness:
+          enabled: true
+          params:
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+  resources:
+    enabled: false
+    powerdns:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 1024Mi
+        cpu: 2000m
+    jobs:
+      db_init:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 1024Mi
+          cpu: 2000m
+      db_sync:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 1024Mi
+          cpu: 2000m
+      image_repo_sync:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 1024Mi
+          cpu: 2000m
+
+dependencies:
+  dynamic:
+    common:
+      local_image_registry:
+        jobs:
+          - powerdns-image-repo-sync
+        services:
+          - endpoint: node
+            service: local_image_registry
+  static:
+    db_init:
+      services:
+        - endpoint: internal
+          service: oslo_db
+    db_sync:
+      jobs:
+        - powerdns-db-init
+      services:
+        - endpoint: internal
+          service: oslo_db
+    powerdns:
+      jobs:
+        - powerdns-db-sync
+        - powerdns-api-key-init
+      services:
+        - endpoint: internal
+          service: oslo_db
+    image_repo_sync:
+      services:
+        - endpoint: internal
+          service: local_image_registry
+
+network:
+  powerdns:
+    ingress:
+      annotations: {}
+    node_port:
+      enabled: false
+      port: 30053
+
+network_policy:
+  powerdns:
+    ingress:
+      - {}
+    egress:
+      - {}
+
+manifests:
+  configmap_bin: true
+  configmap_etc: true
+  deployment: true
+  job_db_init: true
+  job_db_sync: true
+  job_image_repo_sync: true
+  network_policy: false
+  secret_db: true
+  job_api_key_init: true
+  secret_registry: true
+  service: true
+
+extraObjects: []
+...

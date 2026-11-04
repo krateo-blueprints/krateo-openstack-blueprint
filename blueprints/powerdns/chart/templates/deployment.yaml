@@ -1,0 +1,121 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{- if (.Values.global).subchart_release_name }}
+{{- $_ := set . "deployment_name" .Chart.Name }}
+{{- else }}
+{{- $_ := set . "deployment_name" .Release.Name }}
+{{- end }}
+
+{{- if .Values.manifests.deployment }}
+{{- $envAll := . }}
+{{- $configMapBinName := printf "%s-%s" $envAll.deployment_name "powerdns-bin" }}
+{{- $configMapEtcName := printf "%s-%s" $envAll.deployment_name "powerdns-etc" }}
+{{- $rcControllerName := printf "%s-%s" $envAll.deployment_name "powerdns" }}
+{{ tuple $envAll "powerdns" $rcControllerName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ printf "%s-powerdns" $envAll.deployment_name }}
+  labels:
+{{ tuple $envAll "powerdns" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+spec:
+  replicas: {{ .Values.pod.replicas.powerdns }}
+  revisionHistoryLimit: {{ .Values.pod.lifecycle.upgrades.deployments.revision_history }}
+  selector:
+    matchLabels:
+{{ tuple $envAll "powerdns" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ tuple $envAll "powerdns" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+        configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
+        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
+{{ dict "envAll" $envAll "podName" "powerdns" "containerNames" (list "init" "powerdns") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 8 }}
+    spec:
+      serviceAccountName: {{ $rcControllerName | quote }}
+{{ dict "envAll" $envAll "application" "powerdns" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
+      affinity:
+{{ tuple $envAll "powerdns" "server" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+      nodeSelector:
+        {{ .Values.labels.server.node_selector_key }}: {{ .Values.labels.server.node_selector_value }}
+      terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.powerdns.timeout | default "30" }}
+      initContainers:
+{{ tuple $envAll "powerdns" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
+      containers:
+        - name: powerdns
+{{ tuple $envAll "powerdns" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.powerdns | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "powerdns" "container" "powerdns" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
+          command:
+            - /usr/local/sbin/pdns_server
+            - --config-dir=/etc/powerdns
+            - --daemon=no
+            - --guardian=no
+            - --write-pid=no
+          env:
+            {{- /* The API key reaches the server through the environment, never through
+                   pdns.conf: that file lands in a ConfigMap, and a ConfigMap is readable by
+                   anything that can read the namespace. pdns maps PDNS_<setting> onto the
+                   setting of the same name, so this sets `api-key`. */}}
+            - name: PDNS_api_key
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $envAll.Values.secrets.powerdns.api_key }}
+                  key: PDNS_API_KEY
+            - name: PDNS_gmysql_password
+              value: {{ $envAll.Values.endpoints.oslo_db.auth.powerdns.password | quote }}
+          ports:
+            - name: dns-udp
+              containerPort: {{ tuple "powerdns" "internal" "powerdns" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+              protocol: UDP
+            - name: dns-tcp
+              containerPort: {{ tuple "powerdns" "internal" "powerdns" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+              protocol: TCP
+            - name: api
+              containerPort: {{ tuple "powerdns" "internal" "powerdns_api" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+              protocol: TCP
+          {{- /* Probed on the HTTP API rather than with a tcpSocket. pdns_server opens its DNS
+                 sockets before the gmysql backend is usable, so a TCP probe reports healthy
+                 against a server that cannot answer a single query -- the same shape as the
+                 uwsgi tcpSocket probes removed in #158. */}}
+{{- if .Values.pod.probes.powerdns.powerdns.readiness.enabled }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: api
+{{ toYaml .Values.pod.probes.powerdns.powerdns.readiness.params | indent 12 }}
+{{- end }}
+{{- if .Values.pod.probes.powerdns.powerdns.liveness.enabled }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: api
+{{ toYaml .Values.pod.probes.powerdns.powerdns.liveness.params | indent 12 }}
+{{- end }}
+          volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
+            - name: powerdns-etc
+              mountPath: /etc/powerdns/pdns.conf
+              subPath: pdns.conf
+              readOnly: true
+      volumes:
+        - name: pod-tmp
+          emptyDir: {}
+        - name: powerdns-etc
+          configMap:
+            name: {{ $configMapEtcName }}
+            defaultMode: 0444
+{{- end }}
