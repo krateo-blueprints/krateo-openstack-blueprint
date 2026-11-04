@@ -1,0 +1,39 @@
+# requireSameNode dependencies whose two halves are scheduled by DIFFERENT node labels, and the
+# relationship an operator's node labels must therefore satisfy.
+#
+# See hack/validate-same-node-colocation.py for why this file exists: on a 4-node GKE install of
+# profile=full the two label sets were disjoint and twelve neutron pods waited forever, in
+# Init:0/2, for a co-located pod that was on another node pool by construction. The charts are
+# upstream-correct; what was missing was anybody writing down what the labels have to satisfy.
+colocations:
+  - component: neutron
+    waiter: neutron-dhcp-agent-default
+    target: neutron-ovs-agent-default
+    requiredRelation: >-
+      Every node carrying openstack-control-plane=enabled must ALSO carry openvswitch=enabled.
+      The dhcp agent is scheduled by the former and the ovs agent by the latter, and the dhcp
+      agent will not start until an ovs agent is Ready ON ITS OWN NODE.
+    why: >-
+      Consequence worth stating plainly, because it constrains the node image and not just the
+      labels: openvswitch needs the openvswitch kernel module, which Container-Optimized OS does
+      not ship. So on GKE every node carrying openstack-control-plane=enabled must be
+      UBUNTU_CONTAINERD when neutron is selected. Labelling a COS pool openstack-control-plane
+      and a separate Ubuntu pool openvswitch is the natural reading of four labels as four roles,
+      and it deadlocks all three agent DaemonSets.
+  - component: neutron
+    waiter: neutron-l3-agent-default
+    target: neutron-ovs-agent-default
+    requiredRelation: >-
+      Same as the dhcp agent: every openstack-control-plane=enabled node must also carry
+      openvswitch=enabled.
+    why: >-
+      The l3 agent manages network namespaces that the ovs agent plumbs; upstream co-locates
+      them deliberately. Same unsatisfiable-forever failure when the label sets differ.
+  - component: neutron
+    waiter: neutron-metadata-agent-default
+    target: neutron-ovs-agent-default
+    requiredRelation: >-
+      Same as the dhcp agent: every openstack-control-plane=enabled node must also carry
+      openvswitch=enabled.
+    why: >-
+      The metadata agent answers instances through the same datapath. Same failure.

@@ -87,6 +87,38 @@
 {{- range $d := ($c.deps | default list) }}
 {{- if not (has $d $relaxed) }}{{- $strict = append $strict $d }}{{- end }}
 {{- end }}
+{{- /* ONE RENDER EMITS ONE TIER. If you are reading this because the install looks stuck at a
+       handful of components, that is this gate working and not a stall -- and what you do about
+       it depends entirely on how you installed the umbrella.
+
+       The gate below emits a component only once its dependencies are READY. A component in
+       tier N+1 therefore cannot appear in the same render that first created tier N: its
+       dependencies did not exist yet, let alone report Ready. Convergence needs one render per
+       tier, and the tiers are not evenly sized -- a measured 35-component install took EIGHT
+       passes to reach 30 releases, with 8 -> 30 happening on pass five alone.
+
+         * As a Composition (the documented path): krateo's composition-dynamic-controller
+           re-reconciles on its own interval, so the repeated renders happen for free and you
+           do nothing. Seeing few components for the first minutes is expected.
+
+         * Installed directly with `helm install`: NOTHING re-renders it. You must drive the
+           passes yourself with repeated `helm upgrade` until the release count stops rising.
+           That is the mechanism for a hand-installed umbrella, not a workaround -- but it does
+           mean the release count is something you drove, so do not read it as something the
+           chart reached on its own.
+
+       This note is duplicated from the README deliberately. It was already documented there, in
+       detail, and a peer installing by hand still spent twelve minutes deriving it from scratch
+       -- because they opened THIS file, the one that appeared to be failing to progress, and
+       never opened the README. Their diagnosis of why: "I only read documentation when I do not
+       know what I am doing. I thought I knew." A paragraph that corrects a wrong mental model
+       has to live where the wrong model gets exercised.
+
+       Closed WITHOUT a right-trim, for the reason in #152 and for one more: the
+       readiness-deadlock gate extracts the text between `$relaxed :=` and
+       `$strictReady :=` to render its own partition probe, so a trim here swallows the
+       newline before that probe's output line and the gate reads zero partitions. It
+       failed exactly that way when this note was first added. */}}
 {{- $strictReady := include "osh.depsReady" (list $ $strict $.Values.components $crds) }}
 {{- $relaxedExist := include "osh.depsExist" (list $ $relaxed $.Values.components $crds) }}
 {{- $exists := include "osh.exists" (list $ $c.kind $c.name $crds) }}
