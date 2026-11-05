@@ -2,14 +2,17 @@
 """An existing Composition must be emitted at the version it was BORN at, not at this chart's.
 
 The umbrella derives the composition apiVersion from the chart version, so until #303 a chart
-bump changed every emitted object's GVK. Helm does not read a changed GVK as one object moving:
-it reads the old resource as gone and a new resource as added, and it deletes and creates
-accordingly. The replacement gets a NEW UID; core-provider's CalculateReleaseName is
-`<CR name>-<hash of UID>`; so the component acquires a SECOND helm release beside the one whose
-workloads are already running. That second release's Deployments carry its own name in
-spec.selector (release_group, app.kubernetes.io/instance) over objects that already exist under
-the first release's name, and Kubernetes forbids changing a selector -- so its every revision
-fails, and keeps failing, forever.
+bump changed every emitted object's version. This gate was written believing helm deletes and
+recreates on that change. It does not: helm matches on kind and group, and a version-only move
+kept the UID when measured. The d3 split below was the prune in #166. See osh.pinVersion, which
+says what the pin still does and leaves its value open.
+
+When a CR is deleted and re-created, the replacement gets a NEW UID; core-provider's
+CalculateReleaseName is `<CR name>-<hash of UID>`; so the component acquires a SECOND helm release
+beside the one whose workloads are already running. That second release's Deployments carry its
+own name in spec.selector (release_group, app.kubernetes.io/instance) over objects that already
+exist under the first release's name, and Kubernetes forbids changing a selector -- so its every
+revision fails, and keeps failing, forever.
 
 Measured on a0-openstack-d3 after a 0.3.28 bump, 2026-11-03:
 
