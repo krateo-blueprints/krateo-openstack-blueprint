@@ -22,9 +22,8 @@
 {{- $configMapName := printf "%s-%s" $envAll.deployment_name "powerdns-etc" }}
 
 {{- /* The gmysql connection is rendered here from endpoints.oslo_db, so the database the
-       server reads is the same one db-init created and db-sync populated. The PASSWORD is
-       deliberately absent: pdns.conf lands in a ConfigMap, and pdns reads
-       PDNS_gmysql_password from the environment, which comes from a Secret. */}}
+       server reads is the same one db-init created and db-sync populated. The password is
+       deliberately absent: it reaches the server through secrets.j2 below. */}}
 {{- $dbHost := tuple "oslo_db" "internal" $envAll | include "helm-toolkit.endpoints.hostname_fqdn_endpoint_lookup" }}
 {{- $dbPort := tuple "oslo_db" "internal" "mysql" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
 {{- $dbName := $envAll.Values.endpoints.oslo_db.path | trimPrefix "/" }}
@@ -43,4 +42,12 @@ data:
     gmysql-port={{ $dbPort }}
     gmysql-dbname={{ $dbName }}
     gmysql-user={{ $dbUser }}
+  {{- /* A Jinja template, not a Helm one, so the braces are escaped. The image's startup script
+         renders it from the environment into pdns.d/secrets.conf (TEMPLATE_FILES=secrets), so
+         the template is safe in a ConfigMap and the values never are. Its PDNS_AUTH_API_KEY
+         shortcut is not used because that also writes webserver-allow-from=0.0.0.0/0 into
+         pdns.d, which is read after pdns.conf and would override conf.pdns silently. */}}
+  secrets.j2: |
+    api-key={{ "{{ PDNS_API_KEY }}" }}
+    gmysql-password={{ "{{ GMYSQL_PASSWORD }}" }}
 {{- end }}

@@ -58,43 +58,53 @@ spec:
 {{ tuple $envAll "powerdns" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.powerdns | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "powerdns" "container" "powerdns" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
-          command:
-            - /usr/local/sbin/pdns_server
-            - --config-dir=/etc/powerdns
+          {{- /* args, never command. The image's entrypoint is what renders secrets.j2 before it
+                 execs pdns_server; overriding command bypasses it and the server starts with
+                 no API key and no database password. */}}
+          args:
             - --daemon=no
             - --guardian=no
             - --write-pid=no
           env:
-            {{- /* The API key reaches the server through the environment, never through
-                   pdns.conf: that file lands in a ConfigMap, and a ConfigMap is readable by
-                   anything that can read the namespace. pdns maps PDNS_<setting> onto the
-                   setting of the same name, so this sets `api-key`. */}}
-            - name: PDNS_api_key
+            - name: TEMPLATE_FILES
+              value: secrets
+            - name: PDNS_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ $envAll.Values.secrets.powerdns.api_key }}
                   key: PDNS_API_KEY
-            - name: PDNS_gmysql_password
-              value: {{ $envAll.Values.endpoints.oslo_db.auth.powerdns.password | quote }}
+            - name: GMYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $envAll.Values.secrets.oslo_db.powerdns }}
+                  key: DB_PASSWORD
+          {{- $dnsPort := index $envAll.Values.conf.pdns "local-port" }}
           ports:
             - name: dns-udp
-              containerPort: {{ tuple "powerdns" "internal" "powerdns" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+              containerPort: {{ $dnsPort }}
               protocol: UDP
             - name: dns-tcp
-              containerPort: {{ tuple "powerdns" "internal" "powerdns" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+              containerPort: {{ $dnsPort }}
               protocol: TCP
             - name: api
-              containerPort: {{ tuple "powerdns" "internal" "powerdns_api" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+              containerPort: {{ index $envAll.Values.conf.pdns "webserver-port" }}
               protocol: TCP
-          {{- /* Probed on the HTTP API rather than with a tcpSocket. pdns_server opens its DNS
-                 sockets before the gmysql backend is usable, so a TCP probe reports healthy
-                 against a server that cannot answer a single query -- the same shape as the
-                 uwsgi tcpSocket probes removed in #158. */}}
+          {{- /* Readiness asks the API for the zone list, which goes through gmysql, so it fails
+                 when the backend is gone. Liveness asks the webserver only, so a database outage
+                 takes the pod out of the Service without restarting it, which could not repair
+                 anything. An exec probe because the API needs the key and an httpGet header
+                 would put it in the pod spec. */}}
 {{- if .Values.pod.probes.powerdns.powerdns.readiness.enabled }}
           readinessProbe:
-            httpGet:
-              path: /
-              port: api
+            exec:
+              command:
+                - python3
+                - -c
+                - |
+                  import os, urllib.request
+                  url = "http://127.0.0.1:{{ index $envAll.Values.conf.pdns "webserver-port" }}/api/v1/servers/localhost/zones"
+                  req = urllib.request.Request(url, headers={"X-API-Key": os.environ["PDNS_API_KEY"]})
+                  urllib.request.urlopen(req, timeout=4)
 {{ toYaml .Values.pod.probes.powerdns.powerdns.readiness.params | indent 12 }}
 {{- end }}
 {{- if .Values.pod.probes.powerdns.powerdns.liveness.enabled }}
@@ -111,9 +121,19 @@ spec:
               mountPath: /etc/powerdns/pdns.conf
               subPath: pdns.conf
               readOnly: true
+            - name: powerdns-etc
+              mountPath: /etc/powerdns/templates.d/secrets.j2
+              subPath: secrets.j2
+              readOnly: true
+            {{- /* In memory, so the rendered credentials never reach the node's disk. */}}
+            - name: pdns-d
+              mountPath: /etc/powerdns/pdns.d
       volumes:
         - name: pod-tmp
           emptyDir: {}
+        - name: pdns-d
+          emptyDir:
+            medium: Memory
         - name: powerdns-etc
           configMap:
             name: {{ $configMapEtcName }}
