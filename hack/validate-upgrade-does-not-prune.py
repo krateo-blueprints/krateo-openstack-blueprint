@@ -67,7 +67,8 @@ def crd(kind, versions):
                      "versions": [{"name": n, "served": s} for n, s in versions]}}
 
 
-# Cluster states, each named for what it is rather than for what it should produce.
+# One kind is enough: osh.resolveVersion never branches on the kind, so more kinds would add no
+# coverage. Cluster states, each named for what it is rather than for what it should produce.
 STATES = {
     # The bump instant: the new CompositionDefinitions have not reconciled, so only the old
     # version is served. THIS is the state that pruned d4.

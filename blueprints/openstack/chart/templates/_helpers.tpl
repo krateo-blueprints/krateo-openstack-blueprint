@@ -227,7 +227,18 @@ krateo.io/composition-origin-version
      A component that does not exist keeps the pin's answer, so it still waits for its current
      CRD rather than being created at an older schema it would then be pinned to.
 
-     An existence check has to be permissive, because its job is to stop a deletion. */}}
+     An existence check has to be permissive, because its job is to stop a deletion.
+
+     THE INVARIANT THE GATE DEPENDS ON: when the object exists, this returns a version the
+     cluster serves. compositions.yaml still ANDs $crd outside its $exists escape, so the
+     structure alone does not protect a live object; this does. Break it and #166 returns.
+     hack/validate-upgrade-does-not-prune.py asserts it.
+
+     In practice osh.exists only answers "true" when a version is served, so the `ne $served ""`
+     below is a guard against a caller passing the wrong answer. It is not what makes a live
+     object safe. osh.exists looks in the release namespace, which is where compositions.yaml
+     emits, and the two must stay in step: a component emitted elsewhere would be invisible to
+     the escape. */}}
 {{- define "osh.resolveVersion" -}}
 {{- $current := index . 0 -}}{{- $origin := index . 1 -}}{{- $exists := index . 2 -}}{{- $kind := index . 3 -}}{{- $crds := index . 4 -}}
 {{- $pinned := include "osh.pinVersion" (list $current $origin $kind $crds) -}}
