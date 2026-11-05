@@ -115,27 +115,23 @@ krateo.io/composition-origin-version
      testable without a cluster: hack/validate-origin-version-pin.py calls it from a probe
      template with synthetic origins and synthetic CRD lists and asserts every branch.
 
-     # Why pinning exists at all (krateo-platformops/core-provider#303)
+     # Why pinning exists, and what it does not do
 
-     The emitted apiVersion is derived from the chart version, so a chart bump changes the
-     emitted object's GVK. Helm does not see one object moving; it sees the old resource gone
-     and a new resource added, and it deletes and creates accordingly. The replacement gets a
-     NEW UID, and core-provider's CalculateReleaseName is <CR name>-<hash of UID>, so the
-     component acquires a SECOND helm release beside the one already running its workloads.
-     That second release's Deployments carry its own name in spec.selector (release_group,
-     app.kubernetes.io/instance), which Kubernetes forbids changing on an existing object, so
-     its every attempt fails and keeps failing.
+     This comment used to say a bump's GVK change makes helm delete and recreate the object, and
+     cited d3. That was wrong. Helm matches resources on name, namespace, kind and group, not
+     version (isMatchingInfo in helm v3.19.0 and v3.20.2; plumbing's Reconcile uses the same
+     match). Measured with Helm 3.19.0 on k3s 1.33: a move between served versions kept the UID.
 
-     Measured on a0-openstack-d3, 2026-11-03, after a 0.3.28 bump:
+     The d3 split on 2026-11-03 was #166. Its audit log shows helm upgrade to umbrella revision 9
+     at 07:13:57Z, 28 composition CRs deleted by helm at 07:14:07-13Z, and v0-3-28 added to the
+     mariadbs CRD at 07:14:55Z, after they were gone. The gate had closed on a version not yet
+     served. The re-created CR got a new UID, CalculateReleaseName is <CR name>-<hash of UID>, so
+     the component acquired a second release, and that release's Deployments carry its name in
+     spec.selector, which Kubernetes forbids changing.
 
-       composition CRs for mariadb : 1, uid 5eb8f7dd-..., created AFTER the bump,
-                                     apiVersion composition.krateo.io/v0-3-28
-       helm releases for mariadb   : TWO -- mariadb-92wd4czz (rev 4,5,6, all FAILED, owned by
-                                     the surviving CR) and mariadb-9c847c79 (rev 2 DEPLOYED,
-                                     chart mariadb-0.3.28, actually running the database)
-
-     Emitting an existing object at the version it was born at keeps its GVK constant across
-     bumps, so helm patches in place, the UID survives, and the release name never moves.
+     So the pin does not protect UIDs. What it still does is keep a component's reads and writes
+     on one version's schema across a bump. Whether that is worth the cost below is an open
+     question.
 
      # Why it is safe to ask for an older version
 
