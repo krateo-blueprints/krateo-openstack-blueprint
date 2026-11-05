@@ -219,11 +219,36 @@ krateo.io/composition-origin-version
      Read osh.pinVersion before changing anything here: it carries the measurement that forced
      the pin, the pruning cost an older schema imposes, and the one upgrade setting that
      silently defeats it. */}}
+{{/* Which version to emit at, as a pure function, so every arm is testable without a cluster.
+
+     The pin answers first. If the pin's answer is served, that is the version. If it is not, and
+     the object EXISTS, emit at whatever the cluster serves: the emission gate is closed by an
+     unserved version, and a closed gate on a live object deletes it. That covers the two bump
+     cases osh.pinVersion cannot, both of which pruned in 0.3.34: an existing object with no
+     origin stamp, and one whose origin version is no longer served. In both the pin falls back
+     to the current version, which nothing serves yet at the bump instant.
+
+     A component that does not exist keeps the pin's answer, so it still waits for its current
+     CRD rather than being created at an older schema it would then be pinned to.
+
+     An existence check has to be permissive, because its job is to stop a deletion. */}}
+{{- define "osh.resolveVersion" -}}
+{{- $current := index . 0 -}}{{- $origin := index . 1 -}}{{- $exists := index . 2 -}}{{- $kind := index . 3 -}}{{- $crds := index . 4 -}}
+{{- $pinned := include "osh.pinVersion" (list $current $origin $kind $crds) -}}
+{{- $served := include "osh.servedVersion" (list $kind $current $crds) -}}
+{{- if and (eq $exists "true") (ne $served "") (ne (include "osh.crdExists" (list $kind $pinned $crds)) "true") -}}
+{{- $served -}}
+{{- else -}}
+{{- $pinned -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "osh.emitVersion" -}}
 {{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $crds := index . 3 -}}
 {{- $current := include "osh.version" (list $top) -}}
 {{- $origin := include "osh.originVersion" (list $top $kind $name $crds) -}}
-{{- include "osh.pinVersion" (list $current $origin $kind $crds) -}}
+{{- $exists := include "osh.exists" (list $top $kind $name $crds) -}}
+{{- include "osh.resolveVersion" (list $current $origin $exists $kind $crds) -}}
 {{- end -}}
 
 {{/* The apiVersion form of the above. A thin wrapper ON PURPOSE: compositions.yaml's emission

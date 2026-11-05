@@ -129,8 +129,10 @@ kubectl create namespace openstack-system
 # it onto the previous component, so any render carrying two or more components failed
 # and the release froze at revision 1. Fixed in 0.3.32 (issue #152).
 #
-# DO NOT UPGRADE AN EXISTING INSTALL TO 0.3.33 OR ANYTHING EARLIER. 0.3.34 carries the
-# fix. Fresh installs of 0.3.33 are fine; UPGRADING to it deletes every
+# DO NOT UPGRADE AN EXISTING INSTALL TO 0.3.34 OR ANYTHING EARLIER. 0.3.34 fixes only the
+# case where a component has an origin stamp and that version is still served; a component
+# with no stamp, or whose origin version is no longer served, is still pruned. Fresh installs
+# are fine. UPGRADING to 0.3.33 deletes every
 # component Composition CR. The emission gate asked for a CRD serving the chart's NEW
 # version, which no cluster serves at the instant the bump renders -- the
 # CompositionDefinitions in that same pass are what create it -- so every component
@@ -196,7 +198,7 @@ and they stay there. `profile: full-strict` is the same set **minus those three*
 
 ```yaml
 spec:
-  profile: full-strict   # 33 components, every one of which can reach Ready unaided
+  profile: full-strict   # 33 components, none of which needs provisioning you must do yourself
 ```
 
 It also needs one node label fewer — three rather than four, since octavia is the only consumer
