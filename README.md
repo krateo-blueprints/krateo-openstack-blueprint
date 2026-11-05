@@ -137,7 +137,7 @@ kubectl create namespace openstack-system
 # version, which no cluster serves at the instant the bump renders -- the
 # CompositionDefinitions in that same pass are what create it -- so every component
 # document left the manifest and helm pruned the live CRs. Their Helm releases survive
-# with nothing reconciling them. Measured on a 4-node GKE install upgrading
+# with nothing reconciling them. Measured on a 6-node GKE install upgrading
 # 0.3.32 -> 0.3.33: 6 CRs left for 37 releases, 27 running workloads orphaned, and three
 # components re-created with new release names that could not patch their own live
 # objects because spec.selector is immutable. See issue #166.
