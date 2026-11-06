@@ -24,7 +24,7 @@ TWO MEASURED FACTS THIS SCRIPT DEPENDS ON, both the opposite of what I first ass
     one has to check for itself, which is what the SHOW TABLES guard below is.
 */}}
 
-set -eu
+set -euo pipefail
 
 SCHEMA=/tmp/pdns-schema/schema.mysql.sql
 
@@ -47,14 +47,32 @@ if [ ! -s "${SCHEMA}" ]; then
   exit 1
 fi
 
-# `domains` is the table pdns_server reads first, so its presence is the thing that decides
-# whether this database has been initialised -- not a marker row this chart would have to keep
-# in step with the schema it does not own.
-EXISTING="$(mysql_do -e "SHOW TABLES LIKE 'domains';" || true)"
+# The tables the schema declares, read from the schema so this cannot drift from the image.
+# Compared whole because no single table can decide: `domains` is the FIRST statement in the
+# file, so an apply cut off after it would look finished to a check on that table, and the job
+# would go green over a database with no `records` table.
+EXPECTED="$(sed -nE 's/^CREATE TABLE ([a-z_]+).*/\1/p' "${SCHEMA}" | sort)"
+if [ -z "${EXPECTED}" ]; then
+  echo "FATAL: no CREATE TABLE statement found in ${SCHEMA}, so this script cannot tell whether" >&2
+  echo "the schema is present. Its format changed; this script must change with it." >&2
+  exit 1
+fi
+EXISTING="$(mysql_do -e "SHOW TABLES;" | sort)"
+MISSING="$(comm -23 <(echo "${EXPECTED}") <(echo "${EXISTING}"))"
 
-if [ -n "${EXISTING}" ]; then
-  echo "powerdns schema already present in ${DB_NAME} (table 'domains' exists); nothing to do."
+if [ -z "${MISSING}" ]; then
+  echo "powerdns schema already present in ${DB_NAME}; nothing to do."
   exit 0
+fi
+
+# Some tables but not all is an interrupted apply. It cannot be resumed, because the statements
+# are bare CREATE TABLE and fail on the tables that exist. Stop here, naming what is missing: a
+# green job would start pdns_server against a schema with holes in it.
+if [ -n "$(comm -12 <(echo "${EXPECTED}") <(echo "${EXISTING}"))" ]; then
+  echo "FATAL: ${DB_NAME} holds part of the powerdns schema, which is an interrupted apply." >&2
+  echo "Missing tables: $(echo ${MISSING})" >&2
+  echo "Inspect the database, then drop the powerdns tables so this job can apply it whole." >&2
+  exit 1
 fi
 
 echo "applying powerdns schema to ${DB_NAME} on ${DB_HOST}:${DB_PORT}"
@@ -66,12 +84,10 @@ mariadb \
   --database="${DB_NAME}" \
   < "${SCHEMA}"
 
-# Assert the apply actually produced the table, rather than trusting the exit code. A partial
-# apply that failed between statements would otherwise leave the next run to take the
-# "already present" branch above and skip the rest of the schema forever.
-CONFIRM="$(mysql_do -e "SHOW TABLES LIKE 'domains';" || true)"
-if [ -z "${CONFIRM}" ]; then
-  echo "FATAL: the schema was applied without error but table 'domains' does not exist." >&2
+# Assert the apply actually produced every table, rather than trusting the exit code.
+MISSING="$(comm -23 <(echo "${EXPECTED}") <(mysql_do -e "SHOW TABLES;" | sort))"
+if [ -n "${MISSING}" ]; then
+  echo "FATAL: the schema was applied without error but these tables do not exist: $(echo ${MISSING})" >&2
   exit 1
 fi
 

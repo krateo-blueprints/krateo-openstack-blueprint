@@ -38,13 +38,21 @@ kind: Role
 metadata:
   name: {{ $saName }}
 rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["create"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames: [{{ $secretName | quote }}]
-    verbs: ["get", "patch"]
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - create
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    resourceNames:
+      - {{ $secretName | quote }}
+    verbs:
+      - get
+      - patch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -82,7 +82,10 @@ spec:
             - name: DB_USER
               value: {{ $envAll.Values.endpoints.oslo_db.auth.powerdns.username | quote }}
             - name: DB_PASSWORD
-              value: {{ $envAll.Values.endpoints.oslo_db.auth.powerdns.password | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $envAll.Values.secrets.oslo_db.powerdns }}
+                  key: DB_PASSWORD
           volumeMounts:
             - name: pod-tmp
               mountPath: /tmp

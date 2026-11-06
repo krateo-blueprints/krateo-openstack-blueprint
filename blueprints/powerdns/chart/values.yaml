@@ -112,25 +112,40 @@ endpoints:
         default: 8081
 
 conf:
-  # Rendered into /etc/powerdns/pdns.conf. `api-key` is NOT here: it is injected from a Secret
-  # as an environment variable, because this file lands in a ConfigMap and a ConfigMap is
-  # readable by anything that can read the namespace.
+  # Rendered into /etc/powerdns/pdns.conf. `api-key` and `gmysql-password` are NOT here: this
+  # file lands in a ConfigMap, which anything that can read the namespace can read. They come
+  # from Secrets as environment variables and the image's own startup script renders them into
+  # pdns.d from the secrets.j2 template, which is the only route by which pdns_server sees them:
+  # it does not read PDNS_* variables itself.
   pdns:
+    include-dir: /etc/powerdns/pdns.d
     launch: gmysql
     local-address: 0.0.0.0
-    local-port: 53
+    # Not 53. The server runs as uid 953 with allowPrivilegeEscalation false, so it cannot bind a
+    # privileged port (measured: `Unable to bind UDP socket to '0.0.0.0:53': Permission denied`).
+    # The Service still exposes 53 and maps it here by named targetPort, so designate's pool
+    # never sees this number.
+    local-port: 5353
     api: "yes"
     webserver: "yes"
     webserver-address: 0.0.0.0
     webserver-port: 8081
     # designate talks to the API from inside the cluster. Narrow this to your pod CIDR in a
     # real deployment; the default is permissive because the pod CIDR is not knowable here.
+    # 127.0.0.1 is always added, for the probes (templates/configmap-etc.yaml).
     webserver-allow-from: 0.0.0.0/0
-    # designate drives zone contents over the API and by AXFR from designate-mdns, so the
-    # server must accept both.
-    master: "no"
-    slave: "yes"
-    superslave: "no"
+    # designate creates zones over the API and they are filled by AXFR from designate-mdns, so
+    # this is a secondary. `master`, `slave` and `superslave` are gone from 4.9: naming them is a
+    # fatal error at startup.
+    primary: "no"
+    secondary: "yes"
+    autosecondary: "no"
+    # designate-worker sends the NOTIFY, but the only primary PowerDNS knows for a zone is the
+    # designate-mdns Service, so without this every NOTIFY is refused as not from a primary. It
+    # lets the sender ask for a refresh; the transfer itself still comes only from the primary.
+    # Permissive for the same reason as webserver-allow-from: the pod CIDR is not knowable here,
+    # and a range that misses it fails silently, as zones that never update.
+    trusted-notification-proxy: 0.0.0.0/0
     disable-axfr: "no"
     log-dns-details: "yes"
     loglevel: 4

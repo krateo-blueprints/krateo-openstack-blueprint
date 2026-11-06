@@ -13,7 +13,7 @@ TWO THINGS THIS DELIBERATELY ALLOWS:
   * EMPTY collections. `emptyDir: {}`, `deps: []`, `policy: {}` have no block form at all --
     `emptyDir:` alone is the null scalar, which is not the same value and which Kubernetes does
     not accept in its place. A rule that banned them would be unsatisfiable.
-  * VENDORED charts. Everything under blueprints/<component>/chart for the 34 components comes
+  * VENDORED charts. Everything under blueprints/<component>/chart, except powerdns, comes
     from upstream openstack-helm; 991 of the 1014 flow collections in this repo are upstream
     `emptyDir: {}` lines. Restyling vendored files would make every future rebase a conflict,
     and they are not ours to have an opinion about.
@@ -56,6 +56,7 @@ ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 # tomorrow is vendored too, and should not silently enter this population.
 OURS = (
     "blueprints/openstack",
+    "blueprints/powerdns",
     "examples",
     "hack",
     ".github",
