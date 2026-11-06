@@ -42,6 +42,7 @@ spec:
       annotations:
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
+        secret-db-hash: {{ tuple "secret-db.yaml" . | include "helm-toolkit.utils.hash" }}
 {{ dict "envAll" $envAll "podName" "powerdns" "containerNames" (list "init" "powerdns") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 8 }}
     spec:
       serviceAccountName: {{ $rcControllerName | quote }}
@@ -111,7 +112,7 @@ spec:
                 - -c
                 - |
                   import os, urllib.request
-                  url = "http://127.0.0.1:{{ index $envAll.Values.conf.pdns "webserver-port" }}/"
+                  url = "http://127.0.0.1:{{ index $envAll.Values.conf.pdns "webserver-port" }}/api/v1/servers/localhost/zones?zone=readiness.invalid.&dnssec=false"
                   req = urllib.request.Request(url, headers={"X-API-Key": os.environ["PDNS_API_KEY"]})
                   urllib.request.urlopen(req, timeout=4)
 {{ toYaml .Values.pod.probes.powerdns.powerdns.readiness.params | indent 12 }}

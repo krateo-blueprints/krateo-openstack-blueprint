@@ -145,6 +145,7 @@ conf:
     # lets the sender ask for a refresh; the transfer itself still comes only from the primary.
     # Permissive for the same reason as webserver-allow-from: the pod CIDR is not knowable here,
     # and a range that misses it fails silently, as zones that never update.
+    trusted-notification-proxy: 0.0.0.0/0
     disable-axfr: "no"
     log-dns-details: "yes"
     loglevel: 4
