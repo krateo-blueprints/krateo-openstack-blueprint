@@ -138,7 +138,7 @@ conf:
     # this is a secondary. `master`, `slave` and `superslave` are gone from 4.9: naming them is a
     # fatal error at startup.
     primary: "no"
-    secondary: "yes"
+    secondary: "no"
     autosecondary: "no"
     # designate-worker sends the NOTIFY, but the only primary PowerDNS knows for a zone is the
     # designate-mdns Service, so without this every NOTIFY is refused as not from a primary. It
