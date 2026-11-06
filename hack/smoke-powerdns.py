@@ -22,13 +22,16 @@ WHAT IT ASSERTS, in the order a cluster would reach them:
   2. the rendered readiness probe fails until the server is up, then passes;
   3. the API key from the Secret is accepted and a wrong one is refused;
   4. a zone created over the API answers a real DNS query, through the rendered port;
-  5. a secondary zone, created the way designate creates it, accepts a NOTIFY sent from a
+  5. with the database stopped, readiness FAILS and liveness PASSES, and the server answers again
+     after the database returns;
+  6. a secondary zone, created the way designate creates it, accepts a NOTIFY sent from a
      different address than its primary, as designate-worker's is;
-  6. with the database stopped, readiness FAILS, and liveness does not fail on a server that is
-     still running;
-  7. the server exits once its transfer cycle reaches the stopped database, and answers again
-     when restarted after the database returns, as the kubelet would restart it;
-  8. with webserver-allow-from narrowed as values.yaml advises, both probes still pass.
+  7. an outage with that transfer work pending ends with the server answering again;
+  8. with webserver-allow-from narrowed as values.yaml advises, both probes still pass;
+  9. a changed database password changes the pod template, so the pods roll.
+
+Whether the process survives an outage is REPORTED, not asserted, because it depends on what the
+server is doing. Each outage prints what happened. What must hold is recovery.
 
 WHAT A GREEN RESULT DOES NOT COVER: Kubernetes itself. The Service mapping 53 to the named port is
 only checked by name, the api-key-init Job and its RBAC need an apiserver, and designate is not
@@ -61,6 +64,7 @@ ROOT_PASSWORD = "smoke-root"
 API_KEY = "smoke-api-key-" + uuid.uuid4().hex
 ZONE = "smoke.example."
 SECONDARY_ZONE = "secondary.example."
+OUTAGE_SECONDS = 135    # two transfer cycles at the default xfr-cycle-interval
 
 RUN = uuid.uuid4().hex[:8]
 NET = f"pdns-smoke-{RUN}"
@@ -267,6 +271,41 @@ def dns_query(name, port):
     return sh("docker", "exec", SERVER, "python3", "-c", code).stdout.strip()
 
 
+def report_outage(seconds, what):
+    """Hold an outage and say what the process did. If it exited, restart it with the database
+    still down, as the kubelet would, and say whether it stays up."""
+    deadline = time.time() + seconds
+    while time.time() < deadline and running(SERVER):
+        time.sleep(1)
+    held = seconds - (deadline - time.time())
+    if running(SERVER):
+        print(f"outage with {what}: the server was still running after {held:.0f}s")
+        return
+    exited = sh("docker", "logs", SERVER)
+    print(f"outage with {what}: the server exited after {held:.0f}s, code "
+          + sh("docker", "inspect", "-f", "{{.State.ExitCode}}", SERVER).stdout.strip() + ":\n    "
+          + (exited.stdout + exited.stderr).strip().splitlines()[-1][:220])
+    sh("docker", "start", SERVER, check=True)
+    time.sleep(10)
+    print("  restarted with the database still down, it is "
+          + ("running" if running(SERVER) else "exited, so it restarts until the database returns"))
+
+
+def recover(after):
+    """Bring the database back and require the server to answer, restarting it if it exited."""
+    sh("docker", "start", DB, check=True)
+    if not wait_for_db():
+        measurement_failed("MariaDB did not come back:\n" + db_logs())
+    if not running(SERVER):
+        sh("docker", "start", SERVER, check=True)
+    if not wait_until(lambda: probe(SERVER, server["readinessProbe"]), 45):
+        problems.append(f"the server did not pass readiness after {after}")
+        return
+    answer = dns_query(ZONE, DNS_PORT)
+    if answer.split()[:1] != ["0"] or answer.split()[1:2] in ([], ["0"]):
+        problems.append(f"after {after}, {ZONE} did not answer: {answer!r}")
+
+
 def send_notify(zone, port):
     """A NOTIFY from a separate container, so its source address is not the server's own or the
     zone's primary. That is designate's shape: the worker sends it, and the primary is mdns."""
@@ -310,6 +349,18 @@ try:
         if port["targetPort"] not in named:
             problems.append(f"Service port {port['name']} targets {port['targetPort']!r}, which "
                             "no container port is named")
+
+    # 9, checked first because it needs no containers. The password reaches the pod through a
+    # secretKeyRef, so nothing in the template changes with it unless a hash annotation does, and
+    # pods would keep the old password until something else restarted them.
+    def db_secret_hash(rendered):
+        annotations = find(rendered, "Deployment")["spec"]["template"]["metadata"]["annotations"]
+        return annotations.get("secret-db-hash")
+
+    if db_secret_hash(docs) is None or db_secret_hash(docs) == db_secret_hash(
+            render(workdir, "--set", "endpoints.oslo_db.auth.powerdns.password=rotated")):
+        problems.append("changing the database password does not change the pod template, so "
+                        "running pods keep the old one and replicas can disagree after a restart")
 
     sh("docker", "network", "create", NET, check=True)
     network_created = True
@@ -391,7 +442,24 @@ try:
             problems.append(f"a SOA query for {ZONE} on port {DNS_PORT} did not get an answer "
                             f"(rcode, answers = {answer!r})")
 
-        # 5. A secondary zone, posted as designate's pdns4 backend posts it. Its primary is an
+        # 5. An outage with no transfer work pending. Readiness must fail and liveness must pass:
+        # that disagreement is the point of having two probes.
+        sh("docker", "stop", DB, check=True)
+        time.sleep(2)
+        if not running(SERVER):
+            problems.append("the server exited within 2s of a database outage with no transfer "
+                            "work pending, so liveness could not be judged")
+        else:
+            if probe(SERVER, server["readinessProbe"]):
+                problems.append("readiness still PASSES with the database stopped, so the Service "
+                                "keeps routing to a server that cannot read a zone")
+            if not probe(SERVER, server["livenessProbe"]):
+                problems.append("liveness FAILS on a running server with the database stopped, so "
+                                "an outage restarts a server that has not exited")
+        report_outage(OUTAGE_SECONDS, "no transfer work pending")
+        recover("the outage with no transfer work pending")
+
+        # 6. A secondary zone, posted as designate's pdns4 backend posts it. Its primary is an
         # address nothing answers on, so a NOTIFY from elsewhere is accepted only if the server
         # trusts the sender. rcode 5 is REFUSED.
         status = api("POST", "/api/v1/servers/localhost/zones", API_KEY, {
@@ -404,48 +472,10 @@ try:
                             f"{rcode!r}, expected 0. designate-worker sends these from its pod "
                             "address, so a zone it changes would not refresh until its SOA timer.")
 
-        # 6. Readiness must fail during an outage. Liveness is judged only on a server still
-        # running: a probe exec'd into an exited container fails whatever the probe says.
+        # 7. An outage while that NOTIFY's work is pending.
         sh("docker", "stop", DB, check=True)
-        time.sleep(2)
-        if probe(SERVER, server["readinessProbe"]):
-            problems.append("readiness still PASSES with the database stopped, so the Service "
-                            "keeps routing to a server that cannot read a zone")
-        liveness_failed = not probe(SERVER, server["livenessProbe"])
-        if liveness_failed and running(SERVER):
-            problems.append("liveness FAILS on a running server with the database stopped, so an "
-                            "outage restarts a server that has not exited")
-
-        # 7. The transfer cycle needs the database, and PowerDNS exits when that fails. Past one
-        # cycle the process must be gone, and the assertion says so, because the chart's comment
-        # describes it: if a release stops doing this, the comment has to change.
-        cycle = 60
-        time.sleep(cycle + 15)
-        if running(SERVER):
-            problems.append(f"the server is still running after {cycle + 15}s without its "
-                            "database. deployment.yaml says it exits, so one of them is wrong.")
-        else:
-            exited = sh("docker", "logs", SERVER)
-            print("the server exited during the outage, code "
-                  + sh("docker", "inspect", "-f", "{{.State.ExitCode}}", SERVER).stdout.strip()
-                  + ":\n    "
-                  + "\n    ".join((exited.stdout + exited.stderr).strip().splitlines()[-4:]))
-            sh("docker", "start", SERVER, check=True)
-            time.sleep(10)
-            print("restarted with the database still down, the server is "
-                  + ("running" if running(SERVER) else "exited: it restarts until the database "
-                     "returns"))
-        sh("docker", "start", DB, check=True)
-        if not wait_for_db():
-            measurement_failed("MariaDB did not come back:\n" + db_logs())
-        if not running(SERVER):
-            sh("docker", "start", SERVER, check=True)
-        if not wait_until(lambda: probe(SERVER, server["readinessProbe"]), 45):
-            problems.append("the server did not pass readiness after the database came back")
-        else:
-            answer = dns_query(ZONE, DNS_PORT)
-            if answer.split()[:1] != ["0"] or answer.split()[1:2] in ([], ["0"]):
-                problems.append(f"after the outage {ZONE} did not answer: {answer!r}")
+        report_outage(30, "a NOTIFY's transfer work pending")
+        recover("the outage with transfer work pending")
 
         # 8. values.yaml tells operators to narrow this, so doing so must not break the probes.
         narrow = render(workdir, "--set", "conf.pdns.webserver-allow-from=10.99.0.0/16")
@@ -472,7 +502,7 @@ if problems:
 
 print("OK: the rendered db-sync applied the schema, re-ran cleanly and refused a partial one; the "
       "rendered server started unprivileged, authenticated its API, served a zone over DNS, "
-      "accepted a NOTIFY for a secondary zone from a non-primary address, failed readiness during "
-      "a database outage, exited at the transfer cycle and answered again after a restart, and "
-      "kept its probes with webserver-allow-from narrowed. NOT covered: the Service, the api-key-init Job and "
+      "failed readiness and passed liveness during a database outage, accepted a NOTIFY for a "
+      "secondary zone from a non-primary address, answered again after two outages, kept its "
+      "probes with webserver-allow-from narrowed, and rolls its pods on a password change. NOT covered: the Service, the api-key-init Job and "
       "designate, which need a cluster.")
