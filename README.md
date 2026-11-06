@@ -129,13 +129,15 @@ kubectl create namespace openstack-system
 # it onto the previous component, so any render carrying two or more components failed
 # and the release froze at revision 1. Fixed in 0.3.32 (issue #152).
 #
-# DO NOT UPGRADE AN EXISTING INSTALL TO 0.3.33 OR ANYTHING EARLIER. 0.3.34 carries the
-# fix. Fresh installs of 0.3.33 are fine; UPGRADING to it deletes every
+# DO NOT UPGRADE AN EXISTING INSTALL TO 0.3.34 OR ANYTHING EARLIER. 0.3.34 fixes only the
+# case where a component has an origin stamp and that version is still served; a component
+# with no stamp, or whose origin version is no longer served, is still pruned. Fresh installs
+# are fine. UPGRADING to 0.3.33 deletes every
 # component Composition CR. The emission gate asked for a CRD serving the chart's NEW
 # version, which no cluster serves at the instant the bump renders -- the
 # CompositionDefinitions in that same pass are what create it -- so every component
 # document left the manifest and helm pruned the live CRs. Their Helm releases survive
-# with nothing reconciling them. Measured on a 4-node GKE install upgrading
+# with nothing reconciling them. Measured on a 6-node GKE install upgrading
 # 0.3.32 -> 0.3.33: 6 CRs left for 37 releases, 27 running workloads orphaned, and three
 # components re-created with new release names that could not patch their own live
 # objects because spec.selector is immutable. See issue #166.
@@ -196,7 +198,7 @@ and they stay there. `profile: full-strict` is the same set **minus those three*
 
 ```yaml
 spec:
-  profile: full-strict   # 33 components, every one of which can reach Ready unaided
+  profile: full-strict   # 33 components, none of which needs provisioning you must do yourself
 ```
 
 It also needs one node label fewer — three rather than four, since octavia is the only consumer
@@ -374,18 +376,22 @@ that upgrade are worth knowing before you do it, because both of them are silent
 ### A component keeps the API version it was created at
 
 The composition API version is derived from the chart version (`0.3.30` → `v0-3-30`), so a
-bump changes it. Helm reads a changed API version as *this resource is gone and a different one
-has appeared*, deletes the old object and creates a new one — and the new object gets a new UID,
-from which Krateo derives the Helm release name. The component then has **two** releases: the
-one whose Deployments are actually running, and a new one that can never succeed, because its
-Deployments would have to change `spec.selector` on objects that already exist under the other
-release's name and Kubernetes forbids that. Measured on a real upgrade: `mariadb-92wd4czz` at
-revisions 4, 5 and 6, all `FAILED`, beside `mariadb-9c847c79` revision 2 `DEPLOYED` and serving
-the database.
+bump changes it. That alone is harmless: Helm matches an object on name, namespace, kind and
+group, so a move between served versions patches it in place and keeps its UID.
 
-So the orchestrator **pins**. A component that already exists is emitted at the version it was
-*created* at, which Krateo records write-once on the object as the annotation
-`krateo.io/composition-origin-version`:
+What breaks a component is being left out of the manifest. Helm prunes it, the object is
+re-created with a new UID, and Krateo derives the Helm release name from the UID. The component
+then has **two** releases: the one whose Deployments are actually running, and a new one that
+can never succeed, because its Deployments would have to change `spec.selector` on objects that
+already exist under the other release's name and Kubernetes forbids that. Measured on a real
+upgrade: `mariadb-92wd4czz` at revisions 4, 5 and 6, all `FAILED`, beside `mariadb-9c847c79`
+revision 2 `DEPLOYED` and serving the database. The cause was
+[#166](https://github.com/krateo-blueprints/krateo-openstack-blueprint/issues/166), and a
+component that exists now stays in the manifest across a bump.
+
+The orchestrator also **pins**, so that a component's reads and writes stay on one schema. A
+component that already exists is emitted at the version it was *created* at, which Krateo records
+write-once on the object as the annotation `krateo.io/composition-origin-version`:
 
 ```sh
 kubectl -n openstack get mariadb mariadb \
@@ -393,8 +399,9 @@ kubectl -n openstack get mariadb mariadb \
 # v0-3-28     <- created by 0.3.28, still emitted at v0-3-28 after later bumps
 ```
 
-Only a component that does not exist yet is emitted at the current version. Nothing is needed
-from you; the component's API version simply stops moving, and Helm patches it in place.
+A component that does not exist yet is emitted at the current version. An existing component
+with no stamp, or whose stamped version is no longer served, is emitted at the current version
+if that is served, otherwise at the newest served one. Nothing is needed from you.
 
 ### The cost: a value you add later is silently dropped on a pinned component
 
@@ -437,10 +444,10 @@ migration:
 | `Manual` *with* `krateo.io/upgrade-to-version: <new version>` | **Defeats the pin.** |
 | `Automatic`, or unset | **Defeats the pin** — unset is treated as `Automatic`. |
 
-This is an incompatibility, not a recommendation. If migration is approved, the pinned version
-becomes removable and the upgrade behaves as it did before the pin existed: the split-release
-wedge above returns, or an apply lands at a version that is no longer served and fails outright
-with `no matches for kind`. The loud failure is the better of the two and is still a failure.
+If migration is approved, the pinned version becomes removable and the pin stops applying: the
+next render emits the component as an unstamped one. Between the old version being removed and
+that render, an apply can land at a version that is no longer served and fail with
+`no matches for kind`.
 
 **Read the row you are actually on.** The component `CompositionDefinition`s this orchestrator
 registers (`templates/definitions.yaml`) set no `upgradePolicy`, which is the last row —
@@ -466,7 +473,7 @@ Pausing migration has its own price, and it is the other side of the same coin: 
 component's instances stay on their origin version forever, so the CRD keeps every version it
 has ever served instead of retiring them. Decide it per component, not fleet-wide by reflex.
 
-The mechanism and the measurements behind it are in
+The mechanism is in
 `blueprints/openstack/chart/templates/_helpers.tpl` (`osh.pinVersion`), asserted by
 `hack/validate-origin-version-pin.py`, and tracked as
 [krateo-platformops/core-provider#303](https://github.com/krateo-platformops/core-provider/issues/303).
