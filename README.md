@@ -142,13 +142,16 @@ kubectl create namespace openstack-system
 # components re-created with new release names that could not patch their own live
 # objects because spec.selector is immutable. See issue #166.
 #
-# What 0.3.34 has actually been run through: NO INSTALL AND NO UPGRADE. Its fix for #166
-# is verified by hack/validate-upgrade-does-not-prune.py against five synthetic cluster
-# states and by four break tests, and the defect it fixes was measured on a real cluster --
-# but nobody has yet performed a successful umbrella upgrade with it. The release exists so
-# that upgrade can be attempted at all; until someone does, "upgrading works now" is a
-# claim about a gate and not about a cluster. BP_VERSION below therefore stays at 0.3.32,
-# which is the newest release that HAS been run through the steps in this document.
+# What 0.3.34 and 0.3.35 have actually been run through: NO INSTALL AND NO UPGRADE. 0.3.35
+# covers the two cases 0.3.34 still pruned, and adds a PowerDNS that starts, which the chart
+# first shipped on main could not do. Those fixes are verified by
+# hack/validate-upgrade-does-not-prune.py against eight synthetic cluster states and by
+# hack/smoke-powerdns.py against the rendered pods, and the defect was measured on a real
+# cluster -- but nobody has yet performed a successful umbrella upgrade with either release,
+# and designate has not been run against this PowerDNS. 0.3.35 exists so that test can run;
+# until it does, "upgrading works now" is a claim about a gate and not about a cluster.
+# BP_VERSION below therefore stays at 0.3.32, which is the newest release that HAS been run
+# through the steps in this document.
 #
 # What 0.3.32 has actually been run through, stated so you know what is NOT covered: the
 # Composition path below, on kind, with a 7-component closure (gnocchi + skyline + zaqar
