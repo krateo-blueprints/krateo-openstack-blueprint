@@ -24,8 +24,10 @@ WHAT IT ASSERTS, in the order a cluster would reach them:
   4. a zone created over the API answers a real DNS query, through the rendered port;
   5. a secondary zone, created the way designate creates it, accepts a NOTIFY sent from a
      different address than its primary, as designate-worker's is;
-  6. with the database stopped, readiness FAILS and liveness still PASSES;
-  7. an outage longer than the server's transfer cycle ends with the server answering again;
+  6. with the database stopped, readiness FAILS, and liveness does not fail on a server that is
+     still running;
+  7. the server exits once its transfer cycle reaches the stopped database, and answers again
+     when restarted after the database returns, as the kubelet would restart it;
   8. with webserver-allow-from narrowed as values.yaml advises, both probes still pass.
 
 WHAT A GREEN RESULT DOES NOT COVER: Kubernetes itself. The Service mapping 53 to the named port is
@@ -402,28 +404,41 @@ try:
                             f"{rcode!r}, expected 0. designate-worker sends these from its pod "
                             "address, so a zone it changes would not refresh until its SOA timer.")
 
-        # 6. The probes must disagree during a database outage, which is the point of having two.
+        # 6. Readiness must fail during an outage. Liveness is judged only on a server still
+        # running: a probe exec'd into an exited container fails whatever the probe says.
         sh("docker", "stop", DB, check=True)
         time.sleep(2)
         if probe(SERVER, server["readinessProbe"]):
             problems.append("readiness still PASSES with the database stopped, so the Service "
                             "keeps routing to a server that cannot read a zone")
-        if not probe(SERVER, server["livenessProbe"]):
-            problems.append("liveness FAILS with the database stopped, so an outage restarts the "
-                            "server, which repairs nothing")
+        liveness_failed = not probe(SERVER, server["livenessProbe"])
+        if liveness_failed and running(SERVER):
+            problems.append("liveness FAILS on a running server with the database stopped, so an "
+                            "outage restarts a server that has not exited")
 
-        # 7. Past the transfer cycle, which is when a secondary next needs the database. Whether
-        # the process survives that is reported, not assumed; what must hold is recovery. A
-        # stopped container is started again, as the kubelet would restart it.
+        # 7. The transfer cycle needs the database, and PowerDNS exits when that fails. Past one
+        # cycle the process must be gone, and the assertion says so, because the chart's comment
+        # describes it: if a release stops doing this, the comment has to change.
         cycle = 60
         time.sleep(cycle + 15)
-        survived = running(SERVER)
-        print(f"after {cycle + 15}s of database outage the server process "
-              f"{'is still running' if survived else 'has exited'}")
+        if running(SERVER):
+            problems.append(f"the server is still running after {cycle + 15}s without its "
+                            "database. deployment.yaml says it exits, so one of them is wrong.")
+        else:
+            exited = sh("docker", "logs", SERVER)
+            print("the server exited during the outage, code "
+                  + sh("docker", "inspect", "-f", "{{.State.ExitCode}}", SERVER).stdout.strip()
+                  + ":\n    "
+                  + "\n    ".join((exited.stdout + exited.stderr).strip().splitlines()[-4:]))
+            sh("docker", "start", SERVER, check=True)
+            time.sleep(10)
+            print("restarted with the database still down, the server is "
+                  + ("running" if running(SERVER) else "exited: it restarts until the database "
+                     "returns"))
         sh("docker", "start", DB, check=True)
         if not wait_for_db():
             measurement_failed("MariaDB did not come back:\n" + db_logs())
-        if not survived:
+        if not running(SERVER):
             sh("docker", "start", SERVER, check=True)
         if not wait_until(lambda: probe(SERVER, server["readinessProbe"]), 45):
             problems.append("the server did not pass readiness after the database came back")
@@ -457,7 +472,7 @@ if problems:
 
 print("OK: the rendered db-sync applied the schema, re-ran cleanly and refused a partial one; the "
       "rendered server started unprivileged, authenticated its API, served a zone over DNS, "
-      "accepted a NOTIFY for a secondary zone from a non-primary address, disagreed correctly on "
-      "its two probes during a database outage, recovered after it, and kept its probes with "
-      "webserver-allow-from narrowed. NOT covered: the Service, the api-key-init Job and "
+      "accepted a NOTIFY for a secondary zone from a non-primary address, failed readiness during "
+      "a database outage, exited at the transfer cycle and answered again after a restart, and "
+      "kept its probes with webserver-allow-from narrowed. NOT covered: the Service, the api-key-init Job and "
       "designate, which need a cluster.")

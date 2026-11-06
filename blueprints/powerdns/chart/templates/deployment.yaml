@@ -90,11 +90,20 @@ spec:
             - name: api
               containerPort: {{ index $envAll.Values.conf.pdns "webserver-port" }}
               protocol: TCP
-          {{- /* Readiness asks the API for the zone list, which goes through gmysql, so it fails
-                 when the backend is gone. Liveness asks the webserver only, so a database outage
-                 takes the pod out of the Service without restarting it, which could not repair
-                 anything. An exec probe because the API needs the key and an httpGet header
-                 would put it in the pod spec. */}}
+          {{- /* Readiness asks the API about one zone name, which goes through gmysql, so it
+                 fails when the backend is gone. It asks for one name with dnssec=false because
+                 the full zone list costs a DNSSEC lookup per zone on every tick. Liveness asks
+                 the webserver only, so it does not add a restart of its own.
+
+                 Neither keeps the server up through a database outage. PowerDNS exits once its
+                 transfer cycle cannot reach the database, measured at under 75s with the default
+                 60s xfr-cycle-interval in hack/smoke-powerdns.py. So an outage longer than that
+                 restarts the container, and kubelet backoff can delay recovery after the
+                 database returns. That is the server's behaviour and no probe here changes it.
+
+                 Both are exec because the API needs the key, which an httpGet header would put
+                 in the pod spec, and because the webserver ACL can refuse a kubelet's node
+                 address while 127.0.0.1 is always allowed. */}}
 {{- if .Values.pod.probes.powerdns.powerdns.readiness.enabled }}
           readinessProbe:
             exec:
