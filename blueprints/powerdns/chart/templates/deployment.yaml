@@ -95,11 +95,12 @@ spec:
                  the full zone list costs a DNSSEC lookup per zone on every tick. Liveness asks
                  the webserver only, so it does not add a restart of its own.
 
-                 Neither guarantees the server stays up through a database outage. PowerDNS exits
-                 with "communicator thread died" when transfer work needs the database and cannot
-                 reach it, which restarts the container, and kubelet backoff can then delay
-                 recovery. hack/smoke-powerdns.py prints what the process did in an outage with
-                 and without that work pending. That is the server's behaviour; no probe changes it.
+                 Neither keeps the server up through a database outage. A secondary's communicator
+                 thread reads the database on a timer, and PowerDNS exits with "communicator thread
+                 died" when it cannot. Measured once at 121s with the default 60s
+                 xfr-cycle-interval, and not at all with `secondary` off. That restarts the
+                 container; a restart with the database still down stays up. Each smoke run prints
+                 what the process did. It is the server's behaviour and no probe changes it.
 
                  Both are exec because the API needs the key, which an httpGet header would put
                  in the pod spec, and because the webserver ACL can refuse a kubelet's node

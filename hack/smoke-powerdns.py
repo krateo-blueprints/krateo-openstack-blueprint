@@ -26,7 +26,7 @@ WHAT IT ASSERTS, in the order a cluster would reach them:
      after the database returns;
   6. a secondary zone, created the way designate creates it, accepts a NOTIFY sent from a
      different address than its primary, as designate-worker's is;
-  7. an outage with that transfer work pending ends with the server answering again;
+  7. an outage with that NOTIFY queued ends with the server answering again;
   8. with webserver-allow-from narrowed as values.yaml advises, both probes still pass;
   9. a changed database password changes the pod template, so the pods roll.
 
@@ -64,7 +64,7 @@ ROOT_PASSWORD = "smoke-root"
 API_KEY = "smoke-api-key-" + uuid.uuid4().hex
 ZONE = "smoke.example."
 SECONDARY_ZONE = "secondary.example."
-OUTAGE_SECONDS = 135    # two transfer cycles at the default xfr-cycle-interval
+OUTAGE_SECONDS = 135    # past the 121s exit measured with the default xfr-cycle-interval of 60s
 
 RUN = uuid.uuid4().hex[:8]
 NET = f"pdns-smoke-{RUN}"
@@ -442,13 +442,13 @@ try:
             problems.append(f"a SOA query for {ZONE} on port {DNS_PORT} did not get an answer "
                             f"(rcode, answers = {answer!r})")
 
-        # 5. An outage with no transfer work pending. Readiness must fail and liveness must pass:
+        # 5. An outage with no NOTIFY queued. Readiness must fail and liveness must pass:
         # that disagreement is the point of having two probes.
         sh("docker", "stop", DB, check=True)
         time.sleep(2)
         if not running(SERVER):
-            problems.append("the server exited within 2s of a database outage with no transfer "
-                            "work pending, so liveness could not be judged")
+            problems.append("the server exited within 2s of a database outage with no NOTIFY "
+                            "queued, so liveness could not be judged")
         else:
             if probe(SERVER, server["readinessProbe"]):
                 problems.append("readiness still PASSES with the database stopped, so the Service "
@@ -456,8 +456,8 @@ try:
             if not probe(SERVER, server["livenessProbe"]):
                 problems.append("liveness FAILS on a running server with the database stopped, so "
                                 "an outage restarts a server that has not exited")
-        report_outage(OUTAGE_SECONDS, "no transfer work pending")
-        recover("the outage with no transfer work pending")
+        report_outage(OUTAGE_SECONDS, "no NOTIFY queued")
+        recover("the outage with no NOTIFY queued")
 
         # 6. A secondary zone, posted as designate's pdns4 backend posts it. Its primary is an
         # address nothing answers on, so a NOTIFY from elsewhere is accepted only if the server
@@ -472,10 +472,10 @@ try:
                             f"{rcode!r}, expected 0. designate-worker sends these from its pod "
                             "address, so a zone it changes would not refresh until its SOA timer.")
 
-        # 7. An outage while that NOTIFY's work is pending.
+        # 7. An outage with that NOTIFY queued.
         sh("docker", "stop", DB, check=True)
-        report_outage(30, "a NOTIFY's transfer work pending")
-        recover("the outage with transfer work pending")
+        report_outage(30, "a NOTIFY queued")
+        recover("the outage with a NOTIFY queued")
 
         # 8. values.yaml tells operators to narrow this, so doing so must not break the probes.
         narrow = render(workdir, "--set", "conf.pdns.webserver-allow-from=10.99.0.0/16")
