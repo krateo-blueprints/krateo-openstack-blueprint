@@ -24,8 +24,8 @@ from the chart's own _helpers.tpl.
 
 WHAT A GREEN RESULT HERE DOES NOT COVER, which matters more than what it does:
 
-  * osh.emitVersion passing the real answer from osh.exists. The probe injects existence, and
-    only the call site is asserted structurally.
+  * compositions.yaml passing the real answer from osh.exists. The probe injects existence, so
+    that wiring is asserted structurally, as exact lines, at the end of this file.
   * The `lookup` path. osh.originVersion reads the annotation off a live object, and `helm
     template` disables lookup, so OFFLINE the origin always reads "" and osh.pinVersion falls
     back to the current version. This check therefore injects the origin directly where the
@@ -84,6 +84,13 @@ STATES = {
     # The next bump, after the origin version stopped being served: a third version is all
     # that is left. An existing component here must stay emitted.
     "origin_no_longer_served": [crd("Glance", [("v0-3-31", True)])],
+    # Several older versions served and the current one not yet, as a paused definition leaves
+    # them. In append order, so the first served entry is the oldest and narrowest schema.
+    "two_older_served": [crd("Glance", [("v0-3-28", True), ("vacuum", False), ("v0-3-30", True),
+                                        (OLD, True)])],
+    # The same choice with the list reversed and names that sort wrongly as strings, so that
+    # neither "take the last entry" nor a string comparison can pass for the real thing.
+    "older_served_reversed": [crd("Glance", [(OLD, True), ("v0-3-9", True)])],
 }
 
 PROBE = """
@@ -118,7 +125,8 @@ def run_probe(state):
                 "state": state,
                 # The origin the real code would have READ off the live object. Injected because
                 # `helm template` disables lookup -- see the module docstring.
-                "origins": {"existing": OLD, "born_at_current": CUR, "unstamped": ""},
+                "origins": {"existing": OLD, "born_at_current": CUR, "unstamped": "",
+                            "retired": "v0-3-29"},
             }, fh)
         out = subprocess.run(["helm", "template", "p", chart],
                              capture_output=True, text=True)
@@ -134,8 +142,7 @@ def run_probe(state):
 
 
 # What each state must decide, for a component that ALREADY EXISTS and was born at OLD. This is
-# the population the prune destroyed, and the only entry that was wrong before the fix is
-# bump_instant -- which is the whole point.
+# the population the prune destroyed.
 EXPECTED_EXISTING = {
     "bump_instant": ("true", OLD),
     "both_served": ("true", OLD),
@@ -143,6 +150,8 @@ EXPECTED_EXISTING = {
     "new_registered_unserved": ("true", OLD),
     "first_install": ("", CUR),         # no CRD at all: nothing exists, nothing to prune
     "origin_no_longer_served": ("true", "v0-3-31"),
+    "two_older_served": ("true", OLD),
+    "older_served_reversed": ("true", OLD),
 }
 
 # An existing component with NO origin stamp, the case 0.3.34 still pruned. It must survive every
@@ -154,7 +163,14 @@ EXPECTED_UNSTAMPED = {
     "new_registered_unserved": ("true", OLD),
     "first_install": ("", CUR),
     "origin_no_longer_served": ("true", "v0-3-31"),
+    "two_older_served": ("true", OLD),
+    "older_served_reversed": ("true", OLD),
 }
+
+# A component stamped at the current version, or at a version no longer served, has a pin that
+# cannot answer at a bump, so it must decide exactly as an unstamped one does.
+EXPECTED_BORN_AT_CURRENT = EXPECTED_UNSTAMPED
+EXPECTED_RETIRED = EXPECTED_UNSTAMPED
 
 # A component that does NOT exist must keep waiting for the current version. Without this half,
 # "emit at whatever is served" would create new components at an old schema and pin them there.
@@ -165,6 +181,8 @@ EXPECTED_NEW = {
     "new_registered_unserved": "",
     "first_install": "",
     "origin_no_longer_served": "",
+    "two_older_served": "",
+    "older_served_reversed": "",
 }
 
 results = {}
@@ -194,13 +212,18 @@ for name, (want_gate, want_pin) in EXPECTED_EXISTING.items():
             f"{want_pin!r}. A component's GVK must not move on a render where nothing about "
             "the component changed.")
 
-for name, (want_gate, want_pin) in EXPECTED_UNSTAMPED.items():
-    d = results[name]
-    if d.get("unstamped_gate") != want_gate or d.get("unstamped_pinned") != want_pin:
-        problems.append(
-            f"state '{name}': an EXISTING component with NO origin stamp gets "
-            f"$crd={d.get('unstamped_gate')!r} at {d.get('unstamped_pinned')!r}, expected "
-            f"{want_gate!r} at {want_pin!r}. A closed gate on a live object prunes it.")
+for label, what, expected in (
+        ("unstamped", "with NO origin stamp", EXPECTED_UNSTAMPED),
+        ("born_at_current", f"stamped at the current version {CUR}", EXPECTED_BORN_AT_CURRENT),
+        ("retired", "stamped at a version no longer served", EXPECTED_RETIRED)):
+    for name, (want_gate, want_pin) in expected.items():
+        d = results[name]
+        if d.get(f"{label}_gate") != want_gate or d.get(f"{label}_pinned") != want_pin:
+            problems.append(
+                f"state '{name}': an EXISTING component {what} gets "
+                f"$crd={d.get(f'{label}_gate')!r} at {d.get(f'{label}_pinned')!r}, expected "
+                f"{want_gate!r} at {want_pin!r}. A closed gate on a live object prunes it, and "
+                "an older version than the newest served drops every field added since.")
 
 for name, want_gate in EXPECTED_NEW.items():
     got = results[name].get("unstamped_new_gate")
@@ -236,9 +259,7 @@ if results["both_served"].get("existing_served") != CUR:
     problems.append(
         f"with both versions served osh.servedVersion answers "
         f"{results['both_served'].get('existing_served')!r}, expected {CUR!r}. The probe must "
-        "prefer the current version so ordinary renders are unchanged; it exists only to make "
-        "the origin annotation READABLE, never to choose a version -- the annotation decides, "
-        "through osh.pinVersion.")
+        "prefer the current version so ordinary renders are unchanged.")
 
 # The gate and the emitted apiVersion must resolve the SAME version. They did not before #166 --
 # the gate asked osh.version while the emitter asked osh.pinVersion -- so this asserts the chart
@@ -255,29 +276,44 @@ helpers = HELPERS.read_text()
 # old defect's text. An absence-check passes for every way of writing the defect that its
 # author did not anticipate, which is the same shape as a guard that excludes the case it
 # guards.
-EXPECTED_GATE = '{{- $emitVer := include "osh.emitVersion" (list $ $c.kind $c.name $crds) }}\n' \
+EXPECTED_GATE = '{{- $exists := include "osh.exists" (list $ $c.kind $c.name $crds) }}\n' \
+                '{{- $emitVer := include "osh.emitVersion" (list $ $c.kind $c.name $crds $exists) }}\n' \
                 '{{- $crd := include "osh.crdExists" (list $c.kind $emitVer $crds) }}'
+EXPECTED_DOCUMENT = 'apiVersion: {{ include "osh.apiVersionAt" (list $emitVer) }}'
+EXPECTED_EMIT = ('{{- $exists := index . 4 -}}',
+                 '{{- include "osh.resolveVersion" (list $current $origin $exists $kind $crds) -}}')
 if EXPECTED_GATE not in comp:
     found = [l.strip() for l in comp.splitlines() if "$crd :=" in l] or ["(no $crd assignment at all)"]
     problems.append(
-        "compositions.yaml does not compute $crd from osh.emitVersion. Found: "
+        "compositions.yaml does not compute $exists, $emitVer and $crd as the three lines this "
+        "check expects. Found: "
         + " | ".join(found)
-        + ". The gate and the emitted apiVersion must resolve ONE version through ONE function: "
-          "deriving the same fact at two call sites is how they came to disagree, which is #166.")
+        + ". The real osh.exists answer must reach osh.emitVersion: without it an unstamped live "
+          "component is treated as new, its gate closes at the bump instant, and helm prunes it.")
+if EXPECTED_DOCUMENT not in comp:
+    problems.append(
+        "the Composition document is not emitted at $emitVer. The gate and the emitted apiVersion "
+        "must be ONE resolution: deriving the same fact at two call sites is how they came to "
+        "disagree, which is #166.")
+if comp.count('include "osh.exists"') != 1:
+    problems.append(
+        "compositions.yaml asks osh.exists more than once for a component. The gate and the "
+        "version resolution must use one answer, or an object deleted between the two reads "
+        "passes the gate at the old version and renders at an unserved one.")
+
+emit_def = helpers[helpers.index('{{- define "osh.emitVersion" -}}'):]
+emit_def = emit_def[:emit_def.index("{{- end -}}")]
+for line in EXPECTED_EMIT:
+    if line not in emit_def:
+        problems.append(
+            f"osh.emitVersion no longer contains `{line}`. The caller's existence answer must "
+            "reach osh.resolveVersion unchanged.")
 
 # osh.originVersion must read the stamp through a SERVED version. This is the half the probe
 # genuinely cannot see -- the read needs `lookup`, which is disabled offline -- so it is
 # asserted structurally and the limitation is stated rather than papered over. Before #166 this
 # function guarded itself on the current version, so at the bump instant it returned "" and the
 # origin pin was inert in exactly the instant it was written for.
-emit_def = helpers[helpers.index('{{- define "osh.emitVersion" -}}'):]
-emit_def = emit_def[:emit_def.index("{{- end -}}")]
-if 'include "osh.exists"' not in emit_def or 'include "osh.resolveVersion"' not in emit_def:
-    problems.append(
-        "osh.emitVersion must pass osh.exists into osh.resolveVersion. Without the existence "
-        "answer an unstamped live component is treated as new, its gate closes at the bump "
-        "instant, and helm prunes it.")
-
 origin_def = helpers[helpers.index('{{- define "osh.originVersion" -}}'):]
 origin_def = origin_def[:origin_def.index("{{- end -}}")]
 if 'include "osh.servedVersion"' not in origin_def:
@@ -296,6 +332,6 @@ if problems:
     sys.exit(1)
 
 print(f"OK: {len(results)} cluster states probed through the chart's own helpers; an existing "
-      f"component keeps its gate open and its GVK at every one, including the bump instant that "
-      f"pruned d4. NOT covered: the `lookup` that reads the origin stamp needs a live cluster, "
+      f"component keeps its gate open in every state that serves any version of its kind, "
+      f"including the bump instant that pruned d4. NOT covered: the `lookup` that reads the origin stamp needs a live cluster, "
       f"so the origin is injected here -- see this file's docstring.")
