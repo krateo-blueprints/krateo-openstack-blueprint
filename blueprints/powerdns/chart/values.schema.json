@@ -50,7 +50,7 @@
             "webserver-allow-from": {
               "type": "string",
               "title": "API clients allowed",
-              "description": "CIDRs permitted to reach the HTTP API on 8081. The default 0.0.0.0/0 is permissive because a pod CIDR is not knowable from a chart; narrow it to your cluster's pod CIDR. designate-worker is the only client that needs it.",
+              "description": "CIDRs permitted to reach the HTTP API on 8081. The default 0.0.0.0/0 is permissive because a pod CIDR is not knowable from a chart; narrow it to your cluster's pod CIDR. designate-worker is the only client that needs it, and 127.0.0.1 is always added for the probes.",
               "default": "0.0.0.0/0"
             }
           }

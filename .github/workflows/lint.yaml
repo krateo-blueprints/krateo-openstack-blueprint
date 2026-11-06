@@ -52,6 +52,30 @@ jobs:
       - name: Every chart's defaults must satisfy its own schema
         run: python3 hack/validate-values-schema.py .
 
+  powerdns-runs:
+    # Gating, and the only job here that starts a server. The powerdns chart merged with 28 offline
+    # gates green and could not start: settings removed from 4.9, a privileged port, and
+    # credentials the server never read. This runs the pods the chart renders against a real
+    # MariaDB. See hack/smoke-powerdns.py for what it does not cover.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: The rendered powerdns pods must actually serve
+        run: python3 hack/smoke-powerdns.py .
+
   capability-roles:
     # Gating. A capability aggregates into a predefined role via a
     # `rbac.krateo.io/aggregate-to-<role>=true` label, and nothing validates the <role>.

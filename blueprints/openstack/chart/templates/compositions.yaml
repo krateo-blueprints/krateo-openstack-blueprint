@@ -80,9 +80,8 @@
 {{- range $c := .Values.components }}
 {{- if has $c.name $sel }}
 {{- /* The version this component will be EMITTED at, resolved before anything is decided
-       about it: its origin version when it has one and the CRD still serves it, otherwise the
-       current one. osh.emitApiVersion resolves the same thing further down, from the same
-       inputs, so the gate and the emitter now agree by construction.
+       about it: see osh.resolveVersion. The document below is emitted at this same $emitVer, so
+       the gate and the emitted apiVersion cannot disagree: there is one resolution, not two.
 
        This used to be `osh.crdExists $c.kind (osh.version $)` -- the CHART's current version.
        At the first render after a version bump no component CRD serves that version yet,
@@ -92,13 +91,14 @@
        pruned 34 live CRs. On a0-openstack-d4 that left 6 CRs for 37 releases, 27 of them
        running with nothing reconciling them. See issue #166.
 
-       The tie-break, written down because an unstated one is how osh.version became
-       load-bearing here without anyone choosing it: osh.servedVersion exists only to make the
-       write-once origin annotation READABLE, never to choose a version. It prefers the current
-       version so that ordinary renders are unchanged, and falls back to whatever is served
-       only at the bump instant. The annotation then decides, through osh.pinVersion. A probe
-       that chose the newest served version instead would reproduce #166 on the next bump. */ -}}
-{{- $emitVer := include "osh.emitVersion" (list $ $c.kind $c.name $crds) }}
+       The order of decision, written down because an unstated one is how osh.version became
+       load-bearing here without anyone choosing it: the origin annotation decides, through
+       osh.pinVersion, while it is served. Otherwise a live object is emitted at
+       osh.servedVersion's answer, the current version if served and else the newest served one.
+       $exists is asked here, once, because the resolution needs it and the gate below uses the
+       same answer. */ -}}
+{{- $exists := include "osh.exists" (list $ $c.kind $c.name $crds) }}
+{{- $emitVer := include "osh.emitVersion" (list $ $c.kind $c.name $crds $exists) }}
 {{- $crd := include "osh.crdExists" (list $c.kind $emitVer $crds) }}
 {{- /* Partition this component's dependencies by the gate each edge is in, so that which
        semantics applies to which dependency is visible here and not buried in a helper. */ -}}
@@ -141,21 +141,16 @@
        failed exactly that way when this note was first added. */}}
 {{- $strictReady := include "osh.depsReady" (list $ $strict $.Values.components $crds) }}
 {{- $relaxedExist := include "osh.depsExist" (list $ $relaxed $.Values.components $crds) }}
-{{- $exists := include "osh.exists" (list $ $c.kind $c.name $crds) }}
 {{- if and (eq $crd "true") (or (and (eq $strictReady "true") (eq $relaxedExist "true")) (eq $exists "true")) }}
 {{- $ov := (index ($.Values.componentValues | default dict) $c.name) | default dict }}
 {{- /* The apiVersion is PINNED to the version this object was born at, when it has one.
 
-       A new component renders at the current version; one that already exists renders at its
-       krateo.io/composition-origin-version stamp. That keeps a component's GVK constant across
-       a chart bump, and a constant GVK is the whole point: the emitted apiVersion is derived
-       from the chart version, so a bump used to change the GVK, and helm answers a changed GVK
-       by deleting the old object and creating a new one. The new object gets a new UID,
-       core-provider's release name is <CR name>-<hash of UID>, and the component ends up with a
-       SECOND helm release whose workloads cannot be patched -- their spec.selector carries the
-       other release's name, which Kubernetes forbids changing. Measured on a0-openstack-d3:
-       mariadb-92wd4czz at revisions 4,5,6 all FAILED beside mariadb-9c847c79 rev 2 DEPLOYED and
-       actually running the database. See krateo-platformops/core-provider#303.
+       A new component renders at the current version. One that already exists renders at its
+       krateo.io/composition-origin-version stamp while that is served, otherwise as
+       osh.resolveVersion decides. This does not protect the UID: helm matches on
+       kind and group, so a version-only move patches in place. The new UID and second release
+       measured on a0-openstack-d3 came from the prune in #166. See the comment on
+       osh.pinVersion.
 
        TWO COSTS, both documented in osh.pinVersion and in the README's "Upgrading an existing
        install", and neither of them is a footnote:
@@ -174,8 +169,8 @@
             krateo.io/composition-version label the prune predicate reads, and makes the origin
             version prunable. Migration must not be approved while the pin is in effect.
 
-       No new cluster read of any kind: osh.originVersion does one named GET of the one object,
-       the same cheap shape osh.exists uses, and the CRD list stays the one fetched above.
+       The one added read is osh.originVersion's named GET of the one object, the same cheap shape
+       osh.exists uses, and the CRD list stays the one fetched above.
 
        This comment is closed WITHOUT a right-trim marker, and that is load-bearing. A
        right trim swallows the newline that follows, so the document separator below is
@@ -190,7 +185,7 @@
        sequence ends a Go template comment wherever it appears, including inside one, and
        the remaining prose then renders into the manifest as text. */}}
 ---
-apiVersion: {{ include "osh.emitApiVersion" (list $ $c.kind $c.name $crds) }}
+apiVersion: {{ include "osh.apiVersionAt" (list $emitVer) }}
 kind: {{ $c.kind }}
 metadata:
   name: {{ $c.name }}

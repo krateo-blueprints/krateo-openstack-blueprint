@@ -2,14 +2,17 @@
 """An existing Composition must be emitted at the version it was BORN at, not at this chart's.
 
 The umbrella derives the composition apiVersion from the chart version, so until #303 a chart
-bump changed every emitted object's GVK. Helm does not read a changed GVK as one object moving:
-it reads the old resource as gone and a new resource as added, and it deletes and creates
-accordingly. The replacement gets a NEW UID; core-provider's CalculateReleaseName is
-`<CR name>-<hash of UID>`; so the component acquires a SECOND helm release beside the one whose
-workloads are already running. That second release's Deployments carry its own name in
-spec.selector (release_group, app.kubernetes.io/instance) over objects that already exist under
-the first release's name, and Kubernetes forbids changing a selector -- so its every revision
-fails, and keeps failing, forever.
+bump changed every emitted object's version. This gate was written believing helm deletes and
+recreates on that change. It does not: helm matches on kind and group, and a version-only move
+kept the UID when measured. The d3 split below was the prune in #166. See osh.pinVersion, which
+says what the pin still does and leaves its value open.
+
+When a CR is deleted and re-created, the replacement gets a NEW UID; core-provider's
+CalculateReleaseName is `<CR name>-<hash of UID>`; so the component acquires a SECOND helm release
+beside the one whose workloads are already running. That second release's Deployments carry its
+own name in spec.selector (release_group, app.kubernetes.io/instance) over objects that already
+exist under the first release's name, and Kubernetes forbids changing a selector -- so its every
+revision fails, and keeps failing, forever.
 
 Measured on a0-openstack-d3 after a 0.3.28 bump, 2026-11-03:
 
@@ -26,9 +29,8 @@ emitted at the current version. The GVK then stops moving, helm patches in place
 survives and the release name never changes. This asserts that mechanism, in six parts.
 
  1. THE PIN IS WIRED IN, AT THE ONE PLACE THAT MATTERS. templates/compositions.yaml must emit
-    the Composition apiVersion through osh.emitApiVersion, handed the component's kind and name
-    and the hoisted CRD list. A call site that reverts to osh.apiVersion renders perfectly and
-    reinstates the wedge.
+    the Composition apiVersion at $emitVer, the version osh.emitVersion resolved for the gate. A
+    call site that reverts to osh.apiVersion renders perfectly and silently stops pinning.
 
  2. THE ANNOTATION KEY IS THE ENGINE'S, AND LIVES IN ONE PLACE. osh.originVersionAnnotation
     must be exactly krateo.io/composition-origin-version -- core-provider
@@ -36,7 +38,7 @@ survives and the release name never changes. This asserts that mechanism, in six
     a0-openstack-d3 -- and no template may spell that key anywhere else. It is an agreement
     with another component: a rename on either side raises no error anywhere, the umbrella
     simply stops finding a stamp, falls back to the current version for every component, and
-    silently restores the split-release wedge.
+    silently stops pinning.
 
  2b. THE STAMP IS ACTUALLY READ -- and this part is STRUCTURAL, which is a limitation and not a
     style choice. It is the one link with no offline behaviour: `lookup` returns nothing under
@@ -121,7 +123,7 @@ README = ROOT / "README.md"
 # write-once at first reconcile) and on a live CR --
 #   kubectl -n openstack get mariadb mariadb -o jsonpath='{.metadata.annotations}'
 #   {"krateo.io/composition-origin-version":"v0-3-28", ...}
-# on a0-openstack-d3, the cluster the split-release wedge was measured on.
+# on a0-openstack-d3.
 ORIGIN_ANNOTATION = "krateo.io/composition-origin-version"
 
 # The only two full-list cluster reads this chart is allowed, both hoisted above the component
@@ -246,22 +248,20 @@ if len(call_sites) != 1:
         f"{len(call_sites)} Composition apiVersion call sites in compositions.yaml; this gate "
         "assumes the one. A second emission path would be unchecked.")
 helper, args = call_sites[0]
-if helper != "osh.emitApiVersion":
+PINNED_HELPER = "osh.apiVersionAt"
+if helper != PINNED_HELPER:
     problems.append(
         f"compositions.yaml emits the Composition apiVersion through `{helper}`, not "
-        "osh.emitApiVersion. Only osh.emitApiVersion consults the object's origin stamp; "
-        "osh.apiVersion is unconditionally the CURRENT chart version, which is what made a "
-        "bump change every object's GVK and split every component into two helm releases "
-        "(core-provider#303, measured on a0-openstack-d3).")
+        f"{PINNED_HELPER}. osh.apiVersion is unconditionally the CURRENT chart version, so it "
+        "ignores the origin stamp and every decision osh.emitVersion made.")
 else:
-    want = ["$", "$c.kind", "$c.name", "$crds"]
+    want = ["$emitVer"]
     got = args.split()
     if got != want:
         problems.append(
-            f"osh.emitApiVersion is called with {got}, not {want}. It needs the component's "
-            "kind and name to find the object's stamp, and the HOISTED CRD list to check that "
-            "the stamped version is still served -- re-fetching that list per component is the "
-            "mistake osh.crdExists carries a 13-minute render measurement for.")
+            f"{PINNED_HELPER} is called with {got}, not {want}. The document must be emitted at "
+            "the version the gate resolved. Resolving it a second time is a second read of the "
+            "object and an answer that can differ from the gate's.")
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +305,7 @@ if elsewhere:
 # nothing under `helm template`, so a osh.originVersion gutted to `{{- $v = "" -}}` answers
 # exactly what the correct helper answers with no cluster: the pin still looks right in every
 # probe below, every decision case still passes, the offline render is still byte-identical --
-# and against a real cluster nothing is ever pinned and the upgrade wedge is back. That gap was
+# and against a real cluster nothing is ever pinned. That gap was
 # found by differential-testing this gate (mutation "the annotation read is dropped" went
 # unnoticed by an earlier version of it), which is the only reason it is covered at all.
 #
@@ -374,7 +374,7 @@ data:
   current: {{ include "osh.version" (list $) | quote }}
   annotation: {{ include "osh.originVersionAnnotation" $ | quote }}
   pin: {{ include "osh.pinVersion" (list (include "osh.version" (list $)) ORIGIN "KIND" $crds) | quote }}
-  emit: {{ include "osh.emitApiVersion" (list $ "KIND" "NAME" $crds) | quote }}
+  emit: {{ include "osh.apiVersionAt" (list (include "osh.emitVersion" (list $ "KIND" "NAME" $crds (include "osh.exists" (list $ "KIND" "NAME" $crds))))) | quote }}
 """
 
 
@@ -482,13 +482,13 @@ for what, origin, crds, want in CASES:
                "for kind\" on every reconcile, and a release that stops rendering gets "
                "uninstalled (#68)." if want == CURRENT and origin and crds is not BOTH_SERVED
                else ""))
-    # osh.emitApiVersion composes the lookup with the decision. Offline the lookup finds
+    # osh.emitVersion composes the lookup with the decision. Offline the lookup finds
     # nothing, so whatever the synthetic CRD list says, it must answer the current version --
     # the same property part 5 proves over the whole render.
     emit = data.get("emit")
     if emit != f"composition.krateo.io/{CURRENT}":
         problems.append(
-            f"with no cluster, osh.emitApiVersion answers {emit!r} for {what}; it must answer "
+            f"with no cluster, the emitted apiVersion is {emit!r} for {what}; it must be "
             f"'composition.krateo.io/{CURRENT}'. `lookup` returns nothing under `helm "
             "template`, so there is no stamp to honour and the only correct answer is the "
             "current version.")
@@ -657,7 +657,7 @@ def render_all(chart_dir, label):
 
 
 UNPINNED_CALL = 'apiVersion: {{ include "osh.apiVersion" (list $) }}'
-if helper != "osh.emitApiVersion":
+if helper != PINNED_HELPER:
     # Part 1 has already reported the call site as unpinned. There is no pin to compare a
     # counterfactual against, and substituting the unpinned call for itself would produce a
     # check that cannot fail -- which is a worse outcome than not running it and saying so.
