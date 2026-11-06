@@ -35,10 +35,20 @@
      from chartVersion (crdgen maps version 0.1.1 -> apiVersion v0-1-1). Keeping
      this in one place means a version bump never strands a hardcoded v0-1-0.
 
-     This is "the version this chart IS", and it is the right answer for a Composition being
-     created for the first time and for every per-object `lookup` in this file. It is NOT
-     automatically the right answer for a Composition that already exists: see
-     osh.emitVersion. */}}
+     This is "the version this chart IS". NOTHING IN THIS FILE CALLS IT, and nothing should.
+
+     The sentence that used to stand here said it was "the right answer for every per-object
+     `lookup` in this file". That sentence was the instruction that produced #166: every such
+     lookup asked about the chart's current version, no CRD serves that version at the instant
+     a bump renders, and the emission gate closed for all 34 components and pruned their live
+     CRs. Per-object lookups now resolve through osh.servedVersion, and the version a component
+     is emitted at comes from osh.emitVersion.
+
+     It survives for exactly one consumer: hack/validate-origin-version-pin.py substitutes this
+     call for the emitted apiVersion to render the deliberately UNPINNED counterfactual it compares
+     the pinned render against. Deleting it would break that differential. So it is kept as the
+     thing a gate needs to be able to name, not as a helper to reach for -- if you are reading
+     this because you wanted a version to look an object up at, you want osh.servedVersion. */}}
 {{- define "osh.apiVersion" -}}
 {{- $top := index . 0 -}}
 {{- include "osh.apiVersionAt" (list (include "osh.version" (list $top))) -}}
@@ -629,8 +639,21 @@ krateo-openstack-node-reader
 
      Why a guard at all -- the measurement that forced it. `lookup` does NOT return empty when
      it is refused. Helm returns an empty map only for a NotFound; every other API error,
-     Forbidden included, comes back as a template error and fails the WHOLE render. Measured
-     against a real composition-dynamic-controller identity on a 4-node GKE cluster:
+     Forbidden included, comes back as a template error and fails the WHOLE render.
+
+     That sentence says "every other API error" but the repro below exercises ONE kind, so read
+     on its own it is a measurement of the node lookup generalised by assertion. The source is
+     what actually generalises it: helm/helm v3.19.0, pkg/engine/lookup_func.go, is a single
+     function behind every `lookup` -- Get and List, every GVK -- and it returns
+     empty-with-nil-error only under `apierrors.IsNotFound(err)`, propagating everything else.
+     There is no 403 branch and IsNotFound is false for one. So EMPTY MEANS LOOKUP DISABLED
+     (`helm template`, no cluster), NEVER DENIED, for CRDs and Compositions as much as for
+     nodes -- which is what makes the two-state existence checks in this file safe. Cited
+     rather than restated so the next reader can check it: the version is pinned and the
+     function is named. (Found by installer, reading the source at the installed version after
+     this comment's claim was offered to them second-hand.)
+
+     Measured against a real composition-dynamic-controller identity on a 4-node GKE cluster:
 
        $ kubectl auth can-i list nodes --as=system:serviceaccount:openstack:keystones-v0-3-29
        no
