@@ -35,8 +35,11 @@ metadata:
   name: {{ $configMapName }}
 data:
   pdns.conf: |
+{{- /* The probes reach the webserver from loopback, so it is always allowed, whatever
+       webserver-allow-from is narrowed to. Otherwise following the advice in values.yaml takes
+       every pod out of the Service. */}}
 {{- range $k, $v := $envAll.Values.conf.pdns }}
-    {{ $k }}={{ $v }}
+    {{ $k }}={{ $v }}{{ if eq $k "webserver-allow-from" }},127.0.0.1{{ end }}
 {{- end }}
     gmysql-host={{ $dbHost }}
     gmysql-port={{ $dbPort }}

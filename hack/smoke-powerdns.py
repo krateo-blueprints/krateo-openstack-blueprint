@@ -17,11 +17,16 @@ failure, so it is set back explicitly.
 
 WHAT IT ASSERTS, in the order a cluster would reach them:
 
-  1. the db-sync pod applies the schema, and a second run is a no-op (it runs on every release);
+  1. the db-sync pod applies the schema, a second run is a no-op (it runs on every release), and
+     a schema missing a table is refused rather than reported as already applied;
   2. the rendered readiness probe fails until the server is up, then passes;
   3. the API key from the Secret is accepted and a wrong one is refused;
   4. a zone created over the API answers a real DNS query, through the rendered port;
-  5. with the database stopped, readiness FAILS and liveness still PASSES.
+  5. a secondary zone, created the way designate creates it, accepts a NOTIFY sent from a
+     different address than its primary, as designate-worker's is;
+  6. with the database stopped, readiness FAILS and liveness still PASSES;
+  7. an outage longer than the server's transfer cycle ends with the server answering again;
+  8. with webserver-allow-from narrowed as values.yaml advises, both probes still pass.
 
 WHAT A GREEN RESULT DOES NOT COVER: Kubernetes itself. The Service mapping 53 to the named port is
 only checked by name, the api-key-init Job and its RBAC need an apiserver, and designate is not
@@ -50,10 +55,10 @@ ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 CHART = ROOT / "blueprints" / "powerdns" / "chart"
 TOOLKIT = ROOT / "charts" / "helm-toolkit"
 NAMESPACE = "openstack"
-DB_IMAGE = "docker.io/library/mariadb:11.4.8"
 ROOT_PASSWORD = "smoke-root"
 API_KEY = "smoke-api-key-" + uuid.uuid4().hex
 ZONE = "smoke.example."
+SECONDARY_ZONE = "secondary.example."
 
 RUN = uuid.uuid4().hex[:8]
 NET = f"pdns-smoke-{RUN}"
@@ -89,17 +94,17 @@ def cleanup():
         sh("docker", "network", "rm", NET)
 
 
-def render(workdir):
-    dst = pathlib.Path(workdir) / "chart"
+def render(workdir, *extra):
+    dst = pathlib.Path(workdir) / f"chart-{uuid.uuid4().hex[:6]}"
     shutil.copytree(CHART, dst)
     (dst / "charts").mkdir(exist_ok=True)
-    shutil.copytree(TOOLKIT, dst / "charts" / "helm-toolkit")
+    shutil.copytree(TOOLKIT, dst / "charts" / "helm-toolkit", dirs_exist_ok=True)
     chart_yaml = dst / "Chart.yaml"
     chart_yaml.write_text(chart_yaml.read_text().replace("CHART_VERSION", "0.0.0-smoke"))
     values = dst / "values.yaml"
     values.write_text(values.read_text().replace("chartVersion: CHART_VERSION",
                                                  'chartVersion: "0.0.0-smoke"'))
-    out = sh("helm", "template", "powerdns", str(dst), "--namespace", NAMESPACE)
+    out = sh("helm", "template", "powerdns", str(dst), "--namespace", NAMESPACE, *extra)
     if out.returncode != 0:
         measurement_failed(f"helm template failed: {out.stderr.strip()[-400:]}")
     return [d for d in yaml.safe_load_all(out.stdout) if d]
@@ -131,7 +136,12 @@ def container_env(docs, container, extra):
     return env
 
 
-def docker_args(docs, spec, container, workdir, shared):
+def new_pod():
+    """The emptyDirs of one pod. Two pods never share one, so neither do their docker volumes."""
+    return {"id": uuid.uuid4().hex[:6], "volumes": {}}
+
+
+def docker_args(docs, spec, container, workdir, pod_state):
     """Translate one rendered container into docker flags, restrictions included."""
     args = []
     volumes = {v["name"]: v for v in spec.get("volumes") or []}
@@ -150,7 +160,8 @@ def docker_args(docs, spec, container, workdir, shared):
             path.chmod(0o755)
             args += ["-v", f"{path}:{mount['mountPath']}:ro"]
         elif "emptyDir" in vol:
-            docker_vol = shared.setdefault(mount["name"], f"pdns-smoke-{mount['name']}-{RUN}")
+            docker_vol = pod_state["volumes"].setdefault(
+                mount["name"], f"pdns-smoke-{mount['name']}-{pod_state['id']}")
             if docker_vol not in created_volumes:
                 sh("docker", "volume", "create", docker_vol, check=True)
                 created_volumes.append(docker_vol)
@@ -171,12 +182,13 @@ def docker_args(docs, spec, container, workdir, shared):
     return args
 
 
-def run_once(docs, spec, container, workdir, shared, extra_env):
-    name = f"pdns-smoke-{container['name']}-{uuid.uuid4().hex[:6]}"
+def docker_run(name, docs, spec, container, workdir, pod_state, detach=False):
+    """`docker run` of one rendered container: its flags, env, entrypoint, image and args."""
     created_containers.append(name)
-    cmd = ["docker", "run", "--name", name, "--network", NET]
-    cmd += docker_args(docs, spec, container, workdir, shared)
-    for k, v in container_env(docs, container, extra_env).items():
+    cmd = ["docker", "run"] + (["-d"] if detach else [])
+    cmd += ["--name", name, "--network", NET]
+    cmd += docker_args(docs, spec, container, workdir, pod_state)
+    for k, v in container_env(docs, container, {}).items():
         cmd += ["-e", f"{k}={v}"]
     if container.get("command"):
         cmd += ["--entrypoint", container["command"][0]]
@@ -186,30 +198,43 @@ def run_once(docs, spec, container, workdir, shared, extra_env):
     return sh(*cmd, timeout=180)
 
 
+def run_once(docs, spec, container, workdir, pod_state):
+    return docker_run(f"pdns-smoke-{container['name']}-{uuid.uuid4().hex[:6]}", docs, spec,
+                      container, workdir, pod_state)
+
+
 def probe(container_name, probe_spec):
     """Execute a rendered probe from inside the container, as the kubelet's exec would."""
     if "exec" in probe_spec:
         return sh("docker", "exec", container_name, *probe_spec["exec"]["command"]).returncode == 0
-    if "httpGet" in probe_spec:
-        port = probe_spec["httpGet"]["port"]
-        if port == "api":
-            port = API_PORT
-        code = ("import urllib.request;"
-                f"urllib.request.urlopen('http://127.0.0.1:{port}"
-                f"{probe_spec['httpGet'].get('path', '/')}', timeout=4)")
-        return sh("docker", "exec", container_name, "python3", "-c", code).returncode == 0
     measurement_failed(f"a probe has a form this harness cannot run: {list(probe_spec)}")
 
 
-def wait_until(fn, seconds):
+def wait_until(fn, seconds, name=None):
     deadline = time.time() + seconds
     while time.time() < deadline:
         if fn():
             return True
-        if not running(SERVER):
+        if not running(name or SERVER):
             return False
         time.sleep(1)
     return False
+
+
+def wait_for_db():
+    for _ in range(90):
+        if sh("docker", "exec", DB, "mariadb", "-uroot", f"-p{ROOT_PASSWORD}",
+              "-e", "select 1").returncode == 0:
+            return True
+        if not running(DB):
+            measurement_failed("MariaDB exited:\n" + db_logs())
+        time.sleep(1)
+    return False
+
+
+def db_logs():
+    logs = sh("docker", "logs", DB)
+    return (logs.stdout + logs.stderr)[-900:]
 
 
 def running(name):
@@ -240,6 +265,22 @@ def dns_query(name, port):
     return sh("docker", "exec", SERVER, "python3", "-c", code).stdout.strip()
 
 
+def send_notify(zone, port):
+    """A NOTIFY from a separate container, so its source address is not the server's own or the
+    zone's primary. That is designate's shape: the worker sends it, and the primary is mdns."""
+    labels = b"".join(bytes([len(p)]) + p.encode() for p in zone.strip(".").split(".")) + b"\0"
+    packet = (struct.pack(">HHHHHH", 0x4242, 0x2400, 1, 0, 0, 0) + labels
+              + struct.pack(">HH", 6, 1))
+    code = (
+        "import socket\n"
+        "s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(4)\n"
+        f"s.sendto(bytes.fromhex('{packet.hex()}'),('{SERVER}',{port}))\n"
+        "print(s.recv(512)[3]&15)\n")
+    out = sh("docker", "run", "--rm", "--network", NET, "--entrypoint", "python3",
+             server["image"], "-c", code)
+    return out.stdout.strip() or out.stderr.strip()[-200:]
+
+
 if shutil.which("docker") is None or shutil.which("helm") is None:
     measurement_failed("docker and helm are both required, and at least one is missing")
 if sh("docker", "version").returncode != 0:
@@ -247,6 +288,10 @@ if sh("docker", "version").returncode != 0:
 
 workdir = tempfile.mkdtemp()
 try:
+    # The server the chart runs against, read from its own chart, so a bump of that image reaches
+    # this test. Only the db-sync client image is in the powerdns chart.
+    DB_IMAGE = (yaml.safe_load((ROOT / "blueprints" / "mariadb" / "chart" / "values.yaml")
+                               .read_text())["images"]["tags"]["mariadb"])
     docs = render(workdir)
     deployment = find(docs, "Deployment")
     pod = deployment["spec"]["template"]["spec"]
@@ -275,45 +320,52 @@ try:
     sh("docker", "run", "-d", "--name", DB, "--network", NET, "--network-alias", db_host,
        "-e", f"MARIADB_ROOT_PASSWORD={ROOT_PASSWORD}", "-e", f"MARIADB_DATABASE={db_name}",
        "-e", f"MARIADB_USER={db_user}", "-e", f"MARIADB_PASSWORD={db_pass}", DB_IMAGE, check=True)
-    for _ in range(90):
-        ok = sh("docker", "exec", DB, "mariadb", "-uroot", f"-p{ROOT_PASSWORD}", "-e", "select 1")
-        if ok.returncode == 0:
-            break
-        time.sleep(1)
-    else:
-        measurement_failed("MariaDB did not come up")
+    if not wait_for_db():
+        measurement_failed("MariaDB did not come up:\n" + db_logs())
 
     # 1. db-sync, exactly as the Job renders it: the schema-copy init container, then the client.
-    shared = {}
+    job_state = new_pod()
     copier = next(c for c in job_pod["initContainers"] if c["name"] == "powerdns-schema-copy")
     syncer = job_pod["containers"][0]
-    out = run_once(docs, job_pod, copier, workdir, shared, {})
+    out = run_once(docs, job_pod, copier, workdir, job_state)
     if out.returncode != 0:
         problems.append(f"powerdns-schema-copy failed: {(out.stdout + out.stderr)[-300:]}")
-    first = run_once(docs, job_pod, syncer, workdir, shared, {})
+    first = run_once(docs, job_pod, syncer, workdir, job_state)
     if first.returncode != 0:
         problems.append(f"db-sync failed on an empty database: {(first.stdout + first.stderr)[-400:]}")
     tables = sh("docker", "exec", DB, "mariadb", f"-u{db_user}", f"-p{db_pass}", db_name, "-Nse",
                 "show tables").stdout.split()
     if "domains" not in tables:
         problems.append(f"db-sync exited but created no `domains` table: {tables}")
-    second = run_once(docs, job_pod, syncer, workdir, shared, {})
+    second = run_once(docs, job_pod, syncer, workdir, job_state)
     if second.returncode != 0:
         problems.append("db-sync failed on its SECOND run. It runs on every release, so this "
                         f"breaks every upgrade: {(second.stdout + second.stderr)[-300:]}")
 
+    # An apply cut off part way leaves the first table and not the last. That must stop the job:
+    # going green would start the server against a schema with holes in it.
+    def db_sql(sql):
+        return sh("docker", "exec", DB, "mariadb", "-uroot", f"-p{ROOT_PASSWORD}", db_name, "-e",
+                  "SET FOREIGN_KEY_CHECKS=0;" + sql)
+
+    db_sql(f"DROP TABLE {tables[-1]};")
+    partial = run_once(docs, job_pod, syncer, workdir, job_state)
+    if partial.returncode == 0:
+        problems.append(f"db-sync exited 0 with table {tables[-1]} missing, so an interrupted "
+                        "apply goes green and the server starts against a broken schema")
+    elif tables[-1] not in partial.stdout + partial.stderr:
+        problems.append("db-sync refused the partial schema without naming the missing table: "
+                        f"{(partial.stdout + partial.stderr)[-300:]}")
+    db_sql("".join(f"DROP TABLE {t};" for t in tables[:-1]))
+    fresh = run_once(docs, job_pod, syncer, workdir, job_state)
+    if fresh.returncode != 0:
+        problems.append("db-sync failed on an empty database after the partial-schema check: "
+                        f"{(fresh.stdout + fresh.stderr)[-300:]}")
+
     # 2. The server, from the rendered container.
-    cmd = ["docker", "run", "-d", "--name", SERVER, "--network", NET]
-    cmd += docker_args(docs, pod, server, workdir, {})
-    for k, v in container_env(docs, server, {}).items():
-        cmd += ["-e", f"{k}={v}"]
-    if server.get("command"):
-        cmd += ["--entrypoint", server["command"][0]]
-    cmd.append(server["image"])
-    cmd += (server.get("command") or [])[1:]
-    cmd += server.get("args") or []
-    created_containers.append(SERVER)
-    sh(*cmd, check=True)
+    started = docker_run(SERVER, docs, pod, server, workdir, new_pod(), detach=True)
+    if started.returncode != 0:
+        measurement_failed(f"the server container did not start: {started.stderr.strip()[-400:]}")
 
     ready = wait_until(lambda: probe(SERVER, server["readinessProbe"]), 45)
     if not ready:
@@ -337,7 +389,20 @@ try:
             problems.append(f"a SOA query for {ZONE} on port {DNS_PORT} did not get an answer "
                             f"(rcode, answers = {answer!r})")
 
-        # 5. The probes must disagree during a database outage, which is the point of having two.
+        # 5. A secondary zone, posted as designate's pdns4 backend posts it. Its primary is an
+        # address nothing answers on, so a NOTIFY from elsewhere is accepted only if the server
+        # trusts the sender. rcode 5 is REFUSED.
+        status = api("POST", "/api/v1/servers/localhost/zones", API_KEY, {
+            "name": SECONDARY_ZONE, "kind": "Slave", "masters": ["192.0.2.1"]})
+        if status != "201":
+            problems.append(f"creating a secondary zone returned {status}, expected 201")
+        rcode = send_notify(SECONDARY_ZONE, DNS_PORT)
+        if rcode != "0":
+            problems.append(f"a NOTIFY for {SECONDARY_ZONE} from a non-primary address got rcode "
+                            f"{rcode!r}, expected 0. designate-worker sends these from its pod "
+                            "address, so a zone it changes would not refresh until its SOA timer.")
+
+        # 6. The probes must disagree during a database outage, which is the point of having two.
         sh("docker", "stop", DB, check=True)
         time.sleep(2)
         if probe(SERVER, server["readinessProbe"]):
@@ -346,6 +411,40 @@ try:
         if not probe(SERVER, server["livenessProbe"]):
             problems.append("liveness FAILS with the database stopped, so an outage restarts the "
                             "server, which repairs nothing")
+
+        # 7. Past the transfer cycle, which is when a secondary next needs the database. Whether
+        # the process survives that is reported, not assumed; what must hold is recovery. A
+        # stopped container is started again, as the kubelet would restart it.
+        cycle = 60
+        time.sleep(cycle + 15)
+        survived = running(SERVER)
+        print(f"after {cycle + 15}s of database outage the server process "
+              f"{'is still running' if survived else 'has exited'}")
+        sh("docker", "start", DB, check=True)
+        if not wait_for_db():
+            measurement_failed("MariaDB did not come back:\n" + db_logs())
+        if not survived:
+            sh("docker", "start", SERVER, check=True)
+        if not wait_until(lambda: probe(SERVER, server["readinessProbe"]), 45):
+            problems.append("the server did not pass readiness after the database came back")
+        else:
+            answer = dns_query(ZONE, DNS_PORT)
+            if answer.split()[:1] != ["0"] or answer.split()[1:2] in ([], ["0"]):
+                problems.append(f"after the outage {ZONE} did not answer: {answer!r}")
+
+        # 8. values.yaml tells operators to narrow this, so doing so must not break the probes.
+        narrow = render(workdir, "--set", "conf.pdns.webserver-allow-from=10.99.0.0/16")
+        narrow_name = SERVER + "-narrow"
+        narrow_server = next(c for c in find(narrow, "Deployment")["spec"]["template"]["spec"]
+                             ["containers"] if c["name"] == "powerdns")
+        docker_run(narrow_name, narrow, pod, narrow_server, workdir, new_pod(), detach=True)
+        if not wait_until(lambda: probe(narrow_name, narrow_server["readinessProbe"]), 45,
+                          narrow_name):
+            problems.append("with webserver-allow-from narrowed, readiness never passes, so "
+                            "following the chart's advice empties the Service")
+        elif not probe(narrow_name, narrow_server["livenessProbe"]):
+            problems.append("with webserver-allow-from narrowed, liveness fails, so following the "
+                            "chart's advice restarts every pod")
 finally:
     cleanup()
     shutil.rmtree(workdir, ignore_errors=True)
@@ -356,7 +455,9 @@ if problems:
         print("  - " + p)
     sys.exit(1)
 
-print("OK: the rendered db-sync applied the schema and re-ran cleanly; the rendered server started "
-      "unprivileged, authenticated its API, served a zone over DNS, and its two probes disagreed "
-      "correctly during a database outage. NOT covered: the Service, the api-key-init Job and "
+print("OK: the rendered db-sync applied the schema, re-ran cleanly and refused a partial one; the "
+      "rendered server started unprivileged, authenticated its API, served a zone over DNS, "
+      "accepted a NOTIFY for a secondary zone from a non-primary address, disagreed correctly on "
+      "its two probes during a database outage, recovered after it, and kept its probes with "
+      "webserver-allow-from narrowed. NOT covered: the Service, the api-key-init Job and "
       "designate, which need a cluster.")
