@@ -1,8 +1,6 @@
 apiVersion: core.krateo.io/v1alpha1
 kind: CompositionDefinition
 metadata:
-  annotations:
-    krateo.io/icon: fa-sitemap
   name: powerdns
   namespace: openstack-system
 spec:
