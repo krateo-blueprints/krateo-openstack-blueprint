@@ -23,6 +23,7 @@ sources:
   - https://opendev.org/openstack/skyline-apiserver
   - https://opendev.org/openstack/skyline-console
   - https://opendev.org/openstack/openstack-helm
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint
 keywords:
   - openstack
   - dashboard

@@ -1,0 +1,9 @@
+# The organisation's publishing standard (krateo-blueprints/charts PUBLISHING.md rule 9): the index
+# publisher is pinned by full commit SHA, because it receives an org-wide write token, and a new
+# publisher release reaches this repository as a reviewed pull request from here.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

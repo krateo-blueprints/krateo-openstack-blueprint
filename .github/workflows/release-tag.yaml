@@ -64,6 +64,22 @@ jobs:
             exit 1
           fi
 
+      # The Marketplace installs what the helm index at krateo-blueprints/charts lists, not what
+      # GHCR holds. Nothing published there from 0.2.0 (2026-10-09) to 0.3.36, so for weeks the
+      # Marketplace installed 0.2.0, which predates every fix since, while every release here
+      # succeeded. The publish-index job below needs this secret. Refuse here, before anything is
+      # pushed, so a missing token fails the release instead of leaving GHCR and the index at
+      # different versions.
+      - name: The Marketplace index token must be present
+        env:
+          CHARTS_PUBLISH_TOKEN: ${{ secrets.CHARTS_PUBLISH_TOKEN }}
+        run: |
+          if [ -z "${CHARTS_PUBLISH_TOKEN}" ]; then
+            echo "::error::secret CHARTS_PUBLISH_TOKEN is not set, so this release could not reach the"
+            echo "::error::Marketplace index and the Marketplace would keep installing an old version."
+            exit 1
+          fi
+
       - name: Install Helm
         uses: azure/setup-helm@v4
 
@@ -91,6 +107,14 @@ jobs:
           done < <(find blueprints -type f -name compositiondefinition.yaml -not -path '*/charts/*' -print0)
           echo "stamped ${cdcount} CompositionDefinition(s) -> ${VERSION}"
 
+          # Ship each stamped CompositionDefinition inside its own chart, at the chart root where
+          # helm packages it but never renders it. The Marketplace index refuses a chart whose
+          # archive has no compositiondefinition.yaml, and an index entry is what the Marketplace
+          # installs from. The copy is the stamped file, so the chart and the release asset agree.
+          for dir in blueprints/*/chart; do
+            cp "$(dirname "$dir")/compositiondefinition.yaml" "$dir/compositiondefinition.yaml"
+          done
+
           find . -type f -name Chart.yaml -not -path '*/charts/*' -print0 | while IFS= read -r -d '' cf; do
             dir=$(dirname "$cf")
             name=$(awk '/^name:/{print $2; exit}' "$cf")
@@ -116,6 +140,21 @@ jobs:
             # single file:// path carries no information worth maintaining in 35 copies.
             helm dependency update "$dir" --skip-refresh
             helm package "$dir" --version "${VERSION}" --destination .
+            # Assert the archive, not the copy above. helm package exits 0 whether or not the
+            # CompositionDefinition is in the chart directory, so a copy that stopped working would
+            # give a green release here and a refusal at the Marketplace index after GHCR already
+            # held this version. Blueprint charts only; helm-toolkit and the PoC carry none.
+            case "$dir" in
+              ./blueprints/*/chart)
+                members=$(tar tzf "${name}-${VERSION}.tgz")
+                for want in "${name}/compositiondefinition.yaml" "${name}/values.schema.json"; do
+                  if ! grep -qxF "$want" <<< "$members"; then
+                    echo "::error::${name}-${VERSION}.tgz lacks ${want}; refusing to push"
+                    exit 1
+                  fi
+                done
+                ;;
+            esac
             # Retry: this push fails transiently. The 0.3.13 release died on
             #   failed to perform "Tag" on destination: sha256:405b...: not found
             # for one chart after others had pushed fine, and an unchanged re-run succeeded.
@@ -161,6 +200,22 @@ jobs:
           fi
           echo "all charts resolve at ${VERSION}"
           echo "::endgroup::"
+
+          # The same bytes that went to GHCR, for the index. Blueprint charts only: helm-toolkit
+          # and the proof-of-concept chart are not blueprints and the index gate would refuse them.
+          mkdir -p charts-dist
+          for dir in ./blueprints/*/chart; do
+            name=$(awk '/^name:/{print $2; exit}' "$dir/Chart.yaml")
+            mv "${name}-${VERSION}.tgz" charts-dist/
+          done
+          echo "kept $(find charts-dist -name '*.tgz' | wc -l | tr -d ' ') blueprint tarball(s) for the index"
+
+      - name: Hand the blueprint tarballs to the index job
+        uses: actions/upload-artifact@v4
+        with:
+          name: charts-dist
+          path: charts-dist/*.tgz
+          if-no-files-found: error
 
       - name: Publish the stamped CompositionDefinitions and example Compositions as release assets
         env:
@@ -221,3 +276,19 @@ jobs:
           done
           gh release view "${VERSION}" >/dev/null   # no release by now is a real failure
           gh release upload "${VERSION}" dist/*.yaml --clobber
+
+  # The Marketplace reads https://krateo-blueprints.github.io/charts/blueprints/index.yaml and installs
+  # the version its entry names. How every chart in the organisation gets there is decided once, in
+  # krateo-blueprints/charts PUBLISHING.md, and enforced by its publisher.
+  publish-index:
+    needs: package-and-push
+    # The organisation's one publisher, pinned by full commit SHA because it receives an org-wide
+    # write token (krateo-blueprints/charts PUBLISHING.md rule 9); Dependabot proposes upgrades. It also
+    # reads the served index and installs every chart anonymously before it succeeds.
+    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@a2d63ba50e138b17f678528d6d6be3afef48715a # 1.0.0
+    with:
+      source_repo: ${{ github.repository }}
+      git_tag: ${{ github.ref_name }}
+      channel: blueprints
+    secrets:
+      PUBLISH_TOKEN: ${{ secrets.CHARTS_PUBLISH_TOKEN }}

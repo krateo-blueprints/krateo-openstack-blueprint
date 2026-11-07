@@ -24,6 +24,7 @@ icon: https://www.openstack.org/themes/openstack/images/project-mascots/Octavia/
 sources:
   - https://opendev.org/openstack/octavia
   - https://opendev.org/openstack/openstack-helm
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint
 keywords:
   - openstack
   - load-balancer

@@ -22,6 +22,7 @@ icon: https://docs.openvswitch.org/en/latest/_static/logo.png
 sources:
   - https://github.com/openvswitch/ovs
   - https://opendev.org/openstack/openstack-helm
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint
 keywords:
   - openstack
   - networking

@@ -24,6 +24,7 @@ icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media
 sources:
   - https://opendev.org/openstack/aodh
   - https://opendev.org/openstack/openstack-helm
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint
 keywords:
   - openstack
   - alarming

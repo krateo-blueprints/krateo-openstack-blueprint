@@ -23,6 +23,7 @@ sources:
   - https://opendev.org/openstack/masakari
   - https://opendev.org/openstack/masakari-monitors
   - https://opendev.org/openstack/openstack-helm
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint
 keywords:
   - openstack
   - high-availability
