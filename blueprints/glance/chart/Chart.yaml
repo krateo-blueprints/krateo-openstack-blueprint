@@ -22,6 +22,7 @@ icon: https://www.openstack.org/themes/openstack/images/project-mascots/Glance/O
 sources:
   - https://opendev.org/openstack/glance
   - https://opendev.org/openstack/openstack-helm
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint
 keywords:
   - openstack
   - image

@@ -22,6 +22,7 @@ icon: https://www.openstack.org/software/images/mascots/freezer.png
 sources:
   - https://opendev.org/openstack/freezer
   - https://opendev.org/openstack/freezer-api
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint
 keywords:
   - openstack
   - backup

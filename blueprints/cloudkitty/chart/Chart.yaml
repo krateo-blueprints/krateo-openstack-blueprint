@@ -22,6 +22,7 @@ icon: https://opendev.org/openstack/cloudkitty/media/branch/master/doc/source/im
 sources:
   - https://opendev.org/openstack/cloudkitty
   - https://opendev.org/openstack/openstack-helm
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint
 keywords:
   - openstack
   - rating

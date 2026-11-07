@@ -22,6 +22,7 @@ icon: https://www.openstack.org/themes/openstack/images/project-mascots/Cyborg/O
 sources:
   - https://opendev.org/openstack/cyborg
   - https://opendev.org/openstack/openstack-helm
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint
 keywords:
   - openstack
   - accelerator
