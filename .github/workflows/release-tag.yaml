@@ -294,7 +294,7 @@ jobs:
     # The organisation's one publisher, pinned by full commit SHA because it receives an org-wide
     # write token (krateo-blueprints/charts PUBLISHING.md rule 9); Dependabot proposes upgrades. It also
     # reads the served index and installs every chart anonymously before it succeeds.
-    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@36ea357cb0fe4b49628cc984d9939babf0049d03 # 1.0.1
+    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@f0138e816ce827279ad087202889c009899741f7 # 1.0.2
     with:
       source_repo: ${{ github.repository }}
       git_tag: ${{ github.ref_name }}
