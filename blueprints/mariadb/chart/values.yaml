@@ -803,9 +803,13 @@ volume:
     enabled: true
     size: 5Gi
   chown_on_start: true
-  class_name: general
-  enabled: false
+  # `default` leaves storageClassName unset, so the claim takes the cluster's default class.
+  # Upstream's `general` exists on no cluster this blueprint targets.
+  class_name: default
+  # Every OpenStack database lives here. This was a hostPath under /tmp until #177: a node
+  # restart on kind emptied it, and start.py then crash-looped on the missing grastate.dat.
+  enabled: true
   size: 5Gi
   use_local_path_for_single_pod_cluster:
-    enabled: true
+    enabled: false
     host_path: /tmp/mysql-data

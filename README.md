@@ -336,6 +336,36 @@ swift looked attractive — it is a component this blueprint provides — and mo
 PVC proved unprovisionable here. If you select swift, you select it because you want object
 storage.
 
+## MariaDB and RabbitMQ need a default StorageClass
+
+From 0.3.36 both keep their data on a PersistentVolumeClaim, so the cluster needs a default
+StorageClass. Check with:
+
+```bash
+kubectl get storageclass
+```
+
+Without one the claims stay `Pending`, `mariadb-server-0` and `rabbitmq-rabbitmq-0` stay `Pending`
+with them, and nothing that depends on them starts. To use a named class, or more capacity, set it
+before the first install, because Kubernetes refuses a later change to a StatefulSet's claims:
+
+```yaml
+spec:
+  componentValues:
+    mariadb:
+      volume:
+        class_name: my-class
+        size: 20Gi
+    rabbitmq:
+      volume:
+        class_name: my-class
+```
+
+**Up to and including 0.3.35, both stored their data on the node**: MariaDB at `/tmp/mysql-data`
+and RabbitMQ at `/var/lib/rabbitmq`. On those releases a pod that lands on another node does not
+find its data. On kind, where a node's `/tmp` is tmpfs, a node restart destroyed every OpenStack
+database and MariaDB never recovered ([#177](https://github.com/krateo-blueprints/krateo-openstack-blueprint/issues/177)).
+
 ## One install per cluster
 
 **A second OpenStack blueprint cannot be installed onto a cluster that already has one**, in any

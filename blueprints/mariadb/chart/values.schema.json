@@ -38,6 +38,26 @@
           }
         }
       }
+    },
+    "volume": {
+      "type": "object",
+      "title": "Volume",
+      "description": "The PersistentVolumeClaim holding every OpenStack database. Read when the StatefulSet is first created: Kubernetes refuses a later change to it.",
+      "properties": {
+        "class_name": {
+          "type": "string",
+          "title": "StorageClass",
+          "description": "StorageClass for the claim. `default` leaves it unset, so the cluster's default class is used.",
+          "default": "default"
+        },
+        "size": {
+          "type": "string",
+          "title": "Size",
+          "description": "Requested capacity, as a Kubernetes quantity.",
+          "default": "5Gi",
+          "pattern": "^[0-9]+(Mi|Gi|Ti)$"
+        }
+      }
     }
   }
 }
