@@ -64,6 +64,22 @@ jobs:
             exit 1
           fi
 
+      # The Marketplace installs what the helm index at krateo-blueprints/charts lists, not what
+      # GHCR holds. Nothing published there from 0.2.0 (2026-10-09) to 0.3.36, so for weeks the
+      # Marketplace installed 0.2.0, which predates every fix since, while every release here
+      # succeeded. The publish-index job below needs this secret. Refuse here, before anything is
+      # pushed, so a missing token fails the release instead of leaving GHCR and the index at
+      # different versions.
+      - name: The Marketplace index token must be present
+        env:
+          CHARTS_PUBLISH_TOKEN: ${{ secrets.CHARTS_PUBLISH_TOKEN }}
+        run: |
+          if [ -z "${CHARTS_PUBLISH_TOKEN}" ]; then
+            echo "::error::secret CHARTS_PUBLISH_TOKEN is not set, so this release could not reach the"
+            echo "::error::Marketplace index and the Marketplace would keep installing an old version."
+            exit 1
+          fi
+
       - name: Install Helm
         uses: azure/setup-helm@v4
 
@@ -90,6 +106,14 @@ jobs:
             sed -i "s/CHART_VERSION/${VERSION}/g" "$cd"; cdcount=$((cdcount+1))
           done < <(find blueprints -type f -name compositiondefinition.yaml -not -path '*/charts/*' -print0)
           echo "stamped ${cdcount} CompositionDefinition(s) -> ${VERSION}"
+
+          # Ship each stamped CompositionDefinition inside its own chart, at the chart root where
+          # helm packages it but never renders it. The Marketplace index refuses a chart whose
+          # archive has no compositiondefinition.yaml, and an index entry is what the Marketplace
+          # installs from. The copy is the stamped file, so the chart and the release asset agree.
+          for dir in blueprints/*/chart; do
+            cp "$(dirname "$dir")/compositiondefinition.yaml" "$dir/compositiondefinition.yaml"
+          done
 
           find . -type f -name Chart.yaml -not -path '*/charts/*' -print0 | while IFS= read -r -d '' cf; do
             dir=$(dirname "$cf")
@@ -162,6 +186,22 @@ jobs:
           echo "all charts resolve at ${VERSION}"
           echo "::endgroup::"
 
+          # The same bytes that went to GHCR, for the index. Blueprint charts only: helm-toolkit
+          # and the proof-of-concept chart are not blueprints and the index gate would refuse them.
+          mkdir -p charts-dist
+          for dir in ./blueprints/*/chart; do
+            name=$(awk '/^name:/{print $2; exit}' "$dir/Chart.yaml")
+            mv "${name}-${VERSION}.tgz" charts-dist/
+          done
+          echo "kept $(find charts-dist -name '*.tgz' | wc -l | tr -d ' ') blueprint tarball(s) for the index"
+
+      - name: Hand the blueprint tarballs to the index job
+        uses: actions/upload-artifact@v4
+        with:
+          name: charts-dist
+          path: charts-dist/*.tgz
+          if-no-files-found: error
+
       - name: Publish the stamped CompositionDefinitions and example Compositions as release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -216,3 +256,50 @@ jobs:
           done
           gh release view "${VERSION}" >/dev/null   # no release by now is a real failure
           gh release upload "${VERSION}" dist/*.yaml --clobber
+
+  # The Marketplace reads https://krateo-blueprints.github.io/charts/blueprints/index.yaml and
+  # installs the version its entry names. The shared publisher gates each chart (schema, CD, https
+  # icon), attaches the tarballs to this tag's release, and merges the index.
+  publish-index:
+    needs: package-and-push
+    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@main
+    with:
+      source_repo: ${{ github.repository }}
+      git_tag: ${{ github.ref_name }}
+      channel: blueprints
+    secrets:
+      PUBLISH_TOKEN: ${{ secrets.CHARTS_PUBLISH_TOKEN }}
+
+  # A merge commit on gh-pages is not proof the Marketplace sees it: Pages has to rebuild, and an
+  # entry the gate dropped would leave the old version listed. Read the served index and require
+  # every blueprint's newest entry to be this tag.
+  verify-index:
+    needs: publish-index
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Every blueprint's newest Marketplace entry is this release
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          names=$(for d in blueprints/*/chart; do awk '/^name:/{print $2; exit}' "$d/Chart.yaml"; done)
+          [ -n "$names" ] || { echo "::error::found no blueprint charts to check"; exit 1; }
+          for attempt in $(seq 1 20); do
+            curl -fsSL "https://krateo-blueprints.github.io/charts/blueprints/index.yaml?ts=$(date +%s)" -o index.yaml
+            stale=""
+            for n in $names; do
+              got=$(yq -r ".entries.\"${n}\"[0].version // \"absent\"" index.yaml)
+              [ "$got" = "$VERSION" ] || stale="${stale} ${n}=${got}"
+            done
+            if [ -z "$stale" ]; then
+              echo "all $(echo "$names" | wc -w | tr -d ' ') blueprints list ${VERSION} first"
+              exit 0
+            fi
+            echo "attempt ${attempt}: not yet at ${VERSION}:${stale}"
+            sleep 30
+          done
+          echo "::error::the Marketplace index still lists another version for:${stale}"
+          exit 1

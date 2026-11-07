@@ -431,6 +431,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 hack/gen-portal-widgets.py . --check
 
+      # The Marketplace installs what the helm index at krateo-blueprints/charts lists. Its gate
+      # refuses a chart without a schema or an https icon, and at release time that refusal comes
+      # after GHCR already holds the version, so the two disagree: the state that had the
+      # Marketplace installing 0.2.0 for weeks. Refuse here instead.
+      - name: Every blueprint chart is one the Marketplace index will accept
+        run: python3 hack/validate-marketplace-metadata.py .
+
       - name: YAML this repo authors uses block style
         run: python3 hack/validate-yaml-block-style.py .
 
