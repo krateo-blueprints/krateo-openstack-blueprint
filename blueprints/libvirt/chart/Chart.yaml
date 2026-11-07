@@ -22,6 +22,7 @@ icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media
 sources:
   - https://libvirt.org/git/?p=libvirt.git;a=summary
   - https://opendev.org/openstack/openstack-helm
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint
 keywords:
   - openstack
   - libvirt

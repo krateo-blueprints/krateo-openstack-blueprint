@@ -9,13 +9,16 @@ come from the tree, and a refusal at release time arrives after GHCR already hol
 so the index and GHCR would disagree, which is the state that had the Marketplace installing
 0.2.0 for weeks. This gate moves that refusal to the pull request.
 
-It also requires `keywords`, because the Marketplace shows them as the tile's tags.
+It also requires `keywords`, which the Marketplace shows as the tile's tags, and `sources:` listing
+this repository, which the installer uses to trace a pinned chart to the commit that built it.
+The publisher refuses both (krateo-blueprints/charts PUBLISHING.md rule 3).
 
 For each blueprints/<name>/chart/Chart.yaml:
 
 - `name` equals the directory name, because the index is keyed by it;
 - `icon` is an absolute https URL;
 - `keywords` is a non-empty list;
+- `sources` lists https://github.com/krateo-blueprints/krateo-openstack-blueprint;
 - chart/values.schema.json exists;
 - blueprints/<name>/compositiondefinition.yaml exists, for the release to put in the archive.
 
@@ -29,6 +32,8 @@ try:
     import yaml
 except ImportError:
     sys.exit("ERROR: PyYAML is required")
+
+SOURCE_REPO = "https://github.com/krateo-blueprints/krateo-openstack-blueprint"
 
 ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 \
     else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -54,6 +59,8 @@ def main():
         kw = meta.get("keywords")
         if not isinstance(kw, list) or not kw:
             problems.append(f"{bp}: keywords must be a non-empty list (the Marketplace's tags)")
+        if SOURCE_REPO not in (meta.get("sources") or []):
+            problems.append(f"{bp}: sources must list {SOURCE_REPO}, the repository that builds it")
         if not os.path.isfile(os.path.join(chart_dir, "values.schema.json")):
             problems.append(f"{bp}: chart/values.schema.json is missing")
         if not os.path.isfile(os.path.join(bp_dir, "compositiondefinition.yaml")):

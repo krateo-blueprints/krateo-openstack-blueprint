@@ -21,6 +21,7 @@ home: https://docs.openstack.org/zaqar/
 icon: https://www.openstack.org/themes/openstack/images/project-mascots/Zaqar/OpenStack_Project_Zaqar_vertical.png
 sources:
   - https://opendev.org/openstack/zaqar
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint
 keywords:
   - openstack
   - messaging

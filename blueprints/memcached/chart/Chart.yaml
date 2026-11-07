@@ -19,6 +19,10 @@ type: application
 version: CHART_VERSION
 home: https://github.com/memcached/memcached
 icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
+sources:
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint
+  - https://github.com/memcached/memcached
+  - https://opendev.org/openstack/openstack-helm
 keywords:
   - openstack
   - cache
