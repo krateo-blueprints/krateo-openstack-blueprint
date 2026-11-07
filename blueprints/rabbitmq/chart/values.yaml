@@ -333,9 +333,14 @@ secrets:
         internal: rabbitmq-tls-direct
 volume:
   chown_on_start: true
-  class_name: general
-  enabled: false
+  # `default` leaves storageClassName unset, so the claim takes the cluster's default class.
+  # Upstream's `general` exists on no cluster this blueprint targets.
+  class_name: default
+  # The broker's users, vhosts and durable queues live here, and nothing recreates them: the
+  # per-service rabbit-init jobs have already run. A hostPath stays behind when the pod moves
+  # to another node (#177).
+  enabled: true
   size: 768Mi
   use_local_path:
-    enabled: true
+    enabled: false
     host_path: /var/lib/rabbitmq

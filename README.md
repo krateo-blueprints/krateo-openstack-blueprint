@@ -336,6 +336,85 @@ swift looked attractive — it is a component this blueprint provides — and mo
 PVC proved unprovisionable here. If you select swift, you select it because you want object
 storage.
 
+## MariaDB and RabbitMQ need a default StorageClass
+
+From 0.3.36 both keep their data on a PersistentVolumeClaim, so the cluster needs a default
+StorageClass. Check with:
+
+```bash
+kubectl get storageclass
+```
+
+Without one the claims stay `Pending`, `mariadb-server-0` and `rabbitmq-rabbitmq-0` stay `Pending`
+with them, and nothing that depends on them starts. To use a named class, or more capacity, set it
+before the first install, because Kubernetes refuses a later change to a StatefulSet's claims:
+
+```yaml
+spec:
+  componentValues:
+    mariadb:
+      volume:
+        class_name: my-class
+        size: 20Gi
+    rabbitmq:
+      volume:
+        class_name: my-class
+```
+
+**Up to and including 0.3.35, both stored their data on the node**: MariaDB at `/tmp/mysql-data`
+and RabbitMQ at `/var/lib/rabbitmq`. On those releases a pod that lands on another node does not
+find its data. On kind, where a node's `/tmp` is tmpfs, a node restart destroyed every OpenStack
+database and MariaDB never recovered ([#177](https://github.com/krateo-blueprints/krateo-openstack-blueprint/issues/177)).
+
+### Upgrading from 0.3.35 or earlier: migrate first
+
+**Do not apply the 0.3.36 `CompositionDefinition` to an existing install until both components
+are migrated.** Kubernetes refuses to add claims to an existing StatefulSet. When that happens
+the controller does not roll back: it patches the rest of the chart and keeps retrying the
+StatefulSet, with `Ready=Unknown`. A Helm hook cannot do the move either, because the controller
+runs hooks after it has applied the change. Measured with composition-dynamic-controller 2.13.71
+and 2.13.72 on GKE.
+
+So run `hack/migrate-to-pvc.py` on either side of the upgrade:
+
+```bash
+CTX=my-cluster-context     # always explicit; the script refuses to use the current context
+
+for c in mariadb rabbitmq; do
+  hack/migrate-to-pvc.py prepare --context "$CTX" --namespace openstack --component "$c"           # plan
+  hack/migrate-to-pvc.py prepare --context "$CTX" --namespace openstack --component "$c" --apply
+done
+
+# now apply the 0.3.36 CompositionDefinition, as in "Install" above
+
+for c in mariadb rabbitmq; do
+  hack/migrate-to-pvc.py finish --context "$CTX" --namespace openstack --component "$c" --apply
+done
+```
+
+`prepare` sets `krateo.io/paused` on the component's Composition and stops the StatefulSet. It
+then checks that the node path really holds state, which means `grastate.dat` for MariaDB and
+`mnesia` for RabbitMQ, and copies it into the claim the new StatefulSet will use. It compares file
+counts and bytes, and only then deletes the old StatefulSet. `finish` waits until the Composition
+is labelled with the new version, removes the pause, and waits for the pod to be Ready on the
+claim. The node path is left in place, so delete it yourself once you are satisfied.
+
+OpenStack is down from `prepare` until `finish` completes. `prepare` refuses, and leaves the
+component paused at 0 replicas rather than half-migrated, when:
+
+- the StatefulSet has more than one replica, because each pod's data is on a different node;
+- the pod was never scheduled, so nothing says which node holds the data;
+- the node path has no state in it. That is the #177 failure, where the data was already gone.
+  Copying the empty directory would turn a crash loop into an empty database that looks
+  healthy, so the install needs reinstalling instead.
+
+`finish` refuses while the Composition is still at the old version. If it stays there after the
+new definition is applied, that component's definition does not approve migration (see
+"Hard incompatibility" below), so it keeps the old chart and its node path.
+
+CI runs the whole sequence against each released 0.3.35 chart with real data in it
+(`hack/smoke-migrate-to-pvc.sh`). It also checks that an emptied node path is refused.
+
 ## One install per cluster
 
 **A second OpenStack blueprint cannot be installed onto a cluster that already has one**, in any

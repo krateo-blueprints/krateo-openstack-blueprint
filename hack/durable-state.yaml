@@ -1,0 +1,20 @@
+# Components whose state exists nowhere else, and where it must live. A pod that moves to another
+# node, or a node that is replaced, must find this state again, so each of these volumes has to
+# be a claim from the StatefulSet's volumeClaimTemplates. Issue #177.
+#
+# hack/validate-durable-state.py asserts it against the rendered charts.
+#
+# Each entry:
+#   component    the blueprint
+#   statefulset  the StatefulSet that holds the state
+#   volume       the volume name, which is also the claim template's name
+#   mountPath    where the containers read it
+durable:
+  - component: mariadb
+    statefulset: mariadb-server
+    volume: mysql-data
+    mountPath: /var/lib/mysql
+  - component: rabbitmq
+    statefulset: rabbitmq-rabbitmq
+    volume: rabbitmq-data
+    mountPath: /var/lib/rabbitmq
