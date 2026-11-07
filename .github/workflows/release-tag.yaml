@@ -272,51 +272,17 @@ jobs:
           gh release view "${VERSION}" >/dev/null   # no release by now is a real failure
           gh release upload "${VERSION}" dist/*.yaml --clobber
 
-  # The Marketplace reads https://krateo-blueprints.github.io/charts/blueprints/index.yaml and
-  # installs the version its entry names. The shared publisher gates each chart (schema, CD, https
-  # icon), attaches the tarballs to this tag's release, and merges the index.
+  # The Marketplace reads https://krateo-blueprints.github.io/charts/blueprints/index.yaml and installs
+  # the version its entry names. How every chart in the organisation gets there is decided once, in
+  # krateo-blueprints/charts PUBLISHING.md, and enforced by its publisher.
   publish-index:
     needs: package-and-push
-    # Pinned to the commit that stops the publisher creating a release per chart here, each of which
-    # took this repo's Latest (krateo-blueprints/charts#5).
-    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@b6c202b787fd215cb335284040449eaa8f24c80a
+    # The organisation's one publisher, at its major tag (krateo-blueprints/charts PUBLISHING.md).
+    # It also reads the served index and installs every chart anonymously before it succeeds.
+    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@1
     with:
       source_repo: ${{ github.repository }}
       git_tag: ${{ github.ref_name }}
       channel: blueprints
     secrets:
       PUBLISH_TOKEN: ${{ secrets.CHARTS_PUBLISH_TOKEN }}
-
-  # A merge commit on gh-pages is not proof the Marketplace sees it: Pages has to rebuild, and an
-  # entry the gate dropped would leave the old version listed. Read the served index and require
-  # every blueprint's newest entry to be this tag.
-  verify-index:
-    needs: publish-index
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Every blueprint's newest Marketplace entry is this release
-        env:
-          VERSION: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          names=$(for d in blueprints/*/chart; do awk '/^name:/{print $2; exit}' "$d/Chart.yaml"; done)
-          [ -n "$names" ] || { echo "::error::found no blueprint charts to check"; exit 1; }
-          for attempt in $(seq 1 20); do
-            curl -fsSL "https://krateo-blueprints.github.io/charts/blueprints/index.yaml?ts=$(date +%s)" -o index.yaml
-            stale=""
-            for n in $names; do
-              got=$(yq -r ".entries.\"${n}\"[0].version // \"absent\"" index.yaml)
-              [ "$got" = "$VERSION" ] || stale="${stale} ${n}=${got}"
-            done
-            if [ -z "$stale" ]; then
-              echo "all $(echo "$names" | wc -w | tr -d ' ') blueprints list ${VERSION} first"
-              exit 0
-            fi
-            echo "attempt ${attempt}: not yet at ${VERSION}:${stale}"
-            sleep 30
-          done
-          echo "::error::the Marketplace index still lists another version for:${stale}"
-          exit 1
