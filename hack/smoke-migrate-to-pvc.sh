@@ -50,6 +50,13 @@ esac
 for tool in kind kubectl helm python3; do
   command -v "$tool" >/dev/null || { echo "FAIL: $tool is not installed, so nothing was tested" >&2; exit 2; }
 done
+# The upgrade must merge the way composition-dynamic-controller's Helm 3 library does. Helm 4
+# applies server-side and fails on the mariadb Service selector that mariadb-controller owns,
+# and only when that controller got there first, which makes the result depend on timing.
+case "$(helm version --template '{{.Version}}')" in
+  v3.*) ;;
+  *) echo "FAIL: this needs Helm 3 to upgrade the way Krateo does; found $(helm version --short)" >&2; exit 2 ;;
+esac
 
 k() { kubectl --kubeconfig "$KC" --context "$CTX" -n "$NS" "$@"; }
 h() { helm --kubeconfig "$KC" --kube-context "$CTX" -n "$NS" "$@"; }

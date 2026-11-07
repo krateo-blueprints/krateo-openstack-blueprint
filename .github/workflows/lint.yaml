@@ -94,8 +94,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Helm 3, pinned to the library composition-dynamic-controller builds on (plumbing's
+      # go.mod: helm.sh/helm/v3 v3.20.2). The default here became Helm 4, which upgrades with
+      # server-side apply. mariadb-controller owns the mariadb Service's .spec.selector, because
+      # it points it at the leader pod, so Helm 4 refused the upgrade with a field conflict. It
+      # did that only when the controller had already written the selector: it passed on the PR
+      # and failed on main. Helm 3's three-way merge leaves a field the chart does not change
+      # alone, and that is what an install through Krateo does.
       - name: Install Helm
         uses: azure/setup-helm@v4
+        with:
+          version: v3.20.2
 
       - name: Install Python
         uses: actions/setup-python@v5
