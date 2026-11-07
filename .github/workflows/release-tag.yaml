@@ -79,6 +79,15 @@ jobs:
             echo "::error::Marketplace index and the Marketplace would keep installing an old version."
             exit 1
           fi
+          # Shape as well as presence: a token with a trailing newline passes the API and then breaks
+          # git, after this release has already pushed to GHCR (krateo-blueprints/charts#10). The value
+          # is never printed.
+          case "${CHARTS_PUBLISH_TOKEN}" in
+            *[[:space:]]*|*[[:cntrl:]]*)
+              echo "::error::secret CHARTS_PUBLISH_TOKEN contains whitespace or a control character, usually a"
+              echo "::error::trailing newline. Re-save it by pasting at the prompt of 'gh secret set ... --org krateo-blueprints'."
+              exit 1 ;;
+          esac
 
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -285,7 +294,7 @@ jobs:
     # The organisation's one publisher, pinned by full commit SHA because it receives an org-wide
     # write token (krateo-blueprints/charts PUBLISHING.md rule 9); Dependabot proposes upgrades. It also
     # reads the served index and installs every chart anonymously before it succeeds.
-    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@a2d63ba50e138b17f678528d6d6be3afef48715a # 1.0.0
+    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@36ea357cb0fe4b49628cc984d9939babf0049d03 # 1.0.1
     with:
       source_repo: ${{ github.repository }}
       git_tag: ${{ github.ref_name }}
