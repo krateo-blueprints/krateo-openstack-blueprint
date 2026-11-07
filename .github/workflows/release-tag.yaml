@@ -140,6 +140,21 @@ jobs:
             # single file:// path carries no information worth maintaining in 35 copies.
             helm dependency update "$dir" --skip-refresh
             helm package "$dir" --version "${VERSION}" --destination .
+            # Assert the archive, not the copy above. helm package exits 0 whether or not the
+            # CompositionDefinition is in the chart directory, so a copy that stopped working would
+            # give a green release here and a refusal at the Marketplace index after GHCR already
+            # held this version. Blueprint charts only; helm-toolkit and the PoC carry none.
+            case "$dir" in
+              ./blueprints/*/chart)
+                members=$(tar tzf "${name}-${VERSION}.tgz")
+                for want in "${name}/compositiondefinition.yaml" "${name}/values.schema.json"; do
+                  if ! grep -qxF "$want" <<< "$members"; then
+                    echo "::error::${name}-${VERSION}.tgz lacks ${want}; refusing to push"
+                    exit 1
+                  fi
+                done
+                ;;
+            esac
             # Retry: this push fails transiently. The 0.3.13 release died on
             #   failed to perform "Tag" on destination: sha256:405b...: not found
             # for one chart after others had pushed fine, and an unchanged re-run succeeded.
