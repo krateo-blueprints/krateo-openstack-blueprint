@@ -76,6 +76,43 @@ jobs:
       - name: The rendered powerdns pods must actually serve
         run: python3 hack/smoke-powerdns.py .
 
+  migrate-to-pvc:
+    # Gating. Up to 0.3.35 mariadb and rabbitmq kept their state on a hostPath, and 0.3.36 moves
+    # it onto a claim. Kubernetes refuses that change on an existing StatefulSet, so an existing
+    # install needs hack/migrate-to-pvc.py BEFORE upgrading (#177). This runs the script against
+    # each RELEASED 0.3.35 chart with real state in it, upgrades to this tree, and requires the
+    # state to be readable afterwards, plus a refusal on an emptied node path. On amd64,
+    # because rabbitmq cannot run on Apple Silicon (#114).
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - mariadb
+          - rabbitmq
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: Install kind
+        run: |
+          go install sigs.k8s.io/kind@v0.27.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: State moved by the migration script must survive the upgrade
+        run: hack/smoke-migrate-to-pvc.sh ${{ matrix.component }} .
+
   capability-roles:
     # Gating. A capability aggregates into a predefined role via a
     # `rbac.krateo.io/aggregate-to-<role>=true` label, and nothing validates the <role>.
