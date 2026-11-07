@@ -1,6 +1,8 @@
 apiVersion: core.krateo.io/v1alpha1
 kind: CompositionDefinition
 metadata:
+  annotations:
+    krateo.io/icon: fa-ethernet
   name: openvswitch
   namespace: openstack-system
 spec:

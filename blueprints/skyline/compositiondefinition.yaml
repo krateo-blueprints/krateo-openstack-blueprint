@@ -1,6 +1,8 @@
 apiVersion: core.krateo.io/v1alpha1
 kind: CompositionDefinition
 metadata:
+  annotations:
+    krateo.io/icon: fa-gauge-high
   name: skyline
   namespace: openstack-system
 spec:
