@@ -262,7 +262,9 @@ jobs:
   # icon), attaches the tarballs to this tag's release, and merges the index.
   publish-index:
     needs: package-and-push
-    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@main
+    # Pinned to the commit that stops the publisher creating a release per chart here, each of which
+    # took this repo's Latest (krateo-blueprints/charts#5).
+    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@b6c202b787fd215cb335284040449eaa8f24c80a
     with:
       source_repo: ${{ github.repository }}
       git_tag: ${{ github.ref_name }}
