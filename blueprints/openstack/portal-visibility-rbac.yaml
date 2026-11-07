@@ -1,0 +1,75 @@
+# Makes the OpenStack blueprints visible on the Krateo portal's Blueprints page.
+#
+# Apply this once, as an administrator, alongside the CompositionDefinitions. It is published as a
+# release asset:
+#
+#   kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/<version>/portal-visibility-rbac.yaml
+#
+# ---------------------------------------------------------------------------------------------
+# WHY IT IS NEEDED
+#
+# The portal's Blueprints page lists CompositionDefinitions cluster-wide, then filters them to the
+# namespaces where the signed-in user may `list compositiondefinitions.core.krateo.io`. The filter
+# is the portal chart's restaction.blueprints-cards (`userAccessFilter`, verb list, namespace taken
+# from each CD). All 37 of this blueprint's CompositionDefinitions live in `openstack-system`, and
+# nothing else grants that verb there, so without this file the page shows them to nobody but
+# cluster administrators.
+#
+# Visibility is the blueprint's own declaration, next to its CompositionDefinitions. That is the
+# portal's model (krateo-platformops/portal#261), and it is why this lives here rather than in the
+# portal chart.
+#
+# ---------------------------------------------------------------------------------------------
+# THE GROUPS
+#
+# `admins` and `devs` are the portal's defaults for who may open the Blueprints page
+# (`blueprints-page.readerGroups` in the portal chart). Binding the same groups means everyone who
+# can open the page sees these blueprints, and nobody else gets the grant for nothing. If your
+# portal install overrides `blueprints-page.readerGroups`, change the subjects below to match: a
+# group missing here sees an empty page, and a group here that cannot open the page gains only the
+# right to list these definitions.
+#
+# The grant is `get`, `list` and `watch` on CompositionDefinitions in `openstack-system` only. It
+# exposes each definition's chart URL, version and status. It does not grant creating anything:
+# installing is a separate permission.
+#
+# Apply once per cluster, not per release. No object name carries a version, so re-applying is
+# harmless and an upgrade needs nothing.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: krateo-openstack-blueprints-viewer
+  namespace: openstack-system
+  labels:
+    app.kubernetes.io/name: openstack
+    app.kubernetes.io/component: portal-visibility
+rules:
+  - apiGroups:
+      - core.krateo.io
+    resources:
+      - compositiondefinitions
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: krateo-openstack-blueprints-viewer
+  namespace: openstack-system
+  labels:
+    app.kubernetes.io/name: openstack
+    app.kubernetes.io/component: portal-visibility
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: krateo-openstack-blueprints-viewer
+subjects:
+  - kind: Group
+    name: admins
+    apiGroup: rbac.authorization.k8s.io
+  - kind: Group
+    name: devs
+    apiGroup: rbac.authorization.k8s.io

@@ -244,6 +244,11 @@ jobs:
           # be a person's decision. Carries no placeholder, so it is copied, not stamped.
           cp blueprints/openstack/node-reader-rbac.yaml dist/node-reader-rbac.yaml
 
+          # The portal-visibility grant: without it the portal's Blueprints page, which filters
+          # CompositionDefinitions by `list` permission in their namespace, shows these to nobody
+          # but cluster administrators. No placeholder, so copied, not stamped.
+          cp blueprints/openstack/portal-visibility-rbac.yaml dist/portal-visibility-rbac.yaml
+
           # The example Compositions carry COMPOSITION_API_VERSION for the same reason the CDs
           # carry CHART_VERSION: core-provider derives the served group version from the chart
           # version (0.3.8 -> v0-3-8, full major.minor.patch), so any literal in the tree is wrong

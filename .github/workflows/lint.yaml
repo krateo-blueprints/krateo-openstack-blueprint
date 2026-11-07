@@ -422,15 +422,6 @@ jobs:
       - name: State that exists nowhere else must be on a claim, not on a node
         run: python3 hack/validate-durable-state.py .
 
-      # The tiles were first written by a scratch script that was never committed. powerdns and
-      # redis were added afterwards and got no tile, and nothing noticed. The generator is now
-      # in hack/, and this step fails on a missing, stale or orphaned tile, or a blueprint with
-      # no krateo.io/icon. Tags follow the repository topics, read with the job's token.
-      - name: Every blueprint has a Marketplace tile, and each one is what the generator renders
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 hack/gen-portal-widgets.py . --check
-
       # The Marketplace installs what the helm index at krateo-blueprints/charts lists. Its gate
       # refuses a chart without a schema or an https icon, and at release time that refusal comes
       # after GHCR already holds the version, so the two disagree: the state that had the

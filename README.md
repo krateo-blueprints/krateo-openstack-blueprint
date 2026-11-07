@@ -185,6 +185,13 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 # instead make every upgrade quietly stop checking.) Re-applying it is harmless.
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/node-reader-rbac.yaml
 
+# Makes the 37 CompositionDefinitions visible on the portal's Blueprints page, which shows a user
+# only the definitions in namespaces where they may `list compositiondefinitions`. It grants that
+# in `openstack-system` to the groups `admins` and `devs`, the portal's default
+# `blueprints-page.readerGroups`; edit the subjects if your portal install overrides that value.
+# Once per cluster. Published from 0.3.37 on: with an older BP_VERSION, take it from that tag.
+kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/portal-visibility-rbac.yaml
+
 # ...then one Composition rolls out a whole install in dependency order.
 kubectl create namespace openstack
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-openstack.yaml
