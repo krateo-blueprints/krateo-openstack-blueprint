@@ -43,6 +43,10 @@ images:
     rabbit_init: docker.io/rabbitmq:3.13-management
     ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
     ceilometer_central: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble
+    # helm-toolkit's job_db_sync takes images.tags.<service>_db_sync. Without this key the
+    # ceilometer-db-sync Job rendered with no image, the API server refused it, and every
+    # ceilometer pod waited on a Job that never existed (#179).
+    ceilometer_db_sync: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble
     ceilometer_compute: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble
     ceilometer_ipmi: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble
     ceilometer_notification: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble

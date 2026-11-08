@@ -145,13 +145,37 @@ def references(pod):
         yield "Secret", ips.get("name"), "imagePullSecrets"
 
 
+def self_inconsistent(pod, claim_templates=()):
+    """Yield (what, where) for faults inside one pod spec that the API server refuses.
+
+    Both shipped (#179): aodh's alarms-cleaner CronJob mounted `aodh-etc-snippets` while its
+    volume was spelled `aodh-et-etc-snippets`, so the CronJob was refused and the release
+    failed; ceilometer's db-sync Job had no image, because values carried no
+    images.tags.ceilometer_db_sync, so the Job was never created and every ceilometer pod waited
+    on it. A render passes both, and the server only refuses them at apply time.
+    """
+    # A StatefulSet's volumeClaimTemplates are volumes too, though the pod spec does not list them.
+    volumes = {v.get("name") for v in pod.get("volumes") or []} | set(claim_templates)
+    for c in (pod.get("containers") or []) + (pod.get("initContainers") or []):
+        cname = c.get("name")
+        if not c.get("image"):
+            yield "(no image)", f"container {cname} has no image"
+        for m in c.get("volumeMounts") or []:
+            if m.get("name") not in volumes:
+                yield m.get("name"), f"container {cname} mounts volume {m.get('name')!r}, which the pod does not declare"
+
+
 def check(component, rendered):
     docs = [d for d in yaml.safe_load_all(rendered) if isinstance(d, dict)]
     have = {(d.get("kind"), (d.get("metadata") or {}).get("name")) for d in docs}
     pods, dangling, known = 0, [], []
     for d in docs:
+        claims = [(t.get("metadata") or {}).get("name")
+                  for t in (d.get("spec") or {}).get("volumeClaimTemplates") or []]
         for owner, pod in pod_templates(d):
             pods += 1
+            for what, where in self_inconsistent(pod, claims):
+                dangling.append((owner, "pod spec", what, where))
             for kind, name, where in references(pod):
                 if not name:
                     dangling.append((owner, kind, "(empty name)", where))
