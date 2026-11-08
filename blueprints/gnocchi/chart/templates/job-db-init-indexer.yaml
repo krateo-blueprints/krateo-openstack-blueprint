@@ -36,6 +36,8 @@ metadata:
   name: gnocchi-db-init-indexer
   labels:
 {{ tuple $envAll "gnocchi" "db-init-indexer" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+  annotations:
+{{ tuple "db-init-indexer" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
 spec:
   template:
     metadata:

@@ -73,6 +73,8 @@ metadata:
   name: powerdns-api-key-init
   labels:
 {{ tuple $envAll "powerdns" "api-key-init" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+  annotations:
+{{ tuple "api-key-init" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
 spec:
   backoffLimit: 6
   template:

@@ -32,6 +32,7 @@ metadata:
   labels:
 {{ tuple . $serviceName "db-sync" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+{{ tuple "db-sync" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
 {{ tuple $serviceAccountName . | include "helm-toolkit.snippets.custom_job_annotations" | indent 4 -}}
 {{ include "metadata.annotations.job.db_sync" . | indent 4 }}
 spec:

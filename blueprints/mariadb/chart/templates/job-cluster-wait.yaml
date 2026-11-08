@@ -57,6 +57,7 @@ metadata:
   labels:
 {{ tuple $envAll "mariadb" "cluster-wait" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+{{ tuple "cluster-wait" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
 spec:
   backoffLimit: {{ .Values.jobs.cluster_wait.clusterCheckRetries }}

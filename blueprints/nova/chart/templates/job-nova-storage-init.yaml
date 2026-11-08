@@ -50,6 +50,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   annotations:
+{{ tuple "storage-init" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
   name: nova-storage-init
   labels:
 {{ tuple $envAll "nova" "storage-init" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}

@@ -23,6 +23,7 @@ kind: Job
 metadata:
   name: ironic-manage-cleaning-network
   annotations:
+{{ tuple "manage-cleaning-network" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
 {{- if .Values.helm3_hook }}
 {{- end }}
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}

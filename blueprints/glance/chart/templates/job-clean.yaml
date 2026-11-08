@@ -52,6 +52,9 @@ metadata:
   labels:
 {{ tuple $envAll "glance" "clean" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+    # Teardown: runs at uninstall only, as upstream OpenStack-Helm does (#179).
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 {{ tuple $serviceAccountName $envAll | include "helm-toolkit.snippets.custom_job_annotations" | indent 4 -}}
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
 spec:

@@ -30,6 +30,7 @@ metadata:
   labels:
 {{ tuple $envAll "keystone" "domain-manage" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+{{ tuple "domain-manage" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
 {{ tuple $serviceAccountName $envAll | include "helm-toolkit.snippets.custom_job_annotations" | indent 4 }}
 spec:
   template:

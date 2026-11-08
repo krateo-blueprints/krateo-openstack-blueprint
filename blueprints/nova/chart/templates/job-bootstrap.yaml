@@ -31,6 +31,7 @@ metadata:
   labels:
 {{ tuple $envAll "nova" "bootstrap" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+{{ tuple "bootstrap" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
 {{ tuple "nova_bootstrap" $envAll | include "helm-toolkit.snippets.custom_job_annotations" | indent 4 }}
 spec:
   backoffLimit: {{ $backoffLimit }}

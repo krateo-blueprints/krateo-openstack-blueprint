@@ -25,6 +25,7 @@ metadata:
   labels:
 {{ tuple $envAll "heat" "ks-user-domain" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+{{ tuple "domain-ks-user" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
 spec:
   template:

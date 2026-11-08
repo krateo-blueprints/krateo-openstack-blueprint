@@ -29,6 +29,7 @@ kind: Job
 metadata:
   name: {{ printf "%s-%s" $serviceUserPretty "create-internal-tenant" | quote }}
   annotations:
+{{ tuple "create-internal-tenant" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
     {{- tuple "cinder-create-internal-tenant" $envAll | include "helm-toolkit.snippets.custom_job_annotations" | nindent 4 }}
   labels:
 {{ tuple $envAll "cinder" "create-internal-tenant" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}

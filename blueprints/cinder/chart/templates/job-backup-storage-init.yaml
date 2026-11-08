@@ -53,6 +53,7 @@ metadata:
   labels:
 {{ tuple $envAll "cinder" "backup-storage-init" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+{{ tuple "backup-storage-init" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
 spec:
   template:

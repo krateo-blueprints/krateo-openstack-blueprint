@@ -27,6 +27,7 @@ metadata:
   labels:
 {{ tuple $envAll "glance" "metadefs-load" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+{{ tuple "metadefs-load" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
 {{ tuple $serviceAccountName $envAll | include "helm-toolkit.snippets.custom_job_annotations" | indent 4 }}
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
 spec:

@@ -29,6 +29,7 @@ metadata:
   labels:
 {{ tuple $envAll "nova" "cell-setup" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+{{ tuple "cell-setup" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
 {{ tuple "nova_cell_setup" $envAll | include "helm-toolkit.snippets.custom_job_annotations" | indent 4 }}
 spec:
