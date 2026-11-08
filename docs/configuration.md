@@ -1,7 +1,7 @@
 ---
 type: Configuration
 title: krateo-openstack-blueprint — configuration
-description: The whole Openstack orchestrator value surface — profile, enabled, installDefinitions, ociRepo/chartVersion, the strictly-typed componentValues, the serviceContract stanza, and the contractEmitter CronJobs.
+description: The whole Openstack orchestrator value surface — profile, enabled, installDefinitions, ociRepo, the strictly-typed componentValues, the serviceContract stanza, and the contractEmitter CronJobs.
 resource: oci://ghcr.io/krateo-blueprints/charts/openstack
 tags: [openstack, configuration, values, service-contract, contract-emitter]
 timestamp: 2026-08-11T00:00:00Z
@@ -21,8 +21,7 @@ own, smaller schemas; the orchestrator's `componentValues` mirrors them.
 | `profile` | string (`identity` \| `full`) | `identity` | `identity` = MariaDB+Memcached+Keystone+Glance+Horizon; `full` = also RabbitMQ+Placement+OVS+libvirt+Neutron+Nova (compute; needs an amd64 cluster with the OVS kernel module). |
 | `enabled` | array of string \| null | `[]` | Deploy exactly these components plus their transitive dependencies, **overriding** `profile`. E.g. `["heat"]` also brings up keystone, rabbitmq, mariadb and memcached. Empty uses `profile`. |
 | `installDefinitions` | boolean | `true` | Register each component blueprint's `CompositionDefinition` as the first step. |
-| `ociRepo` | string | `oci://ghcr.io/krateo-blueprints/charts` | Registry path holding the per-component blueprint charts. |
-| `chartVersion` | string | `0.3.2` | Component chart version the orchestrator pins. |
+| `ociRepo` | string | `oci://ghcr.io/krateo-blueprints/charts` | Registry path holding the per-component blueprint charts. They are pulled at the orchestrator's own chart version. Up to 0.3.37 a `chartVersion` value chose it, and its schema default was frozen into every Composition at create time, so upgrades left the components behind (#179). A stale `chartVersion` in an existing Composition is accepted and ignored. |
 | `componentValues` | object \| null | `null` | Per-component Composition `spec` overrides (see below). |
 | `serviceContract` | object | chart default | Service integration descriptor, contract v1 (see below). |
 | `contractEmitter` | object | disabled | Runtime usage/health emission CronJobs (see below). |

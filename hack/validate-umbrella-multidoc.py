@@ -69,8 +69,7 @@ def main():
     try:
         dst = os.path.join(tmp, "chart")
         shutil.copytree(CHART, dst)
-        for f, pat, rep in (("Chart.yaml", r"^version: CHART_VERSION$", "version: 0.0.0-gate"),
-                            ("values.yaml", r"^chartVersion: .*$", 'chartVersion: "0.0.0-gate"')):
+        for f, pat, rep in (("Chart.yaml", r"^version: CHART_VERSION$", "version: 0.0.0-gate"),):
             p = os.path.join(dst, f)
             body = open(p).read()
             open(p, "w").write(re.sub(pat, rep, body, count=1, flags=re.M))

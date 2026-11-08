@@ -19,7 +19,7 @@ subject-matter expert on this blueprint:
   [`docs/kolla-ansible-audit-and-helm-plan.md`](../docs/kolla-ansible-audit-and-helm-plan.md)).
 
 The system prompt embeds the non-obvious gotchas (chart-inspector caches by
-version, `chartVersion` -> composition apiVersion coupling, `lookup` errors on
+version, chart version -> composition apiVersion coupling, `lookup` errors on
 an unregistered GVR / self-bootstrap, private-package release 403,
 componentValues CRD defaulting, block-style-only YAML), the determinism /
 hook-stripping rules the Krateo CDC path requires, and the stuck-install triage

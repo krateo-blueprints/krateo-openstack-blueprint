@@ -142,8 +142,9 @@ SELECTIONS = (
     ("enabled={nova,neutron}", ("--set", "enabled={nova,neutron}")),
 )
 
-# A plausible bumped chart version. The umbrella's values carry the CHART_VERSION placeholder,
-# which the release stamps from the git tag, and "vCHART_VERSION" is not a version anything can
+# A plausible bumped chart version, stamped into the staged Chart.yaml: osh.version reads
+# .Chart.Version (#179). The in-tree Chart.yaml carries the CHART_VERSION placeholder, which the
+# release stamps from the git tag, and "vCHART_VERSION" is not a version anything can
 # reason about -- the pin is entirely about which of two versions is emitted.
 CURRENT_CHART_VERSION = "0.3.30"
 CURRENT = "v0-3-30"
@@ -421,8 +422,7 @@ def probe(origin, crds_literal, extra=()):
     (PROBE_CHART / "templates/zz-gate-probe.yaml").write_text(body)
     try:
         return subprocess.run(
-            ["helm", "template", "gate", str(PROBE_CHART), "--kube-version", "1.36.0",
-             "--set", f"chartVersion={CURRENT_CHART_VERSION}", *extra],
+            ["helm", "template", "gate", str(PROBE_CHART), "--kube-version", "1.36.0", *extra],
             capture_output=True, text=True,
         )
     finally:
@@ -450,7 +450,7 @@ OLDER_UNSERVED = crd_list_literal(kinds[0], ((OLDER, False), (CURRENT, True)))
 baseline = probe_data("", BOTH_SERVED, "the baseline")
 if baseline.get("current") != CURRENT:
     measurement_failed(
-        f"osh.version answers {baseline.get('current')!r} with chartVersion="
+        f"osh.version answers {baseline.get('current')!r} with the chart at "
         f"{CURRENT_CHART_VERSION}, not {CURRENT!r}; every expectation below is stated in that "
         "form, so the probe is not measuring what it reads as measuring.")
 if baseline.get("annotation") != ORIGIN_ANNOTATION:

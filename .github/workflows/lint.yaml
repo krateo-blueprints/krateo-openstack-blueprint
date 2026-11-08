@@ -434,6 +434,15 @@ jobs:
 
       - name: A version bump must not prune a component that already exists
         run: python3 hack/validate-upgrade-does-not-prune.py .
+
+      # Gating. Measured on GKE upgrading 0.3.34 to 0.3.36: the umbrella moved, and all 33
+      # components stayed at 0.3.34, because the version came from a value whose schema default
+      # the API server had frozen into the Composition at create time (#179). Every check above
+      # rendered a fresh chart, where the default always matches, so none could see it. This one
+      # renders with the stale spec an older install actually holds, and refuses any
+      # release-stamped schema default anywhere in the repo.
+      - name: An umbrella upgrade must move every component to the umbrella's version
+        run: python3 hack/validate-component-version-follows-chart.py .
       # Gating, and the general form of the stats-port check above. `uwsgi --http` runs its HTTP
       # router in the MASTER process, so a bare tcpSocket probe against the service port is
       # answered by a process that is still fine while every worker is wedged or no application

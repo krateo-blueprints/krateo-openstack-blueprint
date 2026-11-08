@@ -1,7 +1,7 @@
 # krateo-openstack-blueprint — LLM doc index (pinned: 0.3.2)
 # One line per file; regenerate the pin on release. Read files at the tag that matches the
 # running build: a component chart version is CompositionDefinition.spec.chart.version, and the
-# orchestrator's chartVersion default pins the component charts.
+# orchestrator pulls the component charts at its own chart version (no value can change it, #179).
 docs/index.md: the map — what the repo is (one blueprint per OpenStack-Helm chart + an orchestrator umbrella) and links to the whole bundle
 docs/overview.md: the design (one blueprint per chart, why not an umbrella chart), the orchestrator readiness gate, the three planes, the service contract
 docs/usage.md: install the orchestrator (profile/enabled) or the per-component blueprints, access OpenStack and Horizon, the one-namespace rule

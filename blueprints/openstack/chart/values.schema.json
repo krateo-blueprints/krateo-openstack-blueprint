@@ -39,11 +39,6 @@
       "description": "Registry path holding the per-component blueprint charts (openstack-<component>).",
       "default": "oci://ghcr.io/krateo-blueprints/charts"
     },
-    "chartVersion": {
-      "type": "string",
-      "title": "Component chart version",
-      "default": "CHART_VERSION"
-    },
     "componentValues": {
       "type": [
         "object",

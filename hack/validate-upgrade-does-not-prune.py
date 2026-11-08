@@ -118,10 +118,10 @@ def run_probe(state):
         with open(os.path.join(chart, "templates", "probe.yaml"), "w") as fh:
             fh.write(PROBE)
         with open(os.path.join(chart, "Chart.yaml"), "w") as fh:
-            yaml.safe_dump({"apiVersion": "v2", "name": "probe", "version": "0.0.0"}, fh)
+            # The probe chart IS the current release: osh.version reads .Chart.Version (#179).
+            yaml.safe_dump({"apiVersion": "v2", "name": "probe", "version": "0.3.33"}, fh)
         with open(os.path.join(chart, "values.yaml"), "w") as fh:
             yaml.safe_dump({
-                "chartVersion": "0.3.33",
                 "state": state,
                 # The origin the real code would have READ off the live object. Injected because
                 # `helm template` disables lookup -- see the module docstring.

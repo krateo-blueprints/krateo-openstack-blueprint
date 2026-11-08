@@ -123,7 +123,8 @@ spec:
         crdgen turns into the Openstack CRD (and the Portal renders a form for).
         Named `componentValues` (not `overrides`) to avoid OSH's own
         conf-override concept.
-      - `installDefinitions` (default true), `ociRepo`, `chartVersion`.
+      - `installDefinitions` (default true), `ociRepo`. There is no `chartVersion`: the
+        components follow the umbrella's own chart version (gotcha 2).
 
       To reconfigure a live component deployed via the umbrella, you
       `PatchResource` the `Openstack` CR's `spec.componentValues.<name>.<...>`.
@@ -173,15 +174,18 @@ spec:
          `kubectl rollout restart deploy/core-provider deploy/core-provider-chart-inspector -n krateo-system`
          and delete the stale CompositionDefinition. Fresh clusters are
          unaffected (no cache yet).
-      2. **`chartVersion` drives the composition apiVersion.** `osh.apiVersion`
-         maps `chartVersion` 0.3.8 -> `composition.krateo.io/v0-3-8`, full major.minor.patch, so a
-         patch bump moves the served apiVersion. The
-         component CRDs are crdgen'd at that same version. A STALE
-         `chartVersion` default in the umbrella `values.schema.json` (the CRD
-         field default K8s applies when the spec omits it) overrides the chart
-         value and strands the lookup apiVersion -> every reconcile fails with
-         "could not find the requested resource". Keep the schema default in
-         sync with the chart.
+      2. **The umbrella's own chart version drives the composition apiVersion.**
+         `osh.apiVersion` maps `.Chart.Version` 0.3.8 -> `composition.krateo.io/v0-3-8`, full
+         major.minor.patch, so a patch bump moves the served apiVersion, and the component
+         CompositionDefinitions are registered at that same version. It is deliberately NOT a
+         value. Up to 0.3.37 it was `chartVersion`, and its `values.schema.json` default became
+         a CRD default, which the API server WRITES into the object at create time. An install
+         therefore held the version it was born at, and every umbrella upgrade re-rendered its
+         components at that old version: on GKE, 0.3.34 -> 0.3.36 moved the umbrella and left
+         all 33 components at 0.3.34, with the new powerdns asking for a chart that never
+         existed (#179). A Composition created by those releases still carries
+         `spec.chartVersion`; 0.3.38 and later accept it and ignore it. If a component CD's
+         `spec.chart.version` disagrees with the umbrella's Helm release, that is this class.
       3. **`lookup` ERRORS on an unregistered group/version** (not nil). On
          first install the component CRDs don't exist yet, so `osh.ready`,
          `osh.exists` and `osh.paused` all guard the lookup with
@@ -210,12 +214,12 @@ spec:
 
       1. `kubectl get openstack <name> -n <ns> -o jsonpath={.status.conditions}`
          — read `Synced`/`Ready`. A `ReconcileError` with a `lookup`/
-         apiresource message is the chartVersion-mismatch or
+         apiresource message is the version-mismatch or
          missing-CRD-before-self-bootstrap class (gotchas 2 and 3).
       2. `kubectl get compositiondefinition -A` — confirm the component CDs the
          umbrella registered are `Ready=True` (CRD generated). A CD stuck
          `Synced=False` with a pull error is a registry/visibility problem
-         (gotcha 4) or a wrong `chartVersion`.
+         (gotcha 4), or a component left at an older version than the umbrella (gotcha 2).
       3. `kubectl get <kind>s.composition.krateo.io -n <ns>` for each enabled
          component — confirm each child Composition reached `Ready=True`.
       4. `helm list -n <ns>` — the per-component releases appear in dependency
@@ -387,7 +391,7 @@ spec:
         - id: release-and-versioning
           name: Release & Versioning
           description: >-
-            How charts publish to OCI on a semver tag, the chartVersion ->
+            How charts publish to OCI on a semver tag, the chart version ->
             composition apiVersion coupling, and the chart-inspector cache /
             private-package release traps.
           tags:
