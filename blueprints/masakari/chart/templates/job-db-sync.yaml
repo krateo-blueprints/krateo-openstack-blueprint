@@ -23,6 +23,7 @@ kind: Job
 metadata:
   name: masakari-db-sync
   annotations:
+{{ tuple "db-sync" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
 spec:
   template:

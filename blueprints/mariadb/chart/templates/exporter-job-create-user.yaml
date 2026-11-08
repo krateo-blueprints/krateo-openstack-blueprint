@@ -24,6 +24,8 @@ metadata:
   name: mariadb-exporter-create-sql-user
   labels:
 {{ tuple $envAll "prometheus-mysql-exporter" "create-sql-user" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+  annotations:
+{{ tuple "exporter-create-user" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
 spec:
   backoffLimit: {{ .Values.jobs.exporter_create_sql_user.backoffLimit }}
   template:

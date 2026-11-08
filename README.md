@@ -499,6 +499,43 @@ kubectl -n openstack get compositiondefinitions \
   -o custom-columns='NAME:.metadata.name,VER:.spec.chart.version'  # each component's
 ```
 
+### Jobs run as Helm hooks, so an upgrade can change them
+
+A Job's pod template is immutable, and Krateo's composition-dynamic-controller patches a plain
+Job in place. **Up to 0.3.40 every Job was plain, so any release that changed one failed that
+component's upgrade**, and an image bump is enough. Measured on GKE upgrading 0.3.39 to 0.3.40:
+`cannot patch "powerdns-api-key-init" with kind Job: ... spec.template: Invalid value`, while
+the Composition still reported `Synced=True` ([#179](https://github.com/krateo-blueprints/krateo-openstack-blueprint/issues/179),
+[core-provider#403](https://github.com/krateo-platformops/core-provider/issues/403)).
+
+Every Job is now a `post-install,post-upgrade` hook with `before-hook-creation`. Each upgrade
+deletes the old Job and runs the new one, so db-sync and the keystone registrations re-run on
+upgrade as OpenStack-Helm intends. Teardown Jobs (db-drop, and the clean Jobs that delete Glance
+images or storage secrets) are `pre-delete` hooks instead, so they run only on uninstall. On
+0.3.40 and earlier they ran at install as plain Jobs. Measured with core-provider 2.13.72:
+- hooks run on install and on upgrade, and the upgraded Job runs the new template;
+- the controller does not wait for workloads to be Ready before running them, so a pod that
+  waits on a hook Job through kubernetes-entrypoint cannot deadlock it;
+- a release that failed on a plain Job recovers by itself: the next version's hook replaces the
+  plain Job;
+- a single 420-second hook, and three 120-second hooks in sequence, completed with no timeout.
+
+Helm runs hooks one at a time in weight order and waits for each. A Job therefore takes its
+weight from its role, in bands of dependency depth: db-init and the keystone registrations,
+then db-sync and ks-endpoints, then storage-init, then bootstrap. `hack/validate-job-hooks.py`
+proves, per chart, that each hook sorts after every Job it waits on, directly or through the
+pods behind a service it waits on. It fails on any Job that is not a hook.
+
+Two costs, both measured:
+- **Hooks re-run on every revision.** Krateo wrote two Helm revisions per upgrade, six seconds
+  apart, so each hook ran twice. OpenStack-Helm Jobs are idempotent; the cost is time.
+- **A controller restarted mid-operation re-runs every hook.** The release is left pending,
+  and about five minutes later the next controller pod rolls it back and runs the operation
+  again. That happens to plain Jobs too, but hooks make an operation longer.
+
+On a cluster still on 0.3.40 or earlier, a hook Job of the same name replaces the plain Job on
+the first upgrade. Nothing has to be deleted by hand.
+
 ### A component keeps the API version it was created at
 
 The composition API version is derived from the chart version (`0.3.30` → `v0-3-30`), so a

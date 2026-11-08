@@ -45,7 +45,7 @@ metadata:
 {{ toYaml $jobLabels | indent 4 }}
 {{- end }}
   annotations:
-    "helm.sh/hook-delete-policy": before-hook-creation
+{{ tuple "s3-user" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
 {{ tuple $serviceAccountName $envAll | include "helm-toolkit.snippets.custom_job_annotations" | indent 4 -}}
 {{- if $jobAnnotations }}

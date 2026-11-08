@@ -122,6 +122,48 @@ jobs:
       - name: State moved by the migration script must survive the upgrade
         run: hack/smoke-migrate-to-pvc.sh ${{ matrix.component }} .
 
+  job-hooks:
+    # Gating. A Job's pod template is immutable and Krateo patches a plain Job in place, so any
+    # release that changed one -- an image bump is enough -- failed that component's upgrade while
+    # the Composition still said Synced=True (#179: powerdns on 0.3.40; core-provider#403). Every
+    # Job must be a post-install,post-upgrade hook (before-hook-creation, never hook-succeeded)
+    # or a pre-delete teardown hook, and the hooks must run in an order their kubernetes-entrypoint
+    # dependencies allow, because Helm runs them one at a time in weight order.
+    #
+    # Full history so it can also render the base commit and list every Job whose pod template
+    # changed, which is exactly the set a plain Job would fail to upgrade.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the gate's Python dependencies
+        run: pip install PyYAML
+
+      - name: Every Job is a Helm hook, in an order its dependencies allow
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # The hook rules run on every event. The base comparison needs a commit to compare
+          # against, which a first push to a branch does not have.
+          if [ -n "$BASE" ] && [ "$BASE" != "0000000000000000000000000000000000000000" ] \
+            && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            python3 hack/validate-job-hooks.py . --base "$BASE"
+          else
+            echo "no base commit to compare against; checking the hook rules only"
+            python3 hack/validate-job-hooks.py .
+          fi
+
   capability-roles:
     # Gating. A capability aggregates into a predefined role via a
     # `rbac.krateo.io/aggregate-to-<role>=true` label, and nothing validates the <role>.

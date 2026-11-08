@@ -55,6 +55,7 @@ metadata:
   labels:
 {{ tuple $envAll "cinder" "storage-init" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+{{ tuple "storage-init" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
 spec:
   template:
     metadata:

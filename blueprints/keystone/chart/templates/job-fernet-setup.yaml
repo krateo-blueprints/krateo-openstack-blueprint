@@ -59,6 +59,7 @@ metadata:
   labels:
 {{ tuple $envAll "keystone" "fernet-setup" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+{{ tuple "fernet-setup" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
 {{ tuple "keystone_fernet_setup" $envAll | include "helm-toolkit.snippets.custom_job_annotations" | indent 4 }}
 spec:
   template:

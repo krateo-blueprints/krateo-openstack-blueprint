@@ -20,6 +20,8 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: designate-bootstrap
+  annotations:
+{{ tuple "bootstrap" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
 spec:
   template:
     metadata:
