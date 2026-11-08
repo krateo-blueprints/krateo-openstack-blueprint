@@ -34,6 +34,8 @@ metadata:
   labels:
 {{ tuple $envAll "glance" "test" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
 {{ dict "envAll" $envAll "podName" "glance-test" "containerNames" (list "init" "glance-test" "glance-test-ks-user") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 4 }}
 spec:
 {{ if $envAll.Values.pod.tolerations.glance.enabled }}

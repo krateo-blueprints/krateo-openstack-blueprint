@@ -32,6 +32,8 @@ metadata:
   labels:
 {{ tuple $envAll "mariadb" "test" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
 {{ dict "envAll" $envAll "podName" "mariadb-test" "containerNames" (list "init" "mariadb-test") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 4 }}
 spec:
