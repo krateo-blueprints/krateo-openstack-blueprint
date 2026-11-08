@@ -18,8 +18,8 @@
 
 {{- if .Values.manifests.deployment }}
 {{- $envAll := . }}
-{{- $configMapBinName := printf "%s-%s" $envAll.deployment_name "powerdns-bin" }}
-{{- $configMapEtcName := printf "%s-%s" $envAll.deployment_name "powerdns-etc" }}
+{{- $configMapBinName := "powerdns-bin" }}
+{{- $configMapEtcName := "powerdns-etc" }}
 {{- $rcControllerName := printf "%s-%s" $envAll.deployment_name "powerdns" }}
 {{ tuple $envAll "powerdns" $rcControllerName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---

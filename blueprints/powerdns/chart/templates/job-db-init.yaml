@@ -15,6 +15,10 @@
 {{- end }}
 
 {{- if .Values.manifests.job_db_init }}
-{{- $dbInitJob := dict "envAll" . "serviceName" "powerdns" "jobAnnotations" (include "metadata.annotations.job.db_init" . | fromYaml) -}}
+{{- /* inputType "secret": powerdns has no oslo-style /etc/powerdns/powerdns.conf with a [database]
+       connection, which the default "oslo" input reads from a "powerdns-etc" Secret. The connection
+       comes from the DB_CONNECTION that secret-db.yaml renders for the powerdns user (#179). */}}
+{{- $dbToInit := dict "inputType" "secret" "adminSecret" .Values.secrets.oslo_db.admin "userSecret" .Values.secrets.oslo_db.powerdns -}}
+{{- $dbInitJob := dict "envAll" . "serviceName" "powerdns" "dbToInit" $dbToInit "jobAnnotations" (include "metadata.annotations.job.db_init" . | fromYaml) -}}
 {{ $dbInitJob | include "helm-toolkit.manifests.job_db_init_mysql" }}
 {{- end }}

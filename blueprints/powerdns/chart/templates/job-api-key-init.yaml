@@ -18,7 +18,7 @@
 
 {{- if .Values.manifests.job_api_key_init }}
 {{- $envAll := . }}
-{{- $configMapBinName := printf "%s-%s" $envAll.deployment_name "powerdns-bin" }}
+{{- $configMapBinName := "powerdns-bin" }}
 {{- $saName := printf "%s-%s" $envAll.deployment_name "powerdns-api-key-init" }}
 {{- $secretName := $envAll.Values.secrets.powerdns.api_key }}
 ---

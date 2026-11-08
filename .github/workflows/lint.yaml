@@ -443,6 +443,14 @@ jobs:
       # release-stamped schema default anywhere in the repo.
       - name: An umbrella upgrade must move every component to the umbrella's version
         run: python3 hack/validate-component-version-follows-chart.py .
+
+      # Gating. Measured on GKE (#179): powerdns's db-init Job mounted a ConfigMap and a Secret
+      # its chart never created, because the chart named them after the release and helm-toolkit
+      # used fixed names. The two agree only under a release called `powerdns`, which is what
+      # every render here used, and a Krateo release never is. This renders every component under
+      # a release name unlike its chart's and refuses a pod that names an object nobody renders.
+      - name: Every object a pod names must be one its chart renders
+        run: python3 hack/validate-pod-references.py .
       # Gating, and the general form of the stats-port check above. `uwsgi --http` runs its HTTP
       # router in the MASTER process, so a bare tcpSocket probe against the service port is
       # answered by a process that is still fine while every worker is wedged or no application
