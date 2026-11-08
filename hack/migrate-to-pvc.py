@@ -368,10 +368,10 @@ def finish(kube, component, entry):
     since = str(entry["claimsSince"])
     if not semver_at_least(have, since):
         raise Refusal(f"CompositionDefinition {component} renders chart {have or '(none)'}, which "
-                      f"keeps the state on the node path; claims start at {since}. Apply a "
-                      f"{since}-or-later umbrella CompositionDefinition and wait for this one to "
-                      "follow. If the umbrella is newer and this stays, see the README section "
-                      "\"Components follow the umbrella's version\".")
+                      f"keeps the state on the node path; claims start at {since}. Apply a 0.3.38-or-later "
+                      "umbrella CompositionDefinition and wait for this one to follow: 0.3.36 and "
+                      "0.3.37 never move a component (#179). See the README section \"Components "
+                      "follow the umbrella's version\".")
 
     if paused(comp):
         kube.change(f"unpause Composition {comp['metadata']['name']}",
