@@ -404,9 +404,10 @@ done
 `prepare` sets `krateo.io/paused` on the component's Composition and stops the StatefulSet. It
 then checks that the node path really holds state, which means `grastate.dat` for MariaDB and
 `mnesia` for RabbitMQ, and copies it into the claim the new StatefulSet will use. It compares file
-counts and bytes, and only then deletes the old StatefulSet. `finish` waits until the Composition
-is labelled with the new version, removes the pause, and waits for the pod to be Ready on the
-claim. The node path is left in place, so delete it yourself once you are satisfied.
+counts and bytes, and only then deletes the old StatefulSet. `finish` checks that the
+component's own `CompositionDefinition` now renders a chart that claims the volume (0.3.36 or
+later, `claimsSince` in `hack/durable-state.yaml`), removes the pause, and waits for the pod to
+be Ready on the claim. The node path is left in place, so delete it yourself once you are satisfied.
 
 OpenStack is down from `prepare` until `finish` completes. `prepare` refuses, and leaves the
 component paused at 0 replicas rather than half-migrated, when:
@@ -417,12 +418,14 @@ component paused at 0 replicas rather than half-migrated, when:
   Copying the empty directory would turn a crash loop into an empty database that looks
   healthy, so the install needs reinstalling instead.
 
-`finish` refuses while the Composition is still at the old version. If it stays there after the
-new definition is applied, either the new release is 0.3.36 or 0.3.37, which never move any
-component (#179), or that component's definition does not approve migration (see "Hard
-incompatibility" below), so it keeps the old chart and its node path. Compare the component's
-`compositiondefinition` `spec.chart.version` with the umbrella's: if it is still the old
-version, it is the first.
+`finish` refuses while the component's `compositiondefinition` `spec.chart.version` is still
+older than 0.3.36. If it stays there after the new umbrella definition is applied, the new
+release is 0.3.36 or 0.3.37, which never move any component (#179); apply 0.3.38 or later.
+
+It does not read the Composition's `krateo.io/composition-version` label. On an umbrella install
+that label alternates between the version the Composition was created at and the new one, about
+once a minute, because two writers use two API versions (measured upgrading 0.3.34 to 0.3.38,
+#179). A check on it passes or refuses depending on the second it runs.
 
 CI runs the whole sequence against each released 0.3.35 chart with real data in it
 (`hack/smoke-migrate-to-pvc.sh`). It also checks that an emptied node path is refused.

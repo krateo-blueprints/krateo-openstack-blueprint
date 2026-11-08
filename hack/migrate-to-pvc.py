@@ -14,9 +14,10 @@ Two phases, run on either side of the upgrade:
   prepare   pause the component's Composition, stop the StatefulSet, prove the node path holds
             state, copy it into a claim named exactly as the new StatefulSet will claim it,
             verify the copy, then delete the old StatefulSet. The node path is left in place.
-  finish    after the umbrella has moved to 0.3.36: refuse unless the Composition is at the new
-            version, unpause it, wait for the new StatefulSet to adopt the claim and for its pod
-            to be Ready on that claim.
+  finish    after a 0.3.38-or-later umbrella CompositionDefinition is applied: refuse unless the
+            component's own CompositionDefinition renders a chart that claims the volume
+            (hack/durable-state.yaml claimsSince), unpause the Composition, wait for the new
+            StatefulSet to adopt the claim and for its pod to be Ready on that claim.
 
 Without --apply each phase prints what it would do and changes nothing.
 
@@ -28,7 +29,7 @@ install needs a reinstall; a copy whose file count or byte total differs from th
 
 Usage:
   hack/migrate-to-pvc.py prepare --context CTX --namespace openstack --component mariadb [--apply]
-  # apply the 0.3.36 CompositionDefinition, as in the README
+  # apply the 0.3.38-or-later umbrella CompositionDefinition, as in the README
   hack/migrate-to-pvc.py finish  --context CTX --namespace openstack --component mariadb [--apply]
 """
 import argparse
@@ -102,6 +103,19 @@ class Kube:
         print(("  DO   " if self.apply else "  PLAN ") + description)
         if self.apply:
             self.run(*args, stdin=stdin)
+
+
+def semver_at_least(have, want):
+    """True when release version `have` (X.Y.Z) is `want` or later. Anything else is False."""
+    def parts(v):
+        core = v.split("-", 1)[0].split("+", 1)[0].split(".")
+        if len(core) != 3 or not all(c.isdigit() for c in core):
+            return None
+        return tuple(int(c) for c in core)
+    h, w = parts(have), parts(want)
+    if w is None:
+        raise Refusal(f"claimsSince {want!r} in hack/durable-state.yaml is not X.Y.Z")
+    return h is not None and h >= w
 
 
 def composition(kube, component):
@@ -322,11 +336,12 @@ def prepare(kube, component, entry, storage_class, size):
 
     kube.change(f"delete StatefulSet {name}, keeping claim {claim}",
                 "delete", "statefulset", name, "--wait=true")
-    print(f"prepared. {path} stays on {node} until you delete it. Now apply the 0.3.36 "
-          "CompositionDefinition, then run finish.")
+    print(f"prepared. {path} stays on {node} until you delete it. Now apply a 0.3.38-or-later "
+          "umbrella CompositionDefinition (0.3.36 and 0.3.37 leave the components behind, #179), "
+          "then run finish.")
 
 
-def finish(kube, component, entry, version):
+def finish(kube, component, entry):
     name, volume = entry["statefulset"], entry["volume"]
     claim = f"{volume}-{name}-0"
     comp = composition(kube, component)
@@ -338,17 +353,25 @@ def finish(kube, component, entry, version):
         if volume not in templates:
             raise Refusal(f"{name} exists again without a claim template: something recreated "
                           "it from the old chart while it was meant to be paused")
-    # Not the apiVersion kubectl prints: that is the CRD's preferred version, the same for every
-    # object. krateo.io/composition-version is re-stamped on every write, so it names the
-    # version the object was last written through (README, "Upgrading an existing install").
-    at = (comp["metadata"].get("labels") or {}).get("krateo.io/composition-version")
-    want = "v" + version.replace(".", "-")
-    if at != want:
-        raise Refusal(f"Composition {comp['metadata']['name']} is labelled {at}, not {want}. "
-                      "Apply the new CompositionDefinition first. If it is applied and this "
-                      "stays, its definition does not approve migration (upgradePolicy Paused, "
-                      "or Manual without krateo.io/upgrade-to-version), so this component will "
-                      "keep the old chart and its node path: see the README.")
+    # What decides the chart this Composition is rendered from is its component
+    # CompositionDefinition's spec.chart.version, so that is what is checked. Not the
+    # krateo.io/composition-version label: on an umbrella install it alternates between the
+    # version the Composition was created at (the umbrella writes it through that pinned API
+    # version) and the new one (the migration writes it through the new API version), about once
+    # a minute. Measured on GKE, Kubernetes 1.36.4, core-provider 2.13.72, upgrading 0.3.34 to
+    # 0.3.38 (#179). A check on that label passes or refuses depending on the second it runs.
+    cd = kube.get("compositiondefinitions.core.krateo.io", component)
+    if cd is None:
+        raise Refusal(f"no CompositionDefinition {component} in {kube.namespace}: the umbrella "
+                      "registers one per component, so this is not an umbrella install")
+    have = str(((cd.get("spec") or {}).get("chart") or {}).get("version") or "")
+    since = str(entry["claimsSince"])
+    if not semver_at_least(have, since):
+        raise Refusal(f"CompositionDefinition {component} renders chart {have or '(none)'}, which "
+                      f"keeps the state on the node path; claims start at {since}. Apply a 0.3.38-or-later "
+                      "umbrella CompositionDefinition and wait for this one to follow: 0.3.36 and "
+                      "0.3.37 never move a component (#179). See the README section \"Components "
+                      "follow the umbrella's version\".")
 
     if paused(comp):
         kube.change(f"unpause Composition {comp['metadata']['name']}",
@@ -382,7 +405,6 @@ def main():
                     help="must match componentValues.<component>.volume.class_name; empty means "
                          "the cluster default, as the chart's `default` does")
     ap.add_argument("--size", help="defaults to the chart's volume.size")
-    ap.add_argument("--version", default="0.3.36", help="the blueprint version finish expects")
     ap.add_argument("--apply", action="store_true", help="make the changes; otherwise only plan")
     a = ap.parse_args()
     entry = entry_for(a.component)
@@ -393,7 +415,7 @@ def main():
         if a.phase == "prepare":
             prepare(kube, a.component, entry, a.storage_class, size)
         else:
-            finish(kube, a.component, entry, a.version)
+            finish(kube, a.component, entry)
     except Refusal as e:
         sys.exit(f"REFUSED: {e}")
 
