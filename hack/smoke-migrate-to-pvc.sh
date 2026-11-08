@@ -14,6 +14,11 @@
 # separately on GKE with cdc 2.13.72 and is recorded on #177: krateo.io/paused holds a deleted
 # StatefulSet and a manual scale to 0, and the new StatefulSet adopts a claim made first.
 #
+# finish decides from the component's CompositionDefinition (spec.chart.version), also a stand-in
+# here. The Composition's krateo.io/composition-version label is deliberately held at the WRONG
+# value in both finish steps: on an umbrella install it alternates between the old and the new
+# version about once a minute (#179), so a finish that read it would be right only by timing.
+#
 # rabbitmq cannot run on Apple Silicon (#114), so run this on amd64.
 #
 # Usage: hack/smoke-migrate-to-pvc.sh <mariadb|rabbitmq> [repo-root]
@@ -97,6 +102,23 @@ wait_ready() {
   fail "$STS-0 never became Ready"
 }
 
+set_definition() {
+  cat <<EOF | k apply -f - >/dev/null
+apiVersion: core.krateo.io/v1alpha1
+kind: CompositionDefinition
+metadata:
+  name: $COMPONENT
+spec:
+  chart:
+    url: oci://ghcr.io/krateo-blueprints/charts/$COMPONENT
+    version: "$1"
+EOF
+}
+
+set_label() {
+  k label "${COMPONENT}s.composition.krateo.io" "$COMPONENT" "krateo.io/composition-version=v${1//./-}" --overwrite >/dev/null
+}
+
 fresh_install() {
   kubectl --kubeconfig "$KC" --context "$CTX" delete ns "$NS" --ignore-not-found --wait=true >/dev/null
   docker exec "$CLUSTER-control-plane" rm -rf "$HOSTPATH"
@@ -110,6 +132,7 @@ metadata:
     krateo.io/composition-version: v${FROM//./-}
 spec: {}
 EOF
+  set_definition "$FROM"
   h install "$COMPONENT" "$WORK/from/$COMPONENT" --wait=false >/dev/null
   [ -n "$(k get sts "$STS" -o jsonpath="{.spec.template.spec.volumes[?(@.hostPath.path==\"$HOSTPATH\")].name}")" ] \
     || fail "the $FROM chart did not render a hostPath at $HOSTPATH, so this would test nothing"
@@ -146,6 +169,28 @@ spec:
           x-kubernetes-preserve-unknown-fields: true
 EOF
 kubectl --kubeconfig "$KC" --context "$CTX" wait --for=condition=Established "crd/${COMPONENT}s.composition.krateo.io" >/dev/null
+cat <<EOF | kubectl --kubeconfig "$KC" --context "$CTX" apply -f - >/dev/null
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: compositiondefinitions.core.krateo.io
+spec:
+  group: core.krateo.io
+  scope: Namespaced
+  names:
+    plural: compositiondefinitions
+    singular: compositiondefinition
+    kind: CompositionDefinition
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+EOF
+kubectl --kubeconfig "$KC" --context "$CTX" wait --for=condition=Established crd/compositiondefinitions.core.krateo.io >/dev/null
 
 step "charts: released $FROM, and $TO from this tree"
 mkdir -p "$WORK/from" "$WORK/to"
@@ -166,12 +211,15 @@ k get pvc "mysql-data-$STS-0" >/dev/null 2>&1 || k get pvc "rabbitmq-data-$STS-0
   || fail "prepare reported success and left no claim"
 [ -z "$(k get sts "$STS" --ignore-not-found -o name)" ] || fail "prepare left the old StatefulSet"
 
-step "finish refuses before the upgrade"
-if migrate finish --apply; then fail "finish ran before the Composition moved to $TO"; fi
+step "finish refuses while the definition is still at $FROM, even with the label at $TO"
+set_label "$TO"
+if migrate finish --apply; then fail "finish ran while the CompositionDefinition still rendered $FROM"; fi
+[ -z "$(k get sts "$STS" --ignore-not-found -o name)" ] || fail "a refused finish changed the StatefulSet"
 
-step "upgrade to $TO, then finish"
+step "upgrade to $TO, then finish, with the label back at $FROM"
 h upgrade "$COMPONENT" "$WORK/to/$COMPONENT" --wait=false >/dev/null
-k label "${COMPONENT}s.composition.krateo.io" "$COMPONENT" "krateo.io/composition-version=v${TO//./-}" --overwrite >/dev/null
+set_definition "$TO"
+set_label "$FROM"
 migrate finish --apply
 wait_ready
 

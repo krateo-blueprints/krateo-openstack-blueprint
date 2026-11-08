@@ -9,12 +9,16 @@
 #   statefulset  the StatefulSet that holds the state
 #   volume       the volume name, which is also the claim template's name
 #   mountPath    where the containers read it
+#   claimsSince  the first blueprint release whose chart claims this volume. migrate-to-pvc.py
+#                finish refuses until the component's CompositionDefinition is at it or later.
 durable:
   - component: mariadb
     statefulset: mariadb-server
     volume: mysql-data
     mountPath: /var/lib/mysql
+    claimsSince: "0.3.36"
   - component: rabbitmq
     statefulset: rabbitmq-rabbitmq
     volume: rabbitmq-data
     mountPath: /var/lib/rabbitmq
+    claimsSince: "0.3.36"
