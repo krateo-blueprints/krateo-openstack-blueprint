@@ -163,6 +163,10 @@ jobs:
             echo "no base commit to compare against; checking the hook rules only"
             python3 hack/validate-job-hooks.py .
           fi
+      # A Pod's spec is immutable and the controller installs a chart's Pods as plain objects, so
+      # a test Pod that is not a `helm.sh/hook: test` hook blocks every later upgrade (#179).
+      - name: Every test Pod is a Helm test hook
+        run: python3 hack/validate-test-pods.py .
 
   capability-roles:
     # Gating. A capability aggregates into a predefined role via a

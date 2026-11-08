@@ -28,6 +28,8 @@ metadata:
   labels:
 {{ tuple $envAll "gnocchi" "test" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   nodeSelector:
     {{ .Values.labels.test.node_selector_key }}: {{ .Values.labels.test.node_selector_value }}

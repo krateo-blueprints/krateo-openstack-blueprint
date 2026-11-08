@@ -32,6 +32,8 @@ kind: Pod
 metadata:
   name: {{ print .deployment_name "-test" }}
   annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
 {{ tuple $envAll "neutron" "test" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}

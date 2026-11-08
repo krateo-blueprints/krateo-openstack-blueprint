@@ -28,6 +28,8 @@ metadata:
   labels:
 {{ tuple $envAll "watcher" "test" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
 spec:
   nodeSelector:
