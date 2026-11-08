@@ -10,8 +10,8 @@ componentValues is a PARTIAL override (a deep-merge), not a full values document
 
 Adapted from krateo-blueprints/installer hack/gen-componentvalues-schema.py. Difference: this
 repo VENDORS the component charts, so each schema is read from blueprints/<name>/chart/
-(authoritative, offline) rather than `helm pull`ed; the pinned version is the single
-umbrella `chartVersion`. Re-run on every release / whenever a component schema changes.
+(authoritative, offline) rather than `helm pull`ed; the pinned version is the umbrella's own
+chart version. Re-run on every release / whenever a component schema changes.
 
 Usage:  python3 hack/gen-componentvalues-schema.py
 Requires: pyyaml.
@@ -40,7 +40,10 @@ def strip_required(node):
 
 def main():
     vals = yaml.safe_load(open(os.path.join(CHART, "values.yaml")))
-    ver = str(vals["chartVersion"])
+    # The umbrella pulls its components at its own chart version (#179), so that is the version
+    # each embedded schema describes. In the tree it is the CHART_VERSION placeholder, which the
+    # release stamps in values.schema.json too, so the descriptions name the released version.
+    ver = str(yaml.safe_load(open(os.path.join(CHART, "Chart.yaml")))["version"])
     props = {}
     for c in vals["components"]:
         name = c["name"]

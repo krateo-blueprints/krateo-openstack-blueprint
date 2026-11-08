@@ -15,12 +15,23 @@
 {{- end -}}
 {{- end -}}
 
-{{/* The bare composition.krateo.io version (e.g. "v0-3-1") derived from chartVersion
-     (crdgen maps version 0.1.1 -> apiVersion v0-1-1). Single source of truth so
-     osh.apiVersion and osh.crdExists can never drift on which version they mean. */}}
+{{/* The bare composition.krateo.io version (e.g. "v0-3-1") of THIS chart: .Chart.Version,
+     which the release stamps into Chart.yaml (crdgen maps version 0.1.1 -> apiVersion v0-1-1).
+     Single source of truth so osh.apiVersion and osh.crdExists can never drift on which
+     version they mean.
+
+     Never a value. Up to 0.3.37 this read .Values.chartVersion, and values.schema.json
+     defaulted that field to the release version. The schema becomes the CRD, and the API
+     server writes a default into the object when it is created, so every Composition held
+     the version it was born at as if a user had typed it. Every later umbrella then rendered
+     its components at that old version: measured on GKE upgrading 0.3.34 to 0.3.36, the
+     umbrella moved and all 33 components stayed at 0.3.34 (#179). A stored object must not
+     be able to choose the version, so the version is not in the values at all.
+     hack/validate-component-version-follows-chart.py renders the chart with the stale value a
+     0.3.34 Composition still carries and asserts it is ignored. */}}
 {{- define "osh.version" -}}
 {{- $top := index . 0 -}}
-{{- printf "v%s" ($top.Values.chartVersion | toString | replace "." "-") -}}
+{{- printf "v%s" ($top.Chart.Version | toString | replace "." "-") -}}
 {{- end -}}
 
 {{/* The composition.krateo.io apiVersion at an EXPLICIT version ("v0-3-28" ->
@@ -32,7 +43,7 @@
 {{- end -}}
 
 {{/* The composition.krateo.io apiVersion served by the component CRDs, derived
-     from chartVersion (crdgen maps version 0.1.1 -> apiVersion v0-1-1). Keeping
+     from the chart's own version (crdgen maps version 0.1.1 -> apiVersion v0-1-1). Keeping
      this in one place means a version bump never strands a hardcoded v0-1-0.
 
      This is "the version this chart IS". NOTHING IN THIS FILE CALLS IT, and nothing should.

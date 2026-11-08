@@ -16,8 +16,6 @@
 # ${POWERDNS_SERVICE_HOST} was never injected, designate's pools.yaml rendered
 # `nameservers[0].host: None` and designate-worker never left Init. See issue #165.
 
-chartVersion: CHART_VERSION
-
 release_group: null
 
 labels:

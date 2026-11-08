@@ -53,9 +53,7 @@ def selection_for_profile(profile):
     try:
         dst = os.path.join(tmp, "chart")
         shutil.copytree(os.path.join(ROOT, "blueprints", "openstack", "chart"), dst)
-        for name, pat, rep in (("Chart.yaml", "CHART_VERSION", "0.0.0-gate"),
-                               ("values.yaml", "chartVersion: CHART_VERSION",
-                                'chartVersion: "0.0.0-gate"')):
+        for name, pat, rep in (("Chart.yaml", "CHART_VERSION", "0.0.0-gate"),):
             f = os.path.join(dst, name)
             body = open(f).read()
             open(f, "w").write(body.replace(pat, rep))

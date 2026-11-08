@@ -375,8 +375,10 @@ database and MariaDB never recovered ([#177](https://github.com/krateo-blueprint
 
 ### Upgrading from 0.3.35 or earlier: migrate first
 
-**Do not apply the 0.3.36 `CompositionDefinition` to an existing install until both components
-are migrated.** Kubernetes refuses to add claims to an existing StatefulSet. When that happens
+**Do not apply a 0.3.36-or-later `CompositionDefinition` to an existing install until both
+components are migrated, and make that release 0.3.38 or later:** 0.3.36 and 0.3.37 upgrade the
+umbrella but leave every component at its old version (see "Components follow the umbrella's
+version" below, #179). An upgrade to 0.3.38 has not yet been run end to end; #179 is that run. Kubernetes refuses to add claims to an existing StatefulSet. When that happens
 the controller does not roll back: it patches the rest of the chart and keeps retrying the
 StatefulSet, with `Ready=Unknown`. A Helm hook cannot do the move either, because the controller
 runs hooks after it has applied the change. Measured with composition-dynamic-controller 2.13.71
@@ -392,7 +394,7 @@ for c in mariadb rabbitmq; do
   hack/migrate-to-pvc.py prepare --context "$CTX" --namespace openstack --component "$c" --apply
 done
 
-# now apply the 0.3.36 CompositionDefinition, as in "Install" above
+# now apply the 0.3.38 (or later) CompositionDefinition, as in "Install" above
 
 for c in mariadb rabbitmq; do
   hack/migrate-to-pvc.py finish --context "$CTX" --namespace openstack --component "$c" --apply
@@ -416,8 +418,11 @@ component paused at 0 replicas rather than half-migrated, when:
   healthy, so the install needs reinstalling instead.
 
 `finish` refuses while the Composition is still at the old version. If it stays there after the
-new definition is applied, that component's definition does not approve migration (see
-"Hard incompatibility" below), so it keeps the old chart and its node path.
+new definition is applied, either the new release is 0.3.36 or 0.3.37, which never move any
+component (#179), or that component's definition does not approve migration (see "Hard
+incompatibility" below), so it keeps the old chart and its node path. Compare the component's
+`compositiondefinition` `spec.chart.version` with the umbrella's: if it is still the old
+version, it is the first.
 
 CI runs the whole sequence against each released 0.3.35 chart with real data in it
 (`hack/smoke-migrate-to-pvc.sh`). It also checks that an emptied node path is refused.
@@ -461,6 +466,35 @@ second environment needs a second cluster.
 Bumping the blueprint version on a running install is one `kubectl apply` of the new
 `CompositionDefinition`, and the orchestrator rolls the components forward. Two things about
 that upgrade are worth knowing before you do it, because both of them are silent.
+
+### Components follow the umbrella's version
+
+The orchestrator registers every component `CompositionDefinition` at its own chart version
+(`.Chart.Version`, stamped from the tag), and that is the only input. **Up to 0.3.37 it was a
+value, `chartVersion`, and that broke every upgrade.** Its `values.schema.json` default becomes
+the generated CRD's default, and the API server writes a default into the object when the object
+is created. So a Composition created at 0.3.34 held `spec.chartVersion: 0.3.34` as if someone had
+typed it, and every later umbrella re-rendered its components at 0.3.34. Measured on GKE,
+upgrading 0.3.34 to 0.3.36:
+- the umbrella's Helm release moved to `openstack-0.3.36`;
+- all 33 component definitions stayed at `spec.chart.version: 0.3.34`;
+- the new `powerdns` was registered at 0.3.34, a chart that was never published, so it could
+  never sync ([#179](https://github.com/krateo-blueprints/krateo-openstack-blueprint/issues/179)).
+
+From 0.3.38 there is no such value, so a stored object cannot choose the version. A Composition
+created by an earlier release still carries `spec.chartVersion`; it is accepted and ignored.
+`hack/validate-component-version-follows-chart.py` renders the chart with exactly that stale
+spec and fails unless every component lands at the umbrella's version. It also refuses any
+release-stamped placeholder in a schema `default` anywhere in the repo, because a stamped default
+is frozen the same way.
+
+To see whether an install is affected, compare the two:
+
+```sh
+helm -n openstack list --filter '^openstack'                      # the umbrella's chart version
+kubectl -n openstack get compositiondefinitions \
+  -o custom-columns='NAME:.metadata.name,VER:.spec.chart.version'  # each component's
+```
 
 ### A component keeps the API version it was created at
 

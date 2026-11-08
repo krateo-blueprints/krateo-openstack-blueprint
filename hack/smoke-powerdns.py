@@ -107,9 +107,6 @@ def render(workdir, *extra):
     shutil.copytree(TOOLKIT, dst / "charts" / "helm-toolkit", dirs_exist_ok=True)
     chart_yaml = dst / "Chart.yaml"
     chart_yaml.write_text(chart_yaml.read_text().replace("CHART_VERSION", "0.0.0-smoke"))
-    values = dst / "values.yaml"
-    values.write_text(values.read_text().replace("chartVersion: CHART_VERSION",
-                                                 'chartVersion: "0.0.0-smoke"'))
     out = sh("helm", "template", "powerdns", str(dst), "--namespace", NAMESPACE, *extra)
     if out.returncode != 0:
         measurement_failed(f"helm template failed: {out.stderr.strip()[-400:]}")

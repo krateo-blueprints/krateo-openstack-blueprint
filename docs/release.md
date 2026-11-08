@@ -40,7 +40,8 @@ $ helm show chart oci://ghcr.io/krateo-blueprints/charts/keystone  --version X.Y
 ```
 
 After the charts are published, bump each `blueprints/<c>/compositiondefinition.yaml`'s
-`spec.chart.version` (and the orchestrator's `chartVersion` default) to `X.Y.Z` on `main` —
+`spec.chart.version` to `X.Y.Z` on `main` (the orchestrator needs no bump: it pulls the
+components at its own chart version) —
 those are the repo's own registrations and must point at a version that exists.
 
 ## PR-time gate

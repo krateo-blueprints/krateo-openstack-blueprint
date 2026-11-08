@@ -109,8 +109,7 @@ typed by `blueprints/openstack/chart/values.schema.json`:
 | `profile` | string (`identity`\|`full`) | `identity` | Component preset. |
 | `enabled` | array\|null | `[]` | Explicit component set (overrides `profile`), expanded to the transitive dependency closure. |
 | `installDefinitions` | boolean | `true` | Register each component `CompositionDefinition` first. |
-| `ociRepo` | string | `oci://ghcr.io/krateo-blueprints/charts` | Registry for the component charts. |
-| `chartVersion` | string | `0.3.2` | Component chart version to pin. |
+| `ociRepo` | string | `oci://ghcr.io/krateo-blueprints/charts` | Registry for the component charts. They are pulled at the orchestrator's own chart version; there is no `chartVersion` value (#179). |
 | `componentValues` | object\|null | `null` | Per-component `spec` overrides, strictly typed. |
 | `serviceContract` | object | chart default | Contract v1 descriptor (below). |
 | `contractEmitter` | object | disabled | Runtime usage/health CronJobs. |

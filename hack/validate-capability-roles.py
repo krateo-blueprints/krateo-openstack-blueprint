@@ -66,7 +66,7 @@ def render(chart: Path, workdir: Path) -> str:
         (staged / "charts").mkdir(exist_ok=True)
         shutil.copytree(toolkit, staged / "charts" / "helm-toolkit")
     r = subprocess.run(
-        ["helm", "template", "validate", str(staged), "--set", "chartVersion=0.0.0-validate"],
+        ["helm", "template", "validate", str(staged)],
         capture_output=True, text=True,
     )
     if r.returncode != 0:

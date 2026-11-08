@@ -12,7 +12,9 @@ metadata:
 spec:
   chart:
     url: {{ $.Values.ociRepo }}/{{ $c.name }}
-    version: {{ $.Values.chartVersion | quote }}
+    # The umbrella's own version, never a value: a value can be frozen into the stored
+    # Composition by its CRD default, and then no upgrade moves the components (#179).
+    version: {{ $.Chart.Version | quote }}
 {{- end }}
 {{- end }}
 {{- end }}
