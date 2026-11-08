@@ -20,7 +20,7 @@
 {{- if .Values.manifests.job_db_sync }}
 {{- $envAll := . }}
 {{- $serviceName := "powerdns" }}
-{{- $configMapBinName := printf "%s-%s" $envAll.deployment_name "powerdns-bin" }}
+{{- $configMapBinName := "powerdns-bin" }}
 {{- $serviceAccountName := printf "%s-%s" $envAll.deployment_name "powerdns-db-sync" }}
 {{ tuple $envAll "db_sync" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---

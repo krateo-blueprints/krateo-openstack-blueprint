@@ -7,7 +7,8 @@ startup), a privileged port an unprivileged user cannot bind, and credentials se
 variables that pdns_server does not read. All of them are facts about the server, and no render
 can see them.
 
-So this reads the Deployment and the db-sync Job out of `helm template` and executes THOSE: their
+So this reads the Deployment and the db-init and db-sync Jobs out of `helm template` and executes
+THOSE: their
 image, command, args, env, mounts and probes. Nothing here restates what the chart configures, so
 it cannot drift from the chart, which is the failure a hand-written docker command would have.
 
@@ -15,8 +16,14 @@ It uses the same restrictions as the pod: the rendered uid, no_new_privs, every 
 and privileged ports enforced. Docker relaxes that sysctl by default, which would hide a bind
 failure, so it is set back explicitly.
 
+It renders under a release name unlike the chart's, as Krateo names a release (the Composition plus
+a suffix). Rendered as `powerdns`, names built from the release and fixed names coincide, and that
+hid a db-init Job mounting a ConfigMap and a Secret the chart never created (#179).
+
 WHAT IT ASSERTS, in the order a cluster would reach them:
 
+  0. db-init, against a MariaDB holding only its root account, creates the database and the user
+     db-sync and the server log in as, and a second run (it runs on every release) is a no-op;
   1. the db-sync pod applies the schema, a second run is a no-op (it runs on every release), and
      a schema missing a table is refused rather than reported as already applied;
   2. the rendered readiness probe fails until the server is up, then passes;
@@ -60,7 +67,11 @@ ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 CHART = ROOT / "blueprints" / "powerdns" / "chart"
 TOOLKIT = ROOT / "charts" / "helm-toolkit"
 NAMESPACE = "openstack"
-ROOT_PASSWORD = "smoke-root"
+# The MariaDB root password. Taken from the rendered admin Secret once the chart is rendered, so
+# db-init logs in with exactly what the chart gives it.
+ROOT_PASSWORD = None
+# Krateo names a release after the Composition plus a suffix, never after the chart.
+RELEASE = "powerdns-smoke1234"
 API_KEY = "smoke-api-key-" + uuid.uuid4().hex
 ZONE = "smoke.example."
 SECONDARY_ZONE = "secondary.example."
@@ -107,7 +118,7 @@ def render(workdir, *extra):
     shutil.copytree(TOOLKIT, dst / "charts" / "helm-toolkit", dirs_exist_ok=True)
     chart_yaml = dst / "Chart.yaml"
     chart_yaml.write_text(chart_yaml.read_text().replace("CHART_VERSION", "0.0.0-smoke"))
-    out = sh("helm", "template", "powerdns", str(dst), "--namespace", NAMESPACE, *extra)
+    out = sh("helm", "template", RELEASE, str(dst), "--namespace", NAMESPACE, *extra)
     if out.returncode != 0:
         measurement_failed(f"helm template failed: {out.stderr.strip()[-400:]}")
     return [d for d in yaml.safe_load_all(out.stdout) if d]
@@ -366,12 +377,29 @@ try:
     db_name = next(e["value"] for e in job_pod["containers"][0]["env"] if e["name"] == "DB_NAME")
     db_pass = secret_value(docs, "powerdns-db-user", "DB_PASSWORD")
     db_host = next(e["value"] for e in job_pod["containers"][0]["env"] if e["name"] == "DB_HOST")
+    ROOT_PASSWORD = secret_value(docs, "powerdns-db-admin", "DB_PASSWORD")
     created_containers.append(DB)
+    # Only the root account. The database and the powerdns user are db-init's to create, as on a
+    # cluster, where nothing else does.
     sh("docker", "run", "-d", "--name", DB, "--network", NET, "--network-alias", db_host,
-       "-e", f"MARIADB_ROOT_PASSWORD={ROOT_PASSWORD}", "-e", f"MARIADB_DATABASE={db_name}",
-       "-e", f"MARIADB_USER={db_user}", "-e", f"MARIADB_PASSWORD={db_pass}", DB_IMAGE, check=True)
+       "-e", f"MARIADB_ROOT_PASSWORD={ROOT_PASSWORD}", DB_IMAGE, check=True)
     if not wait_for_db():
         measurement_failed("MariaDB did not come up:\n" + db_logs())
+
+    # 0. db-init, exactly as the Job renders it. Its kubernetes-entrypoint init container waits on
+    # the apiserver for dependencies and is skipped, as db-sync's is below.
+    init_job = find(docs, "Job", "powerdns-db-init")
+    init_pod = init_job["spec"]["template"]["spec"]
+    initer = next(c for c in init_pod["containers"] if c["name"].startswith("powerdns-db-init"))
+    for attempt in ("first", "second"):
+        ran = run_once(docs, init_pod, initer, workdir, new_pod())
+        if ran.returncode != 0:
+            problems.append(f"db-init failed on its {attempt} run: {(ran.stdout + ran.stderr)[-400:]}")
+    login = sh("docker", "exec", DB, "mariadb", f"-u{db_user}", f"-p{db_pass}", db_name, "-e",
+               "select 1")
+    if login.returncode != 0:
+        problems.append(f"after db-init, {db_user} cannot log in to {db_name}: "
+                        f"{(login.stdout + login.stderr)[-300:]}")
 
     # 1. db-sync, exactly as the Job renders it: the schema-copy init container, then the client.
     job_state = new_pod()
@@ -497,7 +525,9 @@ if problems:
         print("  - " + p)
     sys.exit(1)
 
-print("OK: the rendered db-sync applied the schema, re-ran cleanly and refused a partial one; the "
+print(f"OK: rendered as release {RELEASE}, the rendered db-init created the database and its user "
+      "against a bare MariaDB and re-ran cleanly; the "
+      "rendered db-sync applied the schema, re-ran cleanly and refused a partial one; the "
       "rendered server started unprivileged, authenticated its API, served a zone over DNS, "
       "failed readiness and passed liveness during a database outage, accepted a NOTIFY for a "
       "secondary zone from a non-primary address, answered again after two outages, kept its "

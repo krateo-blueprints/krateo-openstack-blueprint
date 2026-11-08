@@ -19,7 +19,10 @@
 
 {{- if .Values.manifests.configmap_bin }}
 {{- $envAll := . }}
-{{- $configMapBinName := printf "%s-%s" $envAll.deployment_name "powerdns-bin" }}
+{{- /* A fixed name, as every other component here names its bin ConfigMap: helm-toolkit's job
+       templates (db-init) mount "<service>-bin" whatever the release is called. Named after the
+       release, it matched only a release called "powerdns", and a Krateo release never is (#179). */}}
+{{- $configMapBinName := "powerdns-bin" }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -30,6 +33,8 @@ data:
   image-repo-sync.sh: |
 {{- include "helm-toolkit.scripts.image_repo_sync" . | indent 4 }}
 {{- end }}
+  db-init.py: |
+{{- include "helm-toolkit.scripts.db_init" . | indent 4 }}
   db-sync.sh: |
 {{ tuple "bin/_db-sync.sh.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
   api-key-init.py: |

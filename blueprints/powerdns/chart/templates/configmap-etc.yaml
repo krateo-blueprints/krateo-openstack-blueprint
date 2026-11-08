@@ -19,7 +19,8 @@
 
 {{- if .Values.manifests.configmap_etc }}
 {{- $envAll := . }}
-{{- $configMapName := printf "%s-%s" $envAll.deployment_name "powerdns-etc" }}
+{{- /* Fixed, like powerdns-bin (#179). A ConfigMap, not a Secret: it carries no credential. */}}
+{{- $configMapName := "powerdns-etc" }}
 
 {{- /* The gmysql connection is rendered here from endpoints.oslo_db, so the database the
        server reads is the same one db-init created and db-sync populated. The password is
