@@ -28,11 +28,18 @@ own, smaller schemas; the orchestrator's `componentValues` mirrors them.
 
 ## `componentValues.<name>` — per-component overrides
 
-Per-component Composition `spec` overrides, **strictly typed** against each component's chart
-schema (regenerated per release by `hack/gen-componentvalues-schema.py`; CI fails a stale
-schema). The value at `componentValues.<name>` becomes that component's Composition `spec`,
-deep-merged; components without an entry use chart defaults. `additionalProperties: false` —
-an unknown component or field is rejected.
+Per-component Composition `spec` overrides, typed against each component's chart schema
+(regenerated per release by `hack/gen-componentvalues-schema.py`; CI fails a stale schema). The
+value at `componentValues.<name>` becomes that component's Composition `spec`, deep-merged;
+components without an entry use chart defaults. `additionalProperties: false` applies to the
+component **names**: an unknown component is rejected.
+
+Each component exposes the tunable OpenStack-Helm top-level keys its chart has — `conf`, `pod`,
+`manifests`, `endpoints`, `network`, `images`. Declared fields under them are typed; any other key
+below them passes through untyped (`x-kubernetes-preserve-unknown-fields`) instead of being
+pruned. `hack/validate-component-schema-surface.py` fails CI if a chart grows a tunable key its
+schema does not expose, or if a subtree under one is closed (#209). Up to 0.3.44 most of these
+keys were not exposed, and an override of them was silently pruned by the Composition CRD.
 
 Common shapes across components:
 

@@ -417,6 +417,15 @@ jobs:
       - name: The umbrella must emit well-formed YAML for every component at once
         run: python3 hack/validate-umbrella-multidoc.py .
 
+      # A component override the schema does not declare is PRUNED by the Composition CRD, at
+      # the umbrella (componentValues) and again at the component, with only a client-side
+      # warning (#209). Every component chart was narrower than its values: nova exposed only
+      # `images`, so `componentValues.nova.pod.*`, `.conf.*` and `.manifests.*` did nothing. This
+      # gate requires every tunable top-level key to be declared and open all the way down, and
+      # the umbrella's componentValues to be exactly what hack/gen-componentvalues-schema.py emits.
+      - name: Every tunable component key must reach the chart instead of being pruned
+        run: python3 hack/validate-component-schema-surface.py .
+
       # Gating, and it guards the other gates. Four checks here printed "SKIP: PyYAML
       # unavailable" and exited 0 for weeks (#120) -- the lint job green on every run while
       # nothing was measured, including the gate written to protect the keystone fernet fix.
