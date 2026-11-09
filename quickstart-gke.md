@@ -177,6 +177,18 @@ served on it (`HTTP 200`, login page):
 
 ## Teardown (important — this cluster costs money)
 
+Deleting a GKE cluster does **not** delete the persistent disks behind its volume claims, and
+StatefulSet claims (MariaDB, RabbitMQ) outlive their release by design. Uninstall first, then
+delete the claims, and only then the cluster. Measured on #204: done in this order, every claim
+disk was deleted; deleting the cluster alone left three of them behind (#179).
+
 ```sh
+kubectl -n openstack delete openstacks.composition.krateo.io openstack   # uninstalls every component
+helm -n openstack list -a                                                # wait until this is empty
+kubectl -n openstack delete pvc --all --wait=true                        # releases the claim disks
+kubectl get pv                                                           # wait until this is empty
 gcloud container clusters delete osh --zone us-central1-a --quiet
 ```
+
+Completed hook Jobs stay in the namespace after the uninstall (#206); deleting the cluster removes
+them.

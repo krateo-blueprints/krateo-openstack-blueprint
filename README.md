@@ -129,37 +129,26 @@ kubectl create namespace openstack-system
 # it onto the previous component, so any render carrying two or more components failed
 # and the release froze at revision 1. Fixed in 0.3.32 (issue #152).
 #
-# DO NOT UPGRADE AN EXISTING INSTALL TO 0.3.34 OR ANYTHING EARLIER. 0.3.34 fixes only the
-# case where a component has an origin stamp and that version is still served; a component
-# with no stamp, or whose origin version is no longer served, is still pruned. Fresh installs
-# are fine. UPGRADING to 0.3.33 deletes every
-# component Composition CR. The emission gate asked for a CRD serving the chart's NEW
-# version, which no cluster serves at the instant the bump renders -- the
-# CompositionDefinitions in that same pass are what create it -- so every component
-# document left the manifest and helm pruned the live CRs. Their Helm releases survive
-# with nothing reconciling them. Measured on a 6-node GKE install upgrading
-# 0.3.32 -> 0.3.33: 6 CRs left for 37 releases, 27 running workloads orphaned, and three
-# components re-created with new release names that could not patch their own live
-# objects because spec.selector is immutable. See issue #166.
+# DO NOT INSTALL OR UPGRADE TO 0.3.33 THROUGH 0.3.42. 0.3.33 prunes every component CR on
+# upgrade (#166). 0.3.36 and 0.3.37 upgrade the umbrella but leave every component at its old
+# version (#179). 0.3.38 through 0.3.40 cannot upgrade a Job whose template changed (#179).
+# 0.3.41 and 0.3.42 leave a cinder whose install hooks wait for Ceph forever, silently (#204);
+# the 0.3.42 release notes say how to recover an install that has it.
 #
-# What 0.3.34 and 0.3.35 have actually been run through: NO INSTALL AND NO UPGRADE. 0.3.35
-# covers the two cases 0.3.34 still pruned, and adds a PowerDNS that starts, which the chart
-# first shipped on main could not do. Those fixes are verified by
-# hack/validate-upgrade-does-not-prune.py against eight synthetic cluster states and by
-# hack/smoke-powerdns.py against the rendered pods, and the defect was measured on a real
-# cluster -- but nobody has yet performed a successful umbrella upgrade with either release,
-# and designate has not been run against this PowerDNS. 0.3.35 exists so that test can run;
-# until it does, "upgrading works now" is a claim about a gate and not about a cluster.
-# BP_VERSION below therefore stays at 0.3.32, which is the newest release that HAS been run
-# through the steps in this document.
-#
-# What 0.3.32 has actually been run through, stated so you know what is NOT covered: the
-# Composition path below, on kind, with a 7-component closure (gnocchi + skyline + zaqar
-# and their dependencies). keystone issued a real token, skyline and zaqar served, the
-# umbrella reached revision 2 with all seven component documents and exactly one Helm
-# release per component. NOT verified at this version: the 35-component `profile: full`,
-# the compute tier, and the direct-helm route further down.
-BP_VERSION=0.3.32
+# What 0.3.43 has actually been run through, stated so you know what is NOT covered:
+#   - a fresh install with these exact steps, profile: full-strict, on a 6-node GKE cluster
+#     (n2-standard-16, Kubernetes 1.36.4, core-provider 2.13.72). 32 components; all 33 Helm
+#     releases deployed; the last component Ready 22 min after the apply; every Job a bounded
+#     hook; keystone answering on /v3 (#204);
+#   - an upgrade of a 0.3.34 install to 0.3.42 with hack/migrate-to-pvc.py, then on to 0.3.43:
+#     MariaDB and RabbitMQ data intact across the upgrade, a node move and a RabbitMQ outage,
+#     and a designate zone round-trip through PowerDNS (#179, #204).
+# Six components are NOT Ready on that install, each with its own issue: nova, neutron and
+# cyborg (#200), tacker (#201), magnum (#202), watcher (#203). cinder is not in full-strict
+# from 0.3.43 because its only backend needs Ceph (#196). NOT verified at this version: the
+# 36-component profile: full, kind, and the per-component path further down.
+
+BP_VERSION=0.3.43
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 
@@ -299,7 +288,7 @@ kubectl label --overwrite nodes --all openstack-control-plane=enabled
 
 kubectl create namespace openstack-system
 for c in mariadb memcached keystone glance horizon; do
-BP_VERSION=0.3.32   # the release this path is verified against; see the note above
+BP_VERSION=0.3.32   # this per-component path was last verified at 0.3.32, not since
   kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-$c.yaml; done
 kubectl create namespace openstack
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-01-identity.yaml
@@ -388,7 +377,7 @@ database and MariaDB never recovered ([#177](https://github.com/krateo-blueprint
 **Do not apply a 0.3.36-or-later `CompositionDefinition` to an existing install until both
 components are migrated, and make that release 0.3.38 or later:** 0.3.36 and 0.3.37 upgrade the
 umbrella but leave every component at its old version (see "Components follow the umbrella's
-version" below, #179). An upgrade to 0.3.38 has not yet been run end to end; #179 is that run. Kubernetes refuses to add claims to an existing StatefulSet. When that happens
+version" below, #179). That path has been run end to end on GKE, 0.3.34 to 0.3.42 and then 0.3.43, with the data intact (#179, #204). Kubernetes refuses to add claims to an existing StatefulSet. When that happens
 the controller does not roll back: it patches the rest of the chart and keeps retrying the
 StatefulSet, with `Ready=Unknown`. A Helm hook cannot do the move either, because the controller
 runs hooks after it has applied the change. Measured with composition-dynamic-controller 2.13.71
