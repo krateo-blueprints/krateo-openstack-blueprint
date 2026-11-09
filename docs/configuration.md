@@ -34,12 +34,16 @@ value at `componentValues.<name>` becomes that component's Composition `spec`, d
 components without an entry use chart defaults. `additionalProperties: false` applies to the
 component **names**: an unknown component is rejected.
 
-Each component exposes the tunable OpenStack-Helm top-level keys its chart has — `conf`, `pod`,
-`manifests`, `endpoints`, `network`, `images`. Declared fields under them are typed; any other key
-below them passes through untyped (`x-kubernetes-preserve-unknown-fields`) instead of being
-pruned. `hack/validate-component-schema-surface.py` fails CI if a chart grows a tunable key its
-schema does not expose, or if a subtree under one is closed (#209). Up to 0.3.44 most of these
-keys were not exposed, and an override of them was silently pruned by the Composition CRD.
+Each component exposes **every top-level key of its chart's `values.yaml`**, not a chosen subset:
+`conf`, `pod`, `manifests`, `endpoints`, `network`, `images`, `labels`, `bootstrap`, `extraObjects`,
+`jobs`, `secrets` and the rest. Declared fields under them are typed (`manifests.*` as booleans,
+`labels.*.node_selector_{key,value}` as strings, `extraObjects` as a list of manifests, top-level
+scalars by their default's type); any other key below them passes through untyped
+(`x-kubernetes-preserve-unknown-fields`) instead of being pruned.
+`hack/validate-component-schema-surface.py` fails CI if a chart grows a top-level key its schema
+does not declare, if a subtree under one is closed, or if a declared scalar type does not accept
+the chart's own default (#209). Up to 0.3.44 most of these keys were not exposed, and an override
+of them was silently pruned by the Composition CRD.
 
 Common shapes across components:
 

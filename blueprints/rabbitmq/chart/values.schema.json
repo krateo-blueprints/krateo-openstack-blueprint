@@ -60,7 +60,8 @@
           "default": "768Mi",
           "pattern": "^[0-9]+(Mi|Gi|Ti)$"
         }
-      }
+      },
+      "x-kubernetes-preserve-unknown-fields": true
     },
     "conf": {
       "type": "object",
@@ -134,6 +135,95 @@
       "type": "object",
       "title": "Network overrides",
       "description": "Deep-merged into the chart's network values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "dependencies": {
+      "type": "object",
+      "title": "dependencies",
+      "description": "Deep-merged into the chart's `dependencies` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "extraObjects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "x-kubernetes-preserve-unknown-fields": true
+      },
+      "title": "extraObjects",
+      "description": "Deep-merged into the chart's `extraObjects` values."
+    },
+    "forceBoot": {
+      "type": "object",
+      "title": "forceBoot",
+      "description": "Deep-merged into the chart's `forceBoot` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "global": {
+      "type": "object",
+      "title": "global",
+      "description": "Deep-merged into the chart's `global` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "labels": {
+      "type": "object",
+      "properties": {
+        "jobs": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "server": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "test": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        }
+      },
+      "title": "labels",
+      "description": "Deep-merged into the chart's `labels` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "monitoring": {
+      "type": "object",
+      "title": "monitoring",
+      "description": "Deep-merged into the chart's `monitoring` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "network_policy": {
+      "type": "object",
+      "title": "network_policy",
+      "description": "Deep-merged into the chart's `network_policy` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "secrets": {
+      "type": "object",
+      "title": "secrets",
+      "description": "Deep-merged into the chart's `secrets` values.",
       "x-kubernetes-preserve-unknown-fields": true
     }
   }

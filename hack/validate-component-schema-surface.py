@@ -9,12 +9,17 @@ declare, at BOTH stages. Measured before this gate: nova's schema declared only 
 DEFAULT.debug` and `componentValues.glance.manifests.job_clean` were all dropped with nothing but
 a client-side "unknown field" warning. All 36 component schemas were narrower than their chart.
 
+A curated subset is the defect: a first version of this fix exposed six chosen keys and still
+dropped `labels` (node selectors, which decide placement) in 35 charts, plus `bootstrap`,
+`extraObjects`, `jobs`, `secrets` and others. So the rule is EVERY top-level key.
+
 This gate fails when, for any component chart:
-  1. its values.yaml has a top-level key in TUNABLES that its schema does not declare;
+  1. its values.yaml has a top-level key its schema does not declare;
   2. that key, or any object below it, is not open (x-kubernetes-preserve-unknown-fields: true),
      so a deeper key would still be pruned. An object an author closes on purpose with
      additionalProperties: false is respected; junctor members and $refs are not inspected;
   3. a boolean switch in values.yaml `manifests` is not declared as a boolean;
+  4. a top-level scalar is declared with a type its own default in values.yaml does not have;
 and when the umbrella's committed values.schema.json is not byte-identical to what
 hack/gen-componentvalues-schema.py produces from the component schemas in this tree.
 
@@ -34,8 +39,26 @@ try:
 except ImportError:
     sys.exit("FAIL: PyYAML is required, and this gate does not pass without measuring")
 
-TUNABLES = ("conf", "pod", "manifests", "endpoints", "network", "images")
 MARKER = "x-kubernetes-preserve-unknown-fields"
+SCALAR = {bool: "boolean", int: "integer", str: "string"}
+
+
+def declared_types(node):
+    t = node.get("type")
+    return set(t) if isinstance(t, list) else ({t} if t else set())
+
+
+def scalar_mismatch(value, node):
+    """The chart's own default for a top-level scalar must satisfy the declared type."""
+    types = declared_types(node)
+    if not types or not types <= {"boolean", "integer", "string", "number", "null"}:
+        return None
+    if value is None:
+        return None if "null" in types or node.get("nullable") else "null"
+    want = SCALAR.get(type(value))
+    if want and want not in types and not (want == "integer" and "number" in types):
+        return want
+    return None
 
 
 def closed_objects(node, path):
@@ -56,16 +79,24 @@ def check_chart(chart, name):
     values = yaml.safe_load(open(os.path.join(chart, "values.yaml"))) or {}
     schema = json.load(open(os.path.join(chart, "values.schema.json")))
     props = schema.get("properties") or {}
-    for key in TUNABLES:
-        if key not in values:
-            continue
+    for key, value in values.items():
         node = props.get(key)
         if node is None:
             problems.append(f"{name}: values.yaml has `{key}` but the schema does not declare it, so "
                             f"componentValues.{name}.{key} is pruned")
             continue
-        if node.get("type") != "object":
-            problems.append(f"{name}: `{key}` is declared with type {node.get('type')!r}, not object")
+        bad = scalar_mismatch(value, node)
+        if bad:
+            problems.append(f"{name}: `{key}` is declared as {node.get('type')!r} but its default in values.yaml "
+                            f"is a {bad}")
+        # Helm validates the chart's OWN defaults against this schema before it renders anything,
+        # empty ones included, so a container's declared type must accept its default. A first
+        # version of this rule exempted empty maps; redis ships `extraObjects: {}`, it was declared
+        # an array, and every render of redis failed (hack/validate-values-schema.py caught it).
+        want = "object" if isinstance(value, dict) else "array" if isinstance(value, list) else None
+        if want and want not in declared_types(node):
+            problems.append(f"{name}: `{key}` defaults to a{'n' if want == 'object' else 'n'} {want} in values.yaml "
+                            f"but is declared with type {node.get('type')!r}, so helm refuses the chart's own defaults")
             continue
         for p in closed_objects(node, key):
             problems.append(f"{name}: `{p}` is a closed object, so an undeclared key below it is pruned "
@@ -123,7 +154,7 @@ def main():
     if problems:
         print(f"FAIL: {len(problems)} problem(s) across {len(charts)} component charts")
         return 1
-    print(f"OK: {len(charts)} component charts expose every tunable key, open all the way down, and the "
+    print(f"OK: {len(charts)} component charts declare every top-level values key, open all the way down, and the "
           "umbrella's componentValues matches the generator byte for byte")
     return 0
 

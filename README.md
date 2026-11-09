@@ -670,13 +670,17 @@ spec:
 ```
 
 Per-component overrides go under `spec.componentValues.<name>`, and each one is deep-merged into
-that component's chart values. Every component exposes the OpenStack-Helm keys people tune, where
-its chart has them: `conf`, `pod`, `manifests`, `endpoints`, `network` and `images`. The fields
-declared under them are typed (`images.pull_policy`, replica counts, `manifests.*` switches as
-booleans, `neutron.network.interface.tunnel`, Horizon `network.dashboard.service.type`); any
-other key below them passes through **untyped** (`x-kubernetes-preserve-unknown-fields`), so for
-example `componentValues.keystone.conf.keystone.DEFAULT.debug: true` or
-`componentValues.nova.pod.useHostNetwork.novncproxy: true` reaches the chart. Up to 0.3.44 every
+that component's chart values. Every component exposes **every top-level key of its chart's
+`values.yaml`**: `conf`, `pod`, `manifests`, `endpoints`, `network`, `images`, and also `labels`
+(node selectors, which decide placement), `bootstrap`, `extraObjects`, `jobs`, `secrets` and the
+rest. The fields declared under them are typed (`images.pull_policy`, replica counts,
+`manifests.*` switches as booleans, `labels.*.node_selector_{key,value}` as strings,
+`extraObjects` as a list of manifests, `neutron.network.interface.tunnel`, Horizon
+`network.dashboard.service.type`); any other key below them passes through **untyped**
+(`x-kubernetes-preserve-unknown-fields`), so for example
+`componentValues.keystone.conf.keystone.DEFAULT.debug: true`,
+`componentValues.nova.pod.useHostNetwork.novncproxy: true` or
+`componentValues.nova.labels.api_metadata.node_selector_value: enabled` reaches the chart. Up to 0.3.44 every
 component was narrower than this (nova exposed only `images`), and an override outside the
 declared fields was pruned by the Composition CRD with only a client-side warning (#209). On a
 component created before that, a newly exposed key can still be dropped: see "Any
