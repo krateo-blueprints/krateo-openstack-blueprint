@@ -40,7 +40,9 @@ return: |
 {{- if kindIs "map" $values -}}
 [{{ $section }}]
 {{range $key, $value := $values -}}
-{{- if kindIs "slice" $value -}}
+{{- /* A null leaf means "unset": write nothing rather than "key = <no value>" (#202). */ -}}
+{{- if kindIs "invalid" $value -}}
+{{- else if kindIs "slice" $value -}}
 {{ $key }} = {{ include "helm-toolkit.utils.joinListWithComma" $value }}
 {{else -}}
 {{ $key }} = {{ $value }}

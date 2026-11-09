@@ -56,7 +56,11 @@ return: |
 {{- if kindIs "map" $values -}}
 [{{ $section }}]
 {{ range $key, $value := $values -}}
-{{- if kindIs "slice" $value -}}
+{{- /* A null leaf means "unset": write nothing, so the service uses its own default.
+       Printing it would write Go's nil placeholder, "key = <no value>", which every
+       OpenStack service reads as a literal value (#202). */ -}}
+{{- if kindIs "invalid" $value -}}
+{{- else if kindIs "slice" $value -}}
 {{ $key }} = {{ include "helm-toolkit.utils.joinListWithComma" $value }}
 {{ else if kindIs "map" $value -}}
 {{- if eq $value.type "multistring" }}

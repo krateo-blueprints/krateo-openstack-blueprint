@@ -211,7 +211,17 @@ pod:
         volumes:
 
 storage:
-  storageClass: general
+  # null leaves storageClassName unset, so the claims take the cluster's default class, as
+  # mariadb's and rabbitmq's do. Upstream's `general` exists on no cluster this blueprint targets,
+  # and its claims stayed Pending (#201).
+  storageClass: null
+  # tacker-server and tacker-conductor both mount all three claims below. A cluster's default
+  # class is ReadWriteOnce, which lets several pods use a volume only on the node it attaches to,
+  # so with ReadWriteOnce the conductor is pinned to the server's node by a required podAffinity
+  # (templates/deployment-conductor.yaml): by default tacker's two pods share one node.
+  # To spread them, name a class that offers ReadWriteMany in storageClass and set this to
+  # ReadWriteMany; the affinity is then not rendered.
+  accessMode: ReadWriteOnce
   volumes:
     csar_files:
       name: tacker-csar-files

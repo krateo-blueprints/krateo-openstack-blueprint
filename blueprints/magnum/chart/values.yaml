@@ -131,6 +131,11 @@ conf:
       # via the endpoints section.
       port: null
       host: 0.0.0.0
+      # configmap-etc.yaml copies this into magnum-api-uwsgi.ini's `processes`. With no value
+      # uWSGI started in "Operational MODE: no-workers", its listen queue filled, and
+      # magnum-api never became Ready (#202). 1, as heat, glance and cinder use: the chart
+      # scales through pod replicas, not workers per pod.
+      workers: 1
   logging:
     loggers:
       keys:
