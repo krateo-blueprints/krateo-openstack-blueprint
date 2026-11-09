@@ -167,6 +167,11 @@ jobs:
       # a test Pod that is not a `helm.sh/hook: test` hook blocks every later upgrade (#179).
       - name: Every test Pod is a Helm test hook
         run: python3 hack/validate-test-pods.py .
+      # A Service selecting a hostNetwork pod makes that node's IP a Service endpoint, and cluster
+      # DNS then answers the node's own reverse lookup with the Service name, so every host-network
+      # agent there resolves the wrong FQDN (#200).
+      - name: No Service selects a hostNetwork pod
+        run: python3 hack/validate-hostnetwork-services.py .
 
   capability-roles:
     # Gating. A capability aggregates into a predefined role via a
