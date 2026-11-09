@@ -2945,7 +2945,14 @@ pod:
         key: node-role.kubernetes.io/control-plane
         operator: Exists
   useHostNetwork:
-    novncproxy: true
+    # false (#200). novncproxy is behind Service nova-novncproxy. On the host network its IP is
+    # the node's, so the node's IP became a Service endpoint and cluster DNS answered that node's
+    # own reverse lookup with <ip>.nova-novncproxy.openstack.svc.cluster.local. Every
+    # host-network agent there (nova-compute --use-fqdn, the neutron dhcp and l3 agents,
+    # cyborg-agent) then took that as its FQDN and never became Ready. novncproxy needs no host
+    # networking: it listens on 0.0.0.0 and reaches compute VNC servers at node IPs, which pods
+    # route to. hack/validate-hostnetwork-services.py refuses any Service selecting a hostNetwork pod.
+    novncproxy: false
   use_fqdn:
     compute: true
 rbd_pool:
