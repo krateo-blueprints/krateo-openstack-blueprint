@@ -2,13 +2,14 @@
 """`profile: full-strict` must omit exactly the components that need provisioning, and `full`
 must still include them.
 
-Three of the 35 components cannot start on a Kubernetes cluster as it comes: ironic wants an
+Four of the 36 components cannot start on a Kubernetes cluster as it comes: cinder wants a
+Ceph cluster for its only shipped volume backend (from 0.3.43, #196), ironic wants an
 interface named `ironic-pxe`, octavia wants a Neutron port per host on its management network,
 swift wants a ReadWriteMany StorageClass. Measured on a 4-node GKE install of profile=full: six
 pods at 14 restarts in Init plus four Pending, none of which could ever become Ready there.
 
 They are flagged `requiresProvisioning: true`. `profile: full-strict` skips the flagged ones;
-`profile: full` is unchanged and still selects all 35, because taking components away from an
+`profile: full` is unchanged and still selects all 36, because taking components away from an
 operator who HAS provisioned a PXE interface, an lb-mgmt-net or an RWX StorageClass would be a
 behaviour change arriving through a patch release. This gate asserts all four directions:
 
@@ -29,6 +30,7 @@ which a pod census can only count, and the check because a precondition an opera
 is one they will rediscover instead.
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -123,7 +125,7 @@ def main():
     # mention from a use. The only check that cannot be fooled is rendering the chart and asking
     # what it selected, so that is what this does.
     # Both halves of the contract, each rendered rather than inferred. `full` is unchanged and
-    # must still select the three; `full-strict` must not. Asserting only the second would let
+    # must still select every flagged component; `full-strict` must not. Asserting only the second would let
     # someone "simplify" by excluding them from `full` too -- which is the surprise-in-a-patch-
     # release this was deliberately designed to avoid.
     full = selection_for_profile("full")
@@ -154,6 +156,23 @@ def main():
                 "is supposed to be the SMALLER set. If they are equal the distinction has "
                 "collapsed and one of the two profiles is pointless."
             )
+        # The README states the full-strict count in its example and names every left-out
+        # component in its table. Both drifted once: "33 components" and "minus those three"
+        # survived cinder joining the list until this check (#204). Rendered count and flagged
+        # set are the truth; the prose has to match them.
+        readme = os.path.join(ROOT, "README.md")
+        text = open(readme).read() if os.path.exists(readme) else ""
+        m = re.search(r"profile: full-strict\s+#\s*(\d+) components", text)
+        if not m:
+            problems.append("README.md has no `profile: full-strict   # N components` example line, "
+                            "so the documented count is not checked")
+        elif int(m.group(1)) != len(strict):
+            problems.append(f"README.md says full-strict is {m.group(1)} components; it renders "
+                            f"{len(strict)}")
+        for c in sorted(flagged):
+            if not re.search(r"^\| `" + re.escape(c) + r"` \|", text, re.M):
+                problems.append(f"README.md's full-strict table has no row for `{c}`, which "
+                                "full-strict leaves out")
 
     if problems:
         print(f"FAIL: {len(problems)} problem(s) with the provisioning preconditions "

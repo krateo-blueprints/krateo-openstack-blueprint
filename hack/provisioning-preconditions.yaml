@@ -12,6 +12,20 @@
 # named fix (#165, ship a powerdns blueprint); when that lands the flag comes off and the entry
 # goes with it.
 preconditions:
+  - component: cinder
+    requires: >-
+      A Ceph cluster reachable from the nodes, plus, in the openstack namespace, the ConfigMap
+      ceph-etc (ceph.conf) and the Secrets pvc-ceph-client-key and cinder-volume-rbd-keyring,
+      for the default rbd1 backend. No other volume backend ships with this blueprint: LVM needs
+      a prepared volume group and an iSCSI target on the host, and NFS needs an NFS server.
+    symptom: >-
+      cinder-storage-init and cinder-volume never start: FailedMount on "ceph-etc" and on the
+      keyring Secret, and the pods stay in Init. cinder-api, cinder-scheduler and
+      cinder-bootstrap wait on cinder-volume. Since every Job became a Helm hook (0.3.41),
+      storage-init holds the release in pending-install until its activeDeadlineSeconds expires
+      (0.3.43). Measured on #179 and on a cold 0.3.42 install (#204).
+    check: kubectl -n openstack get configmap ceph-etc && kubectl -n openstack get secret pvc-ceph-client-key cinder-volume-rbd-keyring
+    issue: 196
   - component: ironic
     requires: >-
       A network interface named `ironic-pxe` on every node that will run ironic-conductor, being

@@ -200,15 +200,23 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 `profile: identity` brings up MariaDB+Memcached+Keystone+Glance+Horizon; `profile: full`
 brings up **all 36 components** (needs a large amd64 cluster — see `quickstart-gke.md`).
 
-#### `profile: full-strict` — full, minus the three that need provisioning you must do yourself
+#### `profile: full-strict` — full, minus the four that need provisioning you must do yourself
 
-Three components — `ironic`, `octavia` and `swift` — each wait on infrastructure that no
+> **Upgrading an existing `full-strict` install to 0.3.43 or later uninstalls its `cinder`
+> Composition.** From 0.3.43 `cinder` is one of the components `full-strict` leaves out, because
+> its only shipped volume backend is Ceph and nothing provides a Ceph cluster (#196). On a
+> default install that cinder never worked: `cinder-volume` never started, and from 0.3.41 its
+> `storage-init` hook held the release in `pending-install`. Measured on #179 and on a cold
+> install (#204). If you have provisioned Ceph and use cinder, switch to `profile: full`, or
+> keep `full-strict` and add `cinder` to `enabled:`, **before** you upgrade.
+
+Four components — `cinder`, `ironic`, `octavia` and `swift` — each wait on infrastructure that no
 Kubernetes cluster provides and that this blueprint does not create. They are in `profile: full`,
-and they stay there. `profile: full-strict` is the same set **minus those three**:
+and they stay there. `profile: full-strict` is the same set **minus those four**:
 
 ```yaml
 spec:
-  profile: full-strict   # 33 components, none of which needs provisioning you must do yourself
+  profile: full-strict   # 32 components, none of which needs provisioning you must do yourself
 ```
 
 It also needs one node label fewer — three rather than four, since octavia is the only consumer
@@ -216,6 +224,7 @@ of `openstack-network-node` (see the labelling block above).
 
 | component | needs | symptom when it is absent |
 |---|---|---|
+| `cinder` | a Ceph cluster, plus the ConfigMap `ceph-etc` and the keyring Secrets `pvc-ceph-client-key` and `cinder-volume-rbd-keyring` in `openstack`, for the default `rbd1` backend | `cinder-storage-init` and `cinder-volume` stay in `Init` on `FailedMount` for `ceph-etc`; `cinder-api` and `cinder-scheduler` wait on `cinder-volume` |
 | `ironic` | an interface named `ironic-pxe` on each conductor node — the bare-metal provisioning NIC | `ironic-conductor-init` exits 1 with `Could not find IP for pxe to bind to`; the pod sits in `Init:CrashLoopBackOff` |
 | `octavia` | `lb-mgmt-net` plus a Neutron port per node, named `octavia-{worker,health-manager}-port-<hostname>` | the `get-port` init containers log `No Port found for octavia-worker-port-…` and never finish |
 | `swift` | a StorageClass offering `ReadWriteMany` (upstream uses an `nfs-provisioner` default this repo does not ship) | `swift-ring-builder` and `swift-storage` stay `Pending`, `swift-proxy` stays in `Init` |
@@ -226,11 +235,12 @@ that cluster. `Init:` is neither `Pending` nor `CrashLoopBackOff`, so a pod cens
 `21 in Init` and names nothing — the state is invisible to exactly the command an operator runs
 first. That is the case `full-strict` exists for.
 
-But on a cluster where the PXE NIC, `lb-mgmt-net` and an RWX StorageClass *are* present, those
-same components install and work, and dropping them out of `profile: full` would take components
-away from an install that has them — a behaviour change arriving through a version bump, which is
-the one thing a blueprint must not do. So `full` is unchanged at 35 and `full-strict` is the
-opt-in.
+But on a cluster where Ceph, the PXE NIC, `lb-mgmt-net` and an RWX StorageClass *are* present,
+those same components install and work, and dropping them out of `profile: full` would take
+components away from an install that has them — a behaviour change arriving through a version
+bump, which is the one thing a blueprint must not do. So `full` keeps all 36 and `full-strict` is
+the opt-in. (cinder joined the list in 0.3.43, which is why the notice above names the one
+behaviour change `full-strict` itself carries: a cinder that could not start is removed.)
 
 An entry in that list is a statement about today and not a verdict, and designate is the proof:
 it was flagged here until [#165](https://github.com/krateo-blueprints/krateo-openstack-blueprint/issues/165)

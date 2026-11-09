@@ -7,7 +7,7 @@
     "profile": {
       "type": "string",
       "title": "Profile",
-      "description": "identity = MariaDB+Memcached+Keystone+Glance+Horizon; full = the whole catalogue, including ironic, octavia and swift, which need infrastructure you must provide yourself (a PXE interface, an lb-mgmt-net with a port per host, an RWX StorageClass) and otherwise sit in Init forever; full-strict = everything except those three, i.e. only what can start on a cluster as it comes. See hack/provisioning-preconditions.yaml.",
+      "description": "identity = MariaDB+Memcached+Keystone+Glance+Horizon; full = the whole catalogue, including cinder, ironic, octavia and swift, which need infrastructure you must provide yourself (a Ceph cluster, a PXE interface, an lb-mgmt-net with a port per host, an RWX StorageClass) and otherwise sit in Init forever; full-strict = everything except those four, i.e. only what can start on a cluster as it comes. See hack/provisioning-preconditions.yaml.",
       "enum": [
         "identity",
         "full",
