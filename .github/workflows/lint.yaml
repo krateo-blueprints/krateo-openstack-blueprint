@@ -171,6 +171,10 @@ jobs:
       # text literally: magnum-api ran uWSGI with no workers because of it (#202).
       - name: No rendered config carries Helm's <no value> placeholder
         run: python3 hack/validate-rendered-config.py .
+      # A default cluster's StorageClass is ReadWriteOnce: no default claim may ask for
+      # ReadWriteMany, and pods sharing a ReadWriteOnce claim must be co-located (#201).
+      - name: Every default claim can be bound, and shared ReadWriteOnce claims are co-located
+        run: python3 hack/validate-shared-claims.py .
       # A Service selecting a hostNetwork pod makes that node's IP a Service endpoint, and cluster
       # DNS then answers the node's own reverse lookup with the Service name, so every host-network
       # agent there resolves the wrong FQDN (#200).

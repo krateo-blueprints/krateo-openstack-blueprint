@@ -16,6 +16,7 @@ limitations under the License.
 {{- $name := index . 0 }}
 {{- $size := index . 1 }}
 {{- $storageClass := index . 2 }}
+{{- $accessMode := index . 3 }}
 ---
 kind: PersistentVolumeClaim
 apiVersion: v1
@@ -23,16 +24,20 @@ metadata:
   name: {{ $name }}
 spec:
   accessModes:
-    - "ReadWriteMany"
+    - {{ $accessMode | quote }}
   resources:
     requests:
       storage: {{ $size }}
+{{- /* Unset unless configured, so the claim takes the cluster's default class (#201). */}}
+{{- if $storageClass }}
   storageClassName: {{ $storageClass }}
+{{- end }}
 {{- end }}
 
 {{- if .Values.manifests.pvc }}
 {{- $storageClass := .Values.storage.storageClass }}
+{{- $accessMode := .Values.storage.accessMode | default "ReadWriteOnce" }}
 {{- range .Values.storage.volumes }}
-{{ tuple .name .size $storageClass | include "tacker.pvc" }}
+{{ tuple .name .size $storageClass $accessMode | include "tacker.pvc" }}
 {{- end }}
 {{- end }}

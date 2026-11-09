@@ -37,6 +37,11 @@ spec:
         {{ .Values.labels.conductor.node_selector_key }}: {{ .Values.labels.conductor.node_selector_value }}
       serviceAccountName: {{ $serviceAccountName }}
 {{ dict "envAll" $envAll "application" "conductor" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
+{{- /* The conductor mounts the same claims as tacker-server. With ReadWriteOnce (the default,
+       #201) a volume is usable only on the node it attaches to, so the conductor must follow the
+       server there. Only the conductor carries the rule, so the server schedules first and
+       nothing waits on the conductor. With ReadWriteMany the pods may spread. */}}
+{{- if ne (.Values.storage.accessMode | default "ReadWriteOnce") "ReadWriteMany" }}
       affinity:
         podAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -51,6 +56,7 @@ spec:
                 values:
                 - server
             topologyKey: kubernetes.io/hostname
+{{- end }}
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.conductor.timeout | default "30" }}
       containers:
         - name: tacker-conductor
