@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Refuse to release a commit no gate ever ran against.
       #
@@ -90,7 +90,7 @@ jobs:
           esac
 
       - name: Install Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
 
       - name: Resolve version and registry
         run: |
@@ -220,7 +220,7 @@ jobs:
           echo "kept $(find charts-dist -name '*.tgz' | wc -l | tr -d ' ') blueprint tarball(s) for the index"
 
       - name: Hand the blueprint tarballs to the index job
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: charts-dist
           path: charts-dist/*.tgz
