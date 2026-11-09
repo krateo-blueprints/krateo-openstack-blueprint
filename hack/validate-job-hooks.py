@@ -149,6 +149,16 @@ def check(component, docs):
         shape[name] = (kind, info)
         if kind in ("plain", "bad") and (component, name) not in ALLOWED:
             failures.append(f"Job {name}: {info}")
+        if kind in ("upgrade", "teardown"):
+            # Helm waits for every hook Job, and the controller sets no limit on a Helm operation,
+            # so an unbounded hook that can never finish holds its release in pending-install
+            # forever with no condition on the Composition (#204: cinder-storage-init on Ceph
+            # objects nothing creates). activeDeadlineSeconds must be on the Job spec: on the pod
+            # spec it bounds one pod, and the Job retries it backoffLimit times.
+            ads = (w[5].get("spec") or {}).get("activeDeadlineSeconds")
+            if not isinstance(ads, int) or isinstance(ads, bool) or ads <= 0:
+                failures.append(f"Job {name}: hook Job without a positive spec.activeDeadlineSeconds "
+                                f"({ads!r}), so a hook that can never finish blocks its release forever (#204)")
 
     def behind(svc, seen):
         sel = services.get(svc)

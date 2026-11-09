@@ -51,9 +51,7 @@ metadata:
 {{- end }}
 spec:
   backoffLimit: {{ $backoffLimit }}
-{{- if $activeDeadlineSeconds }}
-  activeDeadlineSeconds: {{ $activeDeadlineSeconds }}
-{{- end }}
+{{ tuple $envAll $activeDeadlineSeconds | include "helm-toolkit.snippets.job_hook_deadline" | indent 2 }}
   template:
     metadata:
       labels:

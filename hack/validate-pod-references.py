@@ -60,13 +60,29 @@ ALLOWED = {
 # Real defects, each with an open issue. Listed on every run as KNOWN, so they stay visible, and
 # not failed on, so the gate can guard every other chart meanwhile. An entry is removed by fixing
 # the chart; until then the issue says why the object is still dangling.
-KNOWN_DEFECTS = {
+KNOWN_DEFECTS = {}
+
+# Objects the operator provides, for components the umbrella flags `requiresProvisioning: true`
+# and declares in hack/provisioning-preconditions.yaml. `profile: full-strict` leaves those
+# components out, so these references are a documented precondition, not a defect. Each entry
+# holds only while its component is still flagged: if the flag comes off, the component installs
+# by default again and these become dangling references, so the gate fails (#196, #204).
+PROVISIONED_BY_OPERATOR = {
     ("cinder", "ConfigMap", "ceph-etc"): "#196",
     ("cinder", "Secret", "cinder-volume-rbd-keyring"): "#196",
     ("cinder", "Secret", "pvc-ceph-client-key"): "#196",
 }
 
+
+def flagged_components(root: Path):
+    """Components the umbrella marks requiresProvisioning: true."""
+    values = yaml.safe_load((root / "blueprints" / "openstack" / "chart" / "values.yaml").read_text()) or {}
+    return {c["name"] for c in values.get("components") or [] if c.get("requiresProvisioning") is True}
+
 KINDS = ("Secret", "ConfigMap", "PersistentVolumeClaim", "ServiceAccount")
+
+
+FLAGGED = set()
 
 
 def stage_and_render(chart: Path, component: str, workdir: Path) -> str:
@@ -183,7 +199,11 @@ def check(component, rendered):
                 if (kind, name) in have or (component, kind, name) in ALLOWED:
                     continue
                 if (component, kind, name) in KNOWN_DEFECTS:
-                    known.append((owner, kind, name, where, KNOWN_DEFECTS[(component, kind, name)]))
+                    known.append(("KNOWN", owner, kind, name, where, KNOWN_DEFECTS[(component, kind, name)]))
+                    continue
+                if (component, kind, name) in PROVISIONED_BY_OPERATOR and component in FLAGGED:
+                    known.append(("PROVISIONED", owner, kind, name, where,
+                                  "requires provisioning, " + PROVISIONED_BY_OPERATOR[(component, kind, name)]))
                     continue
                 dangling.append((owner, kind, name, where))
     return pods, dangling, known
@@ -198,6 +218,8 @@ def main() -> int:
         charts = [c for c in charts if c.parent.name in only]
     if not charts:
         sys.exit("FAIL: no component charts found -- nothing was measured")
+    global FLAGGED
+    FLAGGED = flagged_components(root)
 
     total_pods, failures, unrendered = 0, [], []
     with tempfile.TemporaryDirectory() as td:
@@ -212,8 +234,8 @@ def main() -> int:
             total_pods += pods
             status = "OK  " if not dangling else "FAIL"
             print(f"{status} {component}: {pods} pod templates, {len(dangling)} dangling")
-            for owner, kind, name, where, issue in known:
-                print(f"KNOWN {component}: {owner} {where} names {kind} {name!r} ({issue})")
+            for label, owner, kind, name, where, issue in known:
+                print(f"{label} {component}: {owner} {where} names {kind} {name!r} ({issue})")
             for owner, kind, name, where in dangling:
                 failures.append((component, owner, kind, name, where))
 
