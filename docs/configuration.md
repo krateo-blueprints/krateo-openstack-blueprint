@@ -1,7 +1,7 @@
 ---
 type: Configuration
 title: krateo-openstack-blueprint — configuration
-description: The whole Openstack orchestrator value surface — profile, enabled, installDefinitions, ociRepo, the strictly-typed componentValues, the serviceContract stanza, and the contractEmitter CronJobs.
+description: The whole Openstack orchestrator value surface — profile, enabled, installDefinitions, ociRepo, componentValues (typed by each component's CRD), the serviceContract stanza, and the contractEmitter CronJobs.
 resource: oci://ghcr.io/krateo-blueprints/charts/openstack
 tags: [openstack, configuration, values, service-contract, contract-emitter]
 timestamp: 2026-08-11T00:00:00Z
@@ -28,11 +28,18 @@ own, smaller schemas; the orchestrator's `componentValues` mirrors them.
 
 ## `componentValues.<name>` — per-component overrides
 
-Per-component Composition `spec` overrides, typed against each component's chart schema
-(regenerated per release by `hack/gen-componentvalues-schema.py`; CI fails a stale schema). The
-value at `componentValues.<name>` becomes that component's Composition `spec`, deep-merged;
-components without an entry use chart defaults. `additionalProperties: false` applies to the
-component **names**: an unknown component is rejected.
+Per-component Composition `spec` overrides, keyed by component name. The value at
+`componentValues.<name>` becomes that component's Composition `spec`, deep-merged; components
+without an entry use chart defaults. `additionalProperties: false` applies to the component
+**names**: an unknown component is rejected.
+
+The umbrella passes each `componentValues.<name>` through as an open object, and the component's
+**own Composition CRD** types and validates it, from `blueprints/<name>/chart/values.schema.json`.
+The umbrella used to embed every component schema here; that validated nothing the component CRD
+does not, and it multiplied the umbrella CRD's size by every version the CRD still serves (#209).
+`hack/gen-componentvalues-schema.py` generates this shape (CI fails a stale one), and
+`hack/umbrella-crd-size` fails CI if the generated umbrella CRD, times 4 served versions, would
+exceed 1 MiB.
 
 Each component exposes **every top-level key of its chart's `values.yaml`**, not a chosen subset:
 `conf`, `pod`, `manifests`, `endpoints`, `network`, `images`, `labels`, `bootstrap`, `extraObjects`,

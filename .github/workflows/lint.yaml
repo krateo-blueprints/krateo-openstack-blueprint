@@ -52,6 +52,29 @@ jobs:
       - name: Every chart's defaults must satisfy its own schema
         run: python3 hack/validate-values-schema.py .
 
+  umbrella-crd-size:
+    # Gating. The umbrella's generated Openstack CRD is stored once per version it still serves,
+    # and pinned components keep several served at once. #209's first fix embedded every
+    # component schema in componentValues and made this CRD four times larger. This job generates
+    # it with the same crdgen core-provider uses (plumbing v1.28.1, pinned in the module) and fails
+    # if bytes x 4 served versions (an assumption, stated in the program) exceed 1 MiB.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: hack/umbrella-crd-size/go.mod
+          cache-dependency-path: hack/umbrella-crd-size/go.sum
+
+      - name: The umbrella CRD must stay small enough to serve several versions
+        working-directory: hack/umbrella-crd-size
+        run: |
+          go vet ./...
+          go run .
+
   powerdns-runs:
     # Gating, and the only job here that starts a server. The powerdns chart merged with 28 offline
     # gates green and could not start: settings removed from 4.9, a privileged port, and

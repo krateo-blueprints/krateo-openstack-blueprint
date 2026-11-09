@@ -680,7 +680,10 @@ rest. The fields declared under them are typed (`images.pull_policy`, replica co
 (`x-kubernetes-preserve-unknown-fields`), so for example
 `componentValues.keystone.conf.keystone.DEFAULT.debug: true`,
 `componentValues.nova.pod.useHostNetwork.novncproxy: true` or
-`componentValues.nova.labels.api_metadata.node_selector_value: enabled` reaches the chart. Up to 0.3.44 every
+`componentValues.nova.labels.api_metadata.node_selector_value: enabled` reaches the chart. The
+typing happens in each component's own Composition CRD: the umbrella keys `componentValues` by
+component name and passes each entry through untouched, because embedding the component schemas
+there would multiply the umbrella CRD's size by every version it still serves. Up to 0.3.44 every
 component was narrower than this (nova exposed only `images`), and an override outside the
 declared fields was pruned by the Composition CRD with only a client-side warning (#209). On a
 component created before that, a newly exposed key can still be dropped: see "Any

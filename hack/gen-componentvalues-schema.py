@@ -1,17 +1,29 @@
 #!/usr/bin/env python3
-"""Regenerate the umbrella's componentValues typing in
+"""Regenerate the umbrella's componentValues shape in
 blueprints/openstack/chart/values.schema.json.
 
-For every component in the umbrella's chart/values.yaml, embed that component chart's
-values.schema.json under componentValues.properties.<name>, so `componentValues.<name>`
-is strictly typed against the component's REAL Composition schema (a component chart's
-values ARE its Composition spec). `required` is stripped recursively because
-componentValues is a PARTIAL override (a deep-merge), not a full values document.
+componentValues lists every component in the umbrella's chart/values.yaml by NAME, with
+`additionalProperties: false`, so an unknown component is rejected. Each componentValues.<name> is
+an OPEN object (`type: object` plus `x-kubernetes-preserve-unknown-fields: true`) with no embedded
+properties: the umbrella carries the override through untouched, and the component's own
+Composition CRD, generated from that component chart's values.schema.json, is what validates and
+types it (#209).
 
-Adapted from krateo-blueprints/installer hack/gen-componentvalues-schema.py. Difference: this
-repo VENDORS the component charts, so each schema is read from blueprints/<name>/chart/
-(authoritative, offline) rather than `helm pull`ed; the pinned version is the umbrella's own
-chart version. Re-run on every release / whenever a component schema changes.
+Why not embed each component schema here, as this script used to:
+  1. It validates nothing the component CRD does not already validate. The value at
+     componentValues.<name> becomes that component's Composition spec, and that spec goes
+     through the component CRD.
+  2. It multiplies the umbrella CRD's size. Embedding all 36 full component schemas made the
+     umbrella values.schema.json 376 KB and its generated CRD 396 KB per served version, and a CRD
+     stores every version it still serves. Components that stay pinned at an origin version keep
+     several served at once (two were observed together on a real cluster), which heads toward
+     etcd's object limit. hack/validate-umbrella-crd-size gates that size.
+  3. A narrower embedded copy prunes what the component would accept. That is how #209 began:
+     nova's embedded schema declared only `images`, and every other override was dropped at the
+     umbrella before the component ever saw it.
+
+Each component must still have a values.schema.json, or generation fails: a component without one
+has no CRD typing at all, and that should be noticed, not skipped.
 
 Usage:  python3 hack/gen-componentvalues-schema.py
 Requires: pyyaml.
@@ -26,38 +38,32 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHART = os.path.join(ROOT, "blueprints/openstack/chart")
 
 
-def strip_required(node):
-    """Recursively drop the JSON-Schema `required` keyword (partial overrides need none)."""
-    if isinstance(node, dict):
-        node.pop("required", None)
-        for v in node.values():
-            strip_required(v)
-    elif isinstance(node, list):
-        for v in node:
-            strip_required(v)
-    return node
-
-
 def main():
     vals = yaml.safe_load(open(os.path.join(CHART, "values.yaml")))
     # The umbrella pulls its components at its own chart version (#179), so that is the version
-    # each embedded schema describes. In the tree it is the CHART_VERSION placeholder, which the
+    # each component CRD describes. In the tree it is the CHART_VERSION placeholder, which the
     # release stamps in values.schema.json too, so the descriptions name the released version.
     ver = str(yaml.safe_load(open(os.path.join(CHART, "Chart.yaml")))["version"])
     props = {}
+    missing = []
     for c in vals["components"]:
         name = c["name"]
-        sp = os.path.join(ROOT, f"blueprints/{name}/chart/values.schema.json")
-        if not os.path.exists(sp):
-            print(f"  WARN {name}: no values.schema.json in chart", file=sys.stderr)
+        if not os.path.exists(os.path.join(ROOT, f"blueprints/{name}/chart/values.schema.json")):
+            missing.append(name)
             continue
-        s = json.load(open(sp))
-        s.pop("$schema", None)
-        s.pop("title", None)
-        strip_required(s)
-        s["description"] = f"Overrides for the {name} Composition (chart {ver}), deep-merged into its spec."
-        props[name] = s
-        print(f"  typed {name} ({ver})")
+        props[name] = {
+            "type": "object",
+            "description": (
+                f"Overrides for the {name} Composition (chart {ver}), deep-merged into its spec. "
+                f"Passed through untyped here; the {name} Composition CRD validates them against "
+                f"blueprints/{name}/chart/values.schema.json."
+            ),
+            "x-kubernetes-preserve-unknown-fields": True,
+        }
+        print(f"  open {name} ({ver})")
+    if missing:
+        sys.exit(f"ERROR: no values.schema.json for {missing}: a component needs one for its CRD to type "
+                 "its overrides")
 
     sp = os.path.join(CHART, "values.schema.json")
     schema = json.load(open(sp))
@@ -65,18 +71,18 @@ def main():
         "type": ["object", "null"],
         "title": "Per-component spec overrides",
         "description": (
-            "Per-component Composition spec overrides, STRICTLY TYPED against each "
-            "component's chart schema (regenerated per release by "
-            "hack/gen-componentvalues-schema.py). The value at componentValues.<name> "
-            "becomes that component's Composition spec; components without an entry use "
-            "chart defaults."
+            "Per-component Composition spec overrides, by component name (an unknown name is "
+            "rejected). The value at componentValues.<name> becomes that component's Composition "
+            "spec, deep-merged; components without an entry use chart defaults. It is passed through "
+            "here and typed by the component's own Composition CRD (generated by "
+            "hack/gen-componentvalues-schema.py)."
         ),
         "additionalProperties": False,
         "properties": props,
     }
     json.dump(schema, open(sp, "w"), indent=2)
     open(sp, "a").write("\n")
-    print(f"\nwrote componentValues typing for {len(props)} components -> {sp}")
+    print(f"\nwrote componentValues for {len(props)} components -> {sp}")
 
 
 if __name__ == "__main__":
