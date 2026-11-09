@@ -1112,5 +1112,8 @@ tls:
 volume:
   accessModes:
   - ReadWriteOnce
-  class_name: standard
+  # `default` leaves storageClassName unset, so the claim takes the cluster's default class, as
+  # mariadb's and rabbitmq's do. Upstream's `standard` exists only on clusters that happen to name
+  # a class that way, and glance-images stays Pending everywhere else.
+  class_name: default
   size: 2Gi

@@ -15,6 +15,12 @@ unlike its chart name, as Krateo renders it:
    anchor's pod labels, and the anchor must carry no required affinity to any of the others,
    which would leave each waiting for the other to schedule first.
 
+3. A component that is not flagged `requiresProvisioning` must not name a storageClassName in a
+   default render: unset is what takes the cluster's default class. glance-images named
+   `standard`, which exists only on clusters that happen to call a class that, and tacker named
+   `general`, which exists on none (#201). This covers standalone claims and StatefulSet
+   volumeClaimTemplates alike.
+
 Per-pod claims (StatefulSet volumeClaimTemplates) are not shared and are not checked by rule 2.
 
 Fails when no chart is found, when a chart does not render, or when no pod template renders.
@@ -92,6 +98,19 @@ def check(component, docs, flagged):
     problems = []
     modes = {}
     for d in docs:
+        named = []
+        if d.get("kind") == "PersistentVolumeClaim":
+            named.append((f"PersistentVolumeClaim/{d['metadata']['name']}", d.get("spec") or {}))
+        if d.get("kind") == "StatefulSet":
+            for t in (d.get("spec") or {}).get("volumeClaimTemplates") or []:
+                named.append((f"StatefulSet/{d['metadata']['name']} volumeClaimTemplate "
+                              f"{(t.get('metadata') or {}).get('name')}", t.get("spec") or {}))
+        for what, spec in named:
+            if spec.get("storageClassName") and component not in flagged:
+                problems.append(f"{component}: {what} names storageClassName "
+                                f"{spec['storageClassName']!r} by default; leave it unset so the claim "
+                                "takes the cluster's default class (#201), or flag the component "
+                                "requiresProvisioning")
         if d.get("kind") == "PersistentVolumeClaim":
             name = d["metadata"]["name"]
             modes[name] = set((d.get("spec") or {}).get("accessModes") or [])
@@ -161,8 +180,8 @@ def main() -> int:
     if failures or unrendered:
         print(f"FAIL: {len(failures)} problem(s), {len(unrendered)} unrendered, across {len(charts)} charts")
         return 1
-    print(f"OK: {len(charts)} charts, {templates} pod templates; every default claim can be bound, "
-          "and every shared ReadWriteOnce claim is co-located")
+    print(f"OK: {len(charts)} charts, {templates} pod templates; every default claim takes the cluster's "
+          "default class and can be bound, and every shared ReadWriteOnce claim is co-located")
     return 0
 
 
