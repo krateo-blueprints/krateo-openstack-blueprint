@@ -61,6 +61,7 @@ metadata:
     "helm.sh/hook": pre-delete
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
+{{ tuple $envAll nil | include "helm-toolkit.snippets.job_hook_deadline" | indent 2 }}
   template:
     metadata:
       labels:

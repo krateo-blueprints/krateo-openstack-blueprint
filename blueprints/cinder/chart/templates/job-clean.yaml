@@ -58,6 +58,7 @@ metadata:
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
     {{- tuple "cinder-clean" $envAll | include "helm-toolkit.snippets.custom_job_annotations" | nindent 4 }}
 spec:
+{{ tuple $envAll nil | include "helm-toolkit.snippets.job_hook_deadline" | indent 2 }}
   template:
     metadata:
       labels:

@@ -526,6 +526,19 @@ then db-sync and ks-endpoints, then storage-init, then bootstrap. `hack/validate
 proves, per chart, that each hook sorts after every Job it waits on, directly or through the
 pods behind a service it waits on. It fails on any Job that is not a hook.
 
+Every hook Job is bounded by `spec.activeDeadlineSeconds`, 1800 seconds by default
+(`helm3_hook_deadline_seconds` overrides it per chart; a positive `jobs.<name>.activeDeadlineSeconds`
+overrides it per Job). Helm waits for each hook to complete, and the controller sets no limit on a
+Helm operation, so an unbounded hook that can never finish holds its release in `pending-install`
+forever with no condition on the Composition. That happened to cinder on a cold 0.3.42 install,
+waiting on Ceph objects nothing creates (#204, #196). 1800s is about 2.7 times the slowest Job
+measured anywhere (672s, on the #179 upgrade); on a cold install the slowest of 161 Jobs took 101s.
+Measured with core-provider 2.13.72 on a hook that can never start: at the deadline the operation
+fails with `job … failed: DeadlineExceeded`, the controller logs it and retries as an upgrade, once
+per deadline. **The Composition still reports `Ready=True`/`Synced=True` meanwhile**
+(core-provider#403), so read the Helm release status, not the conditions, when a component stalls.
+`hack/validate-job-hooks.py` fails on any hook Job without a positive deadline.
+
 Two costs, both measured:
 - **Hooks re-run on every revision.** Krateo wrote two Helm revisions per upgrade, six seconds
   apart, so each hook ran twice. OpenStack-Helm Jobs are idempotent; the cost is time.

@@ -34,6 +34,7 @@ metadata:
 {{ tuple "bootstrap" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
 {{ tuple "nova_bootstrap" $envAll | include "helm-toolkit.snippets.custom_job_annotations" | indent 4 }}
 spec:
+{{ tuple $envAll nil | include "helm-toolkit.snippets.job_hook_deadline" | indent 2 }}
   backoffLimit: {{ $backoffLimit }}
   template:
     metadata:
