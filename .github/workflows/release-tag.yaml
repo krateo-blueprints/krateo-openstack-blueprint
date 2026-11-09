@@ -90,7 +90,7 @@ jobs:
           esac
 
       - name: Install Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
 
       - name: Resolve version and registry
         run: |
