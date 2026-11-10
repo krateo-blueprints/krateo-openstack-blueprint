@@ -1,16 +1,16 @@
-# Keystone with OIDC federation and its client secret from a Secret, as
+# Keystone with OIDC federation, its client secret and crypto passphrase from Secrets, as
 # hack/validate-keystone-oidc-secret.py renders it. The VirtualHost carries a complete
-# mod_auth_openidc client with NO OIDCClientSecret of its own: the chart renders that directive
-# from oidc.clientSecretRef. The provider endpoints are static and point at 127.0.0.1:9999, a
-# stand-in token endpoint (TLS, self-signed) that the image-level proof runs next to Apache. It is
-# a fixture, not a deployable configuration.
-#
-# OIDCCryptoPassphrase is a secret too. This fixture reads it from an env var the same way, but the
-# chart does not inject that one yet, so a real install has to.
+# mod_auth_openidc client with NO OIDCClientSecret or OIDCCryptoPassphrase of its own: the chart
+# renders both directives from oidc.clientSecretRef and oidc.cryptoPassphraseRef. The provider
+# endpoints are static and point at 127.0.0.1:9999, a stand-in token endpoint (TLS, self-signed)
+# that the image-level proof runs next to Apache. It is a fixture, not a deployable configuration.
 oidc:
   clientSecretRef:
     name: keystone-oidc-client
     key: client-secret
+  cryptoPassphraseRef:
+    name: keystone-oidc-crypto
+    key: passphrase
 conf:
   wsgi_keystone: |
     {{- $portInt := tuple "identity" "service" "api" $ | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
@@ -41,7 +41,6 @@ conf:
         # The stand-in endpoint uses a throwaway self-signed certificate. Never in a real install.
         OIDCSSLValidateServer Off
         OIDCClientID "keystone"
-        OIDCCryptoPassphrase ${OIDC_CRYPTO_PASSPHRASE}
         OIDCRedirectURI "http://127.0.0.1:{{ $portInt }}/v3/auth/OS-FEDERATION/identity_providers/keycloak/protocols/openid/websso/redirect"
 
         <Location "/v3/auth/OS-FEDERATION/identity_providers/keycloak/protocols/openid/websso">

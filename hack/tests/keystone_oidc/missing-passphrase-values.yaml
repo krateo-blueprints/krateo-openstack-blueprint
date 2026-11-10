@@ -1,0 +1,20 @@
+# Half-configured OIDC: a client secret from a Secret but no crypto passphrase. mod_auth_openidc
+# 2.4.11 refuses to start without OIDCCryptoPassphrase ("mandatory parameter
+# 'OIDCCryptoPassphrase' is not set"), and `apache2 -t` still says Syntax OK, so this would render
+# and then crash-loop keystone-api. The keystone chart must refuse it at render time instead.
+oidc:
+  clientSecretRef:
+    name: keystone-oidc-client
+    key: client-secret
+conf:
+  wsgi_keystone: |
+    {{- $portInt := tuple "identity" "service" "api" $ | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+    Listen 0.0.0.0:{{ $portInt }}
+    <VirtualHost *:{{ $portInt }}>
+        WSGIScriptAlias / /var/www/cgi-bin/keystone/wsgi.py
+        OIDCClientID "keystone"
+        <Location "/v3/auth/OS-FEDERATION/identity_providers/keycloak/protocols/openid/websso">
+            AuthType "openid-connect"
+            Require valid-user
+        </Location>
+    </VirtualHost>

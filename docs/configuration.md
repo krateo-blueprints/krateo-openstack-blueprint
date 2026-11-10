@@ -71,19 +71,29 @@ Notable per-component fields:
     `conf.software.apache2.a2enmod`, `conf.wsgi_keystone` — OIDC federation overrides.
     Free-form subtrees (`federation`, `wsgi_keystone`) carry preserve-unknown-fields because
     the upstream OSH conf tree does not round-trip cleanly through crdgen.
-  - `oidc.clientSecretRef.{name,key}` — the Secret holding mod_auth_openidc's client secret.
-    Never put `OIDCClientSecret` in `conf.wsgi_keystone` (or `conf.security`,
-    `conf.mpm_event`): values end up in the Composition CR, so the chart refuses to render it.
-    With the reference set, keystone-api reads `OIDC_CLIENT_SECRET` from that Secret and the
-    chart renders `OIDCClientSecret ${OIDC_CLIENT_SECRET}` in its own Apache file, which every
-    VirtualHost inherits. Set both fields or neither. Example, with the value generated once by
-    an External Secrets Operator Password generator in the release namespace:
+  - `oidc.clientSecretRef.{name,key}` and `oidc.cryptoPassphraseRef.{name,key}` — the Secrets
+    holding mod_auth_openidc's client secret and its crypto passphrase (the key for its state and
+    session cookies). Never put `OIDCClientSecret` or `OIDCCryptoPassphrase` in
+    `conf.wsgi_keystone` (or `conf.security`, `conf.mpm_event`): values end up in the Composition
+    CR, so the chart refuses to render either. With the references set, keystone-api reads
+    `OIDC_CLIENT_SECRET` and `OIDC_CRYPTO_PASSPHRASE` from those Secrets and the chart renders
+    `OIDCClientSecret ${OIDC_CLIENT_SECRET}` and `OIDCCryptoPassphrase ${OIDC_CRYPTO_PASSPHRASE}`
+    in its own Apache file, which every VirtualHost inherits. Set each reference's name and key
+    together, or neither.
+
+    The passphrase is required whenever OIDC is configured (a `clientSecretRef`, or any OIDC
+    directive in `conf.wsgi_keystone`): mod_auth_openidc 2.4.11 refuses to start without it and
+    `apache2 -t` does not notice, so the chart fails the render instead of letting keystone-api
+    crash-loop. Every keystone-api replica must use the same passphrase.
+
+    Example, with both values generated once by External Secrets Operator Password generators in
+    the release namespace:
 
     ```yaml
     apiVersion: generators.external-secrets.io/v1alpha1
     kind: Password
     metadata:
-      name: keystone-oidc-client
+      name: keystone-oidc
       namespace: openstack
     spec:
       length: 48
@@ -105,24 +115,66 @@ Notable per-component fields:
             generatorRef:
               apiVersion: generators.external-secrets.io/v1alpha1
               kind: Password
-              name: keystone-oidc-client
+              name: keystone-oidc
           rewrite:
             - regexp:
                 source: "^password$"
                 target: client-secret
+    ---
+    apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      name: keystone-oidc-crypto
+      namespace: openstack
+    spec:
+      refreshInterval: "0"
+      target:
+        name: keystone-oidc-crypto
+      dataFrom:
+        - sourceRef:
+            generatorRef:
+              apiVersion: generators.external-secrets.io/v1alpha1
+              kind: Password
+              name: keystone-oidc
+          rewrite:
+            - regexp:
+                source: "^password$"
+                target: passphrase
     ```
 
-    and in the Keystone spec:
+    Each ExternalSecret runs the generator once and gets its own value. This example has not yet
+    been applied to a live External Secrets Operator. In the Keystone spec:
 
     ```yaml
     oidc:
       clientSecretRef:
         name: keystone-oidc-client
         key: client-secret
+      cryptoPassphraseRef:
+        name: keystone-oidc-crypto
+        key: passphrase
     ```
 
-    The OIDC client registered in the identity provider must use the same value. Point it at
-    this Secret rather than copying the value.
+    **Keycloak reads the same Secret.** With keycloak-config-kog 0.4.9 or later, the
+    KeycloakClient for Keystone lives in the same `openstack` namespace and points
+    `spec.clientSecretRef` at `keystone-oidc-client` / `client-secret`. That keeps one generated
+    value with no copy step. Never set the `krateo.io/connector-verbose` annotation on that
+    KeycloakClient: Keycloak's client-list response carries confidential client secrets, and
+    verbose dumps are not redacted.
+
+    **Rotating the client secret takes two steps.**
+    1. keystone-api reads `OIDC_CLIENT_SECRET` only when its container starts, so after the Secret
+       changes, roll it: `kubectl -n openstack rollout restart deployment/keystone-api`. The chart
+       cannot roll it for you on a Secret change: that needs a checksum of the Secret's value in
+       the pod template, which means the render reading the secret, and this chart deliberately
+       never does.
+    2. Keycloak gets the new value only when the KeycloakClient's spec changes or the CR is
+       recreated. A changed Secret alone is not drift for keycloak-config-kog. Trigger one of
+       those in the same change.
+
+    Until both steps are done, Keystone and Keycloak disagree and logins fail. Rotating the crypto
+    passphrase needs only the keystone-api rollout, but it invalidates every state and session
+    cookie made with the old one, so users in a login flow at that moment have to start again.
 - **horizon**
   - `network.dashboard.service.type` — `NodePort` (default) \| `LoadBalancer` \| `ClusterIP`.
   - `network.dashboard.service.annotations` — string map for cloud LB controls.

@@ -820,21 +820,34 @@ network_policy:
     - {}
     ingress:
     - {}
-# mod_auth_openidc's client secret for OIDC federation, read from a Kubernetes Secret and never
-# from values. Values end up in the Composition CR, which anyone who can read the CR can read,
-# so the chart refuses to render an OIDCClientSecret written into conf.wsgi_keystone,
-# conf.security or conf.mpm_event. When name and key are set, keystone-api gets the env var
-# OIDC_CLIENT_SECRET from that Secret, and the chart renders one server-level Apache directive,
-# `OIDCClientSecret ${OIDC_CLIENT_SECRET}`, in its own file under conf.software.apache2.conf_dir.
-# Apache resolves it from the process environment at startup, and every VirtualHost inherits
-# it. Set both or neither. Example, with the value generated once by an External Secrets
-# Operator Password generator:
+# mod_auth_openidc's two secrets for OIDC federation, each read from a Kubernetes Secret and never
+# from values. Values end up in the Composition CR, which anyone who can read the CR can read, so
+# the chart refuses to render an OIDCClientSecret or OIDCCryptoPassphrase written into
+# conf.wsgi_keystone, conf.security or conf.mpm_event.
+#   clientSecretRef      -> env OIDC_CLIENT_SECRET     -> OIDCClientSecret ${OIDC_CLIENT_SECRET}
+#   cryptoPassphraseRef  -> env OIDC_CRYPTO_PASSPHRASE -> OIDCCryptoPassphrase ${OIDC_CRYPTO_PASSPHRASE}
+# The chart renders those directives at server level in its own file under
+# conf.software.apache2.conf_dir; Apache resolves them from the process environment at startup,
+# and every VirtualHost inherits them. Set name and key together, or neither. The passphrase
+# encrypts mod_auth_openidc's state and session cookies, and mod_auth_openidc refuses to start
+# without it, so it is required whenever OIDC is configured (a clientSecretRef, or any OIDC
+# directive in the Apache config): the render fails otherwise. Every keystone-api replica must
+# share one passphrase. keystone-api reads both only at container start, so after rotating either
+# Secret, roll keystone-api (see docs/configuration.md for the Keycloak side of a client-secret
+# rotation). Example, with both values generated once by an External Secrets Operator
+# Password generator:
 #   oidc:
 #     clientSecretRef:
 #       name: keystone-oidc-client
 #       key: client-secret
+#     cryptoPassphraseRef:
+#       name: keystone-oidc-crypto
+#       key: passphrase
 oidc:
   clientSecretRef:
+    name: ""
+    key: ""
+  cryptoPassphraseRef:
     name: ""
     key: ""
 pod:
