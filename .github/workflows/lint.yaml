@@ -196,6 +196,11 @@ jobs:
       # text literally: magnum-api ran uWSGI with no workers because of it (#202).
       - name: No rendered config carries Helm's <no value> placeholder
         run: python3 hack/validate-rendered-config.py .
+      # Values reach the Composition CR in plaintext, so Keystone's OIDC client secret must come
+      # from a Secret (oidc.clientSecretRef), and a secret written into conf.wsgi_keystone must be
+      # refused at render time.
+      - name: Keystone's OIDC client secret comes from a Secret, never from values
+        run: python3 hack/validate-keystone-oidc-secret.py .
       # A default cluster's StorageClass is ReadWriteOnce: no default claim may ask for
       # ReadWriteMany, and pods sharing a ReadWriteOnce claim must be co-located (#201).
       - name: Every default claim can be bound, and shared ReadWriteOnce claims are co-located

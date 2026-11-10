@@ -820,6 +820,23 @@ network_policy:
     - {}
     ingress:
     - {}
+# mod_auth_openidc's client secret for OIDC federation, read from a Kubernetes Secret and never
+# from values. Values end up in the Composition CR, which anyone who can read the CR can read,
+# so the chart refuses to render an OIDCClientSecret written into conf.wsgi_keystone,
+# conf.security or conf.mpm_event. When name and key are set, keystone-api gets the env var
+# OIDC_CLIENT_SECRET from that Secret, and the chart renders one server-level Apache directive,
+# `OIDCClientSecret ${OIDC_CLIENT_SECRET}`, in its own file under conf.software.apache2.conf_dir.
+# Apache resolves it from the process environment at startup, and every VirtualHost inherits
+# it. Set both or neither. Example, with the value generated once by an External Secrets
+# Operator Password generator:
+#   oidc:
+#     clientSecretRef:
+#       name: keystone-oidc-client
+#       key: client-secret
+oidc:
+  clientSecretRef:
+    name: ""
+    key: ""
 pod:
   affinity:
     anti:

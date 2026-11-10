@@ -34,6 +34,34 @@
       },
       "x-kubernetes-preserve-unknown-fields": true
     },
+    "oidc": {
+      "type": "object",
+      "title": "OIDC client secret",
+      "description": "mod_auth_openidc's client secret, read from a Kubernetes Secret and never from values: values end up in the Composition CR. Set clientSecretRef.name and clientSecretRef.key together, or neither. When set, keystone-api gets OIDC_CLIENT_SECRET from that Secret and the chart renders `OIDCClientSecret ${OIDC_CLIENT_SECRET}`. The chart refuses to render an OIDCClientSecret written into conf.wsgi_keystone, conf.security or conf.mpm_event.",
+      "properties": {
+        "clientSecretRef": {
+          "type": "object",
+          "title": "Client secret reference",
+          "description": "The Secret in the release namespace holding Keystone's OIDC client secret, e.g. name keystone-oidc-client, key client-secret. Both empty (the default) means no OIDC client secret is configured.",
+          "properties": {
+            "name": {
+              "type": "string",
+              "title": "Secret name",
+              "description": "Name of the Secret in the release namespace.",
+              "maxLength": 253
+            },
+            "key": {
+              "type": "string",
+              "title": "Secret key",
+              "description": "Key in that Secret whose value is the client secret.",
+              "maxLength": 253
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "pod": {
       "type": "object",
       "title": "Pods",

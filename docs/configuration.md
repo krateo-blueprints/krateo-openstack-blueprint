@@ -71,6 +71,58 @@ Notable per-component fields:
     `conf.software.apache2.a2enmod`, `conf.wsgi_keystone` — OIDC federation overrides.
     Free-form subtrees (`federation`, `wsgi_keystone`) carry preserve-unknown-fields because
     the upstream OSH conf tree does not round-trip cleanly through crdgen.
+  - `oidc.clientSecretRef.{name,key}` — the Secret holding mod_auth_openidc's client secret.
+    Never put `OIDCClientSecret` in `conf.wsgi_keystone` (or `conf.security`,
+    `conf.mpm_event`): values end up in the Composition CR, so the chart refuses to render it.
+    With the reference set, keystone-api reads `OIDC_CLIENT_SECRET` from that Secret and the
+    chart renders `OIDCClientSecret ${OIDC_CLIENT_SECRET}` in its own Apache file, which every
+    VirtualHost inherits. Set both fields or neither. Example, with the value generated once by
+    an External Secrets Operator Password generator in the release namespace:
+
+    ```yaml
+    apiVersion: generators.external-secrets.io/v1alpha1
+    kind: Password
+    metadata:
+      name: keystone-oidc-client
+      namespace: openstack
+    spec:
+      length: 48
+      symbols: 0
+      noUpper: false
+      allowRepeat: true
+    ---
+    apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      name: keystone-oidc-client
+      namespace: openstack
+    spec:
+      refreshInterval: "0"
+      target:
+        name: keystone-oidc-client
+      dataFrom:
+        - sourceRef:
+            generatorRef:
+              apiVersion: generators.external-secrets.io/v1alpha1
+              kind: Password
+              name: keystone-oidc-client
+          rewrite:
+            - regexp:
+                source: "^password$"
+                target: client-secret
+    ```
+
+    and in the Keystone spec:
+
+    ```yaml
+    oidc:
+      clientSecretRef:
+        name: keystone-oidc-client
+        key: client-secret
+    ```
+
+    The OIDC client registered in the identity provider must use the same value. Point it at
+    this Secret rather than copying the value.
 - **horizon**
   - `network.dashboard.service.type` — `NodePort` (default) \| `LoadBalancer` \| `ClusterIP`.
   - `network.dashboard.service.annotations` — string map for cloud LB controls.
