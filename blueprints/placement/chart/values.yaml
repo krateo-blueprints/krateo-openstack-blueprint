@@ -48,8 +48,9 @@ conf:
       - stdout
       level: INFO
       qualname: placement
+      propagate: 0
     logger_root:
-      handlers: 'null'
+      handlers: stderr
       level: WARNING
     logger_sqlalchemy:
       handlers: stderr

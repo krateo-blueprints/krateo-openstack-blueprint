@@ -192,6 +192,14 @@ jobs:
       # a test Pod that is not a `helm.sh/hook: test` hook blocks every later upgrade (#179).
       - name: Every test Pod is a Helm test hook
         run: python3 hack/validate-test-pods.py .
+      # watcher's [watcher_clients_auth] named no auth plugin and no keystone URL, so the decision
+      # engine exited 1 at start-up; the section is judged merged as each pod mounts it (#203).
+      - name: Every keystoneauth section a pod reads names its plugin and endpoint
+        run: python3 hack/validate-oslo-auth-sections.py .
+      # The root logger on NullHandler hid that very error; a logger that also propagates to a
+      # printing root prints every record twice (#203).
+      - name: The root logger prints, and nothing is printed twice
+        run: python3 hack/validate-root-logger.py .
       # Helm writes "<no value>" for a missing or null value, and an OpenStack service reads that
       # text literally: magnum-api ran uWSGI with no workers because of it (#202).
       - name: No rendered config carries Helm's <no value> placeholder

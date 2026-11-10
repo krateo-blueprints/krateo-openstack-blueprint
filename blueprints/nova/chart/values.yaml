@@ -209,13 +209,15 @@ conf:
       - stdout
       level: INFO
       qualname: nova
+      propagate: 0
     logger_os.brick:
       handlers:
       - stdout
       level: INFO
       qualname: os.brick
+      propagate: 0
     logger_root:
-      handlers: 'null'
+      handlers: stderr
       level: WARNING
     logger_sqlalchemy:
       handlers: stderr

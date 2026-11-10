@@ -165,7 +165,11 @@ conf:
     service_user:
       auth_type: password
       send_service_user_token: true
+    # -- The swift client's keystoneauth credentials. configmap-etc fills auth_url, the user,
+    ## project and domains; auth_type names the plugin, without which keystoneauth loads none
+    ## and the client cannot authenticate (#203, hack/validate-oslo-auth-sections.py).
     swift:
+      auth_type: password
       auth_url: null
     oslo_policy:
       policy_file: /etc/ironic/policy.yaml
@@ -185,12 +189,13 @@ conf:
         - default
     logger_root:
       level: WARNING
-      handlers: 'null'
+      handlers: stderr
     logger_ironic:
       level: INFO
       handlers:
         - stdout
       qualname: ironic
+      propagate: 0
     logger_amqp:
       level: WARNING
       handlers: stderr

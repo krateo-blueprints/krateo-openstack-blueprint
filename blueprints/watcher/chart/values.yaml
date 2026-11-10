@@ -360,7 +360,12 @@ conf:
       auth_type: password
       auth_version: v3
       memcache_security_strategy: ENCRYPT
+    # -- Credentials watcher's own clients (keystone, nova, cinder, ...) use. The decision engine
+    ## authenticates with them at start-up and exits 1 if they are missing (#203). Left empty,
+    ## configmap-etc fills auth_url, the service user, project and domains from the same values
+    ## as keystone_authtoken.
     watcher_clients_auth:
+      auth_type: password
       cafile: null
       certfile: null
       keyfile: null
@@ -383,12 +388,13 @@ conf:
         - default
     logger_root:
       level: WARNING
-      handlers: 'null'
+      handlers: stderr
     logger_watcher:
       level: INFO
       handlers:
         - stdout
       qualname: watcher
+      propagate: 0
     logger_amqp:
       level: WARNING
       handlers: stderr
