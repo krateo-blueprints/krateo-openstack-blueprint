@@ -133,22 +133,28 @@ kubectl create namespace openstack-system
 # upgrade (#166). 0.3.36 and 0.3.37 upgrade the umbrella but leave every component at its old
 # version (#179). 0.3.38 through 0.3.40 cannot upgrade a Job whose template changed (#179).
 # 0.3.41 and 0.3.42 leave a cinder whose install hooks wait for Ceph forever, silently (#204);
-# the 0.3.42 release notes say how to recover an install that has it.
+# the 0.3.42 release notes say how to recover an install that has it. 0.3.43 through 0.3.45
+# publish broken Marketplace icons for 23 charts (#214); they install and run correctly.
 #
-# What 0.3.43 has actually been run through, stated so you know what is NOT covered:
-#   - a fresh install with these exact steps, profile: full-strict, on a 6-node GKE cluster
-#     (n2-standard-16, Kubernetes 1.36.4, core-provider 2.13.72). 32 components; all 33 Helm
-#     releases deployed; the last component Ready 22 min after the apply; every Job a bounded
-#     hook; keystone answering on /v3 (#204);
+# What 0.3.46 has actually been run through, stated so you know what is NOT covered:
+#   - 0.3.45 freshly installed with these exact steps, profile: full-strict, on a 6-node GKE
+#     cluster (n2-standard-16, Kubernetes 1.36.4, core-provider 2.13.72): 32 components, 31
+#     Ready; all 33 Helm releases deployed; the last component Ready 24 min after the apply;
+#     every Job a bounded hook; no plain Pods; no `<no value>` in any live config; nova,
+#     neutron and cyborg agents Ready on all 6 nodes; a componentValues override reaching
+#     keystone's live config and reverting cleanly (#213);
+#   - 0.3.46 renders byte-for-byte the same manifests as 0.3.45 for all 37 charts, apart from
+#     the version string; it changes only the Marketplace icons, which its release fetched and
+#     checked as images before publishing (#214);
 #   - an upgrade of a 0.3.34 install to 0.3.42 with hack/migrate-to-pvc.py, then on to 0.3.43:
 #     MariaDB and RabbitMQ data intact across the upgrade, a node move and a RabbitMQ outage,
 #     and a designate zone round-trip through PowerDNS (#179, #204).
-# Six components are NOT Ready on that install, each with its own issue: nova, neutron and
-# cyborg (#200), tacker (#201), magnum (#202), watcher (#203). cinder is not in full-strict
-# from 0.3.43 because its only backend needs Ceph (#196). NOT verified at this version: the
-# 36-component profile: full, kind, and the per-component path further down.
+# One component is NOT Ready: watcher (#203), whose decision engine has no keystone client
+# credentials; the cause is measured and a fix is in progress. cinder is not in full-strict
+# because its only backend needs Ceph (#196). NOT verified at this version: the 36-component
+# profile: full, kind, a VNC console in a browser, and the per-component path further down.
 
-BP_VERSION=0.3.43
+BP_VERSION=0.3.46
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 
