@@ -40,7 +40,7 @@ plaintext, so these helpers make that impossible rather than discouraged. The tw
 {{- if and $name $key -}}
 true
 {{- else if or $name $key -}}
-{{- fail (printf "%s needs both name and key: one without the other configures nothing" .field) -}}
+{{- fail (printf "%s needs both name and key: one without the other configures nothing. See docs/configuration.md, keystone, oidc.clientSecretRef and oidc.cryptoPassphraseRef." .field) -}}
 {{- end -}}
 {{- end -}}
 
@@ -67,7 +67,7 @@ true
 {{- $rendered := tpl (toString $template) $envAll -}}
 {{- range $directive := list "OIDCClientSecret" "OIDCCryptoPassphrase" -}}
 {{- if regexMatch (printf "(?im)^[ \\t]*%s([ \\t]|$)" $directive) $rendered -}}
-{{- fail (printf "conf.%s carries an %s directive: a secret in values is readable by anyone who can read the Composition CR. Remove it and set oidc.clientSecretRef / oidc.cryptoPassphraseRef (name, key) to a Secret instead; the chart then renders the directive itself." $field $directive) -}}
+{{- fail (printf "conf.%s carries an %s directive: a secret in values is readable by anyone who can read the Composition CR. Remove it and set oidc.clientSecretRef / oidc.cryptoPassphraseRef (name, key) to a Secret instead; the chart then renders the directive itself. See docs/configuration.md, section \"Upgrading an install that already uses OIDC\"." $field $directive) -}}
 {{- end -}}
 {{- end -}}
 {{- if regexMatch "(?im)^[ \\t]*(OIDC[A-Za-z]+|AuthType[ \\t]+\"?openid-connect\"?)([ \\t]|$)" $rendered -}}
@@ -76,7 +76,7 @@ true
 {{- end -}}
 {{- end -}}
 {{- if and $oidcConfigured (not (include "keystone.oidc.cryptoPassphraseEnabled" $envAll)) -}}
-{{- fail "OIDC is configured (oidc.clientSecretRef, or OIDC directives in the Apache config) but oidc.cryptoPassphraseRef is not set: mod_auth_openidc refuses to start without OIDCCryptoPassphrase, so keystone-api would crash-loop. Set oidc.cryptoPassphraseRef (name, key) to a Secret." -}}
+{{- fail "OIDC is configured (oidc.clientSecretRef, or OIDC directives in the Apache config) but oidc.cryptoPassphraseRef is not set: mod_auth_openidc refuses to start without OIDCCryptoPassphrase, so keystone-api would crash-loop. Set oidc.cryptoPassphraseRef (name, key) to a Secret. See docs/configuration.md, section \"Upgrading an install that already uses OIDC\"." -}}
 {{- end -}}
 {{- end -}}
 

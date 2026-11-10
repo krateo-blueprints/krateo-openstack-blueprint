@@ -29,7 +29,10 @@ This gate renders the keystone chart and checks:
   - every literal-*.yaml (a secret written into the free-form config) is refused for that reason,
     and both directives have such a fixture;
   - every missing-passphrase-*.yaml (OIDC without oidc.cryptoPassphraseRef) is refused;
-  - half a reference (a name without a key) is refused, for each reference.
+  - half a reference (a name without a key) is refused, for each reference;
+  - the refusals an upgrading install can hit (a literal secret, OIDC without a passphrase) point
+    at docs/configuration.md's "Upgrading an install that already uses OIDC", and that section
+    exists.
 
 It fails when a fixture class is missing or no directive is rendered at all: a gate that looked at
 nothing has measured nothing.
@@ -51,6 +54,11 @@ spec.loader.exec_module(job_hooks)
 yaml = job_hooks.yaml
 
 OWNED_KEY = "oidc-secrets.conf"
+# The upgrade path for installs that wrote the secrets into values before the chart owned them.
+# Every refusal an upgrading install can hit must point here, and the heading must exist.
+UPGRADE_DOC = "docs/configuration.md"
+UPGRADE_HEADING = "Upgrading an install that already uses OIDC"
+UPGRADE_POINTER = f'See {UPGRADE_DOC}, section "{UPGRADE_HEADING}"'
 # directive -> (values reference under oidc, env var)
 SECRETS = {
     "OIDCClientSecret": ("clientSecretRef", "OIDC_CLIENT_SECRET"),
@@ -139,6 +147,10 @@ def main() -> int:
 
     failures, rendered_directives = [], 0
     covered_enabled, covered_literal = set(), set()
+    doc = root / UPGRADE_DOC
+    if not doc.is_file() or f"\n## {UPGRADE_HEADING}\n" not in doc.read_text():
+        failures.append(f"{UPGRADE_DOC} has no '## {UPGRADE_HEADING}' section, which every refusal "
+                        "an upgrading install can hit points at")
 
     with tempfile.TemporaryDirectory() as td:
         work = Path(td)
@@ -263,11 +275,11 @@ def main() -> int:
                                 f"found {named}")
                 continue
             covered_literal.add(named[0])
-            refused(str(f.relative_to(root)), ["-f", str(f)], [f"carries an {named[0]} directive"])
+            refused(str(f.relative_to(root)), ["-f", str(f)], [f"carries an {named[0]} directive", UPGRADE_POINTER])
 
         # OIDC without a passphrase would crash-loop keystone-api, so it must not render.
         for f in missing:
-            refused(str(f.relative_to(root)), ["-f", str(f)], ["oidc.cryptoPassphraseRef is not set"])
+            refused(str(f.relative_to(root)), ["-f", str(f)], ["oidc.cryptoPassphraseRef is not set", UPGRADE_POINTER])
 
         # Half a reference configures nothing; it must not render silently.
         for refkey in ("clientSecretRef", "cryptoPassphraseRef"):

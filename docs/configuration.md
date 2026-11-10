@@ -193,6 +193,67 @@ Notable per-component fields:
 
 Set `spec: {}` (or omit `componentValues.<name>`) to use the validated defaults.
 
+## Upgrading an install that already uses OIDC
+
+Until the keystone chart gained `oidc.clientSecretRef` and `oidc.cryptoPassphraseRef`, the only
+way to configure OIDC federation was to write `OIDCClientSecret` and `OIDCCryptoPassphrase` as
+literals in `componentValues.keystone.conf.wsgi_keystone`. The chart now refuses those literals,
+so **an install that has them fails to render on upgrade**. Under Krateo, the keystone component's
+Composition goes to a failed state, and the release stays on the old version until the values
+are fixed. Do these steps in one change, before or together with the version bump:
+
+1. **Create both Secrets with the values you use today**, not freshly generated ones, in the
+   release namespace (`openstack` by default). The Keycloak client still holds the current client
+   secret, and live state and session cookies are encrypted with the current passphrase. New
+   values would break logins until Keycloak is updated, and would end every session. Write each
+   value to a file first, so it never lands in your shell history:
+
+   ```sh
+   kubectl -n openstack create secret generic keystone-oidc-client \
+     --from-file=client-secret=./client-secret.txt
+   kubectl -n openstack create secret generic keystone-oidc-crypto \
+     --from-file=passphrase=./passphrase.txt
+   rm ./client-secret.txt ./passphrase.txt
+   ```
+
+   The file must hold exactly the value, with no trailing newline (`printf '%s' … > file`).
+2. **Set both references** in `componentValues.keystone`:
+
+   ```yaml
+   oidc:
+     clientSecretRef:
+       name: keystone-oidc-client
+       key: client-secret
+     cryptoPassphraseRef:
+       name: keystone-oidc-crypto
+       key: passphrase
+   ```
+
+3. **Delete the `OIDCClientSecret` and `OIDCCryptoPassphrase` lines** from
+   `componentValues.keystone.conf.wsgi_keystone`, in the same change as step 2. Keep every other
+   OIDC directive.
+4. **Apply the change** (the `Openstack` Composition, with the new version if you are upgrading).
+   keystone-api restarts with both values read from the Secrets. Logins and existing sessions
+   carry on.
+5. Optionally, move Keycloak's client onto the same Secret (keycloak-config-kog 0.4.9 or later,
+   `spec.clientSecretRef` → `keystone-oidc-client` / `client-secret`, see the keystone entry
+   above), and later rotate it as described there.
+
+If you skip this, the render fails with one of these messages. Helm prefixes each with
+`execution error at (keystone/templates/…)`:
+
+- a literal still in the config:
+  `conf.wsgi_keystone carries an OIDCClientSecret directive: a secret in values is readable by
+  anyone who can read the Composition CR. Remove it and set oidc.clientSecretRef /
+  oidc.cryptoPassphraseRef (name, key) to a Secret instead; the chart then renders the directive
+  itself. See docs/configuration.md, section "Upgrading an install that already uses OIDC".`
+  (or the same for `OIDCCryptoPassphrase`);
+- the literals removed but no passphrase reference:
+  `OIDC is configured (oidc.clientSecretRef, or OIDC directives in the Apache config) but
+  oidc.cryptoPassphraseRef is not set: mod_auth_openidc refuses to start without
+  OIDCCryptoPassphrase, so keystone-api would crash-loop. Set oidc.cryptoPassphraseRef (name, key)
+  to a Secret. See docs/configuration.md, section "Upgrading an install that already uses OIDC".`
+
 ## `serviceContract` (contract v1)
 
 The service integration descriptor. Chart defaults are authoritative; deployments override
