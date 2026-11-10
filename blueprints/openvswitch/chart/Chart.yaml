@@ -18,7 +18,7 @@ name: openvswitch
 type: application
 version: CHART_VERSION
 home: http://openvswitch.org
-icon: https://docs.openvswitch.org/en/latest/_static/logo.png
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 sources:
   - https://github.com/openvswitch/ovs
   - https://opendev.org/openstack/openstack-helm

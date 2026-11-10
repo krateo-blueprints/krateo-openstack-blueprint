@@ -18,7 +18,7 @@ name: skyline
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/skyline-apiserver/latest/
-icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 sources:
   - https://opendev.org/openstack/skyline-apiserver
   - https://opendev.org/openstack/skyline-console

@@ -18,7 +18,7 @@ name: ceilometer
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/ceilometer/latest/
-icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/telemetry.png
 sources:
   - https://opendev.org/openstack/ceilometer
   - https://opendev.org/openstack/openstack-helm

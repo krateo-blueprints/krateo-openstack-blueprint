@@ -16,7 +16,13 @@ The publisher refuses both (krateo-blueprints/charts PUBLISHING.md rule 3).
 For each blueprints/<name>/chart/Chart.yaml:
 
 - `name` equals the directory name, because the index is keyed by it;
-- `icon` is an absolute https URL;
+- `icon` is on a host this organisation controls: this repository's own raw path naming a file
+  that exists under docs/icons/, or the organisation's brand logo. Third-party URLs rot without
+  anyone noticing: at 0.3.45, 23 of 37 tiles pointed at an openstack.org directory that had moved
+  (22 answered 404, and freezer redirected to an HTML page with status 200). Twelve more used the
+  pre-rename `krateoplatformops` org and rendered only through GitHub's redirect. This check is
+  offline and per pull request. The release fetches every icon before the GHCR push, the network
+  half;
 - `keywords` is a non-empty list;
 - `sources` lists https://github.com/krateo-blueprints/krateo-openstack-blueprint;
 - chart/values.schema.json exists;
@@ -34,6 +40,26 @@ except ImportError:
     sys.exit("ERROR: PyYAML is required")
 
 SOURCE_REPO = "https://github.com/krateo-blueprints/krateo-openstack-blueprint"
+# Hosts this organisation controls. A chart's own icon lives in this repository and is served
+# from main; the release tags merged main, so the file exists when the release fetches it.
+ICON_REPO_PREFIX = "https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/"
+ICON_ORG_LOGO = "https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg"
+ICON_EXTENSIONS = (".png", ".svg")
+
+
+def icon_problem(bp, icon):
+    icon = str(icon or "")
+    if icon == ICON_ORG_LOGO:
+        return None
+    if icon.startswith(ICON_REPO_PREFIX):
+        rel = icon[len(ICON_REPO_PREFIX):]
+        if "/" in rel or not rel.endswith(ICON_EXTENSIONS):
+            return f"{bp}: icon {icon!r} must name a .png or .svg directly under docs/icons/"
+        if not os.path.isfile(os.path.join(ROOT, "docs", "icons", rel)):
+            return f"{bp}: icon names docs/icons/{rel}, which does not exist in this repository"
+        return None
+    return (f"{bp}: icon {icon!r} is not on a host this organisation controls; use "
+            f"{ICON_REPO_PREFIX}<file> (committed under docs/icons/) or {ICON_ORG_LOGO}")
 
 ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 \
     else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -53,9 +79,9 @@ def main():
             meta = yaml.safe_load(f) or {}
         if meta.get("name") != bp:
             problems.append(f"{bp}: Chart.yaml name is {meta.get('name')!r}, not {bp!r}")
-        icon = meta.get("icon") or ""
-        if not str(icon).startswith("https://"):
-            problems.append(f"{bp}: icon must be an absolute https URL, got {icon!r}")
+        p = icon_problem(bp, meta.get("icon"))
+        if p:
+            problems.append(p)
         kw = meta.get("keywords")
         if not isinstance(kw, list) or not kw:
             problems.append(f"{bp}: keywords must be a non-empty list (the Marketplace's tags)")

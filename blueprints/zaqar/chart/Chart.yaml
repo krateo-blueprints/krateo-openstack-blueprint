@@ -18,7 +18,7 @@ name: zaqar
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/zaqar/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Zaqar/OpenStack_Project_Zaqar_vertical.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/zaqar.png
 sources:
   - https://opendev.org/openstack/zaqar
   - https://github.com/krateo-blueprints/krateo-openstack-blueprint

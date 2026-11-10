@@ -18,7 +18,7 @@ name: magnum
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/magnum/latest/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Magnum/OpenStack_Project_Magnum_vertical.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/magnum.png
 sources:
   - https://opendev.org/openstack/magnum
   - https://opendev.org/openstack/openstack-helm

@@ -18,7 +18,7 @@ name: designate
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/designate/latest/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Designate/OpenStack_Project_Designate_vertical.jpg
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/designate.png
 sources:
   - https://opendev.org/openstack/designate
   - https://opendev.org/openstack/openstack-helm

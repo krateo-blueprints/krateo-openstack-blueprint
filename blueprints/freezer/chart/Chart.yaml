@@ -18,7 +18,7 @@ name: freezer
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/freezer/latest
-icon: https://www.openstack.org/software/images/mascots/freezer.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/freezer.png
 sources:
   - https://opendev.org/openstack/freezer
   - https://opendev.org/openstack/freezer-api

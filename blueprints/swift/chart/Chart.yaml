@@ -18,7 +18,7 @@ name: swift
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/swift/latest/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Swift/OpenStack_Project_Swift_vertical.jpg
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/swift.png
 sources:
   - https://opendev.org/openstack/swift
   - https://opendev.org/openstack/openstack-helm

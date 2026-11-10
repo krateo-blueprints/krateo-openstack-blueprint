@@ -18,7 +18,7 @@ name: mariadb
 type: application
 version: CHART_VERSION
 home: https://mariadb.com/kb/en/
-icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 sources:
   - https://github.com/MariaDB/server
   - https://opendev.org/openstack/openstack-helm

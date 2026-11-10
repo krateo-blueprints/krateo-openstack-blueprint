@@ -18,7 +18,7 @@ name: keystone
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/keystone/latest/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Keystone/OpenStack_Project_Keystone_vertical.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/keystone.png
 sources:
   - https://opendev.org/openstack/keystone
   - https://opendev.org/openstack/openstack-helm

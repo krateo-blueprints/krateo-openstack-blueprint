@@ -18,7 +18,7 @@ name: mistral
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/mistral/latest/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Mistral/OpenStack_Project_Mistral_vertical.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/mistral.png
 sources:
   - https://opendev.org/openstack/mistral
   - https://opendev.org/openstack/openstack-helm

@@ -18,7 +18,7 @@ name: gnocchi
 type: application
 version: CHART_VERSION
 home: https://gnocchi.xyz/
-icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 sources:
   - https://github.com/gnocchixyz/gnocchi
   - https://opendev.org/openstack/openstack-helm

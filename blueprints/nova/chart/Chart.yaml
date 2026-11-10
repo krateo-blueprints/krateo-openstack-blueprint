@@ -18,7 +18,7 @@ name: nova
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/nova/latest/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Nova/OpenStack_Project_Nova_vertical.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/nova.png
 sources:
   - https://opendev.org/openstack/nova
   - https://opendev.org/openstack/openstack-helm

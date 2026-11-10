@@ -18,7 +18,7 @@ name: neutron
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/neutron/latest/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Neutron/OpenStack_Project_Neutron_vertical.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/neutron.png
 sources:
   - https://opendev.org/openstack/neutron
   - https://opendev.org/openstack/openstack-helm
