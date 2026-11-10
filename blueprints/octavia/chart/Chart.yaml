@@ -20,7 +20,7 @@ name: octavia
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/octavia/latest/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Octavia/OpenStack_Project_Octavia_vertical.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/octavia.png
 sources:
   - https://opendev.org/openstack/octavia
   - https://opendev.org/openstack/openstack-helm

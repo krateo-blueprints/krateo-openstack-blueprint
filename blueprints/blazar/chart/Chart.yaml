@@ -18,7 +18,7 @@ name: blazar
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/blazar/
-icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 sources:
   - https://opendev.org/openstack/blazar
   - https://github.com/krateo-blueprints/krateo-openstack-blueprint

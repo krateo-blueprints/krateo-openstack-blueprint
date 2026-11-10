@@ -18,7 +18,7 @@ name: watcher
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/watcher/latest/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Watcher/OpenStack_Project_Watcher_vertical.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/watcher.png
 sources:
   - https://opendev.org/openstack/watcher
   - https://opendev.org/openstack/openstack-helm

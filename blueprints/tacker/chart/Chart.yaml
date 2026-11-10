@@ -18,7 +18,7 @@ name: tacker
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/tacker/latest/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Tacker/OpenStack_Project_Tacker_vertical.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/tacker.png
 sources:
   - https://opendev.org/openstack/tacker
   - https://opendev.org/openstack/openstack-helm

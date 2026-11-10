@@ -18,7 +18,7 @@ name: ironic
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/ironic/latest/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Ironic/OpenStack_Project_Ironic_vertical.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/ironic.png
 sources:
   - https://opendev.org/openstack/ironic
   - https://opendev.org/openstack/openstack-helm

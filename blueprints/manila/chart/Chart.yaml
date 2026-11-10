@@ -18,7 +18,7 @@ name: manila
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/manila/latest/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Manila/OpenStack_Project_Manila_vertical.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/manila.png
 sources:
   - https://opendev.org/openstack/manila
   - https://opendev.org/openstack/openstack-helm

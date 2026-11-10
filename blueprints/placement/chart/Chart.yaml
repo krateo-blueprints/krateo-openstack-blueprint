@@ -20,7 +20,7 @@ name: placement
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/placement/latest/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Placement/OpenStack_Project_Placement_vertical.png
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 sources:
   - https://opendev.org/openstack/placement
   - https://opendev.org/openstack/openstack-helm

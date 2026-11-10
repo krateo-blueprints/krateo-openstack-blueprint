@@ -18,7 +18,7 @@ name: cloudkitty
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/cloudkitty/latest/
-icon: https://opendev.org/openstack/cloudkitty/media/branch/master/doc/source/images/cloudkitty-logo.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/cloudkitty.png
 sources:
   - https://opendev.org/openstack/cloudkitty
   - https://opendev.org/openstack/openstack-helm

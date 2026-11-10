@@ -14,7 +14,7 @@ type: application
 version: CHART_VERSION
 appVersion: "2025.1"
 home: https://krateo.io
-icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 keywords:
   - openstack
   - orchestrator

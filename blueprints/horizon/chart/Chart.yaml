@@ -18,7 +18,7 @@ name: horizon
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/horizon/latest/
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Horizon/OpenStack_Project_Horizon_vertical.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/horizon.png
 sources:
   - https://opendev.org/openstack/horizon
   - https://opendev.org/openstack/openstack-helm

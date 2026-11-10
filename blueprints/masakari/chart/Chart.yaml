@@ -18,7 +18,7 @@ name: masakari
 type: application
 version: CHART_VERSION
 home: https://docs.openstack.org/developer/masakari
-icon: https://www.openstack.org/themes/openstack/images/project-mascots/Masakari/OpenStack_Project_Masakari_vertical.png
+icon: https://raw.githubusercontent.com/krateo-blueprints/krateo-openstack-blueprint/main/docs/icons/masakari.png
 sources:
   - https://opendev.org/openstack/masakari
   - https://opendev.org/openstack/masakari-monitors

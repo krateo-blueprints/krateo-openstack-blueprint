@@ -18,7 +18,7 @@ name: powerdns
 type: application
 version: CHART_VERSION
 home: https://www.powerdns.com/
-icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 sources:
   - https://github.com/krateo-blueprints/krateo-openstack-blueprint
   - https://github.com/PowerDNS/pdns

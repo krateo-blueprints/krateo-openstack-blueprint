@@ -97,6 +97,12 @@ jobs:
           echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
           echo "OCI_REPO=oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts" >> "$GITHUB_ENV"
 
+      # Before the first push: a published index entry is never rewritten, so a dead icon would
+      # stay on that version's Marketplace tile forever. A network error fails here on purpose;
+      # see the script's header.
+      - name: Every chart's icon resolves to an image
+        run: hack/check-icons-live.sh .
+
       - name: Log in to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | \

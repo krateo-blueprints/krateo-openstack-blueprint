@@ -18,7 +18,7 @@ name: libvirt
 type: application
 version: CHART_VERSION
 home: https://libvirt.org
-icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 sources:
   - https://libvirt.org/git/?p=libvirt.git;a=summary
   - https://opendev.org/openstack/openstack-helm
