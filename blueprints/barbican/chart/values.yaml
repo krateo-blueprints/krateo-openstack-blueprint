@@ -369,12 +369,15 @@ conf:
     path_keywords:
       # path of api requests for CADF target typeURI
       # Just need to include top resource path to identify class of resources
-      secrets: null
-      containers: null
-      orders: null
+      # The value is the keyword of the id that follows the path, and keystonemiddleware's
+      # audit map spells "no id keyword" as the string None, as barbican's own
+      # api_audit_map.conf and `cas` below do. YAML null rendered as "<no value>" (#202).
+      secrets: "None"
+      containers: "None"
+      orders: "None"
       cas: "None"
-      quotas: null
-      project-quotas: null
+      quotas: "None"
+      project-quotas: "None"
     service_endpoints:
       # map endpoint type defined in service catalog to CADF typeURI
       key-manager: service/security/keymanager

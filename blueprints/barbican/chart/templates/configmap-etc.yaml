@@ -73,6 +73,13 @@ limitations under the License.
 {{- $_ := set .Values.conf.barbican_api_uwsgi.uwsgi "http-socket" $http_socket -}}
 {{- end -}}
 
+{{- /* values.yaml says the bind port "is manipulated via the endpoints section"; this is that
+       step, as heat and glance do it. Without it barbican.conf carried
+       "bind_port = <no value>" (#202). */ -}}
+{{- if empty .Values.conf.barbican.barbican_api.bind_port -}}
+{{- $_ := tuple "key_manager" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" | set .Values.conf.barbican.barbican_api "bind_port" -}}
+{{- end -}}
+
 {{- if and (empty .Values.conf.logging.handler_fluent) (has "fluent" .Values.conf.logging.handlers.keys) -}}
 {{- $fluentd_host := tuple "fluentd" "internal" $envAll | include "helm-toolkit.endpoints.hostname_namespaced_endpoint_lookup" }}
 {{- $fluentd_port := tuple "fluentd" "internal" "service" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
