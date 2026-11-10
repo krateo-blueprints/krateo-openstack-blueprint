@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "digest": {
+      "type": "string",
+      "description": "Digest of the current managed resources",
+      "default": ""
+    },
+    "helmChartUrl": {
+      "type": "string",
+      "description": "URL of the helm chart deployed"
+    },
+    "releaseName": {
+      "type": "string",
+      "description": "The helm release name this composition resolved to, written by every phase that resolves it. It exists so that RESOLUTION and PERSISTENCE can be told apart from the object alone. The krateo.io/release-name label is write-once, so an established composition carries it and resolution short-circuits; a new or recreated composition has no label, and whether the resolved name was then persisted was NOT observable -- the openstack-ironic-operator-kog session could only infer it by counting 'Adopting the existing helm release' log lines (11 on a probe against 0 in production), because managedFields is stripped on these objects (zero entries on the probe AND zero on a production object that demonstrably carries the label, so ownership said nothing). With this field the three states read directly: label present means it was read from the label and no adoption ran; label absent with releaseName present means adoption resolved it and the write landed; label absent with releaseName absent is the 2.13.61 defect -- resolved in memory and never persisted. NO DEFAULT, DELIBERATELY. Nine of the twelve baseline fields omit one, and here it is load-bearing rather than incidental: a `default: \"\"` makes the apiserver materialise the key on every composition, which collapses the third state into the second and destroys the only distinction the field is for. Absence must stay absence."
+    },
+    "helmChartVersion": {
+      "type": "string",
+      "description": "Version of the helm chart deployed"
+    },
+    "lastReconcileTime": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Wall-clock time of the most recent reconcile of this composition, written on EVERY reconcile whether or not anything changed. It is a liveness signal, not a change signal: a value that stops advancing means the controller stopped reconciling, which no condition can tell you. It exists because #298 removed the accidental one -- the Ready condition's LastTransitionTime used to move every reconcile, for the defective reason that three phases wrote three different messages for one Available state, so the idempotency guard could never fire. Fixing that made the timestamp honest and silent, hence this field. DECLARED HERE DELIBERATELY: structural CRD schemas PRUNE undeclared status fields, and this repo shipped managedDigest and previousManagedCount without declaring them, which cost 502 false drift reports across 30 compositions before anyone noticed the apiserver was silently dropping them. A field written by a controller and absent from this file does not exist."
+    },
+    "managed": {
+      "type": "array",
+      "description": "List of the managed resources installed by the helm chart",
+      "items": {
+        "type": "object",
+        "properties": {
+          "apiVersion": {
+            "type": "string",
+            "description": "API version of the managed resource"
+          },
+          "resource": {
+            "type": "string",
+            "description": "Kind of the managed resource"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name of the managed resource"
+          },
+          "namespace": {
+            "type": "string",
+            "description": "Namespace of the managed resource"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path of the managed resource, you can use this path to ask the API server for the resource"
+          }
+        }
+      }
+    },
+    "managedDigest": {
+      "type": "string",
+      "description": "Digest of the helm release that status.managed was decoded FROM, stamped by the phases that record the inventory (#273). Observe compares it against the current release's digest to answer whether the recorded set is still the inventory of what is rendered \u2014 status.digest tracks the CURRENT release because Observe rewrites it every reconcile, while status.managed tracks whatever Create/Update last decoded, and nothing else ties the two together. MUST BE DECLARED HERE: a structural CRD schema prunes fields it does not declare, and while this was missing the cdc wrote it on every reconcile, the apiserver stripped it, and the absent-stamp branch reported drift forever \u2014 502 drift reports across 30 of 30 inventoried compositions in 20 minutes on a fresh cluster (#293). Same failure as observedGeneration below.",
+      "default": ""
+    },
+    "observedGeneration": {
+      "type": "integer",
+      "description": "The .metadata.generation this status was produced from. The cdc writes it on every successful reconcile (unstructured-runtime SetObservedGeneration), but a structural CRD schema PRUNES fields it does not declare \u2014 so while this was missing, the write was silently stripped by the apiserver on every reconcile and the field read as permanently absent. Anything using it as a health signal therefore saw a false stall forever."
+    },
+    "previousDigest": {
+      "type": "string",
+      "description": "Digest of the previous managed resources",
+      "default": ""
+    },
+    "previousManagedCount": {
+      "type": "integer",
+      "description": "How many children status.managed listed BEFORE the last render replaced it, so the Ready message can say the recorded set shrank (#230). A multi-component bump legitimately renders fewer resources mid-flight; the rollup then evaluates the smaller set, finds it healthy and reports Available, and 122 -> 108 -> 122 is otherwise indistinguishable from 122 -> 122. Persisted rather than compared in flight because Observe stamps the message on every reconcile and has no previous inventory of its own. MUST BE DECLARED HERE for the same reason as managedDigest (#293)."
+    },
+    "managedChildrenCount": {
+      "type": "integer",
+      "description": "How many children status.managed currently lists. The denominator for healthEvaluatedChildren and unreadableChildrenCount, written on every rollup so that full coverage reads as an equality rather than as an absent field."
+    },
+    "healthEvaluatedChildren": {
+      "type": "integer",
+      "description": "How many of the managed children this controller could actually health-evaluate. Less than managedChildrenCount means the Ready condition asserts something about a subset."
+    },
+    "unreadableChildrenCount": {
+      "type": "integer",
+      "description": "How many managed children this controller's ServiceAccount was REFUSED a read of (HTTP 403). Non-zero is a gap in the generated RBAC, not a problem with the children; the child names are in the Ready condition message."
+    }
+  }
+}

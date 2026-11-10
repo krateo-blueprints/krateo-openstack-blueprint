@@ -28,9 +28,11 @@
               "title": "Keystone API image",
               "description": "Full image ref for the keystone-api container, e.g. ghcr.io/krateo-blueprints/keystone-oidc:2025.1-ubuntu_jammy."
             }
-          }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
         }
-      }
+      },
+      "x-kubernetes-preserve-unknown-fields": true
     },
     "pod": {
       "type": "object",
@@ -47,9 +49,11 @@
               "maximum": 5,
               "default": 1
             }
-          }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
         }
-      }
+      },
+      "x-kubernetes-preserve-unknown-fields": true
     },
     "network": {
       "type": "object",
@@ -76,11 +80,14 @@
                   "maximum": 32767,
                   "default": 30500
                 }
-              }
+              },
+              "x-kubernetes-preserve-unknown-fields": true
             }
-          }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
         }
-      }
+      },
+      "x-kubernetes-preserve-unknown-fields": true
     },
     "conf": {
       "type": "object",
@@ -98,7 +105,8 @@
                   "title": "Auth methods",
                   "description": "e.g. password,token,openid"
                 }
-              }
+              },
+              "x-kubernetes-preserve-unknown-fields": true
             },
             "openid": {
               "type": "object",
@@ -108,7 +116,8 @@
                   "title": "Remote ID attribute",
                   "description": "Apache env var carrying the token issuer, e.g. HTTP_OIDC_ISS."
                 }
-              }
+              },
+              "x-kubernetes-preserve-unknown-fields": true
             },
             "federation": {
               "type": "object",
@@ -124,9 +133,11 @@
                   "title": "JIT auto-provisioning",
                   "default": false
                 }
-              }
+              },
+              "x-kubernetes-preserve-unknown-fields": true
             }
-          }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
         },
         "software": {
           "type": "object",
@@ -135,20 +146,232 @@
               "type": "object",
               "properties": {
                 "a2enmod": {
-                  "type": ["array", "null"],
+                  "type": [
+                    "array",
+                    "null"
+                  ],
                   "title": "Apache modules to enable",
-                  "items": { "type": "string" }
+                  "items": {
+                    "type": "string"
+                  }
                 }
-              }
+              },
+              "x-kubernetes-preserve-unknown-fields": true
             }
-          }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
         },
         "wsgi_keystone": {
           "type": "string",
           "title": "Keystone Apache vhost",
           "description": "Full Apache vhost template (mod_auth_openidc OIDC RP config + protected federation Locations). Helm-templated (uses helm-toolkit endpoint lookups)."
         }
-      }
+      },
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "manifests": {
+      "type": "object",
+      "title": "Manifest switches",
+      "description": "Deep-merged into the chart's manifests values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
+      "properties": {
+        "certificates": {
+          "type": "boolean"
+        },
+        "configmap_bin": {
+          "type": "boolean"
+        },
+        "configmap_etc": {
+          "type": "boolean"
+        },
+        "cron_credential_rotate": {
+          "type": "boolean"
+        },
+        "cron_fernet_rotate": {
+          "type": "boolean"
+        },
+        "deployment_api": {
+          "type": "boolean"
+        },
+        "ingress_api": {
+          "type": "boolean"
+        },
+        "job_bootstrap": {
+          "type": "boolean"
+        },
+        "job_credential_cleanup": {
+          "type": "boolean"
+        },
+        "job_credential_setup": {
+          "type": "boolean"
+        },
+        "job_db_drop": {
+          "type": "boolean"
+        },
+        "job_db_init": {
+          "type": "boolean"
+        },
+        "job_db_sync": {
+          "type": "boolean"
+        },
+        "job_domain_manage": {
+          "type": "boolean"
+        },
+        "job_fernet_setup": {
+          "type": "boolean"
+        },
+        "job_image_repo_sync": {
+          "type": "boolean"
+        },
+        "job_rabbit_init": {
+          "type": "boolean"
+        },
+        "network_policy": {
+          "type": "boolean"
+        },
+        "pdb_api": {
+          "type": "boolean"
+        },
+        "pod_rally_test": {
+          "type": "boolean"
+        },
+        "secret_credential_keys": {
+          "type": "boolean"
+        },
+        "secret_db": {
+          "type": "boolean"
+        },
+        "secret_fernet_keys": {
+          "type": "boolean"
+        },
+        "secret_ingress_tls": {
+          "type": "boolean"
+        },
+        "secret_keystone": {
+          "type": "boolean"
+        },
+        "secret_rabbitmq": {
+          "type": "boolean"
+        },
+        "secret_registry": {
+          "type": "boolean"
+        },
+        "service_api": {
+          "type": "boolean"
+        },
+        "service_ingress_api": {
+          "type": "boolean"
+        }
+      },
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "endpoints": {
+      "type": "object",
+      "title": "Endpoint overrides",
+      "description": "Deep-merged into the chart's endpoints values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "bootstrap": {
+      "type": "object",
+      "title": "bootstrap",
+      "description": "Deep-merged into the chart's `bootstrap` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "dependencies": {
+      "type": "object",
+      "title": "dependencies",
+      "description": "Deep-merged into the chart's `dependencies` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "extraObjects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "x-kubernetes-preserve-unknown-fields": true
+      },
+      "title": "extraObjects",
+      "description": "Deep-merged into the chart's `extraObjects` values."
+    },
+    "identity": {
+      "type": "object",
+      "title": "identity",
+      "description": "Deep-merged into the chart's `identity` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "jobs": {
+      "type": "object",
+      "title": "jobs",
+      "description": "Deep-merged into the chart's `jobs` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "labels": {
+      "type": "object",
+      "properties": {
+        "api": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "job": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "test": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        }
+      },
+      "title": "labels",
+      "description": "Deep-merged into the chart's `labels` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "network_policy": {
+      "type": "object",
+      "title": "network_policy",
+      "description": "Deep-merged into the chart's `network_policy` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "release_group": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "title": "release_group",
+      "description": "The chart's `release_group` value."
+    },
+    "secrets": {
+      "type": "object",
+      "title": "secrets",
+      "description": "Deep-merged into the chart's `secrets` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "tls": {
+      "type": "object",
+      "title": "tls",
+      "description": "Deep-merged into the chart's `tls` values.",
+      "x-kubernetes-preserve-unknown-fields": true
     }
   }
 }

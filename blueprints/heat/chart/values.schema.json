@@ -18,7 +18,8 @@
           ],
           "default": "IfNotPresent"
         }
-      }
+      },
+      "x-kubernetes-preserve-unknown-fields": true
     },
     "pod": {
       "type": "object",
@@ -49,9 +50,269 @@
               "maximum": 5,
               "default": 1
             }
-          }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
         }
-      }
+      },
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "conf": {
+      "type": "object",
+      "title": "OpenStack-Helm conf overrides",
+      "description": "Deep-merged into the chart's conf values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "manifests": {
+      "type": "object",
+      "title": "Manifest switches",
+      "description": "Deep-merged into the chart's manifests values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
+      "properties": {
+        "certificates": {
+          "type": "boolean"
+        },
+        "configmap_bin": {
+          "type": "boolean"
+        },
+        "configmap_etc": {
+          "type": "boolean"
+        },
+        "cron_job_engine_cleaner": {
+          "type": "boolean"
+        },
+        "cron_job_purge_deleted": {
+          "type": "boolean"
+        },
+        "deployment_api": {
+          "type": "boolean"
+        },
+        "deployment_cfn": {
+          "type": "boolean"
+        },
+        "deployment_engine": {
+          "type": "boolean"
+        },
+        "ingress_api": {
+          "type": "boolean"
+        },
+        "ingress_cfn": {
+          "type": "boolean"
+        },
+        "job_bootstrap": {
+          "type": "boolean"
+        },
+        "job_db_init": {
+          "type": "boolean"
+        },
+        "job_db_sync": {
+          "type": "boolean"
+        },
+        "job_db_drop": {
+          "type": "boolean"
+        },
+        "job_image_repo_sync": {
+          "type": "boolean"
+        },
+        "job_ks_endpoints": {
+          "type": "boolean"
+        },
+        "job_ks_service": {
+          "type": "boolean"
+        },
+        "job_ks_user_domain": {
+          "type": "boolean"
+        },
+        "job_ks_user_trustee": {
+          "type": "boolean"
+        },
+        "job_ks_user": {
+          "type": "boolean"
+        },
+        "job_rabbit_init": {
+          "type": "boolean"
+        },
+        "pdb_api": {
+          "type": "boolean"
+        },
+        "pdb_cfn": {
+          "type": "boolean"
+        },
+        "pod_rally_test": {
+          "type": "boolean"
+        },
+        "network_policy": {
+          "type": "boolean"
+        },
+        "secret_db": {
+          "type": "boolean"
+        },
+        "secret_ingress_tls": {
+          "type": "boolean"
+        },
+        "secret_keystone": {
+          "type": "boolean"
+        },
+        "secret_rabbitmq": {
+          "type": "boolean"
+        },
+        "secret_registry": {
+          "type": "boolean"
+        },
+        "service_api": {
+          "type": "boolean"
+        },
+        "service_cfn": {
+          "type": "boolean"
+        },
+        "service_ingress_api": {
+          "type": "boolean"
+        },
+        "service_ingress_cfn": {
+          "type": "boolean"
+        },
+        "statefulset_engine": {
+          "type": "boolean"
+        }
+      },
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "endpoints": {
+      "type": "object",
+      "title": "Endpoint overrides",
+      "description": "Deep-merged into the chart's endpoints values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "network": {
+      "type": "object",
+      "title": "Network overrides",
+      "description": "Deep-merged into the chart's network values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "release_group": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "title": "release_group",
+      "description": "The chart's `release_group` value."
+    },
+    "labels": {
+      "type": "object",
+      "properties": {
+        "api": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "cfn": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "engine": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "job": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "test": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        }
+      },
+      "title": "labels",
+      "description": "Deep-merged into the chart's `labels` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "jobs": {
+      "type": "object",
+      "title": "jobs",
+      "description": "Deep-merged into the chart's `jobs` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "bootstrap": {
+      "type": "object",
+      "title": "bootstrap",
+      "description": "Deep-merged into the chart's `bootstrap` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "dependencies": {
+      "type": "object",
+      "title": "dependencies",
+      "description": "Deep-merged into the chart's `dependencies` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "secrets": {
+      "type": "object",
+      "title": "secrets",
+      "description": "Deep-merged into the chart's `secrets` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "identity": {
+      "type": "object",
+      "title": "identity",
+      "description": "Deep-merged into the chart's `identity` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "network_policy": {
+      "type": "object",
+      "title": "network_policy",
+      "description": "Deep-merged into the chart's `network_policy` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "tls": {
+      "type": "object",
+      "title": "tls",
+      "description": "Deep-merged into the chart's `tls` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "extraObjects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "x-kubernetes-preserve-unknown-fields": true
+      },
+      "title": "extraObjects",
+      "description": "Deep-merged into the chart's `extraObjects` values."
     }
   }
 }

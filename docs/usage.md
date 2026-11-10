@@ -48,8 +48,8 @@ spec:
     - heat            # -> heat + keystone + rabbitmq + mariadb + memcached
 ```
 
-Per-component overrides go under `spec.componentValues.<name>` (strictly typed against each
-component's chart schema). See [configuration](./configuration.md) for the whole surface.
+Per-component overrides go under `spec.componentValues.<name>`; the umbrella passes them through
+and each component's own CRD types them against its chart schema. See [configuration](./configuration.md) for the whole surface.
 
 ## Or drive the per-component blueprints directly
 

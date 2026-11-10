@@ -669,9 +669,26 @@ spec:
     - heat            # -> heat + keystone + rabbitmq + mariadb + memcached
 ```
 
-Per-component overrides go under `spec.componentValues.<name>` (strictly typed against each
-component's chart schema — e.g. `images.pull_policy`, replica counts,
-`neutron.network.interface.tunnel`, Horizon `network.dashboard.service.type`). The
+Per-component overrides go under `spec.componentValues.<name>`, and each one is deep-merged into
+that component's chart values. Every component exposes **every top-level key of its chart's
+`values.yaml`**: `conf`, `pod`, `manifests`, `endpoints`, `network`, `images`, and also `labels`
+(node selectors, which decide placement), `bootstrap`, `extraObjects`, `jobs`, `secrets` and the
+rest. The fields declared under them are typed (`images.pull_policy`, replica counts,
+`manifests.*` switches as booleans, `labels.*.node_selector_{key,value}` as strings,
+`extraObjects` as a list of manifests, `neutron.network.interface.tunnel`, Horizon
+`network.dashboard.service.type`); any other key below them passes through **untyped**
+(`x-kubernetes-preserve-unknown-fields`), so for example
+`componentValues.keystone.conf.keystone.DEFAULT.debug: true`,
+`componentValues.nova.pod.useHostNetwork.novncproxy: true` or
+`componentValues.nova.labels.api_metadata.node_selector_value: enabled` reaches the chart. The
+typing happens in each component's own Composition CRD: the umbrella keys `componentValues` by
+component name and passes each entry through untouched, because embedding the component schemas
+there would multiply the umbrella CRD's size by every version it still serves. Up to 0.3.44 every
+component was narrower than this (nova exposed only `images`), and an override outside the
+declared fields was pruned by the Composition CRD with only a client-side warning (#209). On a
+component created before that, a newly exposed key can still be dropped: see "Any
+`spec.componentValues.<name>` property this blueprint adds after a component's origin version"
+below. The
 orchestrator also carries a `serviceContract` v1 stanza and an optional `contractEmitter`.
 The whole surface is documented in [docs/configuration.md](docs/configuration.md), and the
 CRD/schema in [docs/api.md](docs/api.md).

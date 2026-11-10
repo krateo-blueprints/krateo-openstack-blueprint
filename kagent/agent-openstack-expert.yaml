@@ -116,11 +116,15 @@ spec:
       - `componentValues`: a map keyed by component name whose value becomes
         that component's Composition spec — this is HOW you configure a
         component through the umbrella instead of editing a standalone
-        Composition. It is STRICTLY TYPED: `hack/gen-componentvalues-schema.py`
-        merges every component's own `values.schema.json` under
-        `componentValues.properties.<name>`, so e.g.
-        `componentValues.neutron.network.interface.tunnel` is a validated field
-        crdgen turns into the Openstack CRD (and the Portal renders a form for).
+        Composition. The umbrella keys it by component NAME (an unknown name is
+        rejected) and passes each entry through as an open object
+        (`hack/gen-componentvalues-schema.py`). The component's OWN Composition
+        CRD types and validates it from that component's `values.schema.json`,
+        which exposes every top-level key of the chart's values (#209), so e.g.
+        `componentValues.neutron.network.interface.tunnel` is validated by the
+        Neutron CRD. The umbrella no longer embeds the component schemas: that
+        multiplied its CRD size by every served version, so the Portal's
+        Openstack form shows componentValues as free-form per component.
         Named `componentValues` (not `overrides`) to avoid OSH's own
         conf-override concept.
       - `installDefinitions` (default true), `ociRepo`. There is no `chartVersion`: the

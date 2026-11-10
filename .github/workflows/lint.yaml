@@ -52,6 +52,31 @@ jobs:
       - name: Every chart's defaults must satisfy its own schema
         run: python3 hack/validate-values-schema.py .
 
+  umbrella-crd-size:
+    # Gating. The umbrella's generated Openstack CRD is stored once per version it still serves,
+    # and pinned components keep several served at once. #209's first fix embedded every
+    # component schema in componentValues and made this CRD four times larger. This job generates
+    # it with the same crdgen core-provider uses (plumbing v1.28.1, pinned in the module) and
+    # enforces two bounds, explained in the program:
+    #   1. one served version <= 128 KiB, the design bound, which the embedded design fails;
+    #   2. one version x 4 served versions <= 1 MiB, the etcd-level bound (4 is an assumption).
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: hack/umbrella-crd-size/go.mod
+          cache-dependency-path: hack/umbrella-crd-size/go.sum
+
+      - name: The umbrella CRD must stay small enough to serve several versions
+        working-directory: hack/umbrella-crd-size
+        run: |
+          go vet ./...
+          go run .
+
   powerdns-runs:
     # Gating, and the only job here that starts a server. The powerdns chart merged with 28 offline
     # gates green and could not start: settings removed from 4.9, a privileged port, and
@@ -424,6 +449,16 @@ jobs:
       # open, renders offline, and parses the result as multi-document YAML.
       - name: The umbrella must emit well-formed YAML for every component at once
         run: python3 hack/validate-umbrella-multidoc.py .
+
+      # A component override the schema does not declare is PRUNED by the Composition CRD, at
+      # the umbrella (componentValues) and again at the component, with only a client-side
+      # warning (#209). Every component chart was narrower than its values: nova exposed only
+      # `images`, so `componentValues.nova.pod.*`, `.conf.*` and `.manifests.*` did nothing. A
+      # chosen subset is the same defect (it still dropped `labels` in 35 charts), so this gate
+      # requires EVERY top-level values key to be declared and open all the way down, and the
+      # umbrella's componentValues to be exactly what hack/gen-componentvalues-schema.py emits.
+      - name: Every tunable component key must reach the chart instead of being pruned
+        run: python3 hack/validate-component-schema-surface.py .
 
       # Gating, and it guards the other gates. Four checks here printed "SKIP: PyYAML
       # unavailable" and exited 0 for weeks (#120) -- the lint job green on every run while

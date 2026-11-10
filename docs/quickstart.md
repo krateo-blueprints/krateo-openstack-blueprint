@@ -114,8 +114,8 @@ helm list -n openstack          # per-component releases appear in dep order
 ```
 
 To **reconfigure** a component without touching its Composition, patch the
-`Openstack` CR's `spec.componentValues.<name>` (strictly typed — every
-component's own `values.schema.json` is merged into the umbrella CRD). For
+`Openstack` CR's `spec.componentValues.<name>` (the umbrella passes it
+through, and the component's own CRD types it from its `values.schema.json`). For
 example, scale keystone-api to 2 replicas:
 
 ```sh

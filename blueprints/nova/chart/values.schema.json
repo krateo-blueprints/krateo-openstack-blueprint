@@ -18,7 +18,481 @@
           ],
           "default": "IfNotPresent"
         }
-      }
+      },
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "conf": {
+      "type": "object",
+      "title": "OpenStack-Helm conf overrides",
+      "description": "Deep-merged into the chart's conf values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "pod": {
+      "type": "object",
+      "title": "Pod overrides",
+      "description": "Deep-merged into the chart's pod values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
+      "properties": {
+        "replicas": {
+          "type": "object",
+          "properties": {
+            "api_metadata": {
+              "type": "integer"
+            },
+            "compute_ironic": {
+              "type": "integer"
+            },
+            "conductor": {
+              "type": "integer"
+            },
+            "novncproxy": {
+              "type": "integer"
+            },
+            "osapi": {
+              "type": "integer"
+            },
+            "scheduler": {
+              "type": "integer"
+            },
+            "serialproxy": {
+              "type": "integer"
+            },
+            "spiceproxy": {
+              "type": "integer"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        }
+      },
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "manifests": {
+      "type": "object",
+      "title": "Manifest switches",
+      "description": "Deep-merged into the chart's manifests values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
+      "properties": {
+        "certificates": {
+          "type": "boolean"
+        },
+        "compute_uuid_self_provisioning": {
+          "type": "boolean"
+        },
+        "configmap_bin": {
+          "type": "boolean"
+        },
+        "configmap_etc": {
+          "type": "boolean"
+        },
+        "cron_job_archive_deleted_rows": {
+          "type": "boolean"
+        },
+        "cron_job_cell_setup": {
+          "type": "boolean"
+        },
+        "cron_job_service_cleaner": {
+          "type": "boolean"
+        },
+        "daemonset_compute": {
+          "type": "boolean"
+        },
+        "deployment_api_metadata": {
+          "type": "boolean"
+        },
+        "deployment_api_osapi": {
+          "type": "boolean"
+        },
+        "deployment_conductor": {
+          "type": "boolean"
+        },
+        "deployment_novncproxy": {
+          "type": "boolean"
+        },
+        "deployment_scheduler": {
+          "type": "boolean"
+        },
+        "deployment_serialproxy": {
+          "type": "boolean"
+        },
+        "deployment_spiceproxy": {
+          "type": "boolean"
+        },
+        "ingress_metadata": {
+          "type": "boolean"
+        },
+        "ingress_novncproxy": {
+          "type": "boolean"
+        },
+        "ingress_osapi": {
+          "type": "boolean"
+        },
+        "ingress_serialproxy": {
+          "type": "boolean"
+        },
+        "ingress_spiceproxy": {
+          "type": "boolean"
+        },
+        "job_bootstrap": {
+          "type": "boolean"
+        },
+        "job_cell_setup": {
+          "type": "boolean"
+        },
+        "job_db_drop": {
+          "type": "boolean"
+        },
+        "job_db_init": {
+          "type": "boolean"
+        },
+        "job_db_sync": {
+          "type": "boolean"
+        },
+        "job_image_repo_sync": {
+          "type": "boolean"
+        },
+        "job_ks_endpoints": {
+          "type": "boolean"
+        },
+        "job_ks_service": {
+          "type": "boolean"
+        },
+        "job_ks_user": {
+          "type": "boolean"
+        },
+        "job_rabbit_init": {
+          "type": "boolean"
+        },
+        "job_storage_init": {
+          "type": "boolean"
+        },
+        "network_policy": {
+          "type": "boolean"
+        },
+        "pdb_metadata": {
+          "type": "boolean"
+        },
+        "pdb_osapi": {
+          "type": "boolean"
+        },
+        "pod_rally_test": {
+          "type": "boolean"
+        },
+        "secret_db": {
+          "type": "boolean"
+        },
+        "secret_db_api": {
+          "type": "boolean"
+        },
+        "secret_db_cell0": {
+          "type": "boolean"
+        },
+        "secret_ingress_tls": {
+          "type": "boolean"
+        },
+        "secret_keystone": {
+          "type": "boolean"
+        },
+        "secret_ks_etc": {
+          "type": "boolean"
+        },
+        "secret_rabbitmq": {
+          "type": "boolean"
+        },
+        "secret_registry": {
+          "type": "boolean"
+        },
+        "secret_ssh": {
+          "type": "boolean"
+        },
+        "service_ingress_metadata": {
+          "type": "boolean"
+        },
+        "service_ingress_novncproxy": {
+          "type": "boolean"
+        },
+        "service_ingress_osapi": {
+          "type": "boolean"
+        },
+        "service_ingress_serialproxy": {
+          "type": "boolean"
+        },
+        "service_ingress_spiceproxy": {
+          "type": "boolean"
+        },
+        "service_metadata": {
+          "type": "boolean"
+        },
+        "service_novncproxy": {
+          "type": "boolean"
+        },
+        "service_osapi": {
+          "type": "boolean"
+        },
+        "service_serialproxy": {
+          "type": "boolean"
+        },
+        "service_spiceproxy": {
+          "type": "boolean"
+        },
+        "statefulset_compute_ironic": {
+          "type": "boolean"
+        },
+        "statefulset_conductor": {
+          "type": "boolean"
+        },
+        "statefulset_scheduler": {
+          "type": "boolean"
+        }
+      },
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "endpoints": {
+      "type": "object",
+      "title": "Endpoint overrides",
+      "description": "Deep-merged into the chart's endpoints values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "network": {
+      "type": "object",
+      "title": "Network overrides",
+      "description": "Deep-merged into the chart's network values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "bootstrap": {
+      "type": "object",
+      "title": "bootstrap",
+      "description": "Deep-merged into the chart's `bootstrap` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "ceph_client": {
+      "type": "object",
+      "title": "ceph_client",
+      "description": "Deep-merged into the chart's `ceph_client` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "console": {
+      "type": "object",
+      "title": "console",
+      "description": "Deep-merged into the chart's `console` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "dependencies": {
+      "type": "object",
+      "title": "dependencies",
+      "description": "Deep-merged into the chart's `dependencies` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "extraObjects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "x-kubernetes-preserve-unknown-fields": true
+      },
+      "title": "extraObjects",
+      "description": "Deep-merged into the chart's `extraObjects` values."
+    },
+    "health_probe": {
+      "type": "object",
+      "title": "health_probe",
+      "description": "Deep-merged into the chart's `health_probe` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "hosts_uuids": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "x-kubernetes-preserve-unknown-fields": true
+      },
+      "title": "hosts_uuids",
+      "description": "Deep-merged into the chart's `hosts_uuids` values."
+    },
+    "identity": {
+      "type": "object",
+      "title": "identity",
+      "description": "Deep-merged into the chart's `identity` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "jobs": {
+      "type": "object",
+      "title": "jobs",
+      "description": "Deep-merged into the chart's `jobs` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "labels": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "object",
+          "properties": {
+            "compute": {
+              "type": "object",
+              "properties": {
+                "node_selector_key": {
+                  "type": "string"
+                },
+                "node_selector_value": {
+                  "type": "string"
+                }
+              },
+              "x-kubernetes-preserve-unknown-fields": true
+            },
+            "compute_ironic": {
+              "type": "object",
+              "properties": {
+                "node_selector_key": {
+                  "type": "string"
+                },
+                "node_selector_value": {
+                  "type": "string"
+                }
+              },
+              "x-kubernetes-preserve-unknown-fields": true
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "api_metadata": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "conductor": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "job": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "novncproxy": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "osapi": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "scheduler": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "serialproxy": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "spiceproxy": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "test": {
+          "type": "object",
+          "properties": {
+            "node_selector_key": {
+              "type": "string"
+            },
+            "node_selector_value": {
+              "type": "string"
+            }
+          },
+          "x-kubernetes-preserve-unknown-fields": true
+        }
+      },
+      "title": "labels",
+      "description": "Deep-merged into the chart's `labels` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "network_policy": {
+      "type": "object",
+      "title": "network_policy",
+      "description": "Deep-merged into the chart's `network_policy` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "rbd_pool": {
+      "type": "object",
+      "title": "rbd_pool",
+      "description": "Deep-merged into the chart's `rbd_pool` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "release_group": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "title": "release_group",
+      "description": "The chart's `release_group` value."
+    },
+    "secrets": {
+      "type": "object",
+      "title": "secrets",
+      "description": "Deep-merged into the chart's `secrets` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "tls": {
+      "type": "object",
+      "title": "tls",
+      "description": "Deep-merged into the chart's `tls` values.",
+      "x-kubernetes-preserve-unknown-fields": true
     }
   }
 }
