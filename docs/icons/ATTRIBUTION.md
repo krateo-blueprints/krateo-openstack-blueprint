@@ -1,3 +1,16 @@
+---
+type: Decision
+title: krateo-openstack-blueprint — Marketplace icons, sources and licences
+description: Why every chart's icon is self-hosted here or the org logo, where each file comes from, and the CC BY-ND rule that the OpenStack mascot files are never modified.
+resource: oci://ghcr.io/krateo-blueprints/charts/openstack
+tags:
+  - icons
+  - marketplace
+  - licence
+  - attribution
+timestamp: 2026-11-10T00:00:00Z
+---
+
 # Marketplace icons: sources and licences
 
 The charts' `icon:` fields point here, on a host this repository controls. Third-party URLs
