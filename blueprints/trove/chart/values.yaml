@@ -388,6 +388,7 @@ conf:
       handlers:
         - stdout
       qualname: trove
+      propagate: 0
     logger_amqp:
       level: WARNING
       handlers: stderr

@@ -918,12 +918,13 @@ conf:
         - default
     logger_root:
       level: WARNING
-      handlers: 'null'
+      handlers: stderr
     logger_cinder:
       level: INFO
       handlers:
         - stdout
       qualname: cinder
+      propagate: 0
     logger_amqp:
       level: WARNING
       handlers: stderr
