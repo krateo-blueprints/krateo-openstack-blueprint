@@ -20,6 +20,62 @@ conf:
       \ /dev/stdout\n\n    SetEnvIf X-Forwarded-For \"^.*\\..*\\..*\\..*\" forwarded\n\
       \    CustomLog /dev/stdout combined env=!forwarded\n    CustomLog /dev/stdout\
       \ proxy env=forwarded\n</Virtualhost>\n"
+    # OIDC back-channel logout receiver (OpenID Connect Back-Channel Logout 1.0).
+    #
+    # When enabled, Horizon serves POST /auth/backchannel-logout/ (CSRF-exempt). Keycloak's
+    # back-channel logout URL for KEYSTONE's OIDC client points at it, in cluster:
+    #   http://horizon-int.<namespace>.svc:80/auth/backchannel-logout/
+    # On a valid logout token Horizon ends EVERY session of that user -- matching is per user
+    # (the token's `sub`), not per Keycloak session -- by revoking each session's Keystone
+    # tokens and deleting its row, then forwards the raw token as `logout_token=<jwt>` to
+    # mod_auth_openidc on Keystone (forward_url). It answers 200 only if that forward returns
+    # 2xx and every revocation succeeded; an invalid token gets 400 and changes nothing.
+    #
+    # Requires local_settings.config.session_engine to be the database engine (rendering fails
+    # otherwise): the receiver finds sessions in Django's session table on Horizon's MariaDB.
+    # At login Horizon records the user's federated unique id (GET /v3/users/{id},
+    # federated[].protocols[].unique_id) in the session; Keystone's mapping must set user.id
+    # from the OIDC `sub` for it to equal the logout token's `sub`.
+    # Token revocation uses Horizon's service credentials (the horizon-keystone-admin Secret,
+    # secrets.identity.admin), mounted read-only into the Horizon container.
+    backchannel_logout:
+      # Serve the receiver and record subjects at login. Off by default: the values below are
+      # realm-specific.
+      enabled: false
+      # The realm's issuer, exactly as Keycloak writes it into `iss`
+      # (<keycloak hostname>/realms/<realm>). Compared with the token, never derived from it.
+      # Required when enabled.
+      issuer: ""
+      # Keystone's OIDC client id in Keycloak -- the token's `aud` (which may be a string or a
+      # list; it must contain this id). Required when enabled.
+      audience: ""
+      # The realm's JWKS: <issuer>/protocol/openid-connect/certs, reachable from the Horizon
+      # pod. Required when enabled.
+      jwks_url: ""
+      # mod_auth_openidc's back-channel endpoint on Keystone: Keystone's OIDCRedirectURI path,
+      # on an address the Horizon pod reaches, plus `?logout=backchannel`. mod_auth_openidc
+      # matches the redirect URI by path, so an in-cluster host works. Required when enabled.
+      forward_url: ""
+      # Only record unique ids from this Keystone identity provider (federated[].idp_id).
+      # Empty records the ids from every identity provider.
+      identity_provider: ""
+      # Keystone API for revocation and for the login-time user lookup. Empty uses Horizon's
+      # OPENSTACK_KEYSTONE_URL.
+      keystone_url: ""
+      # Clock skew tolerated on `iat` and `exp`, in seconds.
+      iat_skew_seconds: 60
+      # Oldest `iat` accepted, in seconds (plus the skew). Keycloak's tokens live 120 s.
+      max_token_age_seconds: 300
+      # Require the JWS header `typ: logout+jwt`. Keycloak 26 sends it. A `typ` that is present
+      # must say logout+jwt even when this is false.
+      require_typ: true
+      # Timeout for each JWKS, Keystone and forward request, in seconds.
+      timeout_seconds: 10
+      # How long fetched realm keys are reused, in seconds. An unknown `kid` refetches sooner.
+      jwks_cache_seconds: 300
+      # CA bundle path inside the Horizon container for https URLs above. Empty uses the
+      # system trust store.
+      ca_file: ""
     branding:
       favicon: null
       logo: null
@@ -88,7 +144,10 @@ conf:
         secure_proxy_ssl_header: false
         session_cookie_httponly: 'False'
         session_cookie_secure: 'False'
-        session_engine: django.contrib.sessions.backends.cache
+        # Sessions live in Horizon's MariaDB (django_session, created by the db-sync hook's
+        # `manage.py migrate`), so the back-channel logout receiver can find and end them.
+        # Changing the engine logs every Horizon user out once, at the upgrade that changes it.
+        session_engine: django.contrib.sessions.backends.db
         show_openrc_file: 'True'
         ssl_no_verify: 'True'
         use_ssl: 'False'

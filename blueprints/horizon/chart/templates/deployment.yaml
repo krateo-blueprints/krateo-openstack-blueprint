@@ -193,6 +193,22 @@ spec:
               subPath: {{ base $localSettingsFile }}
               readOnly: true
             {{- end }}
+            {{- if include "horizon.backchannel_logout.enabled" $envAll }}
+            {{- $snippet := include "horizon.backchannel_logout.snippet_name" $envAll }}
+            - name: horizon-etc
+              mountPath: /etc/openstack-dashboard/local_settings.d/{{ $snippet }}
+              subPath: {{ $snippet }}
+              readOnly: true
+            {{- range $path, $_ := $envAll.Files.Glob "files/krateo_backchannel/*.py" }}
+            - name: horizon-bin
+              mountPath: {{ include "horizon.backchannel_logout.package_dir" $envAll }}/{{ base $path }}
+              subPath: krateo_backchannel.{{ base $path }}
+              readOnly: true
+            {{- end }}
+            - name: horizon-backchannel-service-auth
+              mountPath: {{ include "horizon.backchannel_logout.credentials_dir" $envAll }}
+              readOnly: true
+            {{- end }}
             {{- if .Values.manifests.configmap_logo }}
             - name: horizon-logo
               mountPath: /tmp/logo.svg
@@ -222,6 +238,13 @@ spec:
           secret:
             secretName: horizon-etc
             defaultMode: 0444
+        {{- if include "horizon.backchannel_logout.enabled" $envAll }}
+        # Horizon's service credentials, for revoking the Keystone tokens of a logged-out user.
+        - name: horizon-backchannel-service-auth
+          secret:
+            secretName: {{ $envAll.Values.secrets.identity.admin }}
+            defaultMode: 0444
+        {{- end }}
         {{- if .Values.manifests.configmap_logo }}
         - name: horizon-logo
           configMap:

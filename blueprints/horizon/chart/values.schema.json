@@ -110,6 +110,79 @@
         "horizon": {
           "type": "object",
           "properties": {
+            "backchannel_logout": {
+              "type": "object",
+              "title": "OIDC back-channel logout receiver",
+              "description": "POST /auth/backchannel-logout/ on Horizon. On a valid logout token it ends EVERY Horizon session of that user (matched by sub), revoking their Keystone tokens, then forwards the token to mod_auth_openidc on Keystone. Needs session_engine django.contrib.sessions.backends.db. See values.yaml.",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "title": "Enabled",
+                  "description": "Serve the receiver and record each federated user's subject at login."
+                },
+                "issuer": {
+                  "type": "string",
+                  "title": "Issuer",
+                  "description": "The realm issuer exactly as Keycloak writes iss (<keycloak hostname>/realms/<realm>). Compared with the token, never derived from it. Required when enabled."
+                },
+                "audience": {
+                  "type": "string",
+                  "title": "Audience",
+                  "description": "Keystone's OIDC client id in Keycloak: the token's aud. Required when enabled."
+                },
+                "jwks_url": {
+                  "type": "string",
+                  "title": "JWKS URL",
+                  "description": "<issuer>/protocol/openid-connect/certs, reachable from the Horizon pod. Required when enabled."
+                },
+                "forward_url": {
+                  "type": "string",
+                  "title": "Forward URL",
+                  "description": "mod_auth_openidc's back-channel endpoint: Keystone's OIDCRedirectURI path on an address Horizon reaches, plus ?logout=backchannel. Required when enabled."
+                },
+                "identity_provider": {
+                  "type": "string",
+                  "title": "Identity provider",
+                  "description": "Record only unique ids from this Keystone identity provider (federated[].idp_id). Empty: every identity provider."
+                },
+                "keystone_url": {
+                  "type": "string",
+                  "title": "Keystone URL",
+                  "description": "Keystone API for token revocation and the login-time user lookup. Empty: Horizon's OPENSTACK_KEYSTONE_URL."
+                },
+                "iat_skew_seconds": {
+                  "type": "integer",
+                  "title": "Clock skew",
+                  "description": "Seconds of clock skew tolerated on iat and exp."
+                },
+                "max_token_age_seconds": {
+                  "type": "integer",
+                  "title": "Maximum token age",
+                  "description": "Oldest iat accepted, in seconds (plus the skew). Keycloak's logout tokens live 120 s."
+                },
+                "require_typ": {
+                  "type": "boolean",
+                  "title": "Require typ",
+                  "description": "Require the JWS header typ logout+jwt (Keycloak 26 sends it). A typ that is present must say logout+jwt regardless."
+                },
+                "timeout_seconds": {
+                  "type": "integer",
+                  "title": "Timeout",
+                  "description": "Timeout of each JWKS, Keystone and forward request, in seconds."
+                },
+                "jwks_cache_seconds": {
+                  "type": "integer",
+                  "title": "JWKS cache",
+                  "description": "How long fetched realm keys are reused, in seconds."
+                },
+                "ca_file": {
+                  "type": "string",
+                  "title": "CA file",
+                  "description": "CA bundle path in the Horizon container for https URLs. Empty: the system trust store."
+                }
+              },
+              "x-kubernetes-preserve-unknown-fields": true
+            },
             "local_settings": {
               "type": "object",
               "properties": {
@@ -121,6 +194,11 @@
                       "title": "Auth / WebSSO",
                       "description": "sso.enabled, sso.initial_choice, sso.websso_keystone_url, idp_mapping[].",
                       "x-kubernetes-preserve-unknown-fields": true
+                    },
+                    "session_engine": {
+                      "type": "string",
+                      "title": "Session engine",
+                      "description": "Django session engine. django.contrib.sessions.backends.db (the default) keeps sessions in Horizon's MariaDB, which the back-channel logout receiver requires. Changing it logs every Horizon user out once."
                     }
                   },
                   "x-kubernetes-preserve-unknown-fields": true

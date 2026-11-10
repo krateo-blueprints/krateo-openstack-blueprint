@@ -282,6 +282,26 @@ jobs:
       - name: No probe that restarts horizon may enter Django
         run: python3 hack/validate-horizon-liveness.py .
 
+      # Horizon's OIDC back-channel logout receiver (conf.horizon.backchannel_logout) only works
+      # if sessions are rows it can read and four separately rendered pieces line up: the
+      # package in horizon-bin, its mounts, horizon.sh's copy step and the local_settings.d
+      # snippet. Horizon swallows an exception raised by a snippet (it logs and carries on), so
+      # a broken snippet leaves a Ready Horizon answering Keycloak's logouts with 404. This
+      # renders the chart, executes the snippet, and checks the session table comes from the
+      # bounded db-sync hook and that the chart refuses configurations that cannot work.
+      - name: Horizon sessions are in its database and the back-channel logout receiver is wired
+        run: python3 hack/validate-horizon-backchannel-render.py .
+
+      # The validator (a Keycloak 26.4-shaped logout token and every rejection) and the logout
+      # path through Django with Keystone and the forward mocked, including a refused forward
+      # answering non-200. Fails when no test ran or any was skipped. Versions are pinned so a run
+      # is reproducible.
+      - name: Install the back-channel logout receiver's test dependencies
+        run: pip install "Django==5.2.19" "cryptography==46.0.5"
+
+      - name: The back-channel logout receiver's unit tests pass
+        run: python3 hack/validate-horizon-backchannel-tests.py .
+
       # The quietest version of the same failure. gnocchi-metricd and gnocchi-statsd had no
       # probe at all, and both swallow every backend error and loop forever
       # (MetricProcessBase.run and Stats.flush in gnocchi 4.7.0), so a metricd that cannot
