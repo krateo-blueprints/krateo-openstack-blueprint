@@ -1,0 +1,6 @@
+{{- /*
+Every capability ClusterRole and every abac guard, unconditionally. The objects themselves are
+defined in _capabilities.tpl, a generated copy of the umbrella's, so both charts render the
+same bytes for the same values. See that file for the handoff from the umbrella.
+*/ -}}
+{{- include "capabilities.render" (list $ "standalone" dict) }}

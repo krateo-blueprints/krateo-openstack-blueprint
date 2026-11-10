@@ -102,7 +102,9 @@ See [release](./release.md) for how the lint job enforces both.
 The orchestrator carries a `serviceContract` stanza (contract v1): identity federation
 (Keycloak client, groups mapper, optional IdP broker), a mandatory role mapping (CMP roles →
 native OpenStack roles), a capability catalog (each capability renders an aggregation-labeled
-ClusterRole, and ABAC capabilities additionally render a Kyverno ClusterPolicy), an SSO
+ClusterRole, and ABAC capabilities additionally a ValidatingAdmissionPolicy and binding; from
+0.3.47 these come from the per-cluster chart `openstack-capabilities`, installed before any
+instance, which takes the same `serviceContract`), an SSO
 deep-link, and usage/health/tagging/ticketing declarations. The runtime side of the
 usage/health declaration is the **contract emitter** — CronJobs polling the OpenStack APIs
 and writing normalized rows to ClickHouse (see [contract-emitter](./contract-emitter.md)).

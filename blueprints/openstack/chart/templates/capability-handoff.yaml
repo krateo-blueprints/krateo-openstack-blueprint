@@ -1,0 +1,10 @@
+{{- /*
+The capability ClusterRoles and guards are owned by the per-cluster chart
+openstack-capabilities from 0.3.47 (blueprints/openstack/capabilities). This umbrella renders a
+capability object only while ITS OWN release still owns the live object, i.e. on a cluster
+upgraded from 0.3.46 before the per-cluster chart has taken ownership, and then only to keep it
+in place, with helm.sh/resource-policy: keep added, until that happens. On a fresh cluster, and
+after the handoff, it renders none of them. Why, and why that cannot leave a gap in either
+order: templates/_capabilities.tpl.
+*/ -}}
+{{- include "capabilities.render" (list $ "handoff" (include "capabilities.liveObjects" $ | fromJson)) }}

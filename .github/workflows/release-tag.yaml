@@ -209,6 +209,14 @@ jobs:
               missing="${missing} ${name}"
             fi
           done
+          # The per-cluster capabilities chart is not a blueprint (no CompositionDefinition, not
+          # in the Marketplace index), so the loop above does not name it. The find loop pushed
+          # it like every other Chart.yaml; the README installs it from GHCR before any Openstack
+          # instance, so a release without it would leave the roles and the compute-tier guard
+          # uninstallable at this version.
+          if ! helm show chart "${OCI_REPO}/openstack-capabilities" --version "${VERSION}" >/dev/null 2>&1; then
+            missing="${missing} openstack-capabilities"
+          fi
           if [ -n "$missing" ]; then
             echo "::error::published incompletely at ${VERSION}; missing:${missing}"
             exit 1
