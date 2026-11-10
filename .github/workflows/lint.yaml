@@ -56,8 +56,10 @@ jobs:
     # Gating. The umbrella's generated Openstack CRD is stored once per version it still serves,
     # and pinned components keep several served at once. #209's first fix embedded every
     # component schema in componentValues and made this CRD four times larger. This job generates
-    # it with the same crdgen core-provider uses (plumbing v1.28.1, pinned in the module) and fails
-    # if bytes x 4 served versions (an assumption, stated in the program) exceed 1 MiB.
+    # it with the same crdgen core-provider uses (plumbing v1.28.1, pinned in the module) and
+    # enforces two bounds, explained in the program:
+    #   1. one served version <= 128 KiB, the design bound, which the embedded design fails;
+    #   2. one version x 4 served versions <= 1 MiB, the etcd-level bound (4 is an assumption).
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

@@ -3,10 +3,9 @@
 // WHY. core-provider turns the umbrella's values.schema.json into the Openstack CRD, and a CRD
 // stores EVERY version it still serves. Components that stay pinned at an origin version keep
 // several served at once (two were observed together on a real cluster). #209's first fix embedded
-// all 36 widened component schemas in componentValues, which made this CRD 396 KB per served
-// version; a handful of versions would reach etcd's object limit. The umbrella now passes
-// componentValues through as open objects and lets each component's own CRD do the typing, and
-// this gate keeps it that way.
+// all 36 widened component schemas in componentValues, which made this CRD 203,608 bytes per served
+// version as JSON (396 KB as crdgen's YAML). The umbrella now passes componentValues through as
+// open objects and lets each component's own CRD do the typing, and this gate keeps it that way.
 //
 // WHAT IT MEASURES. The CRD exactly as core-provider 2.13.72 generates it: the same generator
 // (plumbing v1.28.1 crdgen.Generate, pinned in go.mod) fed the same status schema
@@ -14,10 +13,21 @@
 // go/core-provider/internal/tools/crd/generation/statics/status.schema.json). The size is the
 // object's JSON encoding, the form the apiserver stores.
 //
-// THE LIMIT, AND ITS ASSUMPTION. It fails if bytes x ServedVersions > Limit, with
-// ServedVersions = 4 and Limit = 1 MiB. Four is an ASSUMPTION, not a measurement: two served
-// versions were observed together, and four leaves room for an install whose components stay
-// pinned across a few releases. 1 MiB stays clear of etcd's default 1.5 MiB request size.
+// TWO BOUNDS. Both must hold.
+//
+//  1. Per served version, at most PerVersionCap = 128 KiB (131,072 bytes). This is the DESIGN
+//     bound, and it is the one that catches a design change: embedding the component schemas
+//     again (203,608 bytes) fails it outright. A generous margin over today's 32,640 bytes and
+//     main's 52,669 still leaves room for the umbrella's own values to grow. Diego chose it.
+//
+//  2. Per served version x ServedVersions <= Limit, with ServedVersions = 4 and Limit = 1 MiB.
+//     This is the ETCD-LEVEL bound: the whole CRD object, every served version together, must stay
+//     clear of etcd's default 1.5 MiB request size. Four is an ASSUMPTION, not a measurement: two
+//     served versions were observed together, and four leaves room for an install whose
+//     components stay pinned across a few releases. On its own this bound is too loose to catch a
+//     design change: the embedded design passes it (814,432 bytes), which is why bound 1 exists.
+//     Bound 1 implies bound 2 today (4 x 128 KiB = 512 KiB); bound 2 is kept so that raising the
+//     cap, or a CRD that serves more versions, still has to answer to etcd.
 //
 // It fails, never passes, when the schema is missing or empty or the CRD does not generate.
 //
@@ -37,8 +47,9 @@ import (
 )
 
 const (
-	servedVersions = 4       // ASSUMPTION; see the package comment.
-	limitBytes     = 1 << 20 // 1 MiB.
+	perVersionCap  = 128 << 10 // 131,072 bytes: bound 1, the design bound.
+	servedVersions = 4         // ASSUMPTION; see the package comment.
+	limitBytes     = 1 << 20   // 1 MiB: bound 2, the etcd-level bound.
 )
 
 //go:embed status.schema.json
@@ -83,12 +94,22 @@ func main() {
 	}
 	size := len(asJSON)
 	total := size * servedVersions
-	fmt.Printf("umbrella Openstack CRD: %d bytes (JSON) per served version; x %d served versions (assumed) = %d bytes; limit %d\n",
-		size, servedVersions, total, limitBytes)
+	fmt.Printf("umbrella Openstack CRD: %d bytes (JSON) per served version; cap %d\n", size, perVersionCap)
+	fmt.Printf("x %d served versions (assumed) = %d bytes; limit %d\n", servedVersions, total, limitBytes)
+	failed := false
+	if size > perVersionCap {
+		fmt.Printf("FAIL: bound 1: one served version is %d bytes > %d. Keep componentValues open in the "+
+			"umbrella (hack/gen-componentvalues-schema.py) and let each component CRD type its overrides (#209).\n",
+			size, perVersionCap)
+		failed = true
+	}
 	if total > limitBytes {
-		fail("%d bytes x %d served versions = %d > %d. Keep componentValues open in the umbrella "+
-			"(hack/gen-componentvalues-schema.py) and let each component CRD type its overrides (#209).",
+		fmt.Printf("FAIL: bound 2: %d bytes x %d served versions = %d > %d, too close to etcd's request limit.\n",
 			size, servedVersions, total, limitBytes)
+		failed = true
+	}
+	if failed {
+		os.Exit(1)
 	}
 	fmt.Println("OK")
 }
