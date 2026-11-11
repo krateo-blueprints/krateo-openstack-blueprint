@@ -196,6 +196,10 @@ jobs:
       # engine exited 1 at start-up; the section is judged merged as each pod mounts it (#203).
       - name: Every keystoneauth section a pod reads names its plugin and endpoint
         run: python3 hack/validate-oslo-auth-sections.py .
+      # A workload that mounts its chart's -etc/-bin without the matching hash annotation never rolls
+      # on a config change: the Secret changes, the pod keeps the old file (subPath) (#223).
+      - name: Every long-running workload rolls when the config it mounts changes
+        run: python3 hack/validate-config-hash-rollout.py .
       # The root logger on NullHandler hid that very error; a logger that also propagates to a
       # printing root prints every record twice (#203).
       - name: The root logger prints, and nothing is printed twice
