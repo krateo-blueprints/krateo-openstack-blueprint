@@ -29,8 +29,15 @@ This gate renders the keystone chart and checks:
   - every literal-*.yaml (a secret written into the free-form config) is refused for that reason,
     and both directives have such a fixture;
   - every missing-passphrase-*.yaml (OIDC without oidc.cryptoPassphraseRef) is refused;
+  - every missing-remote-id-*.yaml (OIDC without conf.keystone.openid.remote_id_attribute) is
+    refused: Keystone's validate_idp returns before comparing the token's issuer with the
+    identity provider's remote_ids when that is unset, so remote_ids would constrain nothing;
+  - every federation-remote-id-*.yaml (remote_id_attribute in [federation], Keystone's fallback)
+    is refused, so [openid] is the one place that setting lives;
+  - every enabled-*.yaml renders keystone.conf with [openid] remote_id_attribute as it set it;
   - half a reference (a name without a key) is refused, for each reference;
-  - the refusals an upgrading install can hit (a literal secret, OIDC without a passphrase) point
+  - the refusals an upgrading install can hit (a literal secret, OIDC without a passphrase or
+    without remote_id_attribute, remote_id_attribute in [federation]) point
     at docs/configuration.md's "Upgrading an install that already uses OIDC", and that section
     exists.
 
@@ -111,6 +118,24 @@ def literal_findings(source, found):
             for d, where, v in found if v != env_form(d)]
 
 
+def ini_value(text, group, option):
+    """The value of `option` in `[group]` of an oslo ini text, or None."""
+    current = None
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("[") and s.endswith("]"):
+            current = s[1:-1].strip()
+        elif current == group and "=" in s and not s.startswith(("#", ";")):
+            k, v = s.split("=", 1)
+            if k.strip() == option:
+                return v.strip()
+    return None
+
+
+def keystone_conf(docs):
+    return [text for where, text in config_texts(docs) if where.endswith(" keystone.conf")]
+
+
 def api_container(docs):
     for d in docs:
         if d.get("kind") == "Deployment" and d["metadata"]["name"].endswith("keystone-api"):
@@ -137,10 +162,14 @@ def main() -> int:
     enabled = sorted(tests.glob("enabled-*.yaml"))
     literal = sorted(tests.glob("literal-*.yaml"))
     missing = sorted(tests.glob("missing-passphrase-*.yaml"))
+    no_remote_id = sorted(tests.glob("missing-remote-id-*.yaml"))
+    federation_remote_id = sorted(tests.glob("federation-remote-id-*.yaml"))
     rel = tests.relative_to(root) if tests.is_relative_to(root) else tests
     for files, what in ((enabled, "enabled-*.yaml: the chart-owned directives were never rendered"),
                         (literal, "literal-*.yaml: the refusal was never exercised"),
-                        (missing, "missing-passphrase-*.yaml: OIDC without a passphrase was never tried")):
+                        (missing, "missing-passphrase-*.yaml: OIDC without a passphrase was never tried"),
+                        (no_remote_id, "missing-remote-id-*.yaml: OIDC without remote_id_attribute was never tried"),
+                        (federation_remote_id, "federation-remote-id-*.yaml: [federation] remote_id_attribute was never tried")):
         if not files:
             print(f"FAIL: no {rel}/{what} -- nothing was measured")
             return 1
@@ -211,7 +240,10 @@ def main() -> int:
         # The chart-owned directives, rendered from Secret references.
         for f in enabled:
             source = str(f.relative_to(root))
-            oidc = (yaml.safe_load(f.read_text()) or {}).get("oidc") or {}
+            fixture = yaml.safe_load(f.read_text()) or {}
+            oidc = fixture.get("oidc") or {}
+            want_rid = ((((fixture.get("conf") or {}).get("keystone") or {}).get("openid") or {})
+                        .get("remote_id_attribute"))
             try:
                 docs = render(["-f", str(f)])
             except Exception as e:
@@ -263,6 +295,14 @@ def main() -> int:
                     bad.append(f"{source}: {OWNED_KEY} is not mounted at {want} (got {mounts})")
             if not set_refs:
                 bad.append(f"{source}: sets neither oidc.clientSecretRef nor oidc.cryptoPassphraseRef")
+            confs = keystone_conf(docs)
+            got_rid = [ini_value(text, "openid", "remote_id_attribute") for text in confs]
+            if not want_rid:
+                bad.append(f"{source}: sets no conf.keystone.openid.remote_id_attribute, so it should "
+                           "not have rendered at all")
+            elif got_rid != [want_rid]:
+                bad.append(f"{source}: keystone.conf [openid] remote_id_attribute is {got_rid}, want "
+                           f"[{want_rid!r}] -- the issuer check would not be configured")
             failures += bad
             print(f"{'FAIL' if bad else 'OK  '} {source}: chart-owned {', '.join(set_refs) or 'nothing'}")
 
@@ -280,6 +320,16 @@ def main() -> int:
         # OIDC without a passphrase would crash-loop keystone-api, so it must not render.
         for f in missing:
             refused(str(f.relative_to(root)), ["-f", str(f)], ["oidc.cryptoPassphraseRef is not set", UPGRADE_POINTER])
+
+        # OIDC without remote_id_attribute: Keystone would not check the issuer against remote_ids.
+        for f in no_remote_id:
+            refused(str(f.relative_to(root)), ["-f", str(f)],
+                    ["conf.keystone.openid.remote_id_attribute is not set", UPGRADE_POINTER])
+
+        # remote_id_attribute in [federation] is a second source; [openid] is the only one.
+        for f in federation_remote_id:
+            refused(str(f.relative_to(root)), ["-f", str(f)],
+                    ["conf.keystone.federation.remote_id_attribute is set", UPGRADE_POINTER])
 
         # Half a reference configures nothing; it must not render silently.
         for refkey in ("clientSecretRef", "cryptoPassphraseRef"):
@@ -301,7 +351,8 @@ def main() -> int:
               "oidc.clientSecretRef and oidc.cryptoPassphraseRef (Secrets), never from values")
         return 1
     print(f"OK: {rendered_directives} secret directive(s) rendered, each an env reference read from a "
-          "Secret; literal secrets in values, OIDC without a passphrase and half references are refused")
+          "Secret; literal secrets in values, OIDC without a passphrase or remote_id_attribute, "
+          "[federation] remote_id_attribute and half references are refused")
     return 0
 
 

@@ -7,6 +7,9 @@ oidc:
     name: keystone-oidc-client
     key: client-secret
 conf:
+  keystone:
+    openid:
+      remote_id_attribute: HTTP_OIDC_ISS
   wsgi_keystone: |
     {{- $portInt := tuple "identity" "service" "api" $ | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
     Listen 0.0.0.0:{{ $portInt }}

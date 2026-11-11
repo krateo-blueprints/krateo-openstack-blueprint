@@ -24,6 +24,21 @@ plaintext, so these helpers make that impossible rather than discouraged. The tw
       - OIDC is configured (a clientSecretRef, or any OIDC* directive or `AuthType openid-connect`
         in the free-form config) but oidc.cryptoPassphraseRef is not set.
 
+  keystone.oidc.configured
+    "true" when OIDC is configured: a clientSecretRef, or any OIDC* directive or
+    `AuthType openid-connect` in the free-form Apache config.
+
+  keystone.oidc.requireRemoteIdAttribute
+    Fails the render when OIDC is configured but conf.keystone.openid.remote_id_attribute is
+    empty. Without it Keystone's validate_idp returns before comparing the token's issuer with
+    the identity provider's remote_ids (keystone 2025.1, keystone/federation/utils.py), so the
+    IdP's remote_ids constrain nothing. Also fails when conf.keystone.federation.remote_id_attribute
+    is set: Keystone falls back to it when the protocol group has none, and one setting must
+    decide. The group is `openid` because the protocol id is `openid`, fixed by the websso paths
+    (/v3/auth/OS-FEDERATION/identity_providers/keycloak/protocols/openid/websso); the
+    FederationProtocol CR that registers it (openstack-keystone-operator-kog) has no
+    remote_id_attribute field, so the keystone conf is its single source.
+
   keystone.oidc.secretsConf
     The chart-owned Apache file: one server-level directive per configured reference, each
     resolved by Apache from the process environment at startup. keystone-api.sh sources
@@ -58,9 +73,20 @@ true
 {{- end -}}
 {{- end -}}
 
+{{- define "keystone.oidc.configured" -}}
+{{- $envAll := . -}}
+{{- $configured := include "keystone.oidc.clientSecretEnabled" $envAll -}}
+{{- range $field := list "wsgi_keystone" "security" "mpm_event" -}}
+{{- $template := index $envAll.Values.conf $field -}}
+{{- if and $template (regexMatch "(?im)^[ \\t]*(OIDC[A-Za-z]+|AuthType[ \\t]+\"?openid-connect\"?)([ \\t]|$)" (tpl (toString $template) $envAll)) -}}
+{{- $configured = "true" -}}
+{{- end -}}
+{{- end -}}
+{{- $configured -}}
+{{- end -}}
+
 {{- define "keystone.oidc.refuseLiteralSecret" -}}
 {{- $envAll := . -}}
-{{- $oidcConfigured := include "keystone.oidc.clientSecretEnabled" $envAll -}}
 {{- range $field := list "wsgi_keystone" "security" "mpm_event" -}}
 {{- $template := index $envAll.Values.conf $field -}}
 {{- if $template -}}
@@ -70,13 +96,21 @@ true
 {{- fail (printf "conf.%s carries an %s directive: a secret in values is readable by anyone who can read the Composition CR. Remove it and set oidc.clientSecretRef / oidc.cryptoPassphraseRef (name, key) to a Secret instead; the chart then renders the directive itself. See docs/configuration.md, section \"Upgrading an install that already uses OIDC\"." $field $directive) -}}
 {{- end -}}
 {{- end -}}
-{{- if regexMatch "(?im)^[ \\t]*(OIDC[A-Za-z]+|AuthType[ \\t]+\"?openid-connect\"?)([ \\t]|$)" $rendered -}}
-{{- $oidcConfigured = "true" -}}
 {{- end -}}
 {{- end -}}
-{{- end -}}
-{{- if and $oidcConfigured (not (include "keystone.oidc.cryptoPassphraseEnabled" $envAll)) -}}
+{{- if and (include "keystone.oidc.configured" $envAll) (not (include "keystone.oidc.cryptoPassphraseEnabled" $envAll)) -}}
 {{- fail "OIDC is configured (oidc.clientSecretRef, or OIDC directives in the Apache config) but oidc.cryptoPassphraseRef is not set: mod_auth_openidc refuses to start without OIDCCryptoPassphrase, so keystone-api would crash-loop. Set oidc.cryptoPassphraseRef (name, key) to a Secret. See docs/configuration.md, section \"Upgrading an install that already uses OIDC\"." -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "keystone.oidc.requireRemoteIdAttribute" -}}
+{{- $envAll := . -}}
+{{- $ks := $envAll.Values.conf.keystone | default dict -}}
+{{- if (($ks.federation | default dict).remote_id_attribute) -}}
+{{- fail "conf.keystone.federation.remote_id_attribute is set: Keystone reads it only when the protocol's own group has none, so two places would decide which identity provider a token came from. Set conf.keystone.openid.remote_id_attribute instead and remove this one. See docs/configuration.md, section \"Upgrading an install that already uses OIDC\"." -}}
+{{- end -}}
+{{- if and (include "keystone.oidc.configured" $envAll) (not (($ks.openid | default dict).remote_id_attribute)) -}}
+{{- fail "OIDC is configured (oidc.clientSecretRef, or OIDC directives in the Apache config) but conf.keystone.openid.remote_id_attribute is not set: Keystone then skips checking the token's issuer against the identity provider's remote_ids (keystone.federation.utils.validate_idp returns early), so remote_ids bind nothing. Set it to the request variable that carries the issuer, HTTP_OIDC_ISS with OIDCClaimPrefix \"OIDC-\". See docs/configuration.md, section \"Upgrading an install that already uses OIDC\"." -}}
 {{- end -}}
 {{- end -}}
 

@@ -832,7 +832,10 @@ network_policy:
 # encrypts mod_auth_openidc's state and session cookies, and mod_auth_openidc refuses to start
 # without it, so it is required whenever OIDC is configured (a clientSecretRef, or any OIDC
 # directive in the Apache config): the render fails otherwise. Every keystone-api replica must
-# share one passphrase. keystone-api reads both only at container start, so after rotating either
+# share one passphrase. OIDC also requires conf.keystone.openid.remote_id_attribute (e.g.
+# HTTP_OIDC_ISS): without it Keystone never compares the token's issuer with the identity
+# provider's remote_ids, so the render fails; [federation] remote_id_attribute is refused, so the
+# setting has one place. keystone-api reads both secrets only at container start, so after rotating either
 # Secret, roll keystone-api (see docs/configuration.md for the Keycloak side of a client-secret
 # rotation). Example, with both values generated once by an External Secrets Operator
 # Password generator:

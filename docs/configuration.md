@@ -198,7 +198,8 @@ Set `spec: {}` (or omit `componentValues.<name>`) to use the validated defaults.
 Until the keystone chart gained `oidc.clientSecretRef` and `oidc.cryptoPassphraseRef`, the only
 way to configure OIDC federation was to write `OIDCClientSecret` and `OIDCCryptoPassphrase` as
 literals in `componentValues.keystone.conf.wsgi_keystone`. The chart now refuses those literals,
-so **an install that has them fails to render on upgrade**. Under Krateo, the keystone component's
+so **an install that has them fails to render on upgrade**. It also refuses OIDC without
+`conf.keystone.openid.remote_id_attribute` (step 4). Under Krateo, the keystone component's
 Composition goes to a failed state, and the release stays on the old version until the values
 are fixed. Do these steps in one change, before or together with the version bump:
 
@@ -232,10 +233,27 @@ are fixed. Do these steps in one change, before or together with the version bum
 3. **Delete the `OIDCClientSecret` and `OIDCCryptoPassphrase` lines** from
    `componentValues.keystone.conf.wsgi_keystone`, in the same change as step 2. Keep every other
    OIDC directive.
-4. **Apply the change** (the `Openstack` Composition, with the new version if you are upgrading).
+4. **Set `remote_id_attribute` in `[openid]`**, if it is not set already, and remove it from
+   `[federation]` if it is there:
+
+   ```yaml
+   conf:
+     keystone:
+       openid:
+         remote_id_attribute: HTTP_OIDC_ISS
+   ```
+
+   `HTTP_OIDC_ISS` is the issuer as Keystone sees it with `OIDCClaimPrefix "OIDC-"`; use the
+   matching name if your prefix differs. Without it, Keystone does not compare the token's issuer
+   with the identity provider's `remote_ids` (`validate_idp` in keystone 2025.1 returns early), so
+   `remote_ids` constrain nothing and nothing logs it above debug level. `[federation]` is only
+   Keystone's fallback; the chart keeps the setting in one place, the group named after the
+   protocol id `openid`. The Keystone `FederationProtocol` (openstack-keystone-operator-kog) has
+   no field for it, so the keystone conf is where it lives.
+5. **Apply the change** (the `Openstack` Composition, with the new version if you are upgrading).
    keystone-api restarts with both values read from the Secrets. Logins and existing sessions
    carry on.
-5. Optionally, move Keycloak's client onto the same Secret (keycloak-config-kog 0.4.9 or later,
+6. Optionally, move Keycloak's client onto the same Secret (keycloak-config-kog 0.4.9 or later,
    `spec.clientSecretRef` → `keystone-oidc-client` / `client-secret`, see the keystone entry
    above), and later rotate it as described there.
 
@@ -253,6 +271,18 @@ If you skip this, the render fails with one of these messages. Helm prefixes eac
   oidc.cryptoPassphraseRef is not set: mod_auth_openidc refuses to start without
   OIDCCryptoPassphrase, so keystone-api would crash-loop. Set oidc.cryptoPassphraseRef (name, key)
   to a Secret. See docs/configuration.md, section "Upgrading an install that already uses OIDC".`
+- no `remote_id_attribute` in `[openid]`:
+  `OIDC is configured (oidc.clientSecretRef, or OIDC directives in the Apache config) but
+  conf.keystone.openid.remote_id_attribute is not set: Keystone then skips checking the token's
+  issuer against the identity provider's remote_ids (keystone.federation.utils.validate_idp
+  returns early), so remote_ids bind nothing. Set it to the request variable that carries the
+  issuer, HTTP_OIDC_ISS with OIDCClaimPrefix "OIDC-". See docs/configuration.md, section
+  "Upgrading an install that already uses OIDC".`;
+- `remote_id_attribute` in `[federation]`:
+  `conf.keystone.federation.remote_id_attribute is set: Keystone reads it only when the
+  protocol's own group has none, so two places would decide which identity provider a token came
+  from. Set conf.keystone.openid.remote_id_attribute instead and remove this one. See
+  docs/configuration.md, section "Upgrading an install that already uses OIDC".`
 
 ## `serviceContract` (contract v1)
 
