@@ -74,7 +74,7 @@ data:
 {{- include "helm-toolkit.snippets.values_template_renderer" (dict "envAll" $envAll "template" .Values.conf.sso_callback_template "key" "sso_callback_template.html" "format" "Secret" ) | indent 2 }}
 {{- include "keystone.oidc.refuseLiteralSecret" $envAll }}
 {{- include "keystone.oidc.requireRemoteIdAttribute" $envAll }}
-{{- if include "keystone.oidc.secretsEnabled" $envAll }}
+{{- if include "keystone.oidc.ownedConfEnabled" $envAll }}
   oidc-secrets.conf: {{ include "keystone.oidc.secretsConf" $envAll | b64enc }}
 {{- end }}
 {{- end }}

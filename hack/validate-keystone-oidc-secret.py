@@ -35,6 +35,12 @@ This gate renders the keystone chart and checks:
   - every federation-remote-id-*.yaml (remote_id_attribute in [federation], Keystone's fallback)
     is refused, so [openid] is the one place that setting lives;
   - every enabled-*.yaml renders keystone.conf with [openid] remote_id_attribute as it set it;
+  - every enabled-*.yaml that sets oidc.caBundleRef renders exactly one chart-owned
+    `OIDCCABundlePath /etc/keystone/oidc-ca/<key>`, mounts the named ConfigMap or Secret (that kind,
+    that name, only that key) read-only at /etc/keystone/oidc-ca as a whole volume, not subPath,
+    so a rotated certificate reaches the pod; both kinds must be covered;
+  - every free-form-ca-path-*.yaml (OIDCCABundlePath in the free-form config) is refused, and a
+    half oidc.caBundleRef or a kind other than ConfigMap/Secret is refused;
   - half a reference (a name without a key) is refused, for each reference;
   - the refusals an upgrading install can hit (a literal secret, OIDC without a passphrase or
     without remote_id_attribute, remote_id_attribute in [federation]) point
@@ -164,18 +170,20 @@ def main() -> int:
     missing = sorted(tests.glob("missing-passphrase-*.yaml"))
     no_remote_id = sorted(tests.glob("missing-remote-id-*.yaml"))
     federation_remote_id = sorted(tests.glob("federation-remote-id-*.yaml"))
+    literal_ca = sorted(tests.glob("free-form-ca-path-*.yaml"))
     rel = tests.relative_to(root) if tests.is_relative_to(root) else tests
     for files, what in ((enabled, "enabled-*.yaml: the chart-owned directives were never rendered"),
                         (literal, "literal-*.yaml: the refusal was never exercised"),
                         (missing, "missing-passphrase-*.yaml: OIDC without a passphrase was never tried"),
                         (no_remote_id, "missing-remote-id-*.yaml: OIDC without remote_id_attribute was never tried"),
-                        (federation_remote_id, "federation-remote-id-*.yaml: [federation] remote_id_attribute was never tried")):
+                        (federation_remote_id, "federation-remote-id-*.yaml: [federation] remote_id_attribute was never tried"),
+                        (literal_ca, "free-form-ca-path-*.yaml: OIDCCABundlePath in the free-form config was never tried")):
         if not files:
             print(f"FAIL: no {rel}/{what} -- nothing was measured")
             return 1
 
     failures, rendered_directives = [], 0
-    covered_enabled, covered_literal = set(), set()
+    covered_enabled, covered_literal, covered_ca = set(), set(), set()
     doc = root / UPGRADE_DOC
     if not doc.is_file() or f"\n## {UPGRADE_HEADING}\n" not in doc.read_text():
         failures.append(f"{UPGRADE_DOC} has no '## {UPGRADE_HEADING}' section, which every refusal "
@@ -295,6 +303,33 @@ def main() -> int:
                     bad.append(f"{source}: {OWNED_KEY} is not mounted at {want} (got {mounts})")
             if not set_refs:
                 bad.append(f"{source}: sets neither oidc.clientSecretRef nor oidc.cryptoPassphraseRef")
+            ca = oidc.get("caBundleRef") or {}
+            if ca.get("name") and ca.get("key") and c is not None:
+                kind = ca.get("kind") or "ConfigMap"
+                path = f"/etc/keystone/oidc-ca/{ca['key']}"
+                owned_ca = [where for where, text in config_texts(docs) if where.endswith(f" {OWNED_KEY}")
+                            for m in re.finditer(r"^[ \t]*OIDCCABundlePath[ \t]+(\S+)[ \t]*$", text, re.M)
+                            if m.group(1) == path]
+                anywhere = [where for where, text in config_texts(docs)
+                            if re.search(r"(?im)^[ \t]*OIDCCABundlePath\b", text)]
+                if len(owned_ca) != 1 or len(anywhere) != 1:
+                    bad.append(f"{source}: expected exactly one `OIDCCABundlePath {path}`, in {OWNED_KEY} "
+                               f"only; found it {len(owned_ca)} time(s) there and OIDCCABundlePath in {anywhere}")
+                mounts = [m for m in c.get("volumeMounts") or [] if m.get("mountPath") == "/etc/keystone/oidc-ca"]
+                if len(mounts) != 1 or not mounts[0].get("readOnly") or mounts[0].get("subPath"):
+                    bad.append(f"{source}: /etc/keystone/oidc-ca must be one read-only whole-volume mount "
+                               f"(no subPath, so a rotated certificate reaches the pod); got {mounts}")
+                else:
+                    vol = [v for d in docs if d.get("kind") == "Deployment" and d["metadata"]["name"].endswith("keystone-api")
+                           for v in d["spec"]["template"]["spec"].get("volumes") or [] if v["name"] == mounts[0]["name"]]
+                    src = (vol[0].get("secret") if kind == "Secret" else vol[0].get("configMap")) if vol else None
+                    got_name = (src or {}).get("secretName" if kind == "Secret" else "name")
+                    items = [(i.get("key"), i.get("path")) for i in (src or {}).get("items") or []]
+                    if not src or got_name != ca["name"] or items != [(ca["key"], ca["key"])]:
+                        bad.append(f"{source}: the CA volume is not {kind} {ca['name']!r} with only key "
+                                   f"{ca['key']!r} (got {vol})")
+                if not [x for x in bad if source in x]:
+                    covered_ca.add(kind)
             confs = keystone_conf(docs)
             got_rid = [ini_value(text, "openid", "remote_id_attribute") for text in confs]
             if not want_rid:
@@ -331,11 +366,23 @@ def main() -> int:
             refused(str(f.relative_to(root)), ["-f", str(f)],
                     ["conf.keystone.federation.remote_id_attribute is set", UPGRADE_POINTER])
 
+        # OIDCCABundlePath in the free-form config: the path and its mount must come from caBundleRef.
+        for f in literal_ca:
+            refused(str(f.relative_to(root)), ["-f", str(f)], ["carries an OIDCCABundlePath directive"])
+        refused("half oidc.caBundleRef (name, no key)", ["--set", "oidc.caBundleRef.name=keycloak-ca"],
+                ["oidc.caBundleRef needs both name and key"])
+        refused("oidc.caBundleRef.kind not ConfigMap/Secret (values schema)",
+                ["--set", "oidc.caBundleRef.name=keycloak-ca", "--set", "oidc.caBundleRef.key=ca.crt",
+                 "--set", "oidc.caBundleRef.kind=PersistentVolumeClaim"], ["/oidc/caBundleRef/kind", "must be one of"])
+
         # Half a reference configures nothing; it must not render silently.
         for refkey in ("clientSecretRef", "cryptoPassphraseRef"):
             refused(f"half oidc.{refkey} (name, no key)",
                     ["--set", f"oidc.{refkey}.name=some-secret"], [f"oidc.{refkey} needs both name and key"])
 
+    for kind in ("ConfigMap", "Secret"):
+        if kind not in covered_ca:
+            failures.append(f"no enabled-*.yaml fixture rendered a correct CA bundle from a {kind}")
     for directive in SECRETS:
         if directive not in covered_enabled:
             failures.append(f"no enabled-*.yaml fixture rendered a correct chart-owned {directive}")

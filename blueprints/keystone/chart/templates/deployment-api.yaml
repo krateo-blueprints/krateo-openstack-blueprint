@@ -357,10 +357,15 @@ spec:
               mountPath: {{ .Values.conf.software.apache2.mods_dir }}/mpm_event.conf
               subPath: mpm_event.conf
               readOnly: true
-{{- if include "keystone.oidc.secretsEnabled" $envAll }}
+{{- if include "keystone.oidc.ownedConfEnabled" $envAll }}
             - name: keystone-etc
               mountPath: {{ .Values.conf.software.apache2.conf_dir }}/oidc-secrets.conf
               subPath: oidc-secrets.conf
+              readOnly: true
+{{- end }}
+{{- if include "keystone.oidc.caBundleEnabled" $envAll }}
+            - name: keystone-oidc-ca
+              mountPath: /etc/keystone/oidc-ca
               readOnly: true
 {{- end }}
 {{- if .Values.conf.security }}
@@ -415,6 +420,20 @@ spec:
           secret:
             secretName: keystone-etc
             defaultMode: 0444
+{{- if include "keystone.oidc.caBundleEnabled" $envAll }}
+        - name: keystone-oidc-ca
+{{- if eq (.Values.oidc.caBundleRef.kind | default "ConfigMap") "Secret" }}
+          secret:
+            secretName: {{ .Values.oidc.caBundleRef.name | quote }}
+{{- else }}
+          configMap:
+            name: {{ .Values.oidc.caBundleRef.name | quote }}
+{{- end }}
+            defaultMode: 0444
+            items:
+              - key: {{ .Values.oidc.caBundleRef.key | quote }}
+                path: {{ .Values.oidc.caBundleRef.key | quote }}
+{{- end }}
         - name: keystone-etc-snippets
 {{- if $etcSources }}
           projected:

@@ -175,6 +175,31 @@ Notable per-component fields:
     Until both steps are done, Keystone and Keycloak disagree and logins fail. Rotating the crypto
     passphrase needs only the keystone-api rollout, but it invalidates every state and session
     cookie made with the old one, so users in a login flow at that moment have to start again.
+  - `oidc.caBundleRef.{kind,name,key}` — the identity provider's CA certificate (PEM), when its
+    TLS is signed by a private CA, e.g. a Keycloak serving an in-cluster hostname. `kind` is
+    `ConfigMap` (the default; a CA certificate is public, and cert-manager's trust-manager
+    publishes ConfigMaps) or `Secret`. The chart mounts that object read-only at
+    `/etc/keystone/oidc-ca` and renders `OIDCCABundlePath /etc/keystone/oidc-ca/<key>`, so
+    mod_auth_openidc validates the IdP against it with TLS validation still on. Never write
+    `OIDCCABundlePath` into `conf.wsgi_keystone`: the chart refuses it, so the path and the mount
+    come from one place. Never set `OIDCSSLValidateServer Off` to reach a private-CA IdP.
+    ```yaml
+    oidc:
+      caBundleRef:
+        kind: ConfigMap
+        name: keycloak-ca
+        key: ca.crt
+    ```
+    The bundle is a whole-volume mount, not `subPath`, so the kubelet updates the file in the pod
+    when the object changes, and mod_auth_openidc uses the new file on its next call to the IdP,
+    with no restart: measured with the CA directory laid out as the kubelet writes it
+    (`ca.crt -> ..data/ca.crt`, rotated by an atomic rename of `..data`), the same Apache process
+    refused the IdP before the swap and reached it right after. So a CA rotation, e.g. by
+    trust-manager, needs no keystone-api rollout. Also measured in the
+    keystone OIDC image (mod_auth_openidc 2.4.11) with `OIDCSSLValidateServer On`: with the CA
+    that signed the IdP's certificate, the token request went through; with an unrelated CA, or
+    with no `caBundleRef`, mod_auth_openidc refused it (`SSL certificate problem: unable to get
+    local issuer certificate`) and never reached the IdP.
 - **horizon**
   - `network.dashboard.service.type` — `NodePort` (default) \| `LoadBalancer` \| `ClusterIP`.
   - `network.dashboard.service.annotations` — string map for cloud LB controls.

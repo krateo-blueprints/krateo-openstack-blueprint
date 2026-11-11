@@ -78,6 +78,35 @@
             }
           },
           "additionalProperties": false
+        },
+        "caBundleRef": {
+          "type": "object",
+          "title": "IdP CA bundle reference",
+          "description": "The ConfigMap or Secret in the release namespace holding the identity provider's CA certificate (PEM), for an IdP whose TLS is signed by a private CA. The chart mounts it read-only and renders OIDCCABundlePath for it; TLS validation stays on. Both name and key empty (the default) means the system trust store.",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "title": "Kind",
+              "enum": [
+                "ConfigMap",
+                "Secret"
+              ],
+              "default": "ConfigMap",
+              "description": "ConfigMap (default) or Secret."
+            },
+            "name": {
+              "type": "string",
+              "title": "Name",
+              "default": ""
+            },
+            "key": {
+              "type": "string",
+              "title": "Key",
+              "default": "",
+              "description": "The data key holding the PEM certificate(s), e.g. ca.crt."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

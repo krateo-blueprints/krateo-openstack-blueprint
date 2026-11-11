@@ -24,6 +24,15 @@ plaintext, so these helpers make that impossible rather than discouraged. The tw
       - OIDC is configured (a clientSecretRef, or any OIDC* directive or `AuthType openid-connect`
         in the free-form config) but oidc.cryptoPassphraseRef is not set.
 
+  keystone.oidc.caBundleEnabled / keystone.oidc.ownedConfEnabled
+    oidc.caBundleRef (kind ConfigMap|Secret, name, key) names the identity provider's CA
+    certificate, for an IdP whose TLS is signed by a private CA. The chart mounts that object
+    read-only at /etc/keystone/oidc-ca (a whole-volume mount, not subPath, so a rotated
+    certificate reaches the pod) and renders `OIDCCABundlePath /etc/keystone/oidc-ca/<key>` in
+    its own file, so mod_auth_openidc validates the IdP against it; TLS validation stays on.
+    OIDCCABundlePath written into the free-form config is refused: the path and the mount must
+    come from one place. ownedConfEnabled is true when the chart-owned file has any directive.
+
   keystone.oidc.configured
     "true" when OIDC is configured: a clientSecretRef, or any OIDC* directive or
     `AuthType openid-connect` in the free-form Apache config.
@@ -67,6 +76,22 @@ true
 {{- include "keystone.oidc.refEnabled" (dict "ref" ((.Values.oidc).cryptoPassphraseRef) "field" "oidc.cryptoPassphraseRef") -}}
 {{- end -}}
 
+{{- define "keystone.oidc.caBundleEnabled" -}}
+{{- $ref := (.Values.oidc).caBundleRef | default dict -}}
+{{- if include "keystone.oidc.refEnabled" (dict "ref" $ref "field" "oidc.caBundleRef") -}}
+{{- if not (has ($ref.kind | default "ConfigMap") (list "ConfigMap" "Secret")) -}}
+{{- fail (printf "oidc.caBundleRef.kind is %q: it must be ConfigMap or Secret." ($ref.kind | toString)) -}}
+{{- end -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{- define "keystone.oidc.ownedConfEnabled" -}}
+{{- if or (include "keystone.oidc.secretsEnabled" .) (include "keystone.oidc.caBundleEnabled" .) -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{- define "keystone.oidc.secretsEnabled" -}}
 {{- if or (include "keystone.oidc.clientSecretEnabled" .) (include "keystone.oidc.cryptoPassphraseEnabled" .) -}}
 true
@@ -96,6 +121,9 @@ true
 {{- fail (printf "conf.%s carries an %s directive: a secret in values is readable by anyone who can read the Composition CR. Remove it and set oidc.clientSecretRef / oidc.cryptoPassphraseRef (name, key) to a Secret instead; the chart then renders the directive itself. See docs/configuration.md, section \"Upgrading an install that already uses OIDC\"." $field $directive) -}}
 {{- end -}}
 {{- end -}}
+{{- if regexMatch "(?im)^[ \\t]*OIDCCABundlePath([ \\t]|$)" $rendered -}}
+{{- fail (printf "conf.%s carries an OIDCCABundlePath directive: set oidc.caBundleRef (kind, name, key) to the ConfigMap or Secret holding the identity provider's CA certificate instead; the chart mounts it and renders the directive itself, so the path and the mount cannot disagree." $field) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- if and (include "keystone.oidc.configured" $envAll) (not (include "keystone.oidc.cryptoPassphraseEnabled" $envAll)) -}}
@@ -122,5 +150,9 @@ OIDCClientSecret ${OIDC_CLIENT_SECRET}
 {{- end }}
 {{- if include "keystone.oidc.cryptoPassphraseEnabled" . }}
 OIDCCryptoPassphrase ${OIDC_CRYPTO_PASSPHRASE}
+{{- end }}
+{{- if include "keystone.oidc.caBundleEnabled" . }}
+# The identity provider's CA certificate, from oidc.caBundleRef, mounted read-only by the chart.
+OIDCCABundlePath /etc/keystone/oidc-ca/{{ .Values.oidc.caBundleRef.key }}
 {{- end }}
 {{ end -}}

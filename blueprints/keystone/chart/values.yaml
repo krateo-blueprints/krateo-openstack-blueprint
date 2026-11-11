@@ -853,6 +853,15 @@ oidc:
   cryptoPassphraseRef:
     name: ""
     key: ""
+  # The identity provider's CA certificate, when its TLS is signed by a private CA (e.g. a Keycloak
+  # serving an in-cluster hostname). kind is ConfigMap (the default; a CA certificate is public, and
+  # cert-manager's trust-manager publishes ConfigMaps) or Secret. Mounted read-only at
+  # /etc/keystone/oidc-ca; the chart renders OIDCCABundlePath for it, and refuses one written into
+  # the free-form Apache config. TLS validation stays on. Set name and key together, or neither.
+  caBundleRef:
+    kind: ConfigMap
+    name: ""
+    key: ""
 pod:
   affinity:
     anti:
