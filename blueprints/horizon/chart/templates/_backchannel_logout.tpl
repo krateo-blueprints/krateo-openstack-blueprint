@@ -26,6 +26,25 @@ _90_krateo_backchannel.py
 /etc/openstack-dashboard/krateo_backchannel
 {{- end -}}
 
+{{- define "horizon.backchannel_logout.ca_dir" -}}
+/etc/openstack-dashboard/backchannel-ca
+{{- end -}}
+
+{{/* "true" when ca_bundle_ref names an object and a key; half a reference fails the render. */}}
+{{- define "horizon.backchannel_logout.ca_enabled" -}}
+{{- $ref := .Values.conf.horizon.backchannel_logout.ca_bundle_ref | default dict -}}
+{{- $name := $ref.name | default "" | toString -}}
+{{- $key := $ref.key | default "" | toString -}}
+{{- if and $name $key -}}
+{{- if not (has ($ref.kind | default "ConfigMap") (list "ConfigMap" "Secret")) -}}
+{{- fail (printf "conf.horizon.backchannel_logout.ca_bundle_ref.kind is %q: it must be ConfigMap or Secret" ($ref.kind | toString)) -}}
+{{- end -}}
+true
+{{- else if or $name $key -}}
+{{- fail "conf.horizon.backchannel_logout.ca_bundle_ref needs both name and key: one without the other configures nothing" -}}
+{{- end -}}
+{{- end -}}
+
 {{/* Refuse to render a receiver that could not work. */}}
 {{- define "horizon.backchannel_logout.validate" -}}
 {{- $bcl := .Values.conf.horizon.backchannel_logout -}}
@@ -37,6 +56,10 @@ _90_krateo_backchannel.py
 {{- if ne .Values.conf.horizon.local_settings.config.session_engine "django.contrib.sessions.backends.db" }}
 {{- fail "conf.horizon.backchannel_logout needs conf.horizon.local_settings.config.session_engine: django.contrib.sessions.backends.db (the receiver finds sessions in Horizon's database)" }}
 {{- end }}
+{{- if $bcl.ca_file }}
+{{- fail "conf.horizon.backchannel_logout.ca_file is not a setting: set ca_bundle_ref (kind, name, key) to the ConfigMap or Secret holding the CA certificate; the chart mounts it and points the receiver at it, so the path and the mount cannot disagree" }}
+{{- end }}
+{{- $_ := include "horizon.backchannel_logout.ca_enabled" . -}}
 {{- if not (contains "logout=backchannel" $bcl.forward_url) }}
 {{- fail "conf.horizon.backchannel_logout.forward_url must be Keystone's OIDCRedirectURI with ?logout=backchannel" }}
 {{- end }}
@@ -50,6 +73,10 @@ _90_krateo_backchannel.py
 {{- $short := tuple "dashboard" "internal" . | include "helm-toolkit.endpoints.hostname_short_endpoint_lookup" -}}
 {{- $namespaced := tuple "dashboard" "internal" . | include "helm-toolkit.endpoints.hostname_namespaced_endpoint_lookup" -}}
 {{- $hosts := list $short $namespaced (printf "%s.svc" $namespaced) (printf "%s.svc.%s" $namespaced .Values.endpoints.cluster_domain_suffix) -}}
+{{- $caFile := "" -}}
+{{- if include "horizon.backchannel_logout.ca_enabled" . -}}
+{{- $caFile = printf "%s/%s" (include "horizon.backchannel_logout.ca_dir" .) $bcl.ca_bundle_ref.key -}}
+{{- end -}}
 {{- $cfg := dict
   "issuer" $bcl.issuer
   "audience" $bcl.audience
@@ -62,7 +89,7 @@ _90_krateo_backchannel.py
   "require_typ" (ne (toString $bcl.require_typ) "false")
   "timeout_seconds" (int $bcl.timeout_seconds)
   "jwks_cache_seconds" (int $bcl.jwks_cache_seconds)
-  "ca_file" ($bcl.ca_file | default "")
+  "ca_file" $caFile
   "service_credentials_dir" (include "horizon.backchannel_logout.credentials_dir" .)
 -}}
 # Rendered by the horizon chart from conf.horizon.backchannel_logout. Executed by Horizon from

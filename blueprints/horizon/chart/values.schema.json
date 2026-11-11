@@ -175,10 +175,33 @@
                   "title": "JWKS cache",
                   "description": "How long fetched realm keys are reused, in seconds."
                 },
-                "ca_file": {
-                  "type": "string",
-                  "title": "CA file",
-                  "description": "CA bundle path in the Horizon container for https URLs. Empty: the system trust store."
+                "ca_bundle_ref": {
+                  "type": "object",
+                  "title": "CA bundle reference",
+                  "description": "The ConfigMap or Secret holding the CA certificate (PEM) for the receiver's https URLs, for an IdP behind a private CA. The chart mounts it read-only and points the receiver at it; TLS validation stays on. Empty name and key: the system trust store.",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "title": "Kind",
+                      "enum": [
+                        "ConfigMap",
+                        "Secret"
+                      ],
+                      "default": "ConfigMap"
+                    },
+                    "name": {
+                      "type": "string",
+                      "title": "Name",
+                      "default": ""
+                    },
+                    "key": {
+                      "type": "string",
+                      "title": "Key",
+                      "default": "",
+                      "description": "The data key holding the PEM certificate(s), e.g. ca.crt."
+                    }
+                  },
+                  "additionalProperties": false
                 }
               },
               "x-kubernetes-preserve-unknown-fields": true

@@ -73,9 +73,16 @@ conf:
       timeout_seconds: 10
       # How long fetched realm keys are reused, in seconds. An unknown `kid` refetches sooner.
       jwks_cache_seconds: 300
-      # CA bundle path inside the Horizon container for https URLs above. Empty uses the
-      # system trust store.
-      ca_file: ""
+      # The CA certificate for the https URLs above (jwks_url above all), when the IdP's TLS is
+      # signed by a private CA, e.g. a Keycloak serving an in-cluster hostname. kind is ConfigMap
+      # (the default; cert-manager's trust-manager publishes ConfigMaps) or Secret. The chart
+      # mounts it read-only at /etc/openstack-dashboard/backchannel-ca and points the receiver at
+      # it; TLS validation stays on. Empty name and key use the system trust store. Set name and
+      # key together, or neither.
+      ca_bundle_ref:
+        kind: ConfigMap
+        name: ""
+        key: ""
     branding:
       favicon: null
       logo: null

@@ -199,8 +199,62 @@ def main():
     if docs is not None:
         check_enabled(docs, values, bcl, package_files)
 
+    # -- enabled render with a private-CA bundle (ConfigMap and Secret)
+    for kind in ("ConfigMap", "Secret"):
+        ca_docs = render("enabled+ca_bundle_ref(%s)" % kind, str(ENABLED),
+                         "conf.horizon.backchannel_logout.ca_bundle_ref.kind=" + kind,
+                         "conf.horizon.backchannel_logout.ca_bundle_ref.name=keycloak-ca",
+                         "conf.horizon.backchannel_logout.ca_bundle_ref.key=ca.crt")
+        if ca_docs is not None:
+            check_ca(ca_docs, kind)
+    if docs is not None:
+        check_no_ca(docs)
+
     check_refusals()
     report()
+
+
+CA_DIR = "/etc/openstack-dashboard/backchannel-ca"
+
+
+def receiver_cfg(docs, label):
+    snippet = secret_file(docs, "horizon-etc", SNIPPET)
+    if snippet is None:
+        fail("%s: horizon-etc has no %s" % (label, SNIPPET))
+        return None
+    return run_snippet(snippet).get("KRATEO_BACKCHANNEL") or {}
+
+
+def check_no_ca(docs):
+    cfg = receiver_cfg(docs, "enabled")
+    if cfg is not None and cfg.get("ca_file") != "":
+        fail("enabled without ca_bundle_ref: ca_file is %r, want empty (system trust store)" % cfg.get("ca_file"))
+    c, spec = container(docs, "Deployment", "horizon", "horizon")
+    if c is not None and any(m.get("mountPath") == CA_DIR for m in c.get("volumeMounts", [])):
+        fail("enabled without ca_bundle_ref: %s is mounted anyway" % CA_DIR)
+
+
+def check_ca(docs, kind):
+    label = "enabled+ca_bundle_ref(%s)" % kind
+    cfg = receiver_cfg(docs, label)
+    want = CA_DIR + "/ca.crt"
+    if cfg is not None and cfg.get("ca_file") != want:
+        fail("%s: the receiver's ca_file is %r, want %r" % (label, cfg.get("ca_file"), want))
+    c, spec = container(docs, "Deployment", "horizon", "horizon")
+    if c is None:
+        fail("%s: no horizon container" % label)
+        return
+    mounts = [m for m in c.get("volumeMounts", []) if m.get("mountPath") == CA_DIR]
+    if len(mounts) != 1 or not mounts[0].get("readOnly") or mounts[0].get("subPath"):
+        fail("%s: %s must be one read-only whole-volume mount (no subPath, so a rotated CA "
+             "reaches the pod); got %r" % (label, CA_DIR, mounts))
+        return
+    vol = {v["name"]: v for v in spec.get("volumes", [])}.get(mounts[0]["name"]) or {}
+    src = vol.get("secret") if kind == "Secret" else vol.get("configMap")
+    name = (src or {}).get("secretName" if kind == "Secret" else "name")
+    items = [(i.get("key"), i.get("path")) for i in (src or {}).get("items", [])]
+    if not src or name != "keycloak-ca" or items != [("ca.crt", "ca.crt")]:
+        fail("%s: the CA volume is not %s keycloak-ca with only key ca.crt (got %r)" % (label, kind, vol))
 
 
 def check_default(default, values):
@@ -299,6 +353,8 @@ REFUSALS = {
     "no issuer": ["conf.horizon.backchannel_logout.issuer="],
     "forward_url without ?logout=backchannel": [
         "conf.horizon.backchannel_logout.forward_url=http://keystone-api:5000/redirect"],
+    "a free ca_file path instead of ca_bundle_ref": ["conf.horizon.backchannel_logout.ca_file=/etc/ssl/ca.pem"],
+    "half a ca_bundle_ref (name, no key)": ["conf.horizon.backchannel_logout.ca_bundle_ref.name=keycloak-ca"],
 }
 
 

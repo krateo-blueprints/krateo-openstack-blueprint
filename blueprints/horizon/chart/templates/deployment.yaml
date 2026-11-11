@@ -208,6 +208,12 @@ spec:
             - name: horizon-backchannel-service-auth
               mountPath: {{ include "horizon.backchannel_logout.credentials_dir" $envAll }}
               readOnly: true
+            {{- if include "horizon.backchannel_logout.ca_enabled" $envAll }}
+            # Whole-volume mount, not subPath, so a rotated CA reaches the pod.
+            - name: horizon-backchannel-ca
+              mountPath: {{ include "horizon.backchannel_logout.ca_dir" $envAll }}
+              readOnly: true
+            {{- end }}
             {{- end }}
             {{- if .Values.manifests.configmap_logo }}
             - name: horizon-logo
@@ -244,6 +250,21 @@ spec:
           secret:
             secretName: {{ $envAll.Values.secrets.identity.admin }}
             defaultMode: 0444
+        {{- if include "horizon.backchannel_logout.ca_enabled" $envAll }}
+        {{- $ca := $envAll.Values.conf.horizon.backchannel_logout.ca_bundle_ref }}
+        - name: horizon-backchannel-ca
+          {{- if eq ($ca.kind | default "ConfigMap") "Secret" }}
+          secret:
+            secretName: {{ $ca.name | quote }}
+          {{- else }}
+          configMap:
+            name: {{ $ca.name | quote }}
+          {{- end }}
+            defaultMode: 0444
+            items:
+              - key: {{ $ca.key | quote }}
+                path: {{ $ca.key | quote }}
+        {{- end }}
         {{- end }}
         {{- if .Values.manifests.configmap_logo }}
         - name: horizon-logo
