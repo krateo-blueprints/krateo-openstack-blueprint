@@ -78,7 +78,9 @@ dependency order):
 ```sh
 BP_VERSION=0.3.16   # the release this path is verified against; see the note above
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
-kubectl wait compositiondefinition/openstack -n openstack-system --for=condition=Ready --timeout=180s
+V=v$(printf %s "$BP_VERSION" | tr . -)   # wait until Openstack is served at THIS version (see README.md)
+i=0; until kubectl get --raw "/apis/composition.krateo.io/$V" 2>/dev/null | grep -q '"kind":"Openstack"'; do
+  i=$((i+1)); [ $i -lt 60 ] || { echo "Openstack is not served at $V after 5 min: check core-provider and the CompositionDefinition"; break; }; sleep 5; done
 kubectl create namespace openstack
 curl -sfL https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-openstack.yaml \
   | sed 's/profile: identity/profile: full/' | kubectl apply -f -
@@ -89,8 +91,16 @@ curl -sfL https://github.com/krateo-blueprints/krateo-openstack-blueprint/releas
 ```sh
 kubectl create namespace openstack
 BP_VERSION=0.3.16   # the release this path is verified against; see the note above
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-01-identity.yaml
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-02-compute.yaml
+V=v$(printf %s "$BP_VERSION" | tr . -)
+for ex in example-01-identity example-02-compute; do
+  EX=https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/$ex.yaml
+  # wait until every kind this example uses is served at THIS version (see README.md)
+  for k in $(curl -fsSL "$EX" | sed -n 's/^kind: *//p'); do
+    i=0; until kubectl get --raw "/apis/composition.krateo.io/$V" 2>/dev/null | grep -q "\"kind\":\"$k\""; do
+      i=$((i+1)); [ $i -lt 60 ] || { echo "$k is not served at $V after 5 min: check core-provider and its CompositionDefinition"; break; }; sleep 5; done
+  done
+  kubectl apply -f "$EX"
+done
 ```
 
 The compute Compositions inherit the validated defaults: Nova `virt_type: qemu`, Neutron single-node
