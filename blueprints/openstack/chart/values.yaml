@@ -610,9 +610,14 @@ serviceContract:
         match:
           kinds:
             - "Openstack"
+        # has() before `in`: an object with no annotations at all has no
+        # metadata.annotations key, and `in` on a missing key is an evaluation error. With
+        # failurePolicy Fail that still denies, but with "no such key: annotations" instead
+        # of the message below, which is what a portal shows the user (measured on kind).
         celExpression: >-
           !has(object.spec.profile) || object.spec.profile != 'full' ||
-          ('openstack.krateo.io/compute-approved' in object.metadata.annotations)
+          (has(object.metadata.annotations) &&
+          'openstack.krateo.io/compute-approved' in object.metadata.annotations)
         message: "Provisioning the compute tier (profile=full) requires the openstack.krateo.io/compute-approved annotation."
 
   sso:

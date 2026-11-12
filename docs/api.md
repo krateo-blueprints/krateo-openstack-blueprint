@@ -132,7 +132,7 @@ An atomic, human-readable permission. Required: `name` (DNS-1123, ≤63), `title
 | `crossOrgRole` | string | Central parent-realm role. **Required when `enforcement: cross-org`.** |
 | `aggregateTo[]` | string[] | Predefined roles this capability aggregates into (rendered as `rbac.krateo.io/aggregate-to-<role>` labels). |
 | `rules[]` | `policyRule` | RBAC rules (see below), min 1. |
-| `abac` | `{celExpression, message?, match.kinds[]}` | Kyverno ClusterPolicy (CEL). **Required when `enforcement: abac`.** |
+| `abac` | `{celExpression, message?, match.kinds[]}` | ValidatingAdmissionPolicy (CEL) and binding, `failurePolicy: Fail`, rendered by the per-cluster chart `openstack-capabilities`. **Required when `enforcement: abac`.** |
 
 ### `policyRule` (referenced by `capability.rules[]`)
 

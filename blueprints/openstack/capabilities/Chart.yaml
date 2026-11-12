@@ -1,0 +1,26 @@
+apiVersion: v2
+# Per-cluster companion to the openstack umbrella. It renders the capability ClusterRoles
+# (openstack-view, -provision, -decommission, -compute-tier-guard) and the compute-tier
+# ValidatingAdmissionPolicy and binding, from the same serviceContract values the umbrella takes.
+#
+# Installed once per cluster by an administrator, BEFORE any Openstack instance, so that the
+# roles can authorize creating the first instance and the guard sees that create. Not a
+# Marketplace blueprint: it has no CompositionDefinition and is installed with helm.
+# README.md, "Capability roles and guards", has the install and the upgrade from 0.3.46.
+#
+# values.yaml, values.schema.json and templates/_capabilities.tpl are GENERATED from the
+# umbrella by hack/gen-capabilities-chart.py. Edit the umbrella and run it;
+# hack/validate-capability-roles.py fails when they differ.
+name: openstack-capabilities
+description: Per-cluster capability ClusterRoles and admission guards for the Krateo OpenStack blueprint, installed before any Openstack instance.
+type: application
+version: CHART_VERSION
+appVersion: "2025.1"
+home: https://krateo.io
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
+keywords:
+  - openstack
+  - rbac
+  - admission
+sources:
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint

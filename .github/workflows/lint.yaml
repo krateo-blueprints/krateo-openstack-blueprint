@@ -266,7 +266,11 @@ jobs:
       - name: Install the gates' Python dependencies
         run: pip install PyYAML
 
-      - name: Every capability must aggregate to a predefined role
+      # Also: the capability roles and guards come from the per-cluster chart and never from the
+      # umbrella, which an Openstack instance installs, so they exist before the first instance;
+      # the umbrella's handoff from a 0.3.46 install renders only what its own release owns; and
+      # the per-cluster chart's inputs are the umbrella's, regenerated.
+      - name: Every capability must aggregate to a predefined role, from the per-cluster chart
         run: python3 hack/validate-capability-roles.py .
 
       # Offline and fast. pidof identifies a process by its executable, which under an
