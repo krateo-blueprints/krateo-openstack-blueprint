@@ -158,7 +158,7 @@ dependencies:
         - endpoint: internal
           service: identity
         - endpoint: internal
-          service: infra-optim
+          service: infra_optim
     image_repo_sync:
       services:
         - endpoint: internal

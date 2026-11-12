@@ -69,6 +69,12 @@ dependencies:
           - endpoint: node
             service: local_image_registry
   static:
+    tests:
+      services:
+        - endpoint: internal
+          service: identity
+        - endpoint: internal
+          service: messaging
     api:
       jobs:
         - zaqar-db-sync

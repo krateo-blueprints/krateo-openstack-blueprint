@@ -460,6 +460,12 @@ dependencies:
           - endpoint: node
             service: local_image_registry
   static:
+    db_purge:
+      jobs:
+        - trove-db-sync
+      services:
+        - endpoint: internal
+          service: oslo_db
     api:
       jobs:
         - trove-db-sync

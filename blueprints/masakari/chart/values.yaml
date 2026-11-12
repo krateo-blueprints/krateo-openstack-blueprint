@@ -252,6 +252,46 @@ secrets:
 
 dependencies:
   static:
+    masakari_host_monitor:
+      jobs:
+        - masakari-ks-user
+        - masakari-ks-endpoints
+        - masakari-ks-service
+      services:
+        - endpoint: internal
+          service: identity
+        - endpoint: internal
+          service: instance_ha
+    masakari_instance_monitor:
+      jobs:
+        - masakari-ks-user
+        - masakari-ks-endpoints
+        - masakari-ks-service
+      services:
+        - endpoint: internal
+          service: identity
+        - endpoint: internal
+          service: instance_ha
+    masakari_introspective_instance_monitor:
+      jobs:
+        - masakari-ks-user
+        - masakari-ks-endpoints
+        - masakari-ks-service
+      services:
+        - endpoint: internal
+          service: identity
+        - endpoint: internal
+          service: instance_ha
+    masakari_process_monitor:
+      jobs:
+        - masakari-ks-user
+        - masakari-ks-endpoints
+        - masakari-ks-service
+      services:
+        - endpoint: internal
+          service: identity
+        - endpoint: internal
+          service: instance_ha
     masakari_api:
       jobs:
         - masakari-db-sync

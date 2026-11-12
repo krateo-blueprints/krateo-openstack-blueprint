@@ -119,6 +119,23 @@ endpoints:
     port:
       mysql:
         default: 3306
+  placement:
+    name: placement
+    hosts:
+      default: placement-api
+      public: placement
+    host_fqdn_override:
+      default: null
+    path:
+      default: /
+    scheme:
+      default: 'http'
+      service: 'http'
+    port:
+      api:
+        default: 8778
+        public: 80
+        service: 8778
   identity:
     name: keystone
     auth:
