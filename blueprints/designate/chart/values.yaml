@@ -286,6 +286,18 @@ dependencies:
         jobs:
           - designate-rabbit-init
   static:
+    service_cleaner:
+      jobs:
+        - designate-db-sync
+      services:
+        - endpoint: internal
+          service: oslo_db
+    bootstrap:
+      jobs:
+        - designate-ks-user
+      services:
+        - endpoint: internal
+          service: identity
     db_init:
       services:
         - service: oslo_db
@@ -319,7 +331,7 @@ dependencies:
         - designate-db-sync
         - designate-ks-user
         - designate-ks-endpoints
-      service:
+      services:
         - service: oslo_db
           endpoint: internal
         - service: identity
@@ -331,7 +343,7 @@ dependencies:
         - designate-db-sync
         - designate-ks-user
         - designate-ks-endpoints
-      service:
+      services:
         - service: oslo_db
           endpoint: internal
         - service: identity

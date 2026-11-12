@@ -1312,8 +1312,6 @@ dependencies:
         - endpoint: internal
           service: identity
         - endpoint: internal
-          service: metering
-        - endpoint: internal
           service: metric
     image_repo_sync:
       services:
