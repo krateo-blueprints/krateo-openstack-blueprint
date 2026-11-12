@@ -636,6 +636,7 @@ conf:
       handlers:
         - stdout
       qualname: cloudkitty
+      propagate: 0
     logger_amqp:
       level: WARNING
       handlers: stderr

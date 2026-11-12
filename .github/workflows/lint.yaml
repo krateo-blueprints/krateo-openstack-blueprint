@@ -192,6 +192,27 @@ jobs:
       # a test Pod that is not a `helm.sh/hook: test` hook blocks every later upgrade (#179).
       - name: Every test Pod is a Helm test hook
         run: python3 hack/validate-test-pods.py .
+      # watcher's [watcher_clients_auth] named no auth plugin and no keystone URL, so the decision
+      # engine exited 1 at start-up; the section is judged merged as each pod mounts it (#203).
+      - name: Every keystoneauth section a pod reads names its plugin and endpoint
+        run: python3 hack/validate-oslo-auth-sections.py .
+      # README applied the Composition before core-provider served its kind (ServiceUnavailable on a
+      # fresh cluster). Every documented apply waits for the kind at its BP_VERSION, by API-server poll.
+      - name: Every documented Composition apply waits until its kind is served at that version
+        run: python3 hack/validate-docs-wait-for-served-kind.py .
+      # Behind that, every watcher client defaulted to the public catalog endpoint, the ingress-backed
+      # <svc>:80 with no backend without an ingress controller, so the decision engine's start-up
+      # catalog lookup was refused. Listed client options must be internal where pods read them.
+      - name: OpenStack clients call internal endpoints, never the ingress-backed public one
+        run: python3 hack/validate-client-endpoint-interface.py .
+      # A workload that mounts its chart's -etc/-bin without the matching hash annotation never rolls
+      # on a config change: the Secret changes, the pod keeps the old file (subPath) (#223).
+      - name: Every long-running workload rolls when the config it mounts changes
+        run: python3 hack/validate-config-hash-rollout.py .
+      # The root logger on NullHandler hid that very error; a logger that also propagates to a
+      # printing root prints every record twice (#203).
+      - name: The root logger prints, and nothing is printed twice
+        run: python3 hack/validate-root-logger.py .
       # Helm writes "<no value>" for a missing or null value, and an OpenStack service reads that
       # text literally: magnum-api ran uWSGI with no workers because of it (#202).
       - name: No rendered config carries Helm's <no value> placeholder

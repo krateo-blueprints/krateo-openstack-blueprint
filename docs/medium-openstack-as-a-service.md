@@ -257,14 +257,11 @@ With the blueprints fixed and published (`0.1.1`):
 All of it from Compositions. No `kubectl edit`, no manual `helm install`
 — every fix went back into the blueprint values and shipped as a chart.
 
-```sh
-kubectl create namespace openstack-system
-kubectl apply -f blueprints/openstack/compositiondefinition.yaml
-kubectl create namespace openstack
-kubectl apply -f examples/openstack.yaml      # one Openstack, profile: full
-```
-
-…and a cloud comes up.
+Register one CompositionDefinition, apply one `Openstack` Composition
+(`profile: full`), and a cloud comes up. The exact commands, release-stamped for one
+version and with the wait for the served kind, are in
+[README.md, Install](../README.md#install); the in-repo `compositiondefinition.yaml` and
+`examples/openstack.yaml` are templates the release stamps, not files to apply.
 
 ---
 
