@@ -200,6 +200,11 @@ jobs:
       # fresh cluster). Every documented apply waits for the kind at its BP_VERSION, by API-server poll.
       - name: Every documented Composition apply waits until its kind is served at that version
         run: python3 hack/validate-docs-wait-for-served-kind.py .
+      # Behind that, every watcher client defaulted to the public catalog endpoint, the ingress-backed
+      # <svc>:80 with no backend without an ingress controller, so the decision engine's start-up
+      # catalog lookup was refused. Listed client options must be internal where pods read them.
+      - name: OpenStack clients call internal endpoints, never the ingress-backed public one
+        run: python3 hack/validate-client-endpoint-interface.py .
       # The root logger on NullHandler hid that very error; a logger that also propagates to a
       # printing root prints every record twice (#203).
       - name: The root logger prints, and nothing is printed twice
