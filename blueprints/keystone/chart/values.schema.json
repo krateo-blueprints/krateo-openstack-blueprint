@@ -34,6 +34,83 @@
       },
       "x-kubernetes-preserve-unknown-fields": true
     },
+    "oidc": {
+      "type": "object",
+      "title": "OIDC secrets",
+      "description": "mod_auth_openidc's client secret and crypto passphrase, each read from a Kubernetes Secret and never from values: values end up in the Composition CR. Set each reference's name and key together, or neither. The chart renders `OIDCClientSecret ${OIDC_CLIENT_SECRET}` and `OIDCCryptoPassphrase ${OIDC_CRYPTO_PASSPHRASE}` from them, refuses either directive written into conf.wsgi_keystone, conf.security or conf.mpm_event, and requires cryptoPassphraseRef whenever OIDC is configured, because mod_auth_openidc will not start without it.",
+      "properties": {
+        "clientSecretRef": {
+          "type": "object",
+          "title": "Client secret reference",
+          "description": "The Secret in the release namespace holding Keystone's OIDC client secret, e.g. name keystone-oidc-client, key client-secret. Both empty (the default) means no OIDC client secret is configured.",
+          "properties": {
+            "name": {
+              "type": "string",
+              "title": "Secret name",
+              "description": "Name of the Secret in the release namespace.",
+              "maxLength": 253
+            },
+            "key": {
+              "type": "string",
+              "title": "Secret key",
+              "description": "Key in that Secret whose value is the client secret.",
+              "maxLength": 253
+            }
+          },
+          "additionalProperties": false
+        },
+        "cryptoPassphraseRef": {
+          "type": "object",
+          "title": "Crypto passphrase reference",
+          "description": "The Secret in the release namespace holding the passphrase mod_auth_openidc encrypts its state and session cookies with, e.g. name keystone-oidc-crypto, key passphrase. Required whenever OIDC is configured; every keystone-api replica must share it. Both empty (the default) means none is configured.",
+          "properties": {
+            "name": {
+              "type": "string",
+              "title": "Secret name",
+              "description": "Name of the Secret in the release namespace.",
+              "maxLength": 253
+            },
+            "key": {
+              "type": "string",
+              "title": "Secret key",
+              "description": "Key in that Secret whose value is the passphrase.",
+              "maxLength": 253
+            }
+          },
+          "additionalProperties": false
+        },
+        "caBundleRef": {
+          "type": "object",
+          "title": "IdP CA bundle reference",
+          "description": "The ConfigMap or Secret in the release namespace holding the identity provider's CA certificate (PEM), for an IdP whose TLS is signed by a private CA. The chart mounts it read-only and renders OIDCCABundlePath for it; TLS validation stays on. Both name and key empty (the default) means the system trust store.",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "title": "Kind",
+              "enum": [
+                "ConfigMap",
+                "Secret"
+              ],
+              "default": "ConfigMap",
+              "description": "ConfigMap (default) or Secret."
+            },
+            "name": {
+              "type": "string",
+              "title": "Name",
+              "default": ""
+            },
+            "key": {
+              "type": "string",
+              "title": "Key",
+              "default": "",
+              "description": "The data key holding the PEM certificate(s), e.g. ca.crt."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "pod": {
       "type": "object",
       "title": "Pods",

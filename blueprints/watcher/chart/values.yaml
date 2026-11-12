@@ -370,6 +370,31 @@ conf:
       certfile: null
       keyfile: null
       insecure: false
+    # -- Which catalog endpoint each of watcher's clients calls. Upstream defaults every one to the
+    ## public endpoint (keystone_client.interface=public, <svc>_client.endpoint_type=publicURL;
+    ## watcher 2025.1, watcher/conf/*_client.py). In this blueprint a public endpoint is the
+    ## ingress-backed `<svc>.openstack.svc.cluster.local:80`, which has no backend unless an
+    ## ingress controller is installed, so the decision engine's start-up catalog lookup
+    ## (keystone services.list) failed with ECONNREFUSED and exited 1. Every client reads the
+    ## internal endpoint instead, the one each service's own pods serve.
+    keystone_client:
+      interface: internal
+    nova_client:
+      endpoint_type: internalURL
+    glance_client:
+      endpoint_type: internalURL
+    cinder_client:
+      endpoint_type: internalURL
+    neutron_client:
+      endpoint_type: internalURL
+    ironic_client:
+      endpoint_type: internalURL
+    gnocchi_client:
+      endpoint_type: internal
+    placement_client:
+      interface: internal
+    monasca_client:
+      interface: internal
     oslo_concurrency:
       lock_path: /var/lock
   logging:

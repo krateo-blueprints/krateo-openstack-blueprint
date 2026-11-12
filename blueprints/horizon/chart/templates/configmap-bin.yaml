@@ -38,4 +38,10 @@ data:
 {{ tuple "bin/_django.wsgi.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
   selenium-test.py: |
 {{ tuple "bin/_selenium-test.py.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
+{{- if include "horizon.backchannel_logout.enabled" . }}
+{{- range $path, $_ := .Files.Glob "files/krateo_backchannel/*.py" }}
+  krateo_backchannel.{{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- end }}
 {{- end }}

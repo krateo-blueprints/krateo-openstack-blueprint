@@ -1,0 +1,25 @@
+# OIDCCABundlePath written into the free-form Apache config. The path and the mount behind it must come
+# from one place, oidc.caBundleRef, so the keystone chart refuses this at render time.
+oidc:
+  clientSecretRef:
+    name: keystone-oidc-client
+    key: client-secret
+  cryptoPassphraseRef:
+    name: keystone-oidc-crypto
+    key: passphrase
+conf:
+  keystone:
+    openid:
+      remote_id_attribute: HTTP_OIDC_ISS
+  wsgi_keystone: |
+    {{- $portInt := tuple "identity" "service" "api" $ | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+    Listen 0.0.0.0:{{ $portInt }}
+    <VirtualHost *:{{ $portInt }}>
+        WSGIScriptAlias / /var/www/cgi-bin/keystone/wsgi.py
+        OIDCClientID "keystone"
+        OIDCCABundlePath /etc/ssl/private-ca.pem
+        <Location "/v3/auth/OS-FEDERATION/identity_providers/keycloak/protocols/openid/websso">
+            AuthType "openid-connect"
+            Require valid-user
+        </Location>
+    </VirtualHost>

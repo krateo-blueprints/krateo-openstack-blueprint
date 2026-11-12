@@ -1,0 +1,10 @@
+# Values for hack/validate-horizon-backchannel-render.py: the horizon chart with the OIDC
+# back-channel logout receiver enabled. Example hosts only.
+conf:
+  horizon:
+    backchannel_logout:
+      enabled: true
+      issuer: https://keycloak.example.test/realms/openstack
+      audience: keystone
+      jwks_url: https://keycloak.example.test/realms/openstack/protocol/openid-connect/certs
+      forward_url: http://keystone-api.openstack.svc.cluster.local:5000/v3/auth/OS-FEDERATION/websso/openid/redirect?logout=backchannel

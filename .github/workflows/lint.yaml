@@ -200,6 +200,15 @@ jobs:
       # fresh cluster). Every documented apply waits for the kind at its BP_VERSION, by API-server poll.
       - name: Every documented Composition apply waits until its kind is served at that version
         run: python3 hack/validate-docs-wait-for-served-kind.py .
+      # Behind that, every watcher client defaulted to the public catalog endpoint, the ingress-backed
+      # <svc>:80 with no backend without an ingress controller, so the decision engine's start-up
+      # catalog lookup was refused. Listed client options must be internal where pods read them.
+      - name: OpenStack clients call internal endpoints, never the ingress-backed public one
+        run: python3 hack/validate-client-endpoint-interface.py .
+      # A workload that mounts its chart's -etc/-bin without the matching hash annotation never rolls
+      # on a config change: the Secret changes, the pod keeps the old file (subPath) (#223).
+      - name: Every long-running workload rolls when the config it mounts changes
+        run: python3 hack/validate-config-hash-rollout.py .
       # The root logger on NullHandler hid that very error; a logger that also propagates to a
       # printing root prints every record twice (#203).
       - name: The root logger prints, and nothing is printed twice
@@ -208,6 +217,11 @@ jobs:
       # text literally: magnum-api ran uWSGI with no workers because of it (#202).
       - name: No rendered config carries Helm's <no value> placeholder
         run: python3 hack/validate-rendered-config.py .
+      # Values reach the Composition CR in plaintext, so Keystone's OIDC client secret must come
+      # from a Secret (oidc.clientSecretRef), and a secret written into conf.wsgi_keystone must be
+      # refused at render time.
+      - name: Keystone's OIDC client secret comes from a Secret, never from values
+        run: python3 hack/validate-keystone-oidc-secret.py .
       # A default cluster's StorageClass is ReadWriteOnce: no default claim may ask for
       # ReadWriteMany, and pods sharing a ReadWriteOnce claim must be co-located (#201).
       - name: Every default claim can be bound, and shared ReadWriteOnce claims are co-located
@@ -297,6 +311,26 @@ jobs:
       # no upstream defect behind it and has been reverted. See issue #110.
       - name: No probe that restarts horizon may enter Django
         run: python3 hack/validate-horizon-liveness.py .
+
+      # Horizon's OIDC back-channel logout receiver (conf.horizon.backchannel_logout) only works
+      # if sessions are rows it can read and four separately rendered pieces line up: the
+      # package in horizon-bin, its mounts, horizon.sh's copy step and the local_settings.d
+      # snippet. Horizon swallows an exception raised by a snippet (it logs and carries on), so
+      # a broken snippet leaves a Ready Horizon answering Keycloak's logouts with 404. This
+      # renders the chart, executes the snippet, and checks the session table comes from the
+      # bounded db-sync hook and that the chart refuses configurations that cannot work.
+      - name: Horizon sessions are in its database and the back-channel logout receiver is wired
+        run: python3 hack/validate-horizon-backchannel-render.py .
+
+      # The validator (a Keycloak 26.4-shaped logout token and every rejection) and the logout
+      # path through Django with Keystone and the forward mocked, including a refused forward
+      # answering non-200. Fails when no test ran or any was skipped. Versions are pinned so a run
+      # is reproducible.
+      - name: Install the back-channel logout receiver's test dependencies
+        run: pip install "Django==5.2.19" "cryptography==46.0.5"
+
+      - name: The back-channel logout receiver's unit tests pass
+        run: python3 hack/validate-horizon-backchannel-tests.py .
 
       # The quietest version of the same failure. gnocchi-metricd and gnocchi-statsd had no
       # probe at all, and both swallow every backend error and loop forever

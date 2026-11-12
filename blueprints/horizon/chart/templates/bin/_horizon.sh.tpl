@@ -28,6 +28,14 @@ function start () {
   {{- range $key, $value := .Values.conf.horizon.custom_panels }}
   ln -s /etc/openstack-dashboard/custom_panels/{{ $key }}.py ${SITE_PACKAGES_ROOT}/openstack_dashboard/local/enabled/{{ $key }}.py
   {{- end }}
+  {{- if include "horizon.backchannel_logout.enabled" . }}
+  # OIDC back-channel logout receiver (conf.horizon.backchannel_logout): install the package
+  # and its settings snippet before collectstatic/compress import the settings below.
+  rm -rf ${SITE_PACKAGES_ROOT}/openstack_dashboard/local/krateo_backchannel
+  mkdir -p ${SITE_PACKAGES_ROOT}/openstack_dashboard/local/krateo_backchannel
+  cp {{ include "horizon.backchannel_logout.package_dir" . }}/*.py ${SITE_PACKAGES_ROOT}/openstack_dashboard/local/krateo_backchannel/
+  ln -sf /etc/openstack-dashboard/local_settings.d/{{ include "horizon.backchannel_logout.snippet_name" . }} ${SITE_PACKAGES_ROOT}/openstack_dashboard/local/local_settings.d/{{ include "horizon.backchannel_logout.snippet_name" . }}
+  {{- end }}
   # wsgi/horizon-http needs open files here, including secret_key_store
   chown -R horizon ${SITE_PACKAGES_ROOT}/openstack_dashboard/local/
 

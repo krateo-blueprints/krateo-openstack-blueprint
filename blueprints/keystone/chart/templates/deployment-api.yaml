@@ -274,6 +274,23 @@ spec:
 {{ tuple $envAll "keystone_api" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.api | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "keystone" "container" "keystone_api" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
+{{- if include "keystone.oidc.secretsEnabled" $envAll }}
+          env:
+{{- if include "keystone.oidc.clientSecretEnabled" $envAll }}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oidc.clientSecretRef.name | quote }}
+                  key: {{ .Values.oidc.clientSecretRef.key | quote }}
+{{- end }}
+{{- if include "keystone.oidc.cryptoPassphraseEnabled" $envAll }}
+            - name: OIDC_CRYPTO_PASSPHRASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oidc.cryptoPassphraseRef.name | quote }}
+                  key: {{ .Values.oidc.cryptoPassphraseRef.key | quote }}
+{{- end }}
+{{- end }}
           command:
             - /tmp/keystone-api.sh
             - start
@@ -340,6 +357,17 @@ spec:
               mountPath: {{ .Values.conf.software.apache2.mods_dir }}/mpm_event.conf
               subPath: mpm_event.conf
               readOnly: true
+{{- if include "keystone.oidc.ownedConfEnabled" $envAll }}
+            - name: keystone-etc
+              mountPath: {{ .Values.conf.software.apache2.conf_dir }}/oidc-secrets.conf
+              subPath: oidc-secrets.conf
+              readOnly: true
+{{- end }}
+{{- if include "keystone.oidc.caBundleEnabled" $envAll }}
+            - name: keystone-oidc-ca
+              mountPath: /etc/keystone/oidc-ca
+              readOnly: true
+{{- end }}
 {{- if .Values.conf.security }}
             - name: keystone-etc
               mountPath: {{ .Values.conf.software.apache2.conf_dir }}/security.conf
@@ -392,6 +420,20 @@ spec:
           secret:
             secretName: keystone-etc
             defaultMode: 0444
+{{- if include "keystone.oidc.caBundleEnabled" $envAll }}
+        - name: keystone-oidc-ca
+{{- if eq (.Values.oidc.caBundleRef.kind | default "ConfigMap") "Secret" }}
+          secret:
+            secretName: {{ .Values.oidc.caBundleRef.name | quote }}
+{{- else }}
+          configMap:
+            name: {{ .Values.oidc.caBundleRef.name | quote }}
+{{- end }}
+            defaultMode: 0444
+            items:
+              - key: {{ .Values.oidc.caBundleRef.key | quote }}
+                path: {{ .Values.oidc.caBundleRef.key | quote }}
+{{- end }}
         - name: keystone-etc-snippets
 {{- if $etcSources }}
           projected:
