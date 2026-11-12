@@ -133,22 +133,28 @@ kubectl create namespace openstack-system
 # upgrade (#166). 0.3.36 and 0.3.37 upgrade the umbrella but leave every component at its old
 # version (#179). 0.3.38 through 0.3.40 cannot upgrade a Job whose template changed (#179).
 # 0.3.41 and 0.3.42 leave a cinder whose install hooks wait for Ceph forever, silently (#204);
-# the 0.3.42 release notes say how to recover an install that has it.
+# the 0.3.42 release notes say how to recover an install that has it. 0.3.43 through 0.3.45
+# publish broken Marketplace icons for 23 charts (#214); they install and run correctly.
 #
-# What 0.3.43 has actually been run through, stated so you know what is NOT covered:
-#   - a fresh install with these exact steps, profile: full-strict, on a 6-node GKE cluster
-#     (n2-standard-16, Kubernetes 1.36.4, core-provider 2.13.72). 32 components; all 33 Helm
-#     releases deployed; the last component Ready 22 min after the apply; every Job a bounded
-#     hook; keystone answering on /v3 (#204);
+# What 0.3.46 has actually been run through, stated so you know what is NOT covered:
+#   - 0.3.45 freshly installed with these exact steps, profile: full-strict, on a 6-node GKE
+#     cluster (n2-standard-16, Kubernetes 1.36.4, core-provider 2.13.72): 32 components, 31
+#     Ready; all 33 Helm releases deployed; the last component Ready 24 min after the apply;
+#     every Job a bounded hook; no plain Pods; no `<no value>` in any live config; nova,
+#     neutron and cyborg agents Ready on all 6 nodes; a componentValues override reaching
+#     keystone's live config and reverting cleanly (#213);
+#   - 0.3.46 renders byte-for-byte the same manifests as 0.3.45 for all 37 charts, apart from
+#     the version string; it changes only the Marketplace icons, which its release fetched and
+#     checked as images before publishing (#214);
 #   - an upgrade of a 0.3.34 install to 0.3.42 with hack/migrate-to-pvc.py, then on to 0.3.43:
 #     MariaDB and RabbitMQ data intact across the upgrade, a node move and a RabbitMQ outage,
 #     and a designate zone round-trip through PowerDNS (#179, #204).
-# Six components are NOT Ready on that install, each with its own issue: nova, neutron and
-# cyborg (#200), tacker (#201), magnum (#202), watcher (#203). cinder is not in full-strict
-# from 0.3.43 because its only backend needs Ceph (#196). NOT verified at this version: the
-# 36-component profile: full, kind, and the per-component path further down.
+# One component is NOT Ready: watcher (#203), whose decision engine has no keystone client
+# credentials; the cause is measured and a fix is in progress. cinder is not in full-strict
+# because its only backend needs Ceph (#196). NOT verified at this version: the 36-component
+# profile: full, kind, a VNC console in a browser, and the per-component path further down.
 
-BP_VERSION=0.3.43
+BP_VERSION=0.3.46
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 
@@ -192,6 +198,16 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 helm upgrade --install openstack-capabilities \
   oci://ghcr.io/krateo-blueprints/charts/openstack-capabilities --version ${BP_VERSION} \
   --namespace openstack-system --take-ownership
+
+# Wait until the API server serves the Openstack kind at THIS release's version. core-provider
+# creates it from the CompositionDefinition a few seconds later (28 s on a fresh GKE cluster), and
+# applying the Composition before that fails with `ServiceUnavailable ... Kind=Openstack not
+# found`. Ask the API server directly, at this version: `kubectl wait --for=condition=Ready` on
+# the CompositionDefinition says core-provider is done, not which version is served, and during
+# an upgrade the previous version is still served, so a version-blind wait passes at once.
+V=v$(printf %s "$BP_VERSION" | tr . -)
+i=0; until kubectl get --raw "/apis/composition.krateo.io/$V" 2>/dev/null | grep -q '"kind":"Openstack"'; do
+  i=$((i+1)); [ $i -lt 60 ] || { echo "Openstack is not served at $V after 5 min: check core-provider and the CompositionDefinition"; break; }; sleep 5; done
 
 # ...then one Composition rolls out a whole install in dependency order.
 kubectl create namespace openstack
@@ -299,11 +315,19 @@ components.
 kubectl label --overwrite nodes --all openstack-control-plane=enabled
 
 kubectl create namespace openstack-system
-for c in mariadb memcached keystone glance horizon; do
 BP_VERSION=0.3.32   # this per-component path was last verified at 0.3.32, not since
+for c in mariadb memcached keystone glance horizon; do
   kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-$c.yaml; done
+# Wait until every kind the example uses is served at this version (see the wait above). The
+# kinds come from the example itself, so this list cannot drift from what is applied.
+V=v$(printf %s "$BP_VERSION" | tr . -)
+EX=https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-01-identity.yaml
+for k in $(curl -fsSL "$EX" | sed -n 's/^kind: *//p'); do
+  i=0; until kubectl get --raw "/apis/composition.krateo.io/$V" 2>/dev/null | grep -q "\"kind\":\"$k\""; do
+    i=$((i+1)); [ $i -lt 60 ] || { echo "$k is not served at $V after 5 min: check core-provider and its CompositionDefinition"; break; }; sleep 5; done
+done
 kubectl create namespace openstack
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-01-identity.yaml
+kubectl apply -f "$EX"
 # kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-02-compute.yaml   # compute plane (GKE)
 ```
 

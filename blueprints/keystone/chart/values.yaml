@@ -89,8 +89,9 @@ conf:
       - stdout
       level: INFO
       qualname: keystone
+      propagate: 0
     logger_root:
-      handlers: 'null'
+      handlers: stderr
       level: WARNING
     logger_sqlalchemy:
       handlers: stderr
