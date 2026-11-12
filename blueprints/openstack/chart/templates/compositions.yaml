@@ -164,13 +164,15 @@
             DROPPED for that component. Not an error: the setting just does nothing. Recreating
             the component's Composition re-stamps the origin and restores the full surface.
 
-         2. Approving instance migration (upgradePolicy Automatic, or Manual plus
-            krateo.io/upgrade-to-version) rewrites instances through the new endpoint, flips the
-            krateo.io/composition-version label the prune predicate reads, and makes the origin
-            version prunable. Migration must not be approved while the pin is in effect.
+         2. So the pin applies ONLY while the component's migration is not approved (Paused, or
+            Manual without krateo.io/upgrade-to-version naming the current version). When it is
+            approved -- Automatic or unset, the default -- the engine migrates the instances and
+            osh.emitVersion drops the origin, so the umbrella never writes the child at the old
+            version against the engine (#233).
 
-       The one added read is osh.originVersion's named GET of the one object, the same cheap shape
-       osh.exists uses, and the CRD list stays the one fetched above.
+       The added reads are osh.originVersion's named GET of the one object and
+       osh.migrationApprovedFor's named GET of the component's CompositionDefinition, the same
+       cheap shape osh.exists uses; the CRD list stays the one fetched above.
 
        This comment is closed WITHOUT a right-trim marker, and that is load-bearing. A
        right trim swallows the newline that follows, so the document separator below is
