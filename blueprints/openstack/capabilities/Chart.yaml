@@ -6,7 +6,7 @@ apiVersion: v2
 # Installed once per cluster by an administrator, BEFORE any Openstack instance, so that the
 # roles can authorize creating the first instance and the guard sees that create. Not a
 # Marketplace blueprint: it has no CompositionDefinition and is installed with helm.
-# README.md, "Capability roles and guards", has the install and the upgrade from 0.3.46.
+# README.md, "Capability roles and guards", has the install and the upgrade from 0.3.47.
 #
 # values.yaml, values.schema.json and templates/_capabilities.tpl are GENERATED from the
 # umbrella by hack/gen-capabilities-chart.py. Edit the umbrella and run it;
@@ -24,3 +24,7 @@ keywords:
   - admission
 sources:
   - https://github.com/krateo-blueprints/krateo-openstack-blueprint
+annotations:
+  # The release this chart was first published at. hack/validate-capabilities-first-release.py checks it
+  # against the release tags and checks every "from"/"up to" version claim in the docs against it.
+  krateo.io/first-release: "0.3.48"

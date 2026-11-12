@@ -126,6 +126,18 @@ true
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- /* The opposite half: a reference set while OIDC is not configured. ownedConfEnabled renders
+       oidc-secrets.conf for any reference, and its directives are mod_auth_openidc's; Apache
+       refuses an unknown directive at start-up, so keystone-api would crash-loop on an image
+       without the module, the umbrella's default included (measured, #237). clientSecretRef alone
+       counts as configured, so the passphrase refusal below already covers it. */ -}}
+{{- if not (include "keystone.oidc.configured" $envAll) -}}
+{{- range $ref := list (list "oidc.cryptoPassphraseRef" "keystone.oidc.cryptoPassphraseEnabled" "OIDCCryptoPassphrase") (list "oidc.caBundleRef" "keystone.oidc.caBundleEnabled" "OIDCCABundlePath") -}}
+{{- if include (index $ref 1) $envAll -}}
+{{- fail (printf "%s is set but OIDC is not configured (no oidc.clientSecretRef and no OIDC directive in the Apache config): the chart would render %s, a mod_auth_openidc directive, and Apache refuses it unless that module is loaded, so keystone-api would crash-loop. Configure OIDC (the Apache OIDC block, auth.methods and an image that ships mod_auth_openidc), or remove %s." (index $ref 0) (index $ref 2) (index $ref 0)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if and (include "keystone.oidc.configured" $envAll) (not (include "keystone.oidc.cryptoPassphraseEnabled" $envAll)) -}}
 {{- fail "OIDC is configured (oidc.clientSecretRef, or OIDC directives in the Apache config) but oidc.cryptoPassphraseRef is not set: mod_auth_openidc refuses to start without OIDCCryptoPassphrase, so keystone-api would crash-loop. Set oidc.cryptoPassphraseRef (name, key) to a Secret. See docs/configuration.md, section \"Upgrading an install that already uses OIDC\"." -}}
 {{- end -}}

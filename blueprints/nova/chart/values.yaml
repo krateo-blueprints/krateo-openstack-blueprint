@@ -1568,6 +1568,9 @@ dependencies:
               component: neutron-sriov-agent
             requireSameNode: true
   static:
+    storage_init:
+      jobs: null
+      services: null
     api:
       jobs:
       - nova-db-sync

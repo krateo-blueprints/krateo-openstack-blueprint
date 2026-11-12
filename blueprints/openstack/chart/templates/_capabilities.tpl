@@ -9,18 +9,18 @@ schema. hack/validate-capability-roles.py fails if the copy differs. Edit it her
 generator.
 
 WHY TWO CHARTS RENDER THE SAME OBJECTS, AND WHY THEY NEVER BOTH OWN ONE
-Up to 0.3.46 only the umbrella rendered these, and the umbrella is what an `Openstack`
+Up to 0.3.47 only the umbrella rendered these, and the umbrella is what an `Openstack`
 Composition installs. So they existed only after the first `Openstack` instance did:
   - `openstack-provision` grants `create openstacks`, and did not exist until an `openstacks`
     object did, so it could never authorize the create of the instance;
   - the compute-tier guard matches CREATE and was installed by that create's own release, so it
     never saw the one create that mattered.
-From 0.3.47 the per-cluster chart `openstack-capabilities` owns them. An administrator installs
+From 0.3.48 the per-cluster chart `openstack-capabilities` owns them. An administrator installs
 it once per cluster, before any instance, beside the CompositionDefinitions. It renders every
 object unconditionally (mode "standalone").
 
 The umbrella keeps this file only to hand the objects over without a gap (mode "handoff"). On a
-cluster upgraded from 0.3.46 its release owns them. If 0.3.47 simply stopped rendering them,
+cluster upgraded from 0.3.47 its release owns them. If 0.3.48 simply stopped rendering them,
 Helm would delete them on the upgrade, and the guard would be absent until someone installed
 the new chart. So in handoff mode the umbrella re-renders an object only while the live object
 is still owned by THIS release (its `meta.helm.sh/release-name`/`-namespace` annotations), and
