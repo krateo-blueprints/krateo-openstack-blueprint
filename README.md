@@ -187,6 +187,16 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 # Once per cluster. Published from 0.3.37 on: with an older BP_VERSION, take it from that tag.
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/portal-visibility-rbac.yaml
 
+# Wait until the API server serves the Openstack kind at THIS release's version. core-provider
+# creates it from the CompositionDefinition a few seconds later (28 s on a fresh GKE cluster), and
+# applying the Composition before that fails with `ServiceUnavailable ... Kind=Openstack not
+# found`. Ask the API server directly, at this version: `kubectl wait --for=condition=Ready` on
+# the CompositionDefinition says core-provider is done, not which version is served, and during
+# an upgrade the previous version is still served, so a version-blind wait passes at once.
+V=v$(printf %s "$BP_VERSION" | tr . -)
+i=0; until kubectl get --raw "/apis/composition.krateo.io/$V" 2>/dev/null | grep -q '"kind":"Openstack"'; do
+  i=$((i+1)); [ $i -lt 60 ] || { echo "Openstack is not served at $V after 5 min: check core-provider and the CompositionDefinition"; break; }; sleep 5; done
+
 # ...then one Composition rolls out a whole install in dependency order.
 kubectl create namespace openstack
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-openstack.yaml
@@ -293,11 +303,19 @@ components.
 kubectl label --overwrite nodes --all openstack-control-plane=enabled
 
 kubectl create namespace openstack-system
-for c in mariadb memcached keystone glance horizon; do
 BP_VERSION=0.3.32   # this per-component path was last verified at 0.3.32, not since
+for c in mariadb memcached keystone glance horizon; do
   kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-$c.yaml; done
+# Wait until every kind the example uses is served at this version (see the wait above). The
+# kinds come from the example itself, so this list cannot drift from what is applied.
+V=v$(printf %s "$BP_VERSION" | tr . -)
+EX=https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-01-identity.yaml
+for k in $(curl -fsSL "$EX" | sed -n 's/^kind: *//p'); do
+  i=0; until kubectl get --raw "/apis/composition.krateo.io/$V" 2>/dev/null | grep -q "\"kind\":\"$k\""; do
+    i=$((i+1)); [ $i -lt 60 ] || { echo "$k is not served at $V after 5 min: check core-provider and its CompositionDefinition"; break; }; sleep 5; done
+done
 kubectl create namespace openstack
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-01-identity.yaml
+kubectl apply -f "$EX"
 # kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-02-compute.yaml   # compute plane (GKE)
 ```
 

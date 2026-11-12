@@ -98,7 +98,9 @@ kubectl create namespace openstack-system
 BP_VERSION=0.3.26
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
-kubectl wait compositiondefinition/openstack -n openstack-system --for=condition=Ready --timeout=180s
+V=v$(printf %s "$BP_VERSION" | tr . -)   # wait until Openstack is served at THIS version (see README.md)
+i=0; until kubectl get --raw "/apis/composition.krateo.io/$V" 2>/dev/null | grep -q '"kind":"Openstack"'; do
+  i=$((i+1)); [ $i -lt 60 ] || { echo "Openstack is not served at $V after 5 min: check core-provider and the CompositionDefinition"; break; }; sleep 5; done
 
 kubectl create namespace openstack
 # The in-tree examples carry a COMPOSITION_API_VERSION placeholder; the release publishes them

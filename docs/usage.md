@@ -19,15 +19,12 @@ Register the orchestrator blueprint, then apply one `Openstack` Composition — 
 the component `CompositionDefinition`s itself and emits each component `Composition` in order
 as its dependencies become Ready.
 
-```sh
-# Register only the orchestrator blueprint...
-kubectl create namespace openstack-system
-kubectl apply -f blueprints/openstack/compositiondefinition.yaml
-
-# ...then one Composition rolls out a whole install in dependency order.
-kubectl create namespace openstack
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-openstack.yaml
-```
+Run the install steps in [README.md, Install](../README.md#install) instead of a copy of them
+here: they apply the release-stamped CompositionDefinition and Composition for one `BP_VERSION`, and
+wait until the API server serves the kind at that version before applying the Composition.
+The in-repo `blueprints/*/compositiondefinition.yaml` and `examples/*.yaml` are templates
+(`version: CHART_VERSION`, `apiVersion: composition.krateo.io/COMPOSITION_API_VERSION`) that
+the release stamps; applied as they are, they do not install anything.
 
 `profile: identity` brings up MariaDB + Memcached + Keystone + Glance + Horizon;
 `profile: full` brings up the whole catalog (needs a large amd64 cluster — see
@@ -56,14 +53,9 @@ and each component's own CRD types them against its chart schema. See [configura
 Register the component `CompositionDefinition`s you want, then apply one Composition per
 component — they self-order via OpenStack-Helm's `kubernetes-entrypoint` dep-checks.
 
-```sh
-kubectl create namespace openstack-system
-for c in mariadb memcached keystone glance horizon; do
-  kubectl apply -f blueprints/$c/compositiondefinition.yaml; done
-kubectl create namespace openstack
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-01-identity.yaml
-# kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-02-compute.yaml   # compute plane (GKE)
-```
+The steps are in [README.md, Or drive the per-component blueprints directly](../README.md#or-drive-the-per-component-blueprints-directly),
+for the same reason as above: one copy, with release-stamped files for one `BP_VERSION` and a wait
+for each kind the example uses.
 
 Each Composition's `spec` is the curated chart values (e.g. `images.pull_policy`, replica
 counts, `neutron.network.interface.tunnel`, `nova.conf.nova.libvirt.virt_type`). Empty
