@@ -572,6 +572,20 @@ Two costs, both measured:
 On a cluster still on 0.3.40 or earlier, a hook Job of the same name replaces the plain Job on
 the first upgrade. Nothing has to be deleted by hand.
 
+### Horizon sessions move to the database: every Horizon user is logged out once
+
+Horizon now keeps sessions in its MariaDB (`session_engine: django.contrib.sessions.backends.db`)
+instead of memcached. That is what lets the OIDC back-channel logout receiver find and end a
+user's sessions (`conf.horizon.backchannel_logout`, off by default, see
+[docs/configuration.md](docs/configuration.md)). Sessions created under the cache engine are not
+carried over. **The upgrade that changes the engine logs every Horizon user out once.** They
+sign in again, and nothing else is lost. The `django_session` table already exists: the
+`horizon-db-sync` hook's `manage.py migrate` has always created it, because
+`django.contrib.sessions` is in Horizon's `INSTALLED_APPS`. To keep the old behaviour, and
+forgo back-channel logout, set
+`componentValues.horizon.conf.horizon.local_settings.config.session_engine` back to
+`django.contrib.sessions.backends.cache`.
+
 ### A component keeps the API version it was created at
 
 The composition API version is derived from the chart version (`0.3.30` → `v0-3-30`), so a

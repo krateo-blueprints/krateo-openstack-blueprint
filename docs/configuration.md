@@ -205,6 +205,22 @@ Notable per-component fields:
   - `network.dashboard.service.annotations` — string map for cloud LB controls.
   - `network.node_port.{enabled,port}` — NodePort (default enabled, 31000).
   - `conf.horizon.local_settings.config.auth` — WebSSO overrides (preserve-unknown-fields).
+  - `conf.horizon.local_settings.config.session_engine` — `django.contrib.sessions.backends.db`
+    (default since this release): sessions live in Horizon's MariaDB, in the `django_session`
+    table that the `horizon-db-sync` hook's `manage.py migrate` creates. Changing the engine
+    logs every Horizon user out once.
+  - `conf.horizon.backchannel_logout.*` — the OIDC back-channel logout receiver, off by default.
+    With `enabled: true` and `issuer`, `audience`, `jwks_url` and `forward_url` set, Horizon
+    serves `POST /auth/backchannel-logout/`. Keycloak's back-channel logout URL for Keystone's
+    OIDC client is `http://horizon-int.<namespace>.svc:80/auth/backchannel-logout/`. A valid
+    logout token ends **every** Horizon session of that user: matching is on the token's `sub`,
+    not on the Keycloak session. Each session's Keystone tokens are revoked with Horizon's
+    service credentials and its row is deleted. The token is then forwarded to mod_auth_openidc
+    on Keystone (`forward_url`: Keystone's `OIDCRedirectURI` path plus `?logout=backchannel`).
+    The answer is 200 only if the forward returned 2xx and every revocation succeeded. An
+    invalid token gets 400 and changes nothing. Each value is documented in the horizon
+    chart's `values.yaml`. Keystone's mapping must take `user.id` from the OIDC `sub`, because
+    Horizon records the user's federated `unique_id` at login and compares it with `sub`.
 - **neutron** — `network.interface.tunnel` — host NIC used as the VXLAN tunnel endpoint
   (e.g. `ens4` on GKE/GCE; default `ens4`).
 - **ironic** (bare metal)
