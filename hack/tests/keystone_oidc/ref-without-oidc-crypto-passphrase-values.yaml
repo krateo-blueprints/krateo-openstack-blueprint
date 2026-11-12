@@ -1,0 +1,7 @@
+# A passphrase reference with OIDC not configured. The chart would render `OIDCCryptoPassphrase`,
+# a mod_auth_openidc directive, which Apache refuses without the module: the same crash-loop as
+# ref-without-oidc-ca-bundle-values.yaml (#237). The keystone chart must refuse it at render time.
+oidc:
+  cryptoPassphraseRef:
+    name: keystone-oidc-crypto
+    key: passphrase

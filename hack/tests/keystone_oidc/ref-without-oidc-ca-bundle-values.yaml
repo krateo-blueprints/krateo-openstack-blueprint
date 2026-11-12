@@ -1,0 +1,10 @@
+# A CA reference with OIDC not configured: no oidc.clientSecretRef and no OIDC directive in the
+# Apache config. The chart would still render `OIDCCABundlePath` (a mod_auth_openidc directive)
+# into oidc-secrets.conf, and Apache refuses an unknown directive at start-up: measured on GKE with
+# the umbrella's default keystone image, keystone-api exited 1 with "Invalid command
+# 'OIDCCABundlePath'" and crash-looped (#237). The keystone chart must refuse it at render time.
+oidc:
+  caBundleRef:
+    kind: ConfigMap
+    name: keycloak-ca
+    key: ca.crt
