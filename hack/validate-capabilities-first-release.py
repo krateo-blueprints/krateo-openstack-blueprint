@@ -112,6 +112,10 @@ def main():
             if line.strip() in ("", "#", "*/}}", "{{/*", "-->", "<!--", '"""') or line.strip().startswith("```"):
                 if cur: paras.append(cur); cur = []
                 continue
+            # A list item is a claim of its own: it starts a new scope, so one bullet's context
+            # (e.g. "openstack-capabilities included") never leaks into the next bullet's history.
+            if re.match(r"^\s*(#\s*)?[-*] ", line) and cur:
+                paras.append(cur); cur = []
             cur.append((i + 1, line))
         if cur: paras.append(cur)
         for para in paras:
