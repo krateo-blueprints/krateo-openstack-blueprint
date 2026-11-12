@@ -205,6 +205,10 @@ jobs:
       # catalog lookup was refused. Listed client options must be internal where pods read them.
       - name: OpenStack clients call internal endpoints, never the ingress-backed public one
         run: python3 hack/validate-client-endpoint-interface.py .
+      # A workload that mounts its chart's -etc/-bin without the matching hash annotation never rolls
+      # on a config change: the Secret changes, the pod keeps the old file (subPath) (#223).
+      - name: Every long-running workload rolls when the config it mounts changes
+        run: python3 hack/validate-config-hash-rollout.py .
       # The root logger on NullHandler hid that very error; a logger that also propagates to a
       # printing root prints every record twice (#203).
       - name: The root logger prints, and nothing is printed twice
