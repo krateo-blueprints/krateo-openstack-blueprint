@@ -16,7 +16,7 @@ Four properties, each one a defect this repo has shipped or would ship silently:
    for as long as they had existed.
 
 2. THE PER-CLUSTER CHART RENDERS THEM, AND THE UMBRELLA DOES NOT.
-   Up to 0.3.46 the umbrella rendered them, and the umbrella is installed by an `Openstack`
+   Up to 0.3.47 the umbrella rendered them, and the umbrella is installed by an `Openstack`
    Composition. So the roles and the compute-tier guard came into existence only with the first
    instance. The role that grants `create openstacks` could never authorize that create, and the
    guard that matches CREATE never saw it. Checked here:
@@ -25,10 +25,10 @@ Four properties, each one a defect this repo has shipped or would ship silently:
        `failurePolicy: Fail`;
      - the umbrella, rendered with no cluster, renders none of them.
    Every rendered object carries `helm.sh/resource-policy: keep`, which the gap-free handoff
-   from a 0.3.46 install depends on (templates/_capabilities.tpl).
+   from a 0.3.47 install depends on (templates/_capabilities.tpl).
 
 3. THE UMBRELLA'S HANDOFF RENDERS ONLY WHAT ITS OWN RELEASE OWNS.
-   On a cluster upgraded from 0.3.46, the umbrella re-renders an object while its own release
+   On a cluster upgraded from 0.3.47, the umbrella re-renders an object while its own release
    still owns the live copy, so the upgrade cannot delete it before the per-cluster chart takes
    it over. Getting the ownership test wrong in either direction is silent:
      - too strict, and the upgrade deletes the guard;
@@ -144,7 +144,7 @@ def check_standalone(objs: dict, want: set, bad: list) -> None:
         ann = (d.get("metadata") or {}).get("annotations") or {}
         if ann.get("helm.sh/resource-policy") != "keep":
             bad.append(f"{kind}/{name} lacks helm.sh/resource-policy: keep; the handoff from a "
-                       "0.3.46 install deletes it when the umbrella stops owning it")
+                       "0.3.47 install deletes it when the umbrella stops owning it")
         if kind == "ClusterRole":
             labels = (d.get("metadata") or {}).get("labels") or {}
             found = [m.group(1) for m in (AGG.match(k) for k in labels) if m and labels[m.group(0)] == "true"]
@@ -200,7 +200,7 @@ def check_handoff(umbrella: Path, standalone: dict, want: set, td: Path, bad: li
 
     taken = {k: CAPS_RELEASE if k[0] == "ClusterRole" else OWNER_RELEASE for k in want}
     cases = [
-        ("every object owned by this release (0.3.46 install, before the handoff)",
+        ("every object owned by this release (0.3.47 install, before the handoff)",
          {k: OWNER_RELEASE for k in want}, want),
         ("every object owned by openstack-capabilities (after the handoff)",
          {k: CAPS_RELEASE for k in want}, set()),

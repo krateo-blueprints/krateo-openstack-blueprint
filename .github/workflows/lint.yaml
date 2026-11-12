@@ -273,7 +273,7 @@ jobs:
 
       # Also: the capability roles and guards come from the per-cluster chart and never from the
       # umbrella, which an Openstack instance installs, so they exist before the first instance;
-      # the umbrella's handoff from a 0.3.46 install renders only what its own release owns; and
+      # the umbrella's handoff from a 0.3.47 install renders only what its own release owns; and
       # the per-cluster chart's inputs are the umbrella's, regenerated.
       - name: Every capability must aggregate to a predefined role, from the per-cluster chart
         run: python3 hack/validate-capability-roles.py .
@@ -649,6 +649,28 @@ jobs:
       # "upstream's default is fine" when there is no default.
       - name: Every service:<name> config section must set workers >= 1
         run: python3 hack/validate-service-workers.py .
+
+  capabilities-first-release:
+    # Gating. The per-cluster chart `openstack-capabilities` was written for 0.3.47, slipped to
+    # 0.3.48, and every doc it added still named 0.3.47 as its first release: a README reader there was
+    # told to install a chart version that was never published (#230). The chart's
+    # krateo.io/first-release annotation is the one source; this checks it against the release
+    # tags and every "from"/"up to" claim against it. It needs the tags, hence fetch-depth 0, and
+    # it fails, rather than passing, when it cannot see any.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout, with tags
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Every version claim about the per-cluster capabilities chart names its real first release
+        run: python3 hack/validate-capabilities-first-release.py .
 
   image-tags:
     # Gating, and offline. A rebuildable tag -- `latest`, or any variant containing it --

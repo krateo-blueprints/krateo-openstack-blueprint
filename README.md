@@ -190,9 +190,9 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 # The capability roles (openstack-view, -provision, -decommission, -compute-tier-guard) and the
 # compute-tier admission guard. Once per cluster, and BEFORE the first Openstack instance: the
 # provision role is what lets a non-admin create that instance, and the guard has to exist to
-# see that create. Published from 0.3.47 on; up to 0.3.46 the instance's own release rendered
+# see that create. Published from 0.3.48 on; up to 0.3.47 the instance's own release rendered
 # them, so with an older BP_VERSION skip this. Needs helm 3.17 or later for --take-ownership,
-# which is what moves the objects over from a 0.3.46 install without removing them (see
+# which is what moves the objects over from a 0.3.47 install without removing them (see
 # "Capability roles and guards" below). If you override serviceContract in the Openstack
 # Composition, pass the same values here with -f so both render the same capabilities.
 helm upgrade --install openstack-capabilities \
@@ -468,7 +468,7 @@ CI runs the whole sequence against each released 0.3.35 chart with real data in 
 ## One install per cluster
 
 **A second OpenStack blueprint cannot be installed onto a cluster that already has one**, in any
-namespace. Up to 0.3.46 the install failed in about fifteen seconds on our own capability roles:
+namespace. Up to 0.3.47 the install failed in about fifteen seconds on our own capability roles:
 
 ```
 Error: INSTALLATION FAILED: Unable to continue with install:
@@ -477,7 +477,7 @@ Error: INSTALLATION FAILED: Unable to continue with install:
   key "meta.helm.sh/release-namespace" must equal "openstack2": current value is "openstack"
 ```
 
-From 0.3.47 those four roles come from the per-cluster chart (next section), so they no longer
+From 0.3.48 those four roles come from the per-cluster chart (next section), so they no longer
 collide. The conflict moves to upstream nova's objects, when a second install reaches nova.
 
 The charts themselves are namespace-agnostic — released into `testns`, every
@@ -491,7 +491,7 @@ them:
 | ------ | ---- |
 | `ClusterRole/nova-bootstrap`, `nova-cell-setup` and both `ClusterRoleBinding`s | upstream openstack-helm's nova chart |
 
-Up to 0.3.46 the umbrella's four capability ClusterRoles were in this table too. **Nova's are
+Up to 0.3.47 the umbrella's four capability ClusterRoles were in this table too. **Nova's are
 upstream's**, and this repo tracks upstream except where upstream is demonstrably broken — an
 unnamespaced bootstrap role is an upstream design choice, not a defect. So moving our four out
 changed where the failure happens without making a second install work. That is why this is
@@ -503,7 +503,7 @@ second environment needs a second cluster.
 
 ## Capability roles and guards
 
-From 0.3.47 these objects come from the per-cluster chart `openstack-capabilities`:
+From 0.3.48 these objects come from the per-cluster chart `openstack-capabilities`:
 - the four capability ClusterRoles (`openstack-view`, `-provision`, `-decommission`,
   `-compute-tier-guard`);
 - the compute-tier `ValidatingAdmissionPolicy` and its binding.
@@ -511,7 +511,7 @@ From 0.3.47 these objects come from the per-cluster chart `openstack-capabilitie
 An administrator installs the chart once per cluster, before any `Openstack` instance (the
 `helm upgrade --install` in the install steps above).
 
-Up to 0.3.46 the umbrella rendered them, and the umbrella is what an `Openstack` Composition
+Up to 0.3.47 the umbrella rendered them, and the umbrella is what an `Openstack` Composition
 installs, so they came into existence only with the first instance:
 - `openstack-provision` grants `create openstacks`, and did not exist until an `openstacks`
   object did, so it could never authorize a non-admin to create the instance;
@@ -531,12 +531,12 @@ kubectl delete clusterrole openstack-view openstack-provision openstack-decommis
 kubectl delete validatingadmissionpolicybinding,validatingadmissionpolicy openstack-compute-tier-guard
 ```
 
-### Upgrading from 0.3.46 or earlier: the objects change owner, and are never absent
+### Upgrading from 0.3.47 or earlier: the objects change owner, and are never absent
 
 On an existing install the umbrella's release owns these objects. Upgrade in this order:
 
 ```sh
-BP_VERSION=0.3.47   # or later
+BP_VERSION=0.3.48   # or later
 # 1. The per-cluster chart takes ownership in place. Without --take-ownership helm refuses with
 #    an "invalid ownership metadata" error and changes nothing.
 helm upgrade --install openstack-capabilities \
@@ -552,12 +552,12 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 Why neither step can remove them:
 - **Step 1** updates the live objects in place. They now name `openstack-capabilities` as their
   owner and carry `keep`.
-- **Step 2:** from 0.3.47 the umbrella re-renders a capability object only while its own release
+- **Step 2:** from 0.3.48 the umbrella re-renders a capability object only while its own release
   still owns the live copy. After step 1 it owns none, so it stops rendering them. Helm's upgrade
   deletes what a release stopped rendering, but it reads `keep` from the live object first and
   skips the delete.
 
-Done the other way round, nothing is removed either. The 0.3.47 umbrella still owns the objects,
+Done the other way round, nothing is removed either. The 0.3.48 umbrella still owns the objects,
 so it re-renders them unchanged apart from adding `keep`, and step 1 then takes them over.
 
 The ownership decision is in `templates/_capabilities.tpl`. `hack/validate-capability-roles.py`
