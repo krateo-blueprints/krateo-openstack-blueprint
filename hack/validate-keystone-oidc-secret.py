@@ -42,6 +42,9 @@ This gate renders the keystone chart and checks:
   - every free-form-ca-path-*.yaml (OIDCCABundlePath in the free-form config) is refused, and a
     half oidc.caBundleRef or a kind other than ConfigMap/Secret is refused;
   - half a reference (a name without a key) is refused, for each reference;
+  - every ref-without-oidc-*.yaml (oidc.cryptoPassphraseRef or oidc.caBundleRef with OIDC not
+    configured) is refused: the chart would render a mod_auth_openidc directive that Apache refuses
+    without the module, and keystone-api crash-loops (#237);
   - the refusals an upgrading install can hit (a literal secret, OIDC without a passphrase or
     without remote_id_attribute, remote_id_attribute in [federation]) point
     at docs/configuration.md's "Upgrading an install that already uses OIDC", and that section
@@ -171,13 +174,15 @@ def main() -> int:
     no_remote_id = sorted(tests.glob("missing-remote-id-*.yaml"))
     federation_remote_id = sorted(tests.glob("federation-remote-id-*.yaml"))
     literal_ca = sorted(tests.glob("free-form-ca-path-*.yaml"))
+    ref_without_oidc = sorted(tests.glob("ref-without-oidc-*.yaml"))
     rel = tests.relative_to(root) if tests.is_relative_to(root) else tests
     for files, what in ((enabled, "enabled-*.yaml: the chart-owned directives were never rendered"),
                         (literal, "literal-*.yaml: the refusal was never exercised"),
                         (missing, "missing-passphrase-*.yaml: OIDC without a passphrase was never tried"),
                         (no_remote_id, "missing-remote-id-*.yaml: OIDC without remote_id_attribute was never tried"),
                         (federation_remote_id, "federation-remote-id-*.yaml: [federation] remote_id_attribute was never tried"),
-                        (literal_ca, "free-form-ca-path-*.yaml: OIDCCABundlePath in the free-form config was never tried")):
+                        (literal_ca, "free-form-ca-path-*.yaml: OIDCCABundlePath in the free-form config was never tried"),
+                        (ref_without_oidc, "ref-without-oidc-*.yaml: an OIDC reference without OIDC configured was never tried")):
         if not files:
             print(f"FAIL: no {rel}/{what} -- nothing was measured")
             return 1
@@ -369,6 +374,11 @@ def main() -> int:
         # OIDCCABundlePath in the free-form config: the path and its mount must come from caBundleRef.
         for f in literal_ca:
             refused(str(f.relative_to(root)), ["-f", str(f)], ["carries an OIDCCABundlePath directive"])
+
+        # An OIDC reference with OIDC not configured: the chart would render a mod_auth_openidc
+        # directive that Apache refuses without the module, so keystone-api would crash-loop (#237).
+        for f in ref_without_oidc:
+            refused(str(f.relative_to(root)), ["-f", str(f)], ["is set but OIDC is not configured"])
         refused("half oidc.caBundleRef (name, no key)", ["--set", "oidc.caBundleRef.name=keycloak-ca"],
                 ["oidc.caBundleRef needs both name and key"])
         refused("oidc.caBundleRef.kind not ConfigMap/Secret (values schema)",
