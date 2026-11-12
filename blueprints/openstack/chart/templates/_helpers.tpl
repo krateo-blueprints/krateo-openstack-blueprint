@@ -182,39 +182,30 @@ krateo.io/composition-origin-version
      version) and not merely configured. README, "Upgrading an existing install", carries this
      in operator terms.
 
-     # THE INCOMPATIBILITY, which is not advice
+     # WHEN THE PIN APPLIES: only while migration is NOT approved
 
-     Pinning holds only while the origin version stays unpruned, and what keeps it unpruned is
-     a coincidence: the krateo.io/composition-version label is re-stamped on every write to
-     request.requestKind.version by a cluster-wide MutatingAdmissionPolicy, so writing through
-     the origin endpoint keeps re-asserting that the origin version still has instances, and
-     core-provider's prune predicate therefore never prunes it. Nothing records that this chart
-     depends on that. One switch removes it: approving instance migration for a new version
-     (CompositionDefinition upgradePolicy Automatic, or Manual plus
-     krateo.io/upgrade-to-version) makes the engine rewrite every instance through the NEW
-     endpoint, the label flips, and the origin version becomes prunable. So migration must not
-     be approved for these components while the pin is in effect. If it is, the pin stops
-     applying: osh.resolveVersion emits at the current version, or the newest served one if the
-     current one is not served yet, and the component keeps its gate. Between the flip and the
-     next render, an apply at a pruned version errors.
+     The pin and core-provider's instance migration are two writers of one object, so only one may
+     act. osh.emitVersion asks osh.migrationApprovedFor -- the engine's own predicate, read off the
+     component's live CompositionDefinition -- and drops the origin (osh.effectiveOrigin) when the
+     engine is approved to migrate: Automatic, unset (the CRD default), or Manual with
+     krateo.io/upgrade-to-version naming the current version. Then the component is emitted at the
+     current version once it is served, and at the newest served version before that, so the bump
+     instant is protected exactly as above. Paused, or Manual without that annotation, keeps the
+     pin.
 
-     AND THAT IS THE DEFAULT TODAY, which is the honest limit of this change. templates/
-     definitions.yaml registers every component CompositionDefinition with no upgradePolicy,
-     and an unset policy is treated as Automatic, so migration IS approved. Measured on
-     a0-openstack-d3 running 0.3.28: all 35 component definitions report upgradePolicy
-     Automatic, and every composition.krateo.io CRD on that cluster serves exactly ONE version
-     -- each bump migrated the instances forward and the retired version was then pruned. On
-     such an install the third condition above is false for every component and this answers
-     the current version, exactly as the unpinned chart did.
+     It used to be coupled the other way, by coincidence: the pin was assumed inert under
+     Automatic because the engine pruned the old version (measured on 0.3.28: one served version
+     per CRD). core-provider 2.13.82 keeps a version that a release revision still uses, and the
+     umbrella's own manifest at the origin was such a revision, so the pin stayed in force under
+     Automatic: every child kept being written through its origin's narrower schema, values added
+     since were dropped on store, the old version was never retired, and the engine and the
+     umbrella wrote the child at two versions (#233, core-provider#462). Measured on GKE, 0.3.47 to
+     0.3.48: all 32 children emitted at v0-3-47 an hour after the upgrade, and a keystone
+     `oidc.caBundleRef` rendered by the umbrella was missing from the stored child.
 
-     The pin is therefore the mechanism and not yet the policy: it makes "emit at the origin"
-     possible and correct, and whether a component is allowed to stay at its origin is a
-     per-component upgradePolicy decision with a real cost on the other side (a paused
-     component's versions are never retired, so its CRD accumulates one served version per
-     release, and core-provider runs a controller per served version). Flipping 35 definitions
-     to Paused inside this chart would trade a visible upgrade failure for an invisible,
-     unbounded growth, which is not a trade a template should make silently. README,
-     "Hard incompatibility", states the default and how to opt a component out. */}}
+     Pausing a component's migration is still a per-component decision with a cost (its CRD keeps
+     every version it ever served, and core-provider runs a controller per served version). README,
+     "Hard incompatibility", states it and how to opt a component out. */}}
 {{- define "osh.pinVersion" -}}
 {{- $current := index . 0 -}}{{- $origin := index . 1 -}}{{- $kind := index . 2 -}}{{- $crds := index . 3 -}}
 {{- if and (ne $origin "") (ne $origin $current) (eq (include "osh.crdExists" (list $kind $origin $crds)) "true") -}}
@@ -277,10 +268,64 @@ krateo.io/composition-origin-version
      Read osh.pinVersion before changing anything here: it carries what the pin does and does
      not do, the pruning cost an older schema imposes, and the one upgrade setting that releases
      it. */}}
+{{/* Whether core-provider's engine is approved to migrate <name>'s instances to <current>: the
+     SAME predicate the engine evaluates, CompositionDefinition.MigrationApproved(targetVersion)
+     at core-provider 2.13.82 (apis/compositiondefinitions/v1alpha1/types.go:258-269):
+
+       Paused    -> false
+       Manual    -> annotation krateo.io/upgrade-to-version == targetVersion (exact string)
+       otherwise -> true            (Automatic, or unset: the CRD defaults it to Automatic)
+
+     targetVersion is the served version name the engine builds from the chart version,
+     "v" + "." replaced by "-" (internal/tools/chart/chart.go), which is exactly osh.version. An
+     annotation naming any OTHER version approves nothing, an older one included.
+
+     A pure function of (policy, upgrade-to annotation, current version), so
+     hack/validate-upgrade-does-not-prune.py drives every case without a cluster. */}}
+{{- define "osh.migrationApproved" -}}
+{{- $policy := index . 0 | toString -}}{{- $upgradeTo := index . 1 | toString -}}{{- $current := index . 2 | toString -}}
+{{- if eq $policy "Paused" -}}
+{{- else if eq $policy "Manual" -}}
+{{- if eq $upgradeTo $current -}}true{{- end -}}
+{{- else -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/* osh.migrationApproved for component <name>, read off its LIVE CompositionDefinition, so an
+     operator's `kubectl patch ... upgradePolicy` counts exactly as it does for the engine. One
+     named GET in the release namespace, where templates/definitions.yaml registers it. No
+     CompositionDefinition found -- the first render, or `helm template` where lookup is
+     disabled -- reads as unset, which the CRD defaults to Automatic. */}}
+{{- define "osh.migrationApprovedFor" -}}
+{{- $top := index . 0 -}}{{- $name := index . 1 -}}
+{{- $cd := lookup "core.krateo.io/v1alpha1" "CompositionDefinition" $top.Release.Namespace $name | default dict -}}
+{{- $policy := (($cd.spec).upgradePolicy) | default "" -}}
+{{- $upgradeTo := index ((($cd.metadata).annotations) | default dict) "krateo.io/upgrade-to-version" | default "" -}}
+{{- include "osh.migrationApproved" (list $policy $upgradeTo (include "osh.version" (list $top))) -}}
+{{- end -}}
+
+{{/* The origin the emission honours: the component's origin stamp while its instances are NOT
+     approved to migrate, and none ("") once they are. A pure function of (origin, approved).
+
+     When migration is approved the engine rewrites every instance through the current version
+     and retires the old controller; an umbrella still emitting the child at its origin would be a
+     second writer at the old version, keeping that version served (core-provider no longer prunes
+     a version a release revision still uses) and writing the child through its narrower schema,
+     which PRUNES every value the component gained since (#233, measured: a keystone
+     `oidc.caBundleRef` rendered and dropped on store). With no origin, osh.resolveVersion emits
+     the current version when it is served and otherwise the newest served one, so #166's gate
+     protection at the bump instant is unchanged. */}}
+{{- define "osh.effectiveOrigin" -}}
+{{- $origin := index . 0 | toString -}}{{- $approved := index . 1 | toString -}}
+{{- if ne $approved "true" -}}{{- $origin -}}{{- end -}}
+{{- end -}}
+
 {{- define "osh.emitVersion" -}}
 {{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $crds := index . 3 -}}{{- $exists := index . 4 -}}
 {{- $current := include "osh.version" (list $top) -}}
-{{- $origin := include "osh.originVersion" (list $top $kind $name $crds) -}}
+{{- $approved := include "osh.migrationApprovedFor" (list $top $name) -}}
+{{- $origin := include "osh.effectiveOrigin" (list (include "osh.originVersion" (list $top $kind $name $crds)) $approved) -}}
 {{- include "osh.resolveVersion" (list $current $origin $exists $kind $crds) -}}
 {{- end -}}
 

@@ -93,6 +93,21 @@ STATES = {
     "older_served_reversed": [crd("Glance", [(OLD, True), ("v0-3-9", True)])],
 }
 
+# core-provider's MigrationApproved(targetVersion) at 2.13.82 (types.go:258-269), case by case.
+# targetVersion is the served version name, so CUR; a chart-version string or an older version in
+# the annotation approves nothing.
+POLICIES = {
+    "automatic": ("Automatic", ""),
+    "unset": ("", ""),
+    "paused": ("Paused", ""),
+    "manual_no_annotation": ("Manual", ""),
+    "manual_to_current": ("Manual", CUR),
+    "manual_to_older": ("Manual", OLD),
+    "manual_chart_version_form": ("Manual", "0.3.33"),
+}
+APPROVED = {"automatic": "true", "unset": "true", "paused": "", "manual_no_annotation": "",
+            "manual_to_current": "true", "manual_to_older": "", "manual_chart_version_form": ""}
+
 PROBE = """
 {{- $crds := .Values.state }}
 apiVersion: v1
@@ -105,6 +120,11 @@ data:
   {{ $label }}_pinned: {{ include "osh.resolveVersion" (list (include "osh.version" (list $)) $origin "true" "Glance" $crds) | quote }}
   {{ $label }}_gate: {{ include "osh.crdExists" (list "Glance" (include "osh.resolveVersion" (list (include "osh.version" (list $)) $origin "true" "Glance" $crds)) $crds) | quote }}
   {{ $label }}_new_gate: {{ include "osh.crdExists" (list "Glance" (include "osh.resolveVersion" (list (include "osh.version" (list $)) $origin "" "Glance" $crds)) $crds) | quote }}
+{{- end }}
+{{- range $label, $p := .Values.policies }}
+{{- $approved := include "osh.migrationApproved" (list (index $p 0) (index $p 1) (include "osh.version" (list $))) }}
+  policy_{{ $label }}_approved: {{ $approved | quote }}
+  policy_{{ $label }}_emit: {{ include "osh.resolveVersion" (list (include "osh.version" (list $)) (include "osh.effectiveOrigin" (list (index $.Values.origins "existing") $approved)) "true" "Glance" $crds) | quote }}
 {{- end }}
 """
 
@@ -127,6 +147,9 @@ def run_probe(state):
                 # `helm template` disables lookup -- see the module docstring.
                 "origins": {"existing": OLD, "born_at_current": CUR, "unstamped": "",
                             "retired": "v0-3-29"},
+                # (upgradePolicy, krateo.io/upgrade-to-version) as the component's live
+                # CompositionDefinition would carry them; read by lookup in the real chart.
+                "policies": {name: list(v) for name, v in POLICIES.items()},
             }, fh)
         out = subprocess.run(["helm", "template", "p", chart],
                              capture_output=True, text=True)
@@ -261,6 +284,34 @@ if results["both_served"].get("existing_served") != CUR:
         f"{results['both_served'].get('existing_served')!r}, expected {CUR!r}. The probe must "
         "prefer the current version so ordinary renders are unchanged.")
 
+# #233: the origin pin must hold ONLY while migration is not approved. An EXISTING component born
+# at OLD, with both versions served (the state right after a bump), is emitted at CUR when its
+# CompositionDefinition approves migration and at OLD otherwise. At the bump instant (CUR not yet
+# served) it stays at OLD whatever the policy, so #166's protection is unchanged.
+for pol, want in APPROVED.items():
+    got = results["both_served"].get(f"policy_{pol}_approved")
+    if got != want:
+        problems.append(
+            f"upgradePolicy case '{pol}' {POLICIES[pol]}: osh.migrationApproved answers {got!r}, "
+            f"core-provider's MigrationApproved answers {want!r}. The umbrella must decide exactly "
+            "as the engine does, or it pins a component the engine is migrating (#233) or moves "
+            "one the engine is holding.")
+    emit = results["both_served"].get(f"policy_{pol}_emit")
+    want_emit = CUR if want == "true" else OLD
+    if emit != want_emit:
+        problems.append(
+            f"upgradePolicy case '{pol}', both versions served: an existing component born at {OLD} "
+            f"is emitted at {emit!r}, expected {want_emit!r}. "
+            + ("Migration is approved, so emitting at the origin writes the child through the old, "
+               "narrower schema: every value added since is dropped on store (#233)."
+               if want == "true" else
+               "Migration is NOT approved, so the component must stay at its origin."))
+    bump = results["bump_instant"].get(f"policy_{pol}_emit")
+    if bump != OLD:
+        problems.append(
+            f"upgradePolicy case '{pol}', bump instant: emitted at {bump!r}, expected {OLD!r}. The "
+            "current version is not served yet, so anything else closes the gate and prunes (#166).")
+
 # The gate and the emitted apiVersion must resolve the SAME version. They did not before #166 --
 # the gate asked osh.version while the emitter asked osh.pinVersion -- so this asserts the chart
 # routes both through the one function rather than deriving the fact twice.
@@ -281,7 +332,13 @@ EXPECTED_GATE = '{{- $exists := include "osh.exists" (list $ $c.kind $c.name $cr
                 '{{- $crd := include "osh.crdExists" (list $c.kind $emitVer $crds) }}'
 EXPECTED_DOCUMENT = 'apiVersion: {{ include "osh.apiVersionAt" (list $emitVer) }}'
 EXPECTED_EMIT = ('{{- $exists := index . 4 -}}',
+                 '{{- $approved := include "osh.migrationApprovedFor" (list $top $name) -}}',
+                 '{{- $origin := include "osh.effectiveOrigin" (list (include "osh.originVersion" (list $top $kind $name $crds)) $approved) -}}',
                  '{{- include "osh.resolveVersion" (list $current $origin $exists $kind $crds) -}}')
+EXPECTED_POLICY_READ = ('lookup "core.krateo.io/v1alpha1" "CompositionDefinition" $top.Release.Namespace $name',
+                        '(($cd.spec).upgradePolicy)',
+                        '"krateo.io/upgrade-to-version"',
+                        'include "osh.migrationApproved" (list $policy $upgradeTo (include "osh.version" (list $top)))')
 if EXPECTED_GATE not in comp:
     found = [l.strip() for l in comp.splitlines() if "$crd :=" in l] or ["(no $crd assignment at all)"]
     problems.append(
@@ -308,6 +365,20 @@ for line in EXPECTED_EMIT:
         problems.append(
             f"osh.emitVersion no longer contains `{line}`. The caller's existence answer must "
             "reach osh.resolveVersion unchanged.")
+
+# The policy must be read off the component's LIVE CompositionDefinition (the probe injects it, so
+# only a structural check can see the read), and compared with the CURRENT version.
+if '{{- define "osh.migrationApprovedFor" -}}' not in helpers:
+    problems.append("osh.migrationApprovedFor is missing: nothing reads the component's upgradePolicy, "
+                    "so the origin pin holds even while the engine migrates the component (#233).")
+else:
+    pol_def = helpers[helpers.index('{{- define "osh.migrationApprovedFor" -}}'):]
+    pol_def = pol_def[:pol_def.index("{{- end -}}")]
+    for frag in EXPECTED_POLICY_READ:
+        if frag not in pol_def:
+            problems.append(f"osh.migrationApprovedFor no longer contains `{frag}`: the policy must come "
+                            "from the component's live CompositionDefinition in the release namespace "
+                            "and be compared with the current version, as core-provider's engine does.")
 
 # osh.originVersion must read the stamp through a SERVED version. This is the half the probe
 # genuinely cannot see -- the read needs `lookup`, which is disabled offline -- so it is
