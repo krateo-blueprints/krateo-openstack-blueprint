@@ -103,7 +103,7 @@ The orchestrator carries a `serviceContract` stanza (contract v1): identity fede
 (Keycloak client, groups mapper, optional IdP broker), a mandatory role mapping (CMP roles →
 native OpenStack roles), a capability catalog (each capability renders an aggregation-labeled
 ClusterRole, and ABAC capabilities additionally a ValidatingAdmissionPolicy and binding; from
-0.3.47 these come from the per-cluster chart `openstack-capabilities`, installed before any
+0.3.48 these come from the per-cluster chart `openstack-capabilities`, installed before any
 instance, which takes the same `serviceContract`), an SSO
 deep-link, and usage/health/tagging/ticketing declarations. The runtime side of the
 usage/health declaration is the **contract emitter** — CronJobs polling the OpenStack APIs
