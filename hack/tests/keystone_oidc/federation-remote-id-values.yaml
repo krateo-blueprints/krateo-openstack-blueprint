@@ -1,0 +1,27 @@
+# remote_id_attribute in [federation], Keystone's fallback when the protocol's own group has none.
+# Next to [openid] it would be a second place deciding which identity provider a token came from,
+# so the keystone chart refuses it: conf.keystone.openid.remote_id_attribute is the one source.
+oidc:
+  clientSecretRef:
+    name: keystone-oidc-client
+    key: client-secret
+  cryptoPassphraseRef:
+    name: keystone-oidc-crypto
+    key: passphrase
+conf:
+  keystone:
+    openid:
+      remote_id_attribute: HTTP_OIDC_ISS
+    federation:
+      remote_id_attribute: HTTP_OIDC_ISS
+  wsgi_keystone: |
+    {{- $portInt := tuple "identity" "service" "api" $ | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+    Listen 0.0.0.0:{{ $portInt }}
+    <VirtualHost *:{{ $portInt }}>
+        WSGIScriptAlias / /var/www/cgi-bin/keystone/wsgi.py
+        OIDCClientID "keystone"
+        <Location "/v3/auth/OS-FEDERATION/identity_providers/keycloak/protocols/openid/websso">
+            AuthType "openid-connect"
+            Require valid-user
+        </Location>
+    </VirtualHost>
