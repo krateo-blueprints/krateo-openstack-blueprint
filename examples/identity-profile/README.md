@@ -30,15 +30,10 @@ spec:
 
 ## Run it
 
-```sh
-# 1. Register the orchestrator blueprint (it registers the component definitions itself).
-kubectl create namespace openstack-system
-kubectl apply -f ../../blueprints/openstack/compositiondefinition.yaml
-
-# 2. One Composition rolls out the whole identity plane in dependency order.
-kubectl create namespace openstack
-kubectl apply -f ../openstack.yaml
-```
+Follow [README.md, Install](../../README.md#install). Its `example-openstack.yaml` is this file,
+stamped by the release with the `apiVersion` that release serves; `profile: identity` is its
+default. The file here is the unstamped template (`apiVersion:
+composition.krateo.io/COMPOSITION_API_VERSION`), so applying it as it is installs nothing.
 
 The orchestrator emits each component `Composition` only once its dependencies report
 `Ready=True`: `mariadb`+`memcached` → `keystone` → `glance`+`horizon`.
