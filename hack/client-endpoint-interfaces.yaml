@@ -1,0 +1,53 @@
+# Client endpoint options a component's own OpenStack clients read, whose UPSTREAM default is the
+# public catalog endpoint. In this blueprint a public endpoint is `<svc>.openstack.svc.cluster.local:80`,
+# backed by the ingress (`app=ingress-api`), which has no pods unless an ingress controller is
+# installed, so a client left at its default fails with ECONNREFUSED. Each option must render with its
+# internal value in every pod that reads it. hack/validate-client-endpoint-interface.py enforces this.
+#
+# Each entry is measured from the upstream source named in `source`, not inferred: a default that is
+# already internal (e.g. watcher's monasca_client) is listed too, so a future default change is caught
+# by the gate rather than assumed.
+watcher:
+  source: openstack/watcher unmaintained/2025.1, watcher/conf/*_client.py (defaults) and watcher/common/clients.py (readers)
+  # Pods whose merged config must carry these: the ones that run watcher's clients.
+  pods:
+    - watcher-decision-engine
+    - watcher-applier
+    - watcher-api
+  options:
+    - group: keystone_client
+      option: interface
+      upstream_default: public
+      internal: internal
+    - group: nova_client
+      option: endpoint_type
+      upstream_default: publicURL
+      internal: internalURL
+    - group: glance_client
+      option: endpoint_type
+      upstream_default: publicURL
+      internal: internalURL
+    - group: cinder_client
+      option: endpoint_type
+      upstream_default: publicURL
+      internal: internalURL
+    - group: neutron_client
+      option: endpoint_type
+      upstream_default: publicURL
+      internal: internalURL
+    - group: ironic_client
+      option: endpoint_type
+      upstream_default: publicURL
+      internal: internalURL
+    - group: gnocchi_client
+      option: endpoint_type
+      upstream_default: public
+      internal: internal
+    - group: placement_client
+      option: interface
+      upstream_default: public
+      internal: internal
+    - group: monasca_client
+      option: interface
+      upstream_default: internal
+      internal: internal

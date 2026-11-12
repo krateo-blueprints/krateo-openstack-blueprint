@@ -42,6 +42,18 @@ limitations under the License.
 {{- $_ := set .Values.conf.watcher.keystone_authtoken "password" .Values.endpoints.identity.auth.watcher.password -}}
 {{- end -}}
 
+{{- /* [watcher_clients_auth]: the identity watcher's clients authenticate with (#203). Each key
+       left empty takes the value keystone_authtoken uses, so the two can't drift apart. */ -}}
+{{- $clients := .Values.conf.watcher.watcher_clients_auth -}}
+{{- if empty $clients.auth_url -}}
+{{- $_ := tuple "identity" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" | set $clients "auth_url" -}}
+{{- end -}}
+{{- range $key := list "username" "password" "project_name" "project_domain_name" "user_domain_name" "region_name" -}}
+{{- if empty (index $clients $key) -}}
+{{- $_ := set $clients $key (index $envAll.Values.endpoints.identity.auth.watcher $key) -}}
+{{- end -}}
+{{- end -}}
+
 {{- if empty .Values.conf.watcher.keystone_authtoken.memcached_servers -}}
 {{- $_ := tuple "oslo_cache" "internal" "memcache" . | include "helm-toolkit.endpoints.host_and_port_endpoint_uri_lookup" | set .Values.conf.watcher.keystone_authtoken "memcached_servers" -}}
 {{- end -}}
