@@ -13,9 +13,9 @@ Secrets; keystone-api gets OIDC_CLIENT_SECRET and OIDC_CRYPTO_PASSPHRASE from th
 renders `OIDCClientSecret ${OIDC_CLIENT_SECRET}` and `OIDCCryptoPassphrase
 ${OIDC_CRYPTO_PASSPHRASE}` in its own file under conf.software.apache2.conf_dir. Apache resolves
 them from the process environment at startup. Measured in
-ghcr.io/krateo-blueprints/keystone-oidc:2025.1-ubuntu_jammy: a real code flow's token request
-carried the client secret's value, and a state cookie made under one passphrase was rejected under
-another. Either directive in the free-form config is refused at render time, and so is OIDC without
+ghcr.io/krateo-blueprints/keystone-oidc:2025.1-ubuntu_jammy (mod_auth_openidc 2.4.11) and again in
+:2026.1-ubuntu_noble (2.4.15.1, keystone 29.1.1): a real code flow's token request carried the client
+secret's value, and a state cookie made under one passphrase was rejected under another. Either directive in the free-form config is refused at render time, and so is OIDC without
 a passphrase: mod_auth_openidc 2.4.11 refuses to start without one, and `apache2 -t` does not
 notice.
 

@@ -40,7 +40,7 @@ plaintext, so these helpers make that impossible rather than discouraged. The tw
   keystone.oidc.requireRemoteIdAttribute
     Fails the render when OIDC is configured but conf.keystone.openid.remote_id_attribute is
     empty. Without it Keystone's validate_idp returns before comparing the token's issuer with
-    the identity provider's remote_ids (keystone 2025.1, keystone/federation/utils.py), so the
+    the identity provider's remote_ids (keystone 2026.1, keystone/federation/utils.py; unchanged since 2025.1), so the
     IdP's remote_ids constrain nothing. Also fails when conf.keystone.federation.remote_id_attribute
     is set: Keystone falls back to it when the protocol group has none, and one setting must
     decide. The group is `openid` because the protocol id is `openid`, fixed by the websso paths

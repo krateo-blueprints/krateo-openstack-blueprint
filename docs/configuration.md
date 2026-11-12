@@ -62,8 +62,11 @@ Common shapes across components:
 Notable per-component fields:
 
 - **keystone**
-  - `images.tags.keystone_api` — full image ref for the keystone-api container (e.g. a
-    build that ships `mod_auth_openidc` for OIDC federation).
+  - `images.tags.keystone_api` — full image ref for the keystone-api container. OIDC federation
+    needs `mod_auth_openidc`, which the default image does not ship: use
+    `ghcr.io/krateo-blueprints/keystone-oidc:2026.1-ubuntu_noble`, the same OpenStack series as the
+    chart's other keystone images (db-sync and bootstrap run those, so a different series would run
+    keystone-api against a schema another release migrated, #229).
   - `network.api.node_port.{enabled,port}` — expose the API on a NodePort (30000..32767,
     default 30500); OIDC redirects run through the browser, so Keystone must be reachable at
     a public HTTPS hostname.
@@ -290,7 +293,7 @@ are fixed. Do these steps in one change, before or together with the version bum
 
    `HTTP_OIDC_ISS` is the issuer as Keystone sees it with `OIDCClaimPrefix "OIDC-"`; use the
    matching name if your prefix differs. Without it, Keystone does not compare the token's issuer
-   with the identity provider's `remote_ids` (`validate_idp` in keystone 2025.1 returns early), so
+   with the identity provider's `remote_ids` (`validate_idp` in keystone 2026.1 returns early), so
    `remote_ids` constrain nothing and nothing logs it above debug level. `[federation]` is only
    Keystone's fallback; the chart keeps the setting in one place, the group named after the
    protocol id `openid`. The Keystone `FederationProtocol` (openstack-keystone-operator-kog) has
