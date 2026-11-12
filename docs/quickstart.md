@@ -48,12 +48,12 @@ helm upgrade --install core-provider $OCI/core-provider \
 Only the umbrella `CompositionDefinition` is registered by hand — it registers
 each component blueprint itself.
 
-```sh
-kubectl create namespace openstack-system
-kubectl apply -f blueprints/openstack/compositiondefinition.yaml
-kubectl wait compositiondefinition/openstack -n openstack-system \
-  --for=condition=Ready --timeout=180s
-```
+Run the install steps in [README.md, Install](../README.md#install) instead of a copy of them
+here: they apply the release-stamped CompositionDefinition and Composition for one `BP_VERSION`, and
+wait until the API server serves the kind at that version before applying the Composition.
+The in-repo `blueprints/*/compositiondefinition.yaml` and `examples/*.yaml` are templates
+(`version: CHART_VERSION`, `apiVersion: composition.krateo.io/COMPOSITION_API_VERSION`) that
+the release stamps; applied as they are, they do not install anything.
 
 `core-provider` pulls `oci://ghcr.io/krateo-blueprints/charts/openstack` at the version the
 CompositionDefinition pins, and generates the `Openstack` CRD and its controller. The CRD's group
@@ -82,10 +82,8 @@ One `Openstack` Composition = one install. Pick the scope with `spec`:
   expanded to its **transitive dependency closure**, so you get exactly what
   you ask for plus what it needs.
 
-```sh
-kubectl create namespace openstack
-kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/latest/download/example-openstack.yaml
-```
+The Composition is applied by the same [README.md, Install](../README.md#install) steps, after the
+wait for the served kind.
 
 Or deploy a precise subset — e.g. just Heat and everything it depends on:
 
