@@ -183,6 +183,10 @@ Notable per-component fields:
     mod_auth_openidc validates the IdP against it with TLS validation still on. Never write
     `OIDCCABundlePath` into `conf.wsgi_keystone`: the chart refuses it, so the path and the mount
     come from one place. Never set `OIDCSSLValidateServer Off` to reach a private-CA IdP.
+    Set it, and `oidc.cryptoPassphraseRef`, only together with an OIDC configuration (an
+    `oidc.clientSecretRef` or the Apache OIDC block): on its own the chart refuses it, because the
+    directive it renders belongs to mod_auth_openidc, and Apache would refuse to start without that
+    module loaded (#237).
     ```yaml
     oidc:
       caBundleRef:
@@ -338,7 +342,7 @@ only environment-specific fields (URLs, realm). All top-level keys are required:
 | `service` | `{name, displayName, description?, owner?}` | DNS-1123 identifier + display metadata. |
 | `identity.keycloak` | `{client, groupsMapper, idpBroker?}` | Keycloak client (`clientId`, `realmRef?`, `protocol`), groups mapper (`claim`, `fullPath`), optional IdP broker (`alias`, `providerRef?`). |
 | `roleMapping[]` | `{cmpRole, nativeRole, scope?, description?}` | **Mandatory**, min 1 — maps CMP roles/capabilities to native OpenStack roles. |
-| `capabilities[]` | see [api](./api.md) | Atomic permissions; each renders an aggregation-labeled ClusterRole, ABAC ones additionally a ValidatingAdmissionPolicy and binding. From 0.3.47 the per-cluster chart `openstack-capabilities` renders them (pass it the same `serviceContract`); see the README's "Capability roles and guards". |
+| `capabilities[]` | see [api](./api.md) | Atomic permissions; each renders an aggregation-labeled ClusterRole, ABAC ones additionally a ValidatingAdmissionPolicy and binding. From 0.3.48 the per-cluster chart `openstack-capabilities` renders them (pass it the same `serviceContract`); see the README's "Capability roles and guards". |
 | `sso` | `{deepLink, logout}` | Context deep-link (`urlTemplate` with `{org}/{tenant}/{namespace}/{project}`, optional `preRedirect`) + logout (`oidc-backchannel` default, or `saml-slo`). |
 | `usage` | `{interval, metrics[]}` | UsageRecord emission declaration; each metric `{name, unit, kind: gauge\|counter\|capacity, dimensions?}`. |
 | `health` | `{interval, source}` | Normalized health emission mapped to `OK\|Warning\|Critical\|Unknown`; `source.type` is `endpoint`\|`metric`\|`adapter`. |

@@ -311,6 +311,12 @@ dependencies:
           - endpoint: node
             service: local_image_registry
   static:
+    alarms_cleaner:
+      jobs:
+        - aodh-db-sync
+      services:
+        - endpoint: internal
+          service: oslo_db
     api:
       jobs:
         - aodh-db-sync

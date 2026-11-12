@@ -200,9 +200,9 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 # The capability roles (openstack-view, -provision, -decommission, -compute-tier-guard) and the
 # compute-tier admission guard. Once per cluster, and BEFORE the first Openstack instance: the
 # provision role is what lets a non-admin create that instance, and the guard has to exist to
-# see that create. Published from 0.3.47 on; up to 0.3.46 the instance's own release rendered
+# see that create. Published from 0.3.48 on; up to 0.3.47 the instance's own release rendered
 # them, so with an older BP_VERSION skip this. Needs helm 3.17 or later for --take-ownership,
-# which is what moves the objects over from a 0.3.46 install without removing them (see
+# which is what moves the objects over from a 0.3.47 install without removing them (see
 # "Capability roles and guards" below). If you override serviceContract in the Openstack
 # Composition, pass the same values here with -f so both render the same capabilities.
 helm upgrade --install openstack-capabilities \
@@ -478,7 +478,7 @@ CI runs the whole sequence against each released 0.3.35 chart with real data in 
 ## One install per cluster
 
 **A second OpenStack blueprint cannot be installed onto a cluster that already has one**, in any
-namespace. Up to 0.3.46 the install failed in about fifteen seconds on our own capability roles:
+namespace. Up to 0.3.47 the install failed in about fifteen seconds on our own capability roles:
 
 ```
 Error: INSTALLATION FAILED: Unable to continue with install:
@@ -487,7 +487,7 @@ Error: INSTALLATION FAILED: Unable to continue with install:
   key "meta.helm.sh/release-namespace" must equal "openstack2": current value is "openstack"
 ```
 
-From 0.3.47 those four roles come from the per-cluster chart (next section), so they no longer
+From 0.3.48 those four roles come from the per-cluster chart (next section), so they no longer
 collide. The conflict moves to upstream nova's objects, when a second install reaches nova.
 
 The charts themselves are namespace-agnostic — released into `testns`, every
@@ -501,7 +501,7 @@ them:
 | ------ | ---- |
 | `ClusterRole/nova-bootstrap`, `nova-cell-setup` and both `ClusterRoleBinding`s | upstream openstack-helm's nova chart |
 
-Up to 0.3.46 the umbrella's four capability ClusterRoles were in this table too. **Nova's are
+Up to 0.3.47 the umbrella's four capability ClusterRoles were in this table too. **Nova's are
 upstream's**, and this repo tracks upstream except where upstream is demonstrably broken — an
 unnamespaced bootstrap role is an upstream design choice, not a defect. So moving our four out
 changed where the failure happens without making a second install work. That is why this is
@@ -513,7 +513,7 @@ second environment needs a second cluster.
 
 ## Capability roles and guards
 
-From 0.3.47 these objects come from the per-cluster chart `openstack-capabilities`:
+From 0.3.48 these objects come from the per-cluster chart `openstack-capabilities`:
 - the four capability ClusterRoles (`openstack-view`, `-provision`, `-decommission`,
   `-compute-tier-guard`);
 - the compute-tier `ValidatingAdmissionPolicy` and its binding.
@@ -521,7 +521,7 @@ From 0.3.47 these objects come from the per-cluster chart `openstack-capabilitie
 An administrator installs the chart once per cluster, before any `Openstack` instance (the
 `helm upgrade --install` in the install steps above).
 
-Up to 0.3.46 the umbrella rendered them, and the umbrella is what an `Openstack` Composition
+Up to 0.3.47 the umbrella rendered them, and the umbrella is what an `Openstack` Composition
 installs, so they came into existence only with the first instance:
 - `openstack-provision` grants `create openstacks`, and did not exist until an `openstacks`
   object did, so it could never authorize a non-admin to create the instance;
@@ -541,12 +541,12 @@ kubectl delete clusterrole openstack-view openstack-provision openstack-decommis
 kubectl delete validatingadmissionpolicybinding,validatingadmissionpolicy openstack-compute-tier-guard
 ```
 
-### Upgrading from 0.3.46 or earlier: the objects change owner, and are never absent
+### Upgrading from 0.3.47 or earlier: the objects change owner, and are never absent
 
 On an existing install the umbrella's release owns these objects. Upgrade in this order:
 
 ```sh
-BP_VERSION=0.3.47   # or later
+BP_VERSION=0.3.48   # or later
 # 1. The per-cluster chart takes ownership in place. Without --take-ownership helm refuses with
 #    an "invalid ownership metadata" error and changes nothing.
 helm upgrade --install openstack-capabilities \
@@ -562,12 +562,12 @@ kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint
 Why neither step can remove them:
 - **Step 1** updates the live objects in place. They now name `openstack-capabilities` as their
   owner and carry `keep`.
-- **Step 2:** from 0.3.47 the umbrella re-renders a capability object only while its own release
+- **Step 2:** from 0.3.48 the umbrella re-renders a capability object only while its own release
   still owns the live copy. After step 1 it owns none, so it stops rendering them. Helm's upgrade
   deletes what a release stopped rendering, but it reads `keep` from the live object first and
   skips the delete.
 
-Done the other way round, nothing is removed either. The 0.3.47 umbrella still owns the objects,
+Done the other way round, nothing is removed either. The 0.3.48 umbrella still owns the objects,
 so it re-renders them unchanged apart from adding `keep`, and step 1 then takes them over.
 
 The ownership decision is in `templates/_capabilities.tpl`. `hack/validate-capability-roles.py`
@@ -717,54 +717,47 @@ GET /apis/composition.krateo.io/v0-3-28/.../mariadbs/mariadb   ->   spec: {a}
 
 Same object, same storage. `b` is still there; the older endpoint simply does not hand it over.
 
-**Any `spec.componentValues.<name>` property this blueprint adds after a component's origin
-version therefore does nothing on that component.** It is not rejected and it raises no event:
-it is dropped on the way in, and the only symptom is a setting that has no effect. If a value
-you set appears to be ignored, read the annotation above: a component whose
-`composition-origin-version` is older than the release that introduced the value cannot see it.
+**On a PINNED component, any `spec.componentValues.<name>` property this blueprint adds after
+the component's origin version therefore does nothing.** It is not rejected and it raises no
+event: it is dropped on the way in, and the only symptom is a setting that has no effect. A
+component is pinned only while its migration is not approved (next section); with the default
+`upgradePolicy` it follows the migration and sees every value. If a value you set appears to be
+ignored, read the component's `upgradePolicy` and the annotation above.
 
-The fix is to recreate that component rather than to configure it harder — delete its
-Composition and let the orchestrator emit it fresh, which re-stamps the origin at the current
-version and restores the whole value surface. Expect that component's workloads to be recreated.
+To give a pinned component a newer value, either approve its migration (next section), or
+recreate it: delete its Composition and let the orchestrator emit it fresh, which re-stamps the
+origin at the current version. Expect that component's workloads to be recreated.
 
-### Hard incompatibility: do not approve instance migration on these components
+### The pin and instance migration: one writer per component
 
-The pin works only while the origin version is still served, and what keeps it served is that
-writing an instance through that endpoint keeps marking the version as in use. Approving
-**instance migration** rewrites every instance through the *new* endpoint instead, which
-releases the old version for removal and takes the pin with it.
+The pin and core-provider's **instance migration** both decide which version a component's
+object is written through, so only one of them may act for a component. Migration rewrites every
+instance through the *new* endpoint and retires the old controller; a pin still writing the
+object at its origin would undo that on every reconcile.
 
-So, for as long as components are pinned, their `CompositionDefinition`s must **not** approve
-migration:
+The umbrella reads each component's `CompositionDefinition` and pins only while its migration
+is **not** approved, using the same predicate core-provider's engine evaluates:
 
-| `spec.upgradePolicy` | Effect |
-| -------------------- | ------ |
-| `Paused`             | Safe. Migration never runs. |
-| `Manual` *without* the `krateo.io/upgrade-to-version` annotation | Safe. |
-| `Manual` *with* `krateo.io/upgrade-to-version: <new version>` | **Defeats the pin.** |
-| `Automatic`, or unset | **Defeats the pin** — unset is treated as `Automatic`. |
+| `spec.upgradePolicy` | Migration | The umbrella emits the component at |
+| -------------------- | --------- | ----------------------------------- |
+| `Automatic`, or unset (the default) | approved | the current version once served; until then, the newest served |
+| `Manual` with `krateo.io/upgrade-to-version: <current served version, e.g. v0-3-48>` | approved | the same |
+| `Manual` without that annotation, or naming any other version | not approved | its origin version (pinned) |
+| `Paused` | not approved | its origin version (pinned) |
 
-If migration is approved, the pinned version becomes removable and the pin stops applying: the
-next render emits the component as an unstamped one. Between the old version being removed and
-that render, an apply can land at a version that is no longer served and fail with
-`no matches for kind`.
-
-**Read the row you are actually on.** The component `CompositionDefinition`s this orchestrator
-registers (`templates/definitions.yaml`) set no `upgradePolicy`, which is the last row —
-migration is approved, and the pin above therefore falls back to the current version. Measured
-on a live cluster running 0.3.28: all 35 component definitions report `upgradePolicy:
-Automatic`, and every `composition.krateo.io` CRD on it serves exactly one version, the current
-one, because each bump migrates the instances forward and the retired version is then pruned.
-
-So the pin protects an install whose component definitions do not approve migration, and does
-nothing on one that does:
+Up to 0.3.48 the umbrella pinned regardless of the policy. That was meant to be harmless under
+`Automatic` because the old version used to be pruned, but core-provider now keeps a version
+a release revision still uses, so on an upgraded install every component stayed at its creation
+version: values a component gained since were dropped on store, and the old version was never
+retired (#233). Measured on GKE, 0.3.47 → 0.3.48. From this fix, a component whose migration is
+approved follows it.
 
 ```sh
 # inspect
 kubectl -n openstack get compositiondefinitions \
   -o custom-columns='NAME:.metadata.name,VER:.spec.chart.version,POLICY:.spec.upgradePolicy'
 
-# opt a component out of migration, which is what makes the pin effective for it
+# keep a component on its origin version (opt it out of migration)
 kubectl -n openstack patch compositiondefinition mariadb --type=merge \
   -p '{"spec":{"upgradePolicy":"Paused"}}'
 ```
