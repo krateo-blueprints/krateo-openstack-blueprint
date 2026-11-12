@@ -1409,6 +1409,12 @@ dependencies:
           pod: null
       sriov: {}
   static:
+    ovn_db_sync:
+      jobs:
+        - neutron-db-sync
+      services:
+        - endpoint: internal
+          service: oslo_db
     bootstrap:
       services:
       - endpoint: internal

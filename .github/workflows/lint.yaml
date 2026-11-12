@@ -196,6 +196,11 @@ jobs:
       # engine exited 1 at start-up; the section is judged merged as each pod mounts it (#203).
       - name: Every keystoneauth section a pod reads names its plugin and endpoint
         run: python3 hack/validate-oslo-auth-sections.py .
+      # 20 workloads passed an init-container dependency key their chart did not define, so they
+      # waited on nothing: watcher's decision engine crashed on missing tables before its db-sync
+      # ran (#236). Also: entries must use keys the snippet reads, and services the chart defines.
+      - name: Every init container waits on a declared, resolvable dependency
+        run: python3 hack/validate-init-container-dependencies.py .
       # README applied the Composition before core-provider served its kind (ServiceUnavailable on a
       # fresh cluster). Every documented apply waits for the kind at its BP_VERSION, by API-server poll.
       - name: Every documented Composition apply waits until its kind is served at that version
