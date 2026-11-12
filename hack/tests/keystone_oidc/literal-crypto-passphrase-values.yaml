@@ -1,0 +1,17 @@
+# The same defect for the other secret: mod_auth_openidc's crypto passphrase written straight into
+# conf.wsgi_keystone, where anyone who can read the Composition CR can read it and decrypt or forge
+# state and session cookies. The value below is a placeholder and not a credential. The keystone
+# chart must refuse to render this, even with the client secret correctly referenced.
+oidc:
+  clientSecretRef:
+    name: keystone-oidc-client
+    key: client-secret
+conf:
+  wsgi_keystone: |
+    {{- $portInt := tuple "identity" "service" "api" $ | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+    Listen 0.0.0.0:{{ $portInt }}
+    <VirtualHost *:{{ $portInt }}>
+        WSGIScriptAlias / /var/www/cgi-bin/keystone/wsgi.py
+        OIDCClientID "keystone"
+        OIDCCryptoPassphrase "placeholder-not-a-credential"
+    </VirtualHost>
