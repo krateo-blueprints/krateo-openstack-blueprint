@@ -312,6 +312,14 @@ dependencies:
         - endpoint: internal
           service: identity
     agent:
+      # The agent registers accelerators against THIS node's placement resource provider, which
+      # nova-compute on the same node creates; waiting for placement-api alone is not enough
+      # (measured: PlacementResourceProviderNotFound until that node's nova-compute was up, #236).
+      pod:
+        - labels:
+            application: nova
+            component: compute
+          requireSameNode: true
       jobs:
         - cyborg-db-sync
         - cyborg-rabbit-init
