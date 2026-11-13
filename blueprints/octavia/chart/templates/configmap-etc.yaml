@@ -69,7 +69,9 @@ limitations under the License.
 {{- if empty .Values.conf.octavia.service_auth.username -}}
 {{- $_ := set .Values.conf.octavia.service_auth "username" .Values.endpoints.identity.auth.admin.username -}}
 {{- end -}}
-{{- if empty .Values.conf.octavia.service_auth.password -}}
+{{- /* With passwordFrom (#228) the admin password reaches octavia as the drop-in
+       octavia-admin-password-etc renders (secret-admin-password-etc.yaml), never through this file. */ -}}
+{{- if and (empty .Values.conf.octavia.service_auth.password) (not .Values.endpoints.identity.auth.admin.passwordFrom) -}}
 {{- $_ := set .Values.conf.octavia.service_auth "password" .Values.endpoints.identity.auth.admin.password -}}
 {{- end -}}
 

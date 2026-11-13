@@ -115,6 +115,14 @@ kubectl label --overwrite nodes --all openstack-control-plane=enabled \
 # nodes carried only openstack-control-plane ran 227 pods and had no nova-compute, no libvirt and
 # no openvswitch: an OpenStack that could not boot an instance, reported by nothing.
 
+# External Secrets Operator generates every install's credentials, so they are the install's own
+# instead of OpenStack-Helm's published defaults (#228; the Keystone admin password first, the
+# others follow). From 0.3.52 the orchestrator REFUSES to render without ESO's CRDs, and says so on
+# its status; installing it for an earlier release is harmless.
+helm upgrade --install external-secrets external-secrets \
+  --repo https://charts.external-secrets.io --version 2.14.0 \
+  --namespace external-secrets --create-namespace --set installCRDs=true --wait
+
 # Register only the orchestrator blueprint...
 kubectl create namespace openstack-system
 # The blueprint release this path has been verified against. Pinned, not `latest`, for
@@ -574,6 +582,27 @@ umbrella renders none of them on its own.
 Bumping the blueprint version on a running install is one `kubectl apply` of the new
 `CompositionDefinition`, and the orchestrator rolls the components forward. Two things about
 that upgrade are worth knowing before you do it, because both of them are silent.
+
+### Upgrading to 0.3.52 or later: install ESO first, and the Keystone admin password rotates
+
+From 0.3.52 the orchestrator generates the Keystone admin password once per install, with an
+External Secrets Operator `Password` generator, instead of using OpenStack-Helm's published
+default (#228). Install ESO (the `helm upgrade --install external-secrets` step above) **before**
+applying the 0.3.52 `CompositionDefinition`; without its CRDs the orchestrator refuses to render
+and says why on its status, and the install stays on the previous release.
+
+The upgrade rotates the password; nothing is left on the default:
+- `openstack-credential-identity-admin` in the install's namespace holds the generated value. Never
+  delete it: the generator would produce a new value no service accepts (it carries
+  `helm.sh/resource-policy: keep` so an upgrade cannot remove it).
+- Every `<component>-keystone-admin` Secret keeps its name and keys and is now written by an
+  `ExternalSecret` from that root, so its readers (component jobs, and for example
+  openstack-keystone-operator-kog's `authBridge.openrcSecret: keystone-keystone-admin`) need no
+  change. Measured on ESO 2.14.0: during the upgrade the name is absent for about 13 ms.
+- Keystone's `db-sync` hook runs `keystone-manage bootstrap` with the new value, which resets the
+  admin user's password without needing the old one.
+- A rollback across this upgrade fails without changing anything and the next reconcile moves
+  forward again; the generated password stays.
 
 ### Components follow the umbrella's version
 

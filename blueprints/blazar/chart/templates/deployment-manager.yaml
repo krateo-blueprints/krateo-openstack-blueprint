@@ -90,6 +90,12 @@ spec:
               mountPath: /etc/blazar/policy.yaml
               subPath: policy.yaml
               readOnly: true
+            {{- if .Values.endpoints.identity.auth.admin.passwordFrom }}
+            # The admin password as a drop-in (#228); oslo.config reads blazar.conf.d after blazar.conf.
+            - name: blazar-admin-password-etc
+              mountPath: /etc/blazar/blazar.conf.d/
+              readOnly: true
+            {{- end }}
 {{- if $mounts.volumeMounts }}
 {{ toYaml $mounts.volumeMounts | indent 12 }}
 {{- end }}
@@ -108,6 +114,12 @@ spec:
           secret:
             secretName: blazar-etc
             defaultMode: 0444
+        {{- if .Values.endpoints.identity.auth.admin.passwordFrom }}
+        - name: blazar-admin-password-etc
+          secret:
+            secretName: blazar-admin-password-etc
+            defaultMode: 0444
+        {{- end }}
 {{- if $mounts.volumes }}
 {{ toYaml $mounts.volumes | indent 8 }}
 {{- end }}
