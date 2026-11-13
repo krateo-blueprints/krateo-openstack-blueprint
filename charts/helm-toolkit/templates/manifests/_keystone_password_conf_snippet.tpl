@@ -30,6 +30,9 @@ apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: {{ $secretName }}
+  annotations:
+    # Deleted with the release, after its pre-delete hooks, not finalized ahead of it (#254).
+    krateo.io/teardown: with-release
 spec:
   refreshInterval: 1h
   secretStoreRef:

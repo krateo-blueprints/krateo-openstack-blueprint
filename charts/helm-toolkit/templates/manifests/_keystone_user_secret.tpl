@@ -50,6 +50,10 @@ kind: ExternalSecret
 metadata:
   name: {{ $secretName }}
   annotations:
+    # Deleted by helm WITH the release, after the pre-delete hooks that read this Secret -- not
+    # finalized ahead of the uninstall by composition-dynamic-controller, which would take the Secret
+    # with it (#254; core-provider's opt-out contract: exactly this value).
+    krateo.io/teardown: with-release
 {{ tuple "identity" $userClass $envAll | include "helm-toolkit.snippets.custom_secret_annotations" | indent 4 }}
 spec:
   refreshInterval: 1h
