@@ -341,6 +341,13 @@ jobs:
       - name: The back-channel logout receiver's unit tests pass
         run: python3 hack/validate-horizon-backchannel-tests.py .
 
+      # Horizon's home page (#247): on a deployment without compute every login landed on 403,
+      # because the default home (Project > Overview) needs openstack.services.compute. Renders the
+      # chart, checks the package, its mounts, its install step and the EXECUTED settings snippet
+      # (Horizon only logs a snippet that raises), then runs the /auth/home/ view's tests.
+      - name: Horizon sends every user to a page they can open
+        run: python3 hack/validate-horizon-home.py .
+
       # The quietest version of the same failure. gnocchi-metricd and gnocchi-statsd had no
       # probe at all, and both swallow every backend error and loop forever
       # (MetricProcessBase.run and Stats.flush in gnocchi 4.7.0), so a metricd that cannot

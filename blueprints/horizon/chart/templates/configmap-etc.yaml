@@ -38,6 +38,7 @@ data:
 {{- range $key, $value := .Values.conf.horizon.local_settings_d }}
   {{ printf "%s.py" $key }}: {{ $value | b64enc }}
 {{- end }}
+  {{ include "horizon.krateo_home.snippet_name" . }}: {{ include "horizon.krateo_home.settings" . | b64enc }}
 {{- if include "horizon.backchannel_logout.enabled" . }}
   {{ include "horizon.backchannel_logout.snippet_name" . }}: {{ include "horizon.backchannel_logout.settings" . | b64enc }}
 {{- end }}

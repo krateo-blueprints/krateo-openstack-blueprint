@@ -193,6 +193,17 @@ spec:
               subPath: {{ base $localSettingsFile }}
               readOnly: true
             {{- end }}
+            {{- $homeSnippet := include "horizon.krateo_home.snippet_name" $envAll }}
+            - name: horizon-etc
+              mountPath: /etc/openstack-dashboard/local_settings.d/{{ $homeSnippet }}
+              subPath: {{ $homeSnippet }}
+              readOnly: true
+            {{- range $path, $_ := $envAll.Files.Glob "files/krateo_home/*.py" }}
+            - name: horizon-bin
+              mountPath: {{ include "horizon.krateo_home.package_dir" $envAll }}/{{ base $path }}
+              subPath: krateo_home.{{ base $path }}
+              readOnly: true
+            {{- end }}
             {{- if include "horizon.backchannel_logout.enabled" $envAll }}
             {{- $snippet := include "horizon.backchannel_logout.snippet_name" $envAll }}
             - name: horizon-etc
