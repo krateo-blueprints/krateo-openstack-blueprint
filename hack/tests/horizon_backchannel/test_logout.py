@@ -249,8 +249,12 @@ class FakeUser(object):
 
 class LoginRecordsSubject(Base):
 
-    def login(self, user):
-        request = RequestFactory().get("/auth/websso/")
+    def login(self, user, post=None):
+        # post: the login form's fields. openstack_auth's websso view is a POST of `token`.
+        if post is None:
+            request = RequestFactory().get("/auth/websso/")
+        else:
+            request = RequestFactory().post("/auth/websso/", post)
         request.session = SessionStore()
         user_logged_in.send(sender=FakeUser, request=request, user=user)
         return request.session
@@ -291,6 +295,33 @@ class LoginRecordsSubject(Base):
         finally:
             logging.disable(logging.NOTSET)
         self.assertNotIn(logout.SESSION_KEY, session)
+
+    def test_websso_login_records_the_websso_token(self):
+        self.user_route("u-46", [{"idp_id": "keycloak", "protocols": [
+            {"protocol_id": "openid", "unique_id": support.USER_SUB}]}])
+        session = self.login(FakeUser("u-46"), post={"token": "websso-46"})
+        self.assertEqual(session[logout.SESSION_KEY], {
+            "subs": [support.USER_SUB], "user_id": "u-46", "unscoped_token": "user-unscoped",
+            "websso_token": "websso-46"})
+
+    def test_password_login_records_no_websso_token(self):
+        self.user_route("u-47", [{"idp_id": "keycloak", "protocols": [
+            {"protocol_id": "openid", "unique_id": support.USER_SUB}]}])
+        session = self.login(FakeUser("u-47"), post={"username": "u", "password": "pw-not-real"})
+        self.assertNotIn("websso_token", session[logout.SESSION_KEY])
+
+    def test_websso_token_is_revoked_at_logout(self):
+        # Horizon authenticates WITH the WebSSO token to get its own unscoped token, and revoking
+        # a token never revokes its parent: the browser's WebSSO token must be revoked itself.
+        self.user_route("u-48", [{"idp_id": "keycloak", "protocols": [
+            {"protocol_id": "openid", "unique_id": support.USER_SUB}]}])
+        session = self.login(FakeUser("u-48"), post={"token": "websso-48"})
+        session["token"] = support.FakeToken("s-48", "user-unscoped")
+        session.save()
+        self.assertEqual(self.post(support.keycloak_token()).status_code, 200)
+        revoked = {c["headers"]["X-Subject-Token"] for c in self.transport.made("DELETE", TOKENS_URL)}
+        self.assertEqual(revoked, {"s-48", "user-unscoped", "websso-48"})
+        self.assertNotIn(session.session_key, live_keys())
 
     def test_recorded_login_is_then_logged_out(self):
         self.user_route("u-45", [{"idp_id": "keycloak", "protocols": [
