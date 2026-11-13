@@ -77,6 +77,14 @@
 {{- $nodes = ((lookup "v1" "Node" "" "").items | default list) }}
 {{- end }}
 {{- include "osh.requireNodeLabels" (list $ $sel $nodes) -}}
+{{- /* Selected components this render does NOT emit (their dependencies are not Ready yet, or their CRD
+       is not served yet). While any remain, the ConfigMap openstack-install-pending below is emitted,
+       and the CompositionDefinition's statusDataTemplate projects health Ready=False/Creating from its
+       presence in .status.managed: the umbrella must not report Ready while a selected component does
+       not exist yet (#257 -- measured: Ready=True at 21:47:26 with cyborg, the last tier, emitted only
+       at 21:48:21). The selection and emission decisions stay here, in one place; the projection only
+       reads whether the chart said "pending". */ -}}
+{{- $pending := list }}
 {{- range $c := .Values.components }}
 {{- if has $c.name $sel }}
 {{- /* The version this component will be EMITTED at, resolved before anything is decided
@@ -202,6 +210,21 @@ spec:
 {{- else }}
 spec: {}
 {{- end }}
+{{- else }}
+{{- $pending = append $pending $c.name }}
 {{- end }}
 {{- end }}
+{{- end }}
+{{- if $pending }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openstack-install-pending
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    krateo.io/install-pending: "true"
+data:
+  pending: {{ join " " $pending | quote }}
+  count: {{ len $pending | quote }}
 {{- end }}

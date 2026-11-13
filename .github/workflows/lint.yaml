@@ -349,6 +349,13 @@ jobs:
       - name: Every install's credentials are its own
         run: python3 hack/validate-credentials.py .
 
+      # The umbrella is not Ready while a selected component does not exist yet (#257): the chart emits
+      # ConfigMap openstack-install-pending exactly while it holds a selected component back, and the
+      # CompositionDefinition's statusDataTemplate projects Ready=False/Creating from its presence --
+      # {} (no ready key) otherwise, never ready: true. The jq is executed, not just read.
+      - name: The umbrella waits for its last tier before reporting Ready
+        run: python3 hack/validate-umbrella-install-pending.py .
+
       # Horizon's home page (#247): on a deployment without compute every login landed on 403,
       # because the default home (Project > Overview) needs openstack.services.compute. Renders the
       # chart, checks the package, its mounts, its install step and the EXECUTED settings snippet

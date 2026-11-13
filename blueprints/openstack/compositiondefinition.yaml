@@ -7,3 +7,13 @@ spec:
   chart:
     url: oci://ghcr.io/krateo-blueprints/charts/openstack
     version: CHART_VERSION
+  # The umbrella is not Ready while a selected component does not exist yet (#257). The chart emits the
+  # ConfigMap openstack-install-pending exactly while it holds back a selected component (one DAG tier per
+  # render); core-provider projects this onto status.health, which its Ready verdict reads as a veto:
+  # Ready=False/Creating, a converging state, never Ready=True on its own. Done projects {} -- an object
+  # with NO ready key -- so the stale value is replaced and readiness follows the children's rollup
+  # (projecting ready: true would count as evidence for a composition whose children could not be read).
+  statusDataTemplate:
+    - forPath: health
+      preserveUnknownFields: true
+      expression: '${ if ((.status.managed // []) | any(.resource == "configmaps" and .name == "openstack-install-pending")) then {ready: false, reason: "Creating", message: "selected components are not created yet (DAG tiers still pending); they are listed in ConfigMap openstack-install-pending"} else {} end }'
