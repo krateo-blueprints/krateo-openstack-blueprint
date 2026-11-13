@@ -35,6 +35,11 @@ four things hold, and each is checked here:
      chart's db-sync script must set ignore_lockout_failure_attempts on the bootstrap user through
      Keystone's provider API, BEFORE keystone-manage bootstrap (so the exemption holds before the
      reset can make anyone fail) and AFTER it (a fresh install, where bootstrap creates the user).
+  6. TORN DOWN WITH THE RELEASE. composition-dynamic-controller finalizes a release's children that
+     carry finalizers BEFORE helm uninstall. An ExternalSecret carries ESO's, so it was deleted first
+     and took its Secret with it -- and glance's pre-delete hook then could not start (#254). Every
+     ExternalSecret rendered, the umbrella's roots and every component's projections, must carry
+     krateo.io/teardown: with-release (core-provider's opt-out contract, exactly that value).
 
 Fails when helm or PyYAML is missing, when the umbrella defines no credential, when a listed chart
 does not render, and when no chart was checked.
@@ -173,6 +178,8 @@ def main():
             if i["secret"] not in root_names:
                 fail("umbrella: no root ExternalSecret %s for credential %s" % (i["secret"], i["id"]))
         for d in roots:
+            if (d["metadata"].get("annotations") or {}).get("krateo.io/teardown") != "with-release":
+                fail("umbrella: root %s lacks krateo.io/teardown: with-release (#254)" % d["metadata"]["name"])
             if (d["metadata"].get("annotations") or {}).get("helm.sh/resource-policy") != "keep":
                 fail("umbrella: root %s lacks helm.sh/resource-policy: keep" % d["metadata"]["name"])
             if (d.get("spec") or {}).get("refreshPolicy") != "CreatedOnce":
@@ -219,6 +226,12 @@ def main():
                                      % (c["name"], d["metadata"]["name"], k))
                         except Exception:
                             pass
+            for d in docs:
+                if d.get("kind") == "ExternalSecret" and \
+                        (d["metadata"].get("annotations") or {}).get("krateo.io/teardown") != "with-release":
+                    fail("%s: ExternalSecret %s lacks krateo.io/teardown: with-release, so it is finalized "
+                         "before the release's pre-delete hooks run and takes its Secret with it (#254)"
+                         % (c["name"], d["metadata"]["name"]))
             es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == admin_secret]
             sec = [d for d in docs if d.get("kind") == "Secret" and d["metadata"]["name"] == admin_secret]
             item = items["identity-admin"]
@@ -279,7 +292,7 @@ def main():
             print("FAIL: " + f)
         sys.exit(1)
     print("OK: %d credential item(s); %d chart(s) rendered with references carry no admin password from values; "
-          "umbrella references, closure, roots and the admin lockout exemption consistent" % (len(items), checked))
+          "umbrella references, closure, roots, the admin lockout exemption and teardown with the release consistent" % (len(items), checked))
 
 
 main()
