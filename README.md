@@ -583,12 +583,12 @@ Bumping the blueprint version on a running install is one `kubectl apply` of the
 `CompositionDefinition`, and the orchestrator rolls the components forward. Two things about
 that upgrade are worth knowing before you do it, because both of them are silent.
 
-### Upgrading to 0.3.52 or later: install ESO first, and the Keystone admin password rotates
+### Upgrading to 0.3.53 or later: install ESO first, and the Keystone admin password rotates
 
 From 0.3.52 the orchestrator generates the Keystone admin password once per install, with an
 External Secrets Operator `Password` generator, instead of using OpenStack-Helm's published
 default (#228). Install ESO (the `helm upgrade --install external-secrets` step above) **before**
-applying the 0.3.52 `CompositionDefinition`; without its CRDs the orchestrator refuses to render
+applying the new `CompositionDefinition`; without its CRDs the orchestrator refuses to render
 and says why on its status, and the install stays on the previous release.
 
 The upgrade rotates the password; nothing is left on the default:
@@ -596,9 +596,21 @@ The upgrade rotates the password; nothing is left on the default:
   delete it: the generator would produce a new value no service accepts (it carries
   `helm.sh/resource-policy: keep` so an upgrade cannot remove it).
 - Every `<component>-keystone-admin` Secret keeps its name and keys and is now written by an
-  `ExternalSecret` from that root, so its readers (component jobs, and for example
-  openstack-keystone-operator-kog's `authBridge.openrcSecret: keystone-keystone-admin`) need no
-  change. Measured on ESO 2.14.0: during the upgrade the name is absent for about 13 ms.
+  `ExternalSecret` from that root, so nothing has to be reconfigured. Measured on ESO 2.14.0:
+  during the upgrade the name is absent for about 13 ms.
+- **Restart every long-running reader of `keystone-keystone-admin` outside the blueprint right
+  after the upgrade.** A process that read the Secret when it started (through `envFrom`, for
+  example openstack-keystone-operator-kog's auth-bridge with
+  `authBridge.openrcSecret: keystone-keystone-admin`) keeps the old password and gets 401 until it
+  restarts: `kubectl -n openstack rollout restart deployment <its deployment>`.
+- **Use 0.3.53 or later, not 0.3.52.** keystone.conf locks an account for 30 minutes after five
+  failed logins. On 0.3.52 such a stale reader locked the admin account for everyone, again every
+  30 minutes, and component upgrades that needed it waited (measured: Glance's hooks waited 34
+  minutes, and the correct new password got 401 while locked). From 0.3.53 the keystone chart
+  exempts the admin user from lockout (`ignore_lockout_failure_attempts`, set by `db-sync` before
+  `bootstrap` resets the password), so a stale reader gets 401 without locking anyone else out. The
+  password is 32 random characters, so brute force is not what the lockout would stop; human and
+  federated users keep it.
 - Keystone's `db-sync` hook runs `keystone-manage bootstrap` with the new value, which resets the
   admin user's password without needing the old one.
 - A rollback across this upgrade fails without changing anything and the next reconcile moves

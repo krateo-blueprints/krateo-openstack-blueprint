@@ -29,6 +29,12 @@ four things hold, and each is checked here:
   4. ROOTS ARE PERMANENT. Every root Secret name shipped in the latest release tag is still an item
      here. Renaming or removing one makes ESO generate a new password that no backend accepts
      (measured on ESO 2.15.0, #228).
+  5. MACHINE USERS CANNOT BE LOCKED OUT. keystone.conf enables failed-login lockout, and while the
+     admin password rotates, clients still holding the previous value fail: five failures locked the
+     admin account for 30 minutes at a time (measured upgrading 0.3.51 to 0.3.52). The keystone
+     chart's db-sync script must set ignore_lockout_failure_attempts on the bootstrap user through
+     Keystone's provider API, BEFORE keystone-manage bootstrap (so the exemption holds before the
+     reset can make anyone fail) and AFTER it (a fresh install, where bootstrap creates the user).
 
 Fails when helm or PyYAML is missing, when the umbrella defines no credential, when a listed chart
 does not render, and when no chart was checked.
@@ -230,6 +236,28 @@ def main():
                 if spec.get("target", {}).get("creationPolicy") != "Owner":
                     fail("%s: ExternalSecret %s is not creationPolicy Owner (Orphan loses the Secret on a "
                          "retried upgrade, #228)" % (c["name"], admin_secret))
+        # 5. the admin user is exempt from lockout, before and after bootstrap
+        w = stage(os.path.join(BP, "keystone", "chart"), tmp, "keystone-lockout")
+        rc, out, err = helm_template(w, "keystone-gate1234")
+        script = None
+        if rc == 0:
+            for d in yaml.safe_load_all(out):
+                if d and d.get("kind") == "ConfigMap" and d["metadata"]["name"] == "keystone-bin":
+                    script = (d.get("data") or {}).get("db-sync.sh")
+        if script is None:
+            fail("keystone: no db-sync.sh in the keystone-bin ConfigMap (render rc=%s %s)" % (rc, err.strip()[:200]))
+        else:
+            lines = [l.strip() for l in script.splitlines()]
+            calls = [i for i, l in enumerate(lines) if l == "ensure_admin_lockout_exempt"]
+            boot = [i for i, l in enumerate(lines) if l == "bootstrap"]
+            if '"ignore_lockout_failure_attempts": True' not in script or "identity.update_user(" not in script:
+                fail("keystone: db-sync.sh does not set ignore_lockout_failure_attempts through identity_api.update_user")
+            if len(boot) != 1:
+                fail("keystone: db-sync.sh runs keystone-manage bootstrap %d times, want 1" % len(boot))
+            elif not any(c < boot[0] for c in calls) or not any(c > boot[0] for c in calls):
+                fail("keystone: db-sync.sh must call ensure_admin_lockout_exempt before AND after bootstrap "
+                     "(calls at lines %s, bootstrap at %s)" % (calls, boot[0]))
+
         if checked == 0:
             print("FAILED MEASUREMENT: no chart was rendered with credential references")
             sys.exit(2)
@@ -251,7 +279,7 @@ def main():
             print("FAIL: " + f)
         sys.exit(1)
     print("OK: %d credential item(s); %d chart(s) rendered with references carry no admin password from values; "
-          "umbrella references, closure and roots consistent" % (len(items), checked))
+          "umbrella references, closure, roots and the admin lockout exemption consistent" % (len(items), checked))
 
 
 main()
