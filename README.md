@@ -136,35 +136,33 @@ kubectl create namespace openstack-system
 # the 0.3.42 release notes say how to recover an install that has it. 0.3.43 through 0.3.45
 # publish broken Marketplace icons for 23 charts (#214); they install and run correctly.
 #
-# What 0.3.48 has actually been run through, stated so you know what is NOT covered:
-#   - 0.3.48 freshly installed with these exact steps, profile: full-strict, on a 6-node GKE
-#     cluster (n2-standard-16, Kubernetes 1.36.4, core-provider 2.13.82): 32 components and the
-#     umbrella Ready 26 min after the apply; all 37 Helm releases deployed, openstack-capabilities
-#     included; no container restarted in a 10-minute window after start-up; a componentValues
-#     override (keystone `oidc.caBundleRef`) stored on the component and mounted by keystone-api.
-#     Set without OIDC configured, that crash-looped keystone-api (#237); removing it recovered
-#     keystone on its own, after the stuck upgrade's 15-minute helm timeout;
-#   - a 0.3.47 install upgraded to 0.3.48 as "Upgrading an existing install" below describes: all
-#     32 components and the umbrella Ready at 0.3.48 20 min after the apply; the capability roles
-#     and guard handed to openstack-capabilities and never absent (sampled every 5 s); watcher's
-#     decision engine on internal endpoints (#224) and every changed workload rolled once (#225);
+# What 0.3.51 has actually been run through, stated so you know what is NOT covered:
+#   - 0.3.51 freshly installed with these exact steps, profile: full-strict, on a 3-node GKE
+#     cluster (n2-standard-16, Kubernetes 1.36.4, core-provider 2.13.89): 32 components Ready
+#     24 min and the umbrella 25 min after the apply; the apply below went through on its first
+#     server dry-run (#245); no container restarted, cyborg's agents and conductor and watcher's
+#     decision engine included (#236, #243), and none restarted in a 10-minute window after
+#     start-up (310 containers); 171 pods, none Pending;
+#   - a fresh 0.3.50 install upgraded to 0.3.51 as "Upgrading an existing install" below
+#     describes, with no change to the Openstack: all 32 components at 0.3.51 5 min after the
+#     apply, never fewer than 32 Ready during it; the previous version stopped being served 5 min
+#     later (core-provider 2.13.89). A Horizon user whose catalog has no compute lands on the
+#     Identity dashboard, not on 403 (#247);
+#   - an identity-profile 0.3.49 install upgraded to 0.3.50 with no values change: every
+#     component converged to the new version in 2.5 min (#233, core-provider 2.13.87); Keystone
+#     WebSSO through an in-cluster Keycloak (keystone-oidc 2026.1): login, a federated user mapped
+#     to its tenant project, and a Keycloak logout ending the Horizon session and revoking the
+#     Keystone token the browser carried (#246);
 #   - an upgrade of a 0.3.34 install to 0.3.42 with hack/migrate-to-pvc.py, then on to 0.3.43:
 #     MariaDB and RabbitMQ data intact across the upgrade, a node move and a RabbitMQ outage,
 #     and a designate zone round-trip through PowerDNS (#179, #204).
 # Known, measured, not yet fixed:
-#   - on a fresh install 8 pods restart during start-up before their components report Ready:
-#     watcher's decision engine (5x, it starts before its database tables exist) and cyborg's
-#     agents and conductor (5-8x), because their init containers wait on nothing (#236);
-#   - on an UPGRADED install, a value a component's schema gained after the version that
-#     component was created at is silently dropped: in 0.3.48 that is keystone `oidc.*Ref` and
-#     horizon `backchannel_logout.ca_bundle_ref` (#233). Fresh installs are not affected;
-#   - an `oidc.*Ref` set without OIDC configured crash-loops keystone-api (#237);
 #   - a component can read Ready while a pod of it crash-loops (#231).
 # cinder is not in full-strict because its only backend needs Ceph (#196). NOT verified at this
-# version: the 36-component profile: full, kind, a VNC console in a browser, OIDC federation
-# (the OIDC image is still 2025.1, #229), and the per-component path further down.
+# version: the 36-component profile: full, kind, a VNC console in a browser, and the
+# per-component path further down.
 
-BP_VERSION=0.3.48
+BP_VERSION=0.3.51
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 
