@@ -78,12 +78,14 @@ dependency order):
 ```sh
 BP_VERSION=0.3.16   # the release this path is verified against; see the note above
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
-V=v$(printf %s "$BP_VERSION" | tr . -)   # wait until Openstack is served at THIS version (see README.md)
-i=0; until kubectl get --raw "/apis/composition.krateo.io/$V" 2>/dev/null | grep -q '"kind":"Openstack"'; do
-  i=$((i+1)); [ $i -lt 60 ] || { echo "Openstack is not served at $V after 5 min: check core-provider and the CompositionDefinition"; break; }; sleep 5; done
 kubectl create namespace openstack
+OS=openstack-full.yaml
 curl -sfL https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-openstack.yaml \
-  | sed 's/profile: identity/profile: full/' | kubectl apply -f -
+  | sed 's/profile: identity/profile: full/' > "$OS"
+# wait until the API server accepts it (a server dry-run of the same file; see README.md, #244)
+i=0; until kubectl apply --dry-run=server -f "$OS" >/dev/null 2>&1; do
+  i=$((i+1)); [ $i -lt 60 ] || { echo "the API server has not accepted $OS after 5 min:"; kubectl apply --dry-run=server -f "$OS"; break; }; sleep 5; done
+kubectl apply -f "$OS"
 ```
 
 **Or the per-component Composition sets** (register the component CompositionDefinitions from step 2 first):
@@ -91,14 +93,11 @@ curl -sfL https://github.com/krateo-blueprints/krateo-openstack-blueprint/releas
 ```sh
 kubectl create namespace openstack
 BP_VERSION=0.3.16   # the release this path is verified against; see the note above
-V=v$(printf %s "$BP_VERSION" | tr . -)
 for ex in example-01-identity example-02-compute; do
   EX=https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/$ex.yaml
-  # wait until every kind this example uses is served at THIS version (see README.md)
-  for k in $(curl -fsSL "$EX" | sed -n 's/^kind: *//p'); do
-    i=0; until kubectl get --raw "/apis/composition.krateo.io/$V" 2>/dev/null | grep -q "\"kind\":\"$k\""; do
-      i=$((i+1)); [ $i -lt 60 ] || { echo "$k is not served at $V after 5 min: check core-provider and its CompositionDefinition"; break; }; sleep 5; done
-  done
+  # wait until the API server accepts it (a server dry-run of the same file; see README.md, #244)
+  i=0; until kubectl apply --dry-run=server -f "$EX" >/dev/null 2>&1; do
+    i=$((i+1)); [ $i -lt 60 ] || { echo "the API server has not accepted $EX after 5 min:"; kubectl apply --dry-run=server -f "$EX"; break; }; sleep 5; done
   kubectl apply -f "$EX"
 done
 ```
