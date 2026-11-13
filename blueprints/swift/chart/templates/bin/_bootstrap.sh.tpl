@@ -8,15 +8,10 @@ set -ex
 
 echo "Swift bootstrap started"
 
-# Source credentials
-export OS_AUTH_URL={{ tuple "identity" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" }}
-export OS_IDENTITY_API_VERSION=3
-export OS_USERNAME={{ .Values.endpoints.identity.auth.admin.username }}
-export OS_PASSWORD={{ .Values.endpoints.identity.auth.admin.password }}
-export OS_PROJECT_NAME={{ .Values.endpoints.identity.auth.admin.project_name }}
-export OS_USER_DOMAIN_NAME={{ .Values.endpoints.identity.auth.admin.user_domain_name }}
-export OS_PROJECT_DOMAIN_NAME={{ .Values.endpoints.identity.auth.admin.project_domain_name }}
-export OS_INTERFACE=internal
+# Credentials: the Job's env carries every OS_* variable from the swift-keystone-admin Secret
+# (helm-toolkit keystone_openrc_env_vars). They are not exported here: this script ships in a
+# ConfigMap, so a literal password here would be readable by anyone who can read ConfigMaps, and
+# would be the published default even when the Secret's password is generated (#228).
 
 # Wait for Swift proxy to be ready
 SWIFT_ENDPOINT={{ tuple "object_store" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" }}

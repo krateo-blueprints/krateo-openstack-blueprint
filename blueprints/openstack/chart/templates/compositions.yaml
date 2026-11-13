@@ -143,6 +143,10 @@
 {{- $relaxedExist := include "osh.depsExist" (list $ $relaxed $.Values.components $crds) }}
 {{- if and (eq $crd "true") (or (and (eq $strictReady "true") (eq $relaxedExist "true")) (eq $exists "true")) }}
 {{- $ov := (index ($.Values.componentValues | default dict) $c.name) | default dict }}
+{{- /* Credential references (#228): merged UNDER the component's own values, so an explicit
+       componentValues entry wins. osh.credentialRefs says what is passed and why. */ -}}
+{{- $refs := include "osh.credentialRefs" (list $ $c) | fromYaml }}
+{{- if $refs }}{{- $ov = mergeOverwrite $refs (deepCopy $ov) }}{{- end }}
 {{- /* The apiVersion is PINNED to the version this object was born at, when it has one.
 
        A new component renders at the current version. One that already exists renders at its

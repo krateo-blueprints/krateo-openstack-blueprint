@@ -86,7 +86,9 @@ Openstack auth
 {{- if empty .Values.conf.blazar.DEFAULT.os_admin_username -}}
 {{- $_ := set .Values.conf.blazar.DEFAULT "os_admin_username" .Values.endpoints.identity.auth.admin.username -}}
 {{- end -}}
-{{- if empty .Values.conf.blazar.DEFAULT.os_admin_password -}}
+{{- /* With passwordFrom (#228) the admin password reaches blazar as the drop-in
+       blazar-admin-password-etc renders (secret-admin-password-etc.yaml), never through this file. */ -}}
+{{- if and (empty .Values.conf.blazar.DEFAULT.os_admin_password) (not .Values.endpoints.identity.auth.admin.passwordFrom) -}}
 {{- $_ := set .Values.conf.blazar.DEFAULT "os_admin_password" .Values.endpoints.identity.auth.admin.password -}}
 {{- end -}}
 ---

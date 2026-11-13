@@ -341,6 +341,14 @@ jobs:
       - name: The back-channel logout receiver's unit tests pass
         run: python3 hack/validate-horizon-backchannel-tests.py .
 
+      # Per-install credentials (#228): the umbrella passes each component a REFERENCE to a
+      # credential ESO generated once, the charts project it, and the value from values reaches no
+      # rendered object (a per-chart sentinel, since the published default is a common word); the
+      # consumers listed by the umbrella are exactly the charts that render the credential; the
+      # roots are kept and never renamed against the latest release.
+      - name: Every install's credentials are its own
+        run: python3 hack/validate-credentials.py .
+
       # Horizon's home page (#247): on a deployment without compute every login landed on 403,
       # because the default home (Project > Overview) needs openstack.services.compute. Renders the
       # chart, checks the package, its mounts, its install step and the EXECUTED settings snippet

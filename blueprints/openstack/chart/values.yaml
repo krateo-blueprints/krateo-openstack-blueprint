@@ -29,6 +29,21 @@ enabled:
 #           tunnel: eth1
 componentValues:
 
+
+# Per-install credentials (#228). The umbrella generates each one ONCE with External Secrets
+# Operator (templates/credentials.yaml) and hands the components listing it under
+# `components[].credentials` a REFERENCE at `path`, never a value. Not part of the Openstack
+# schema: an install cannot drop a credential back to OpenStack-Helm's published default.
+# NEVER rename or remove an item: its root Secret holds the live password, and a new name
+# generates a new one (hack/validate-credentials.py refuses both).
+credentials:
+  store: openstack-credentials
+  generator: openstack-credentials
+  items:
+    - id: identity-admin
+      secret: openstack-credential-identity-admin
+      key: password
+      path: endpoints.identity.auth.admin.passwordFrom
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
 components:
@@ -42,17 +57,23 @@ components:
     tier: identity
   - name: keystone
     kind: Keystone
+    credentials:
+      - identity-admin
     deps:
       - mariadb
       - memcached
     tier: identity
   - name: glance
     kind: Glance
+    credentials:
+      - identity-admin
     deps:
       - keystone
     tier: identity
   - name: horizon
     kind: Horizon
+    credentials:
+      - identity-admin
     deps:
       - keystone
     tier: identity
@@ -66,6 +87,8 @@ components:
     tier: compute
   - name: placement
     kind: Placement
+    credentials:
+      - identity-admin
     deps:
       - keystone
     tier: compute
@@ -76,6 +99,8 @@ components:
     tier: compute
   - name: neutron
     kind: Neutron
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -83,6 +108,8 @@ components:
     tier: compute
   - name: nova
     kind: Nova
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - placement
@@ -93,6 +120,8 @@ components:
     tier: compute
   - name: ironic
     kind: Ironic
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - mariadb
@@ -109,6 +138,8 @@ components:
     requiresProvisioning: true
   - name: cinder
     kind: Cinder
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -124,6 +155,8 @@ components:
     requiresProvisioning: true
   - name: heat
     kind: Heat
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -131,6 +164,8 @@ components:
     tier: compute
   - name: barbican
     kind: Barbican
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -143,6 +178,8 @@ components:
     tier: compute
   - name: designate
     kind: Designate
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -151,6 +188,8 @@ components:
     tier: compute
   - name: octavia
     kind: Octavia
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -166,6 +205,8 @@ components:
 
   - name: magnum
     kind: Magnum
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -179,6 +220,8 @@ components:
     tier: compute
   - name: manila
     kind: Manila
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -186,6 +229,8 @@ components:
     tier: compute
   - name: mistral
     kind: Mistral
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -193,6 +238,8 @@ components:
     tier: compute
   - name: ceilometer
     kind: Ceilometer
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -205,6 +252,8 @@ components:
     tier: compute
   - name: aodh
     kind: Aodh
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -212,6 +261,8 @@ components:
     tier: compute
   - name: cloudkitty
     kind: Cloudkitty
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -219,6 +270,8 @@ components:
     tier: compute
   - name: masakari
     kind: Masakari
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -226,6 +279,8 @@ components:
     tier: compute
   - name: trove
     kind: Trove
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -233,6 +288,8 @@ components:
     tier: compute
   - name: watcher
     kind: Watcher
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -240,6 +297,8 @@ components:
     tier: compute
   - name: tacker
     kind: Tacker
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -251,6 +310,8 @@ components:
     tier: compute
   - name: cyborg
     kind: Cyborg
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -262,6 +323,8 @@ components:
     tier: compute
   - name: blazar
     kind: Blazar
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -273,6 +336,8 @@ components:
     tier: compute
   - name: zaqar
     kind: Zaqar
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - mariadb
@@ -288,6 +353,8 @@ components:
     tier: compute
   - name: freezer
     kind: Freezer
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - rabbitmq
@@ -295,11 +362,15 @@ components:
     tier: compute
   - name: skyline
     kind: Skyline
+    credentials:
+      - identity-admin
     deps:
       - keystone
     tier: compute
   - name: gnocchi
     kind: Gnocchi
+    credentials:
+      - identity-admin
     deps:
       - keystone
       - mariadb
@@ -319,6 +390,8 @@ components:
     tier: compute
   - name: swift
     kind: Swift
+    credentials:
+      - identity-admin
     deps:
       - keystone
     tier: compute
