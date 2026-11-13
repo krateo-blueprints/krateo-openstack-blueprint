@@ -255,9 +255,10 @@ components:
       - keystone
       - rabbitmq
       - mariadb
-      # cyborg-agent waits for placement-api: it registers accelerators against the node's
-      # resource provider (#236).
+      # cyborg-agent waits for placement-api, and for nova-compute on its own node, which creates
+      # the node's placement resource provider it registers accelerators against (#236).
       - placement
+      - nova
     tier: compute
   - name: blazar
     kind: Blazar
