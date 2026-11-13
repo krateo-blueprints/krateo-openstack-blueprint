@@ -144,18 +144,27 @@ kubectl create namespace openstack-system
 # the 0.3.42 release notes say how to recover an install that has it. 0.3.43 through 0.3.45
 # publish broken Marketplace icons for 23 charts (#214); they install and run correctly.
 #
-# What 0.3.51 has actually been run through, stated so you know what is NOT covered:
-#   - 0.3.51 freshly installed with these exact steps, profile: full-strict, on a 3-node GKE
-#     cluster (n2-standard-16, Kubernetes 1.36.4, core-provider 2.13.89): 32 components Ready
-#     24 min and the umbrella 25 min after the apply; the apply below went through on its first
-#     server dry-run (#245); no container restarted, cyborg's agents and conductor and watcher's
-#     decision engine included (#236, #243), and none restarted in a 10-minute window after
-#     start-up (310 containers); 171 pods, none Pending;
+# What 0.3.55 has actually been run through, stated so you know what is NOT covered:
+#   - 0.3.55 freshly installed with these exact steps (External Secrets Operator included),
+#     profile: full-strict, on a 3-node GKE cluster (n2-standard-16, Kubernetes 1.36.4,
+#     core-provider 2.13.94): all 32 components Ready 28 min and the umbrella 29 min after the
+#     apply. The umbrella reported Ready=False/Creating until the last DAG tier existed (#257) and
+#     only then Ready. No container restarted, cyborg's agents and conductor, mariadb's controller
+#     and watcher's decision engine included, and none in a 10-minute window started after the
+#     install was complete (311 containers); 174 pods, none Pending. Every install's Keystone admin
+#     password is generated (#228): all 25 <component>-keystone-admin Secrets hold it, Keystone
+#     accepts it and rejects OpenStack-Helm's published default. Deleting the install took about
+#     1.5 min, glance's pre-delete hook included (#254);
+#   - a fresh 0.3.51 install upgraded straight to 0.3.53 (the rotating upgrade): the admin
+#     password moved off the published default, the admin user is exempt from failed-login lockout
+#     (#252), and openstack-keystone-operator-kog 0.4.1 picked up the new password without a
+#     restart and without a failed token request; a 0.3.53 install bumped to 0.3.54 was Ready in
+#     4 min with no long pending upgrade (core-provider 2.13.94);
 #   - a fresh 0.3.50 install upgraded to 0.3.51 as "Upgrading an existing install" below
 #     describes, with no change to the Openstack: all 32 components at 0.3.51 5 min after the
 #     apply, never fewer than 32 Ready during it; the previous version stopped being served 5 min
-#     later (core-provider 2.13.89). A Horizon user whose catalog has no compute lands on the
-#     Identity dashboard, not on 403 (#247);
+#     later. A Horizon user whose catalog has no compute lands on the Identity dashboard, not on
+#     403 (#247);
 #   - an identity-profile 0.3.49 install upgraded to 0.3.50 with no values change: every
 #     component converged to the new version in 2.5 min (#233, core-provider 2.13.87); Keystone
 #     WebSSO through an in-cluster Keycloak (keystone-oidc 2026.1): login, a federated user mapped
@@ -170,7 +179,7 @@ kubectl create namespace openstack-system
 # version: the 36-component profile: full, kind, a VNC console in a browser, and the
 # per-component path further down.
 
-BP_VERSION=0.3.51
+BP_VERSION=0.3.55
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 
