@@ -598,11 +598,13 @@ The upgrade rotates the password; nothing is left on the default:
 - Every `<component>-keystone-admin` Secret keeps its name and keys and is now written by an
   `ExternalSecret` from that root, so nothing has to be reconfigured. Measured on ESO 2.14.0:
   during the upgrade the name is absent for about 13 ms.
-- **Restart every long-running reader of `keystone-keystone-admin` outside the blueprint right
-  after the upgrade.** A process that read the Secret when it started (through `envFrom`, for
-  example openstack-keystone-operator-kog's auth-bridge with
-  `authBridge.openrcSecret: keystone-keystone-admin`) keeps the old password and gets 401 until it
-  restarts: `kubectl -n openstack rollout restart deployment <its deployment>`.
+- **Readers outside the blueprint must pick up the new password.** openstack-keystone-operator-kog
+  0.4.1 and later (`authBridge.openrcSecret: keystone-keystone-admin`) re-reads the Secret by itself:
+  measured on a 0.3.51 → 0.3.53 rotation, it switched to the new credentials 63 s after ESO wrote
+  the Secret, without a restart and without a single failed token request. Any other process that
+  read the Secret only when it started (through `envFrom`), including that KOG before 0.4.1, keeps
+  the old password and gets 401 until it restarts:
+  `kubectl -n openstack rollout restart deployment <its deployment>`.
 - **Use 0.3.53 or later, not 0.3.52.** keystone.conf locks an account for 30 minutes after five
   failed logins. On 0.3.52 such a stale reader locked the admin account for everyone, again every
   30 minutes, and component upgrades that needed it waited (measured: Glance's hooks waited 34
