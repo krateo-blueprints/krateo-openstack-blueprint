@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every documented Composition apply first waits until its kind is served at that version.
+"""Every documented Composition apply first waits until the API server accepts that very file.
 
 core-provider creates a blueprint's kind from its CompositionDefinition some seconds after the
 CompositionDefinition is applied (28 s on a fresh GKE cluster, 0.3.47, core-provider 2.13.82).
@@ -8,24 +8,27 @@ README's install steps applied the Composition straight after, which failed:
     Error from server (ServiceUnavailable): ... Resource kind
     composition.krateo.io/v0-3-47, Kind=Openstack not found.
 
-`kubectl wait compositiondefinition/... --for=condition=Ready` is not the fix: it says
-core-provider is done, not which version the API server serves, and during an upgrade the
-previous version is still served, so it passes at once. The predicate that holds in both cases
-asks the API server for this release's group-version and looks for the kind:
+The first fix (#227) waited until DISCOVERY listed the kind at this version. That is not the
+predicate either (#244): on a fresh cluster (osh-s2, 0.3.49) discovery listed Openstack at
+07:40:24 and the apply one second later still got the same 503 from the API server -- the CRD was
+in discovery, its handler not serving yet. `kubectl wait compositiondefinition` is version-blind
+(during an upgrade the previous version is still served). The predicate that is exactly right is
+the apply itself, without its effect: a server dry-run of the SAME file, which goes through the
+same handler, admission and schema, and needs no plural (core-provider's are not mechanical).
 
-    V=v$(printf %s "$BP_VERSION" | tr . -)
-    ... kubectl get --raw "/apis/composition.krateo.io/$V" ... grep -q '"kind":"Openstack"'
-
-Matching the kind, not the plural, needs nothing derived: core-provider's plurals are not
-mechanical (Nova's is `nova`, Openvswitch's `openvswitches`).
+    kubectl create namespace openstack            # a namespaced dry-run needs the namespace
+    OS=<the release's example-openstack.yaml>
+    i=0; until kubectl apply --dry-run=server -f "$OS" >/dev/null 2>&1; do
+      i=$((i+1)); [ $i -lt 60 ] || { ...print the server's error...; break; }; sleep 5; done
+    kubectl apply -f "$OS"
 
 For every fenced sh/bash block in the repo's own Markdown, this gate checks:
-  * each `kubectl apply` of a release Composition (`example-*.yaml`, or `$EX` set from one) is
-    preceded in the block by `V=v$(printf %s "$BP_VERSION" | tr . -)` and a bounded
-    `until kubectl get --raw "/apis/composition.krateo.io/$V"` poll that greps `"kind":"...";
-  * when the apply is of `$EX`, the poll's kinds are read from that same `$EX` (`sed -n
-    's/^kind: *//p'`), and when it is a fixed example the poll names a kind, so the wait
-    cannot drift from what is applied;
+  * each Composition apply (`kubectl apply -f <...>/example-*.yaml`, or `-f "$VAR"` in a block
+    that applies an example) is preceded in the block by a bounded
+    `until kubectl apply --dry-run=server -f <the same target>` loop, and by
+    `kubectl create namespace openstack` before that loop;
+  * no block waits on discovery (`until kubectl get --raw "/apis/composition.krateo.io/...`):
+    that is the #244 race, refused rather than merely not required;
   * no block uses `kubectl wait compositiondefinition` (version-blind), and none applies an
     unstamped template (`blueprints/*/compositiondefinition.yaml`, `examples/*.yaml`,
     `../openstack.yaml`): their `CHART_VERSION` / `COMPOSITION_API_VERSION` placeholders install
@@ -42,11 +45,11 @@ from pathlib import Path
 
 SKIP_PARTS = {"helm-toolkit", "node_modules", ".git", ".claude", "vendor"}
 FENCE = re.compile(r"^\s*(?:> ?)?```(\w*)\s*$")
-V_LINE = re.compile(r'''V=v\$\(printf %s "\$BP_VERSION" \| tr \. -\)''')
-POLL = re.compile(r'''until kubectl get --raw "/apis/composition\.krateo\.io/\$V"[^\n]*grep -q [^\n]*\\?"kind\\?":''')
+DISCOVERY_POLL = re.compile(r'until kubectl get --raw "/apis/composition\.krateo\.io')
+DRY_RUN = re.compile(r'until kubectl apply --dry-run=server -f "?([^"\s]+)"?')
 BOUND = re.compile(r"\[ \$i -lt \d+ \]")
-KINDS_FROM_EX = re.compile(r'''for k in \$\(curl -fsSL "\$EX" \| sed -n 's/\^kind: \*//p'\)''')
-APPLY_RELEASE = re.compile(r"kubectl apply -f (?:\S*/example-[\w-]+\.yaml|\"\$EX\"|-)")
+APPLY = re.compile(r'kubectl apply -f "?([^"\s]+)"?(?!\S)')
+NAMESPACE = re.compile(r"kubectl create namespace openstack\b(?!-)")
 VERSION_BLIND = re.compile(r"kubectl wait (?:--\S+ )*compositiondefinition")
 UNSTAMPED = re.compile(r"kubectl apply -f \S*(?:blueprints/[\w-]+/compositiondefinition\.yaml|examples/[\w-]+\.yaml|\.\./openstack\.yaml)\b")
 
@@ -101,34 +104,42 @@ def main() -> int:
                 if UNSTAMPED.search(code):
                     failures.append(f"{rel}:{start}: applies an unstamped template ({code.strip()[:90]}); "
                                     "apply the release-stamped file for one BP_VERSION")
-            seen = []
+            for line in lines:
+                code = "" if line.lstrip().startswith("#") else line
+                if DISCOVERY_POLL.search(code):
+                    failures.append(f"{rel}:{start}: waits on discovery (`kubectl get --raw /apis/...`): discovery "
+                                    "can list the kind a second before the API server serves it (#244); wait with a "
+                                    "server dry-run of the file instead")
+            mentions_example = "example-" in body
             for i, line in enumerate(lines):
                 code = "" if line.lstrip().startswith("#") else line
-                m = APPLY_RELEASE.search(code)
+                if "--dry-run" in code:
+                    continue
+                m = APPLY.search(code)
                 if not m:
                     continue
-                if m.group(0).endswith(" -") and "example-" not in code:
+                target = m.group(1)
+                is_example = re.search(r"/example-[\w-]+\.yaml$", target) is not None
+                is_var = target.startswith("$") and mentions_example
+                if not (is_example or is_var):
                     continue
                 applies += 1
-                before = "\n".join(lines[:i])
                 where = f"{rel}:{start} (`{code.strip()[:80]}`)"
                 problems = []
-                if not V_LINE.search(before):
-                    problems.append('no `V=v$(printf %s "$BP_VERSION" | tr . -)` before it')
-                if not POLL.search(before):
-                    problems.append('no `until kubectl get --raw "/apis/composition.krateo.io/$V" ... '
-                                    'grep -q \'"kind":...\'` poll before it')
+                waits = [j for j in range(i) if (d := DRY_RUN.search(lines[j])) and d.group(1) == target]
+                if not waits:
+                    problems.append(f"no `until kubectl apply --dry-run=server -f {target}` wait before it (the "
+                                    "same target: a wait on anything else can pass while this file is refused)")
                 else:
-                    # the bound must be in THIS poll's loop: the poll line and the line after it
-                    last = max(j for j in range(i) if POLL.search(lines[j]))
-                    if not BOUND.search("\n".join(lines[last:last + 2])):
-                        problems.append("the poll has no bound (`[ $i -lt N ]` in its own loop), so a "
-                                        "stuck engine hangs it")
-                if '"$EX"' in m.group(0) and not KINDS_FROM_EX.search(before):
-                    problems.append("it applies $EX but the poll's kinds are not read from $EX")
+                    w = waits[-1]
+                    if not BOUND.search("\n".join(lines[w:w + 2])):
+                        problems.append("the wait has no bound (`[ $i -lt N ]` in its own loop), so a refused file "
+                                        "hangs it")
+                    if not any(NAMESPACE.search(lines[j]) for j in range(w)):
+                        problems.append("no `kubectl create namespace openstack` before the wait: a namespaced "
+                                        "dry-run is refused forever without its namespace")
                 if problems:
                     failures.append(f"{where}: " + "; ".join(problems))
-                seen.append(i)
     if applies == 0:
         print("FAIL: no documented Composition apply found -- nothing was measured")
         return 1
@@ -137,8 +148,9 @@ def main() -> int:
     if failures:
         print(f"FAIL: {len(failures)} problem(s) in {len(docs)} documents")
         return 1
-    print(f"OK: {applies} documented Composition apply(ies) each wait until the kind is served at "
-          f"their BP_VERSION; no version-blind wait and no unstamped template in {len(docs)} documents")
+    print(f"OK: {applies} documented Composition apply(ies) each wait until the API server accepts the same "
+          f"file (server dry-run); no discovery wait, no version-blind wait and no unstamped template in "
+          f"{len(docs)} documents")
     return 0
 
 
