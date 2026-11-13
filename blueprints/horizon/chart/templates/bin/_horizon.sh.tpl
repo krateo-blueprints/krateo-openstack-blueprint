@@ -28,6 +28,12 @@ function start () {
   {{- range $key, $value := .Values.conf.horizon.custom_panels }}
   ln -s /etc/openstack-dashboard/custom_panels/{{ $key }}.py ${SITE_PACKAGES_ROOT}/openstack_dashboard/local/enabled/{{ $key }}.py
   {{- end }}
+  # The user's home page (#247): install the package and its settings snippet before
+  # collectstatic/compress import the settings below.
+  rm -rf ${SITE_PACKAGES_ROOT}/openstack_dashboard/local/krateo_home
+  mkdir -p ${SITE_PACKAGES_ROOT}/openstack_dashboard/local/krateo_home
+  cp {{ include "horizon.krateo_home.package_dir" . }}/*.py ${SITE_PACKAGES_ROOT}/openstack_dashboard/local/krateo_home/
+  ln -sf /etc/openstack-dashboard/local_settings.d/{{ include "horizon.krateo_home.snippet_name" . }} ${SITE_PACKAGES_ROOT}/openstack_dashboard/local/local_settings.d/{{ include "horizon.krateo_home.snippet_name" . }}
   {{- if include "horizon.backchannel_logout.enabled" . }}
   # OIDC back-channel logout receiver (conf.horizon.backchannel_logout): install the package
   # and its settings snippet before collectstatic/compress import the settings below.
