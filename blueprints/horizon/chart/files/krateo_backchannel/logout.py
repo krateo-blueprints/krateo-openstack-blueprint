@@ -6,7 +6,10 @@ of that user, not only the one tied to the Keycloak session (`sid`) that was log
 
 For each matching session: revoke its Keystone tokens (DELETE /v3/auth/tokens with
 X-Subject-Token, authenticated with Horizon's service credentials), then delete the session
-row. Then forward the raw logout token, as `logout_token=<jwt>`, to mod_auth_openidc's
+row. Those are the session's scoped and unscoped tokens AND the WebSSO token Keystone handed the
+browser: Horizon does not keep that one, it authenticates with it to get its own unscoped token
+(openstack_auth's TokenPlugin), and revoking a token never revokes the one it was made from, so
+without the recorded WebSSO token it would outlive the logout. Then forward the raw logout token, as `logout_token=<jwt>`, to mod_auth_openidc's
 back-channel endpoint on Keystone. Success is reported only if every step succeeded.
 
 Tokens are never logged: not the logout token, not a Keystone token, not the service password.
@@ -276,6 +279,7 @@ def _token_ids(data):
         getattr(tok, "id", None) if not isinstance(tok, dict) else tok.get("id"),
         getattr(tok, "unscoped_token", None) if not isinstance(tok, dict) else tok.get("unscoped_token"),
         rec.get("unscoped_token"),
+        rec.get("websso_token"),
     ):
         if isinstance(value, str) and value and value not in ids:
             ids.append(value)
@@ -376,9 +380,10 @@ def end_sessions_and_forward(cfg, claims, raw_token, sessions):
 
 # --- Login --------------------------------------------------------------------------------
 
-def record_subject(cfg, session, user):
-    """At login, store the user's federated unique ids, user id and unscoped token id in the
-    session, so a back-channel logout can find it. Non-federated users get nothing recorded."""
+def record_subject(cfg, session, user, websso_token=None):
+    """At login, store the user's federated unique ids, user id, unscoped token id and the WebSSO
+    token the login was made with (if any) in the session, so a back-channel logout can find the
+    session and revoke every token it holds. Non-federated users get nothing recorded."""
     token = getattr(user, "unscoped_token", None) or getattr(getattr(user, "token", None), "id", None)
     if not token:
         LOG.error("back-channel logout: no Keystone token on the logged-in user; not recorded")
@@ -389,6 +394,9 @@ def record_subject(cfg, session, user):
         LOG.info("back-channel logout: user %s has no federated identity; not recorded", user.id)
         session.pop(SESSION_KEY, None)
         return None
-    session[SESSION_KEY] = {"subs": ids, "user_id": user.id, "unscoped_token": token}
+    rec = {"subs": ids, "user_id": user.id, "unscoped_token": token}
+    if isinstance(websso_token, str) and websso_token:
+        rec["websso_token"] = websso_token
+    session[SESSION_KEY] = rec
     LOG.info("back-channel logout: recorded user %s for back-channel logout", user.id)
     return ids

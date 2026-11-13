@@ -6,10 +6,19 @@ from django.apps import AppConfig
 LOG = logging.getLogger(__name__)
 
 
+def _websso_token(request):
+    """The token Keystone handed the browser, on a WebSSO login: openstack_auth's websso view is
+    the only login that POSTs a `token` field (the password form posts username/password)."""
+    if request is None or request.method != "POST":
+        return None
+    return request.POST.get("token") or None
+
+
 def _on_login(sender, request, user, **kwargs):
     from . import logout
     try:
-        logout.record_subject(logout.from_django_settings(), request.session, user)
+        logout.record_subject(logout.from_django_settings(), request.session, user,
+                              websso_token=_websso_token(request))
     except Exception as e:
         # Never block a login. A session recorded without its subject is not reachable by a
         # back-channel logout, so this is logged as an error, not a warning.
