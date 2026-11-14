@@ -96,9 +96,10 @@ four things hold, and each is checked here:
   17. SERVICE USERS ROTATE BEFORE THEIR READERS. For every rotated service user, the ks-user Job that creates
      it is post-install,pre-upgrade, reads the password from the umbrella's root (a pre-upgrade hook runs
      before the projection is applied), and its script exempts the user from lockout BEFORE setting it.
-  18. READERS RESTART. Every Deployment, StatefulSet and DaemonSet that reads a credential ExternalSecret has a
-     pod template that changes when the references are applied (0.3.63: ks-etc kept its name, nothing hashed
-     it, and stale readers locked nova, neutron and placement for 30 minutes -- measured).
+  18. READERS RESTART. Every Deployment, StatefulSet and DaemonSet that reads an ExternalSecret projecting an
+     item's root has a pod template that differs between the render without that one item's reference and the
+     render with it, every other reference set in both (0.3.63: ks-etc kept its name, nothing hashed it, and
+     stale readers locked nova, neutron and placement for 30 minutes -- measured).
 
 Fails when helm or PyYAML is missing, when the umbrella defines no credential, when a listed chart
 does not render, and when no chart was checked.
@@ -720,20 +721,25 @@ def pod_template_refs(pod):
     return refs
 
 
-def readers_restart(chart, root_secrets, docs0, docs):
-    """18. Every long-running workload that reads a credential ExternalSecret has a pod template that differs
-    from the default render, so applying the references restarts it onto the new value. 0.3.63's ks-etc kept its
-    name and nothing hashed it: nova, neutron and placement kept the old password in memory and locked their
-    users (measured)."""
+READERS_CHECKED = []
+
+
+def readers_restart(chart, cid, root, docs_without, docs_with):
+    """18. Every long-running workload that reads an ExternalSecret projecting this item's root has a pod template
+    that differs between the render WITHOUT this one item's reference and the render with it (every other
+    reference set in both), so applying it restarts the workload onto the new value. Comparing against the
+    defaults render instead would pass on any other item's change (measured: it survived removing the hash).
+    0.3.63's ks-etc kept its name and nothing hashed it: nova, neutron and placement kept the old password in
+    memory and locked their users."""
     es_names = set()
-    for d in docs:
+    for d in docs_with:
         if d.get("kind") == "ExternalSecret":
             keys = {(e.get("remoteRef") or {}).get("key") for e in (d.get("spec") or {}).get("data") or []}
-            if keys & set(root_secrets):
+            if root in keys:
                 es_names.add(((d.get("spec") or {}).get("target") or {}).get("name") or d["metadata"]["name"])
-    before = {(d["kind"], d["metadata"]["name"]): d for d in docs0
+    before = {(d["kind"], d["metadata"]["name"]): d for d in docs_without
               if d.get("kind") in ("Deployment", "StatefulSet", "DaemonSet")}
-    for d in docs:
+    for d in docs_with:
         if d.get("kind") not in ("Deployment", "StatefulSet", "DaemonSet"):
             continue
         t = (d.get("spec") or {}).get("template") or {}
@@ -741,10 +747,11 @@ def readers_restart(chart, root_secrets, docs0, docs):
         old = before.get((d["kind"], d["metadata"]["name"]))
         if not reads or old is None:
             continue
+        READERS_CHECKED.append((chart, cid, d["metadata"]["name"]))
         if old["spec"]["template"] == t:
-            fail("%s: %s/%s reads %s but its pod template is identical with and without the references, so it "
-                 "would keep the previous value in memory (and lock its user)" % (chart, d["kind"], d["metadata"]["name"],
-                                                                                  sorted(reads)))
+            fail("%s: %s/%s reads %s, which projects %s, but its pod template is identical with and without that "
+                 "reference, so it would keep the previous value in memory (and a service user would be locked)"
+                 % (chart, d["kind"], d["metadata"]["name"], sorted(reads), cid))
 
 
 KS_USER_CHECKED = []
@@ -852,9 +859,11 @@ def main():
                         fail("umbrella: %s reaches %s at %s, but that chart holds user %s under %s"
                              % (cid, c["name"], got, IDUSER_BY_ITEM[cid], want))
 
-    def refs_for(c):
+    def refs_for(c, skip=None):
         out = {}
         for cid in c.get("credentials") or []:
+            if cid == skip:
+                continue
             i = items[cid]
             path = (i.get("pathFor") or {}).get(c["name"], i["path"])
             deep_merge(out, nested(path, {"store": creds["store"], "secret": i["secret"], "key": i["key"]}))
@@ -1069,8 +1078,20 @@ def main():
                     elif items[cid]["secret"] not in [(e.get("remoteRef") or {}).get("key")
                                                       for e in es[0]["spec"].get("data") or []]:
                         fail("%s: ExternalSecret %s does not read %s" % (c["name"], want, items[cid]["secret"]))
-            if rc0 == 0:
-                readers_restart(c["name"], root_secrets, [d for d in yaml.safe_load_all(out0) if d], docs)
+            base = refs_for(c)
+            deep_merge(base, json.loads(json.dumps(enabled)))
+            rcb, outb, errb = helm_template(w, release, base)
+            for cid in cids:
+                if rcb != 0:
+                    break
+                minus = refs_for(c, skip=cid)
+                deep_merge(minus, json.loads(json.dumps(enabled)))
+                rcm, outm, errm = helm_template(w, release, minus)
+                if rcm != 0:
+                    fail("%s: does not render with every reference but %s: %s" % (c["name"], cid, errm.strip()[:200]))
+                    continue
+                readers_restart(c["name"], cid, items[cid]["secret"], [d for d in yaml.safe_load_all(outm) if d],
+                                [d for d in yaml.safe_load_all(outb) if d])
             for cid in cids:
                 if RULES[cid].get("carriers"):
                     ks_user_rotation(c["name"], cid, cv, items[cid]["secret"], docs)
@@ -1175,6 +1196,8 @@ def main():
                 fail("roots: %s shipped in %s and is no longer an item; every install running %s holds its "
                      "live password there" % (gone, latest, latest))
 
+    if checked and not READERS_CHECKED:
+        fail("18: no workload reading a credential projection was found; the check had no input")
     if checked and not KS_USER_CHECKED:
         fail("17: no chart's ks-user Job was matched to a rotated service user; the check had no input")
     if failures:
@@ -1183,7 +1206,9 @@ def main():
         sys.exit(1)
     print("OK: %d credential item(s); %d chart(s) rendered with references carry no admin password from values; "
           "umbrella references, closure, roots, the admin lockout exemption and teardown with the release consistent; "
-          "%d service-user ks-user Job(s) rotate pre-upgrade from the root with the exemption first" % (len(items), checked, len(KS_USER_CHECKED)))
+          "%d service-user ks-user Job(s) rotate pre-upgrade from the root with the exemption first; %d (workload, item) "
+          "reader pair(s) restart when that item's reference is applied" % (len(items), checked, len(KS_USER_CHECKED),
+                                                                           len(READERS_CHECKED)))
 
 
 main()
