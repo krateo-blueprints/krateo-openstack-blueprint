@@ -17,8 +17,9 @@ four things hold, and each is checked here:
      component on the default -- and compared with the reference built from the item (store,
      secret, key at `path`). An explicit componentValues entry must win over the reference.
   2. CLOSURE. A credential consumed by a chart the umbrella does not list stays on the default.
-     For identity-admin: the components listing it are exactly the charts that render an openrc
-     Secret for the Keystone admin user (templates/secret-keystone.yaml).
+     Per item (RULES below): identity-admin goes to exactly the charts rendering a Keystone admin
+     openrc Secret (templates/secret-keystone.yaml); oslo-db-admin to exactly the charts rendering a
+     MariaDB root DB_CONNECTION Secret (templates/secret-db.yaml) and to mariadb itself.
   3. NO VALUE FROM VALUES. Each listed chart is rendered with its references AND with the admin
      password in values replaced by a unique sentinel. The sentinel must appear NOWHERE: not in any
      rendered text (configs, scripts) and not in any Secret's data once base64-decoded. A substring
@@ -40,6 +41,11 @@ four things hold, and each is checked here:
      and took its Secret with it -- and glance's pre-delete hook then could not start (#254). Every
      ExternalSecret rendered, the umbrella's roots and every component's projections, must carry
      krateo.io/teardown: with-release (core-provider's opt-out contract, exactly that value).
+
+  7. NO DANGLING REFERENCE. Rendered with its references, no pod of a consumer references a Secret
+     that the chart renders at defaults but no longer provides (as a Secret or an ExternalSecret
+     target) -- e.g. mariadb's server still pointing at mariadb-dbadmin-password after the projection
+     moved to mariadb-dbadmin-generated. The default-values pod-references gate cannot see this.
 
 Fails when helm or PyYAML is missing, when the umbrella defines no credential, when a listed chart
 does not render, and when no chart was checked.
@@ -117,6 +123,64 @@ def deep_merge(a, b):
     return a
 
 
+# Per credential item: which charts must receive it (closure), where its password lives in a chart's
+# values (the sentinel), and which projections a consumer must render instead of a Secret.
+RULES = {
+    "identity-admin": {
+        "what": "renders a Keystone admin openrc Secret (templates/secret-keystone.yaml)",
+        "consumes": lambda d, has: has(d, "secret-keystone.yaml"),
+        "password_path": "endpoints.identity.auth.admin.password",
+        "projections": lambda chart, cv: [((cv.get("secrets") or {}).get("identity") or {}).get("admin")],
+    },
+    "oslo-db-admin": {
+        "what": "renders a MariaDB root DB_CONNECTION Secret (templates/secret-db.yaml) or is MariaDB itself",
+        "consumes": lambda d, has: has(d, "secret-db.yaml") or d == "mariadb",
+        "password_path": "endpoints.oslo_db.auth.admin.password",
+        "projections": lambda chart, cv: (["mariadb-dbadmin-generated", "mariadb-secrets-generated"]
+                                          if chart == "mariadb" else
+                                          [((cv.get("secrets") or {}).get("oslo_db") or {}).get("admin")]),
+    },
+}
+
+
+def pod_secret_refs(docs):
+    """Every Secret name a pod template in docs references (env, envFrom, volumes, projected)."""
+    refs = set()
+    for d in docs:
+        spec = d.get("spec") or {}
+        tpl = (spec.get("jobTemplate") or {}).get("spec", {}).get("template") if d.get("kind") == "CronJob" \
+            else (spec if d.get("kind") == "Pod" else spec.get("template"))
+        pod = (tpl or {}).get("spec") if d.get("kind") != "Pod" else spec
+        if not isinstance(pod, dict):
+            continue
+        for c in (pod.get("containers") or []) + (pod.get("initContainers") or []):
+            for e in c.get("env") or []:
+                n = ((e.get("valueFrom") or {}).get("secretKeyRef") or {}).get("name")
+                if n:
+                    refs.add(n)
+            for e in c.get("envFrom") or []:
+                n = (e.get("secretRef") or {}).get("name")
+                if n:
+                    refs.add(n)
+        for v in pod.get("volumes") or []:
+            if (v.get("secret") or {}).get("secretName"):
+                refs.add(v["secret"]["secretName"])
+            for src in (v.get("projected") or {}).get("sources") or []:
+                if (src.get("secret") or {}).get("name"):
+                    refs.add(src["secret"]["name"])
+    return refs
+
+
+def provided(docs):
+    out = set()
+    for d in docs:
+        if d.get("kind") == "Secret":
+            out.add(d["metadata"]["name"])
+        elif d.get("kind") == "ExternalSecret":
+            out.add(((d.get("spec") or {}).get("target") or {}).get("name") or d["metadata"]["name"])
+    return out
+
+
 def git(*args):
     r = subprocess.run(["git", "-C", ROOT] + list(args), capture_output=True, text=True)
     return r.returncode, r.stdout
@@ -185,29 +249,38 @@ def main():
             if (d.get("spec") or {}).get("refreshPolicy") != "CreatedOnce":
                 fail("umbrella: root %s is not refreshPolicy CreatedOnce (it would regenerate)" % d["metadata"]["name"])
 
-        # 2. closure for identity-admin
-        listed = {c["name"] for c in components if "identity-admin" in (c.get("credentials") or [])}
-        rendering = {d for d in os.listdir(BP)
-                     if os.path.isfile(os.path.join(BP, d, "chart", "templates", "secret-keystone.yaml"))}
-        for name in sorted(rendering - listed):
-            fail("closure: %s renders a Keystone admin openrc Secret but the umbrella does not pass it "
-                 "identity-admin, so it would keep the published default" % name)
-        for name in sorted(listed - rendering):
-            fail("closure: the umbrella passes identity-admin to %s, which renders no admin openrc Secret" % name)
+        # 2. closure, per credential item
+        def has_template(d, t):
+            return os.path.isfile(os.path.join(BP, d, "chart", "templates", t))
+        charts = [d for d in os.listdir(BP) if os.path.isdir(os.path.join(BP, d, "chart")) and d != "openstack"]
+        for cid, rule in RULES.items():
+            if cid not in items:
+                continue
+            listed = {c["name"] for c in components if cid in (c.get("credentials") or [])}
+            rendering = {d for d in charts if rule["consumes"](d, has_template)}
+            for name in sorted(rendering - listed):
+                fail("closure: %s %s but the umbrella does not pass it %s, so it would keep the published "
+                     "default" % (name, rule["what"], cid))
+            for name in sorted(listed - rendering):
+                fail("closure: the umbrella passes %s to %s, which does not %s" % (cid, name, rule["what"]))
+        for cid in items:
+            if cid not in RULES:
+                fail("credential item %s has no closure/sentinel rule in this gate" % cid)
 
-        # 3. no default
+        # 3. no value from values
         checked = 0
+        root_secrets = {i["secret"]: i for i in items.values()}
         for c in components:
-            if not c.get("credentials"):
+            cids = [cid for cid in (c.get("credentials") or []) if cid in RULES]
+            if not cids:
                 continue
             chart_dir = os.path.join(BP, c["name"], "chart")
             cv = yaml.safe_load(open(os.path.join(chart_dir, "values.yaml")))
-            admin_secret = ((cv.get("secrets") or {}).get("identity") or {}).get("admin")
-            if not admin_secret:
-                fail("%s: values.yaml declares no secrets.identity.admin" % c["name"])
-                continue
-            sentinel = "gate-admin-sentinel-" + c["name"] + "-7f3c9e"
-            values = deep_merge(refs_for(c), nested("endpoints.identity.auth.admin.password", sentinel))
+            values = refs_for(c)
+            sentinels = {}
+            for cid in cids:
+                sentinels[cid] = "gate-%s-sentinel-%s-7f3c9e" % (cid, c["name"])
+                deep_merge(values, nested(RULES[cid]["password_path"], sentinels[cid]))
             w = stage(chart_dir, tmp, c["name"])
             rc, out, err = helm_template(w, c["name"] + "-gate1234", values)
             if rc != 0:
@@ -215,40 +288,55 @@ def main():
                 continue
             checked += 1
             docs = [d for d in yaml.safe_load_all(out) if d]
-            if sentinel in out:
-                fail("%s: the admin password from values appears in the rendered text" % c["name"])
+            for cid, sentinel in sentinels.items():
+                if sentinel in out:
+                    fail("%s: the %s password from values appears in the rendered text" % (c["name"], cid))
+                for d in docs:
+                    if d.get("kind") == "Secret":
+                        for k, v in (d.get("data") or {}).items():
+                            try:
+                                if sentinel in base64.b64decode(v).decode("utf-8", "replace"):
+                                    fail("%s: Secret %s key %s carries the %s password from values"
+                                         % (c["name"], d["metadata"]["name"], k, cid))
+                            except Exception:
+                                pass
             for d in docs:
-                if d.get("kind") == "Secret":
-                    for k, v in (d.get("data") or {}).items():
-                        try:
-                            if sentinel in base64.b64decode(v).decode("utf-8", "replace"):
-                                fail("%s: Secret %s key %s carries the admin password from values"
-                                     % (c["name"], d["metadata"]["name"], k))
-                        except Exception:
-                            pass
-            for d in docs:
-                if d.get("kind") == "ExternalSecret" and \
-                        (d["metadata"].get("annotations") or {}).get("krateo.io/teardown") != "with-release":
+                if d.get("kind") != "ExternalSecret":
+                    continue
+                name = d["metadata"]["name"]
+                if (d["metadata"].get("annotations") or {}).get("krateo.io/teardown") != "with-release":
                     fail("%s: ExternalSecret %s lacks krateo.io/teardown: with-release, so it is finalized "
                          "before the release's pre-delete hooks run and takes its Secret with it (#254)"
-                         % (c["name"], d["metadata"]["name"]))
-            es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == admin_secret]
-            sec = [d for d in docs if d.get("kind") == "Secret" and d["metadata"]["name"] == admin_secret]
-            item = items["identity-admin"]
-            if sec:
-                fail("%s: still renders Secret %s itself" % (c["name"], admin_secret))
-            if len(es) != 1:
-                fail("%s: renders %d ExternalSecret(s) named %s, want 1" % (c["name"], len(es), admin_secret))
-            else:
-                spec = es[0]["spec"]
+                         % (c["name"], name))
+                spec = d["spec"]
                 ref = (spec.get("data") or [{}])[0].get("remoteRef") or {}
-                if spec.get("secretStoreRef", {}).get("name") != creds["store"] or ref.get("key") != item["secret"] \
+                item = root_secrets.get(ref.get("key"))
+                if item is None or spec.get("secretStoreRef", {}).get("name") != creds["store"] \
                         or ref.get("property") != item["key"]:
-                    fail("%s: ExternalSecret %s does not read %s/%s through store %s"
-                         % (c["name"], admin_secret, item["secret"], item["key"], creds["store"]))
+                    fail("%s: ExternalSecret %s does not read a credential root through store %s (reads %s/%s)"
+                         % (c["name"], name, creds["store"], ref.get("key"), ref.get("property")))
                 if spec.get("target", {}).get("creationPolicy") != "Owner":
                     fail("%s: ExternalSecret %s is not creationPolicy Owner (Orphan loses the Secret on a "
-                         "retried upgrade, #228)" % (c["name"], admin_secret))
+                         "retried upgrade, #228)" % (c["name"], name))
+            # 7. no dangling reference: a Secret the chart renders at defaults and a pod references must
+            # still be provided (as a Secret or an ExternalSecret target) once the references are set.
+            rc0, out0, _ = helm_template(w, c["name"] + "-gate1234", {})
+            if rc0 == 0:
+                docs0 = [d for d in yaml.safe_load_all(out0) if d]
+                dangling = (pod_secret_refs(docs) & provided(docs0)) - provided(docs)
+                for n in sorted(dangling):
+                    fail("%s: with its credential references a pod still references Secret %s, which is no "
+                         "longer rendered (point it at the projection)" % (c["name"], n))
+            for cid in cids:
+                for want in RULES[cid]["projections"](c["name"], cv):
+                    es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == want]
+                    sec = [d for d in docs if d.get("kind") == "Secret" and d["metadata"]["name"] == want]
+                    if sec:
+                        fail("%s: still renders Secret %s itself (%s)" % (c["name"], want, cid))
+                    if len(es) != 1:
+                        fail("%s: renders %d ExternalSecret(s) named %s, want 1 (%s)" % (c["name"], len(es), want, cid))
+                    elif ((es[0]["spec"].get("data") or [{}])[0].get("remoteRef") or {}).get("key") != items[cid]["secret"]:
+                        fail("%s: ExternalSecret %s does not read %s" % (c["name"], want, items[cid]["secret"]))
         # 5. the admin user is exempt from lockout, before and after bootstrap
         w = stage(os.path.join(BP, "keystone", "chart"), tmp, "keystone-lockout")
         rc, out, err = helm_template(w, "keystone-gate1234")

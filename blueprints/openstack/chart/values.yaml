@@ -44,11 +44,17 @@ credentials:
       secret: openstack-credential-identity-admin
       key: password
       path: endpoints.identity.auth.admin.passwordFrom
+    - id: oslo-db-admin
+      secret: openstack-credential-oslo-db-admin
+      key: password
+      path: endpoints.oslo_db.auth.admin.passwordFrom
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
 components:
   - name: mariadb
     kind: Mariadb
+    credentials:
+      - oslo-db-admin
     deps: []
     tier: identity
   - name: memcached
@@ -59,6 +65,7 @@ components:
     kind: Keystone
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - mariadb
       - memcached
@@ -67,6 +74,7 @@ components:
     kind: Glance
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
     tier: identity
@@ -74,6 +82,7 @@ components:
     kind: Horizon
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
     tier: identity
@@ -89,6 +98,7 @@ components:
     kind: Placement
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
     tier: compute
@@ -101,6 +111,7 @@ components:
     kind: Neutron
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -110,6 +121,7 @@ components:
     kind: Nova
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - placement
@@ -122,6 +134,7 @@ components:
     kind: Ironic
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - mariadb
@@ -140,6 +153,7 @@ components:
     kind: Cinder
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -157,6 +171,7 @@ components:
     kind: Heat
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -166,6 +181,7 @@ components:
     kind: Barbican
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -173,6 +189,8 @@ components:
     tier: compute
   - name: powerdns
     kind: Powerdns
+    credentials:
+      - oslo-db-admin
     deps:
       - mariadb
     tier: compute
@@ -180,6 +198,7 @@ components:
     kind: Designate
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -190,6 +209,7 @@ components:
     kind: Octavia
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -207,6 +227,7 @@ components:
     kind: Magnum
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -222,6 +243,7 @@ components:
     kind: Manila
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -231,6 +253,7 @@ components:
     kind: Mistral
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -254,6 +277,7 @@ components:
     kind: Aodh
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -263,6 +287,7 @@ components:
     kind: Cloudkitty
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -272,6 +297,7 @@ components:
     kind: Masakari
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -281,6 +307,7 @@ components:
     kind: Trove
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -290,6 +317,7 @@ components:
     kind: Watcher
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -299,6 +327,7 @@ components:
     kind: Tacker
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -312,6 +341,7 @@ components:
     kind: Cyborg
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -325,6 +355,7 @@ components:
     kind: Blazar
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -338,6 +369,7 @@ components:
     kind: Zaqar
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - mariadb
@@ -355,6 +387,7 @@ components:
     kind: Freezer
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - rabbitmq
@@ -364,6 +397,7 @@ components:
     kind: Skyline
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
     tier: compute
@@ -371,6 +405,7 @@ components:
     kind: Gnocchi
     credentials:
       - identity-admin
+      - oslo-db-admin
     deps:
       - keystone
       - mariadb

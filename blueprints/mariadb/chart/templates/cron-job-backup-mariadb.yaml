@@ -195,7 +195,7 @@ spec:
               emptyDir: {}
             - name: mariadb-secrets
               secret:
-                secretName: mariadb-secrets
+                secretName: {{ include "mariadb.secrets_etc_name" $envAll }}
                 defaultMode: 420
             - configMap:
                 defaultMode: 365

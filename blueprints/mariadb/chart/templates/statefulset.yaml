@@ -185,7 +185,7 @@ spec:
             - name: MYSQL_DBADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mariadb-dbadmin-password
+                  name: {{ include "mariadb.dbadmin_secret_name" . }}
                   key: MYSQL_DBADMIN_PASSWORD
             - name: MYSQL_DBSST_USERNAME
               value: {{ .Values.endpoints.oslo_db.auth.sst.username }}
@@ -335,7 +335,7 @@ spec:
             defaultMode: 0444
         - name: mariadb-secrets
           secret:
-            secretName: mariadb-secrets
+            secretName: {{ include "mariadb.secrets_etc_name" $envAll }}
             defaultMode: 0444
 {{ dict "enabled" $envAll.Values.manifests.certificates "name" $envAll.Values.secrets.tls.oslo_db.server.internal | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
         {{- if not .Values.volume.enabled }}
