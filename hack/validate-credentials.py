@@ -15,18 +15,24 @@ four things hold, and each is checked here:
      osh.credentialRefs, through the line calling mergeOverwrite) are EXTRACTED and rendered for every component through a probe -- the
      helper alone is not enough, because dropping the merge left the helper correct and every
      component on the default -- and compared with the reference built from the item (store,
-     secret, key at `path`). An explicit componentValues entry must win over the reference.
+     secret, key at `path`, or at `pathFor.<component>` when the item names that component). An
+     explicit componentValues entry must win over the reference.
   2. CLOSURE. A credential consumed by a chart the umbrella does not list stays on the default.
      Per item (RULES below): identity-admin goes to exactly the charts rendering a Keystone admin
      openrc Secret (templates/secret-keystone.yaml); oslo-db-admin to exactly the charts rendering a
-     MariaDB root DB_CONNECTION Secret (templates/secret-db.yaml) and to mariadb itself.
+     MariaDB root DB_CONNECTION Secret (templates/secret-db.yaml) and to mariadb itself;
+     oslo-messaging-admin to exactly the charts rendering a RabbitMQ admin connection Secret
+     (templates/secret-rabbitmq.yaml) and to rabbitmq itself, whose administrator it is (at
+     auth.user); oslo-messaging-guest to rabbitmq alone.
   3. NO VALUE FROM VALUES. Each listed chart is rendered with its references AND with the admin
      password in values replaced by a unique sentinel. The sentinel must appear NOWHERE: not in any
      rendered text (configs, scripts) and not in any Secret's data once base64-decoded. A substring
      search for the published default cannot do this job: it is a common word that other
      credentials share and that appears as a non-secret value (OS_AUTH_TYPE: password), so it
-     matches everywhere and proves nothing about THIS credential. The admin openrc must also be an
-     ExternalSecret projecting the root through the store, with no Secret of that name.
+     matches everywhere and proves nothing about THIS credential. Each projection (the admin openrc,
+     the DB_CONNECTION, the RabbitMQ connection, rabbitmq's admin-user Secret) must also be an
+     ExternalSecret reading the item's root through the store, with no Secret of that name; and
+     EVERY remoteRef of every ExternalSecret a consumer renders must read a known root.
   4. ROOTS ARE PERMANENT. Every root Secret name shipped in the latest release tag is still an item
      here. Renaming or removing one makes ESO generate a new password that no backend accepts
      (measured on ESO 2.15.0, #228).
@@ -46,6 +52,13 @@ four things hold, and each is checked here:
      that the chart renders at defaults but no longer provides (as a Secret or an ExternalSecret
      target) -- e.g. mariadb's server still pointing at mariadb-dbadmin-password after the projection
      moved to mariadb-dbadmin-generated. The default-values pod-references gate cannot see this.
+  8. PROJECTION FIDELITY. A projection must hold exactly what the chart would have rendered with the
+     generated password in values -- the URL built from values with only the password replaced. For
+     every ExternalSecret a consumer renders, each `{{ .<secretKey> }}` of its template is replaced
+     by a known alphanumeric password for the root that secretKey reads, and the result must equal,
+     key for key, the Secret of the same name (or of the name it replaced: RENAMED) that the chart
+     renders when that password is set in values instead. A drop-in that has no Secret counterpart
+     (a keystone_password_conf_snippet) is not compared; every other projection must be.
 
 Fails when helm or PyYAML is missing, when the umbrella defines no credential, when a listed chart
 does not render, and when no chart was checked.
@@ -129,17 +142,46 @@ RULES = {
     "identity-admin": {
         "what": "renders a Keystone admin openrc Secret (templates/secret-keystone.yaml)",
         "consumes": lambda d, has: has(d, "secret-keystone.yaml"),
-        "password_path": "endpoints.identity.auth.admin.password",
+        "password_path": lambda chart: "endpoints.identity.auth.admin.password",
         "projections": lambda chart, cv: [((cv.get("secrets") or {}).get("identity") or {}).get("admin")],
     },
     "oslo-db-admin": {
         "what": "renders a MariaDB root DB_CONNECTION Secret (templates/secret-db.yaml) or is MariaDB itself",
         "consumes": lambda d, has: has(d, "secret-db.yaml") or d == "mariadb",
-        "password_path": "endpoints.oslo_db.auth.admin.password",
+        "password_path": lambda chart: "endpoints.oslo_db.auth.admin.password",
         "projections": lambda chart, cv: (["mariadb-dbadmin-generated", "mariadb-secrets-generated"]
-                                          if chart == "mariadb" else
-                                          [((cv.get("secrets") or {}).get("oslo_db") or {}).get("admin")]),
+                                               if chart == "mariadb" else
+                                               [((cv.get("secrets") or {}).get("oslo_db") or {}).get("admin")]),
     },
+    # One credential under two keys: every component's rabbit-init authenticates as auth.admin against
+    # the server whose administrator is the rabbitmq chart's auth.user.
+    "oslo-messaging-admin": {
+        "what": "renders a RabbitMQ admin connection Secret (templates/secret-rabbitmq.yaml) or is RabbitMQ itself",
+        "consumes": lambda d, has: has(d, "secret-rabbitmq.yaml") or d == "rabbitmq",
+        "password_path": lambda chart: ("endpoints.oslo_messaging.auth.user.password" if chart == "rabbitmq"
+                                        else "endpoints.oslo_messaging.auth.admin.password"),
+        # rabbitmq's Secrets are named after the chart, not the release (global.subchart_release_name).
+        "projections": lambda chart, cv: (["rabbitmq-admin-user-generated"] if chart == "rabbitmq" else
+                                          [((cv.get("secrets") or {}).get("oslo_messaging") or {}).get("admin")]),
+        # A chart may ship the Secret disabled (keystone: manifests.secret_rabbitmq false) and an install
+        # can enable it through componentValues; render it enabled, or the sentinel would pass vacuously.
+        "enable": lambda chart: {} if chart == "rabbitmq" else {"manifests": {"secret_rabbitmq": True}},
+    },
+    "oslo-messaging-guest": {
+        "what": "is RabbitMQ itself (the guest user is written into its definitions file)",
+        "consumes": lambda d, has: d == "rabbitmq",
+        "password_path": lambda chart: "endpoints.oslo_messaging.auth.guest.password",
+        "projections": lambda chart, cv: ["rabbitmq-admin-user-generated"],
+    },
+}
+
+
+# A projection rendered under a new name (the rotation mechanism: a new name changes the pod spec),
+# and the Secret it replaces at defaults.
+RENAMED = {
+    "mariadb-dbadmin-generated": "mariadb-dbadmin-password",
+    "mariadb-secrets-generated": "mariadb-secrets",
+    "rabbitmq-admin-user-generated": "rabbitmq-admin-user",
 }
 
 
@@ -199,7 +241,8 @@ def main():
         out = {}
         for cid in c.get("credentials") or []:
             i = items[cid]
-            deep_merge(out, nested(i["path"], {"store": creds["store"], "secret": i["secret"], "key": i["key"]}))
+            path = (i.get("pathFor") or {}).get(c["name"], i["path"])
+            deep_merge(out, nested(path, {"store": creds["store"], "secret": i["secret"], "key": i["key"]}))
         return out
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -277,12 +320,17 @@ def main():
             chart_dir = os.path.join(BP, c["name"], "chart")
             cv = yaml.safe_load(open(os.path.join(chart_dir, "values.yaml")))
             values = refs_for(c)
+            enabled = {}
+            for cid in cids:
+                deep_merge(enabled, (RULES[cid].get("enable") or (lambda chart: {}))(c["name"]))
+            deep_merge(values, json.loads(json.dumps(enabled)))
             sentinels = {}
             for cid in cids:
                 sentinels[cid] = "gate-%s-sentinel-%s-7f3c9e" % (cid, c["name"])
-                deep_merge(values, nested(RULES[cid]["password_path"], sentinels[cid]))
+                deep_merge(values, nested(RULES[cid]["password_path"](c["name"]), sentinels[cid]))
             w = stage(chart_dir, tmp, c["name"])
-            rc, out, err = helm_template(w, c["name"] + "-gate1234", values)
+            release = c["name"] + "-gate1234"
+            rc, out, err = helm_template(w, release, values)
             if rc != 0:
                 fail("%s: does not render with its credential references: %s" % (c["name"], err.strip()[:300]))
                 continue
@@ -309,18 +357,65 @@ def main():
                          "before the release's pre-delete hooks run and takes its Secret with it (#254)"
                          % (c["name"], name))
                 spec = d["spec"]
-                ref = (spec.get("data") or [{}])[0].get("remoteRef") or {}
-                item = root_secrets.get(ref.get("key"))
-                if item is None or spec.get("secretStoreRef", {}).get("name") != creds["store"] \
-                        or ref.get("property") != item["key"]:
-                    fail("%s: ExternalSecret %s does not read a credential root through store %s (reads %s/%s)"
-                         % (c["name"], name, creds["store"], ref.get("key"), ref.get("property")))
+                if spec.get("secretStoreRef", {}).get("name") != creds["store"]:
+                    fail("%s: ExternalSecret %s does not read through store %s" % (c["name"], name, creds["store"]))
+                if not spec.get("data"):
+                    fail("%s: ExternalSecret %s reads nothing" % (c["name"], name))
+                for entry in spec.get("data") or []:
+                    ref = entry.get("remoteRef") or {}
+                    item = root_secrets.get(ref.get("key"))
+                    if item is None or ref.get("property") != item["key"]:
+                        fail("%s: ExternalSecret %s does not read a credential root (reads %s/%s)"
+                             % (c["name"], name, ref.get("key"), ref.get("property")))
                 if spec.get("target", {}).get("creationPolicy") != "Owner":
                     fail("%s: ExternalSecret %s is not creationPolicy Owner (Orphan loses the Secret on a "
                          "retried upgrade, #228)" % (c["name"], name))
+            # 8. projection fidelity
+            known = {cid: "Gate%sFidelity%s7f3c" % (cid.replace("-", ""), c["name"].replace("-", "")) for cid in cids}
+            values_g = json.loads(json.dumps(enabled))
+            for cid in cids:
+                deep_merge(values_g, nested(RULES[cid]["password_path"](c["name"]), known[cid]))
+            rcg, outg, errg = helm_template(w, release, values_g)
+            if rcg != 0:
+                fail("%s: does not render with the passwords in values: %s" % (c["name"], errg.strip()[:300]))
+            else:
+                plain = {d["metadata"]["name"]: d for d in yaml.safe_load_all(outg)
+                         if d and d.get("kind") == "Secret"}
+                for d in docs:
+                    if d.get("kind") != "ExternalSecret":
+                        continue
+                    name = d["metadata"]["name"]
+                    spec = d["spec"]
+                    tdata = ((spec.get("target") or {}).get("template") or {}).get("data") or {}
+                    src = plain.get(RENAMED.get(name, name))
+                    if src is None:
+                        if any("[" in (v or "") and "]" in (v or "") for v in tdata.values()) and len(tdata) == 1:
+                            continue  # a keystone_password_conf_snippet drop-in: no Secret counterpart
+                        fail("%s: ExternalSecret %s has no Secret counterpart rendered from values to compare with"
+                             % (c["name"], name))
+                        continue
+                    subst = {}
+                    for entry in spec.get("data") or []:
+                        item = root_secrets.get((entry.get("remoteRef") or {}).get("key"))
+                        if item is not None and item["id"] in known:
+                            subst[entry["secretKey"]] = known[item["id"]]
+                    got = {}
+                    for k, v in tdata.items():
+                        for sk, pw in subst.items():
+                            v = v.replace("{{ .%s }}" % sk, pw)
+                        got[k] = v
+                    want = {k: base64.b64decode(v).decode("utf-8", "replace")
+                            for k, v in (src.get("data") or {}).items()}
+                    want.update(src.get("stringData") or {})
+                    if got != want:
+                        diff = sorted(k for k in set(got) | set(want) if got.get(k) != want.get(k))
+                        fail("%s: ExternalSecret %s does not project what values render with the same password "
+                             "(keys differ: %s)" % (c["name"], name, diff))
+                    elif any("{{" in v for v in got.values()):
+                        fail("%s: ExternalSecret %s keeps a template action no root fills" % (c["name"], name))
             # 7. no dangling reference: a Secret the chart renders at defaults and a pod references must
             # still be provided (as a Secret or an ExternalSecret target) once the references are set.
-            rc0, out0, _ = helm_template(w, c["name"] + "-gate1234", {})
+            rc0, out0, _ = helm_template(w, release, enabled)
             if rc0 == 0:
                 docs0 = [d for d in yaml.safe_load_all(out0) if d]
                 dangling = (pod_secret_refs(docs) & provided(docs0)) - provided(docs)
@@ -335,7 +430,8 @@ def main():
                         fail("%s: still renders Secret %s itself (%s)" % (c["name"], want, cid))
                     if len(es) != 1:
                         fail("%s: renders %d ExternalSecret(s) named %s, want 1 (%s)" % (c["name"], len(es), want, cid))
-                    elif ((es[0]["spec"].get("data") or [{}])[0].get("remoteRef") or {}).get("key") != items[cid]["secret"]:
+                    elif items[cid]["secret"] not in [(e.get("remoteRef") or {}).get("key")
+                                                      for e in es[0]["spec"].get("data") or []]:
                         fail("%s: ExternalSecret %s does not read %s" % (c["name"], want, items[cid]["secret"]))
         # 5. the admin user is exempt from lockout, before and after bootstrap
         w = stage(os.path.join(BP, "keystone", "chart"), tmp, "keystone-lockout")

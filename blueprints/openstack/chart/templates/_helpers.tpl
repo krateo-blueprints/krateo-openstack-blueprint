@@ -932,7 +932,9 @@ krateo-openstack-node-reader
 {{- /* osh.credentialRefs (list $ $c): the credential REFERENCES component $c receives (#228), as a
        YAML dict to merge into its spec. For each id in $c.credentials, the item of
        .Values.credentials.items with that id contributes {store, secret, key} at the item's dotted
-       `path` (e.g. endpoints.identity.auth.admin.passwordFrom). A value is never passed: the chart
+       `path` (e.g. endpoints.identity.auth.admin.passwordFrom), or at the item's `pathFor.<component>`
+       when it names this component (a chart holding the same credential under another key). A
+       value is never passed: the chart
        projects it from the root Secret through the store. An id no item defines fails the render,
        because a silently missing reference leaves that component on the published default. */ -}}
 {{- define "osh.credentialRefs" -}}
@@ -946,7 +948,9 @@ krateo-openstack-node-reader
 {{- fail (printf "component %s lists credential %q, which .Values.credentials.items does not define" $c.name $id) -}}
 {{- end -}}
 {{- $ref := dict "store" $creds.store "secret" $item.secret "key" $item.key -}}
-{{- $parts := splitList "." $item.path -}}
+{{- $path := $item.path -}}
+{{- if hasKey ($item.pathFor | default dict) $c.name -}}{{- $path = index $item.pathFor $c.name -}}{{- end -}}
+{{- $parts := splitList "." $path -}}
 {{- $node := $out -}}
 {{- range $idx, $p := $parts -}}
 {{- if eq $idx (sub (len $parts) 1) -}}
