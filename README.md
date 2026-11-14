@@ -736,8 +736,12 @@ From 0.3.61 two shared secrets are generated per install:
   and vendor data. Nova (`[neutron]`) and every neutron metadata agent (`[DEFAULT]`, OVS or OVN) read
   it from a drop-in, `81-metadata-proxy.conf`, in their `conf.d` directory;
 - `openstack-credential-horizon-secret-key`. Django signs Horizon's session cookies and CSRF tokens
-  with it, so the published value let anyone forge a session. It arrives as
-  `local_settings.d/_90_krateo_secret_key.py`, and `local_settings` no longer contains it.
+  with it, so the published value let anyone forge a session. **Use 0.3.62 or later for this one.**
+  0.3.61 delivered it as a `local_settings.d` snippet that Horizon never executes. With no key in
+  `local_settings`, each Horizon pod generated its own random key in `/tmp`. Measured: the
+  published key was no longer used, but neither was the generated one, and sessions broke on every
+  pod restart and across replicas. From 0.3.62, `local_settings` reads the key from the mounted
+  generated Secret (`/etc/openstack-dashboard/krateo-secret-key/secret_key`).
 
 On the upgrade, **every Horizon user is signed out once**: sessions signed with the old key are
 rejected. Nova's metadata API and the metadata agents restart with the new secret together, and
