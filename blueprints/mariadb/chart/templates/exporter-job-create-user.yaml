@@ -89,7 +89,7 @@ spec:
             defaultMode: 0555
         - name: mariadb-secrets
           secret:
-            secretName: mariadb-secrets
+            secretName: {{ include "mariadb.secrets_etc_name" $envAll }}
             defaultMode: 0444
 {{ dict "enabled" $envAll.Values.manifests.certificates "name" $envAll.Values.secrets.tls.oslo_db.server.internal | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
 {{- end }}

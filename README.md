@@ -627,6 +627,20 @@ The upgrade rotates the password; nothing is left on the default:
 - A rollback across this upgrade fails without changing anything and the next reconcile moves
   forward again; the generated password stays.
 
+### Upgrading to 0.3.56 or later: the MariaDB root password rotates
+
+From 0.3.56 the MariaDB root password is generated per install too (`openstack-credential-oslo-db-admin`,
+the same ESO mechanism as the Keystone admin password above). On the upgrade that ships it:
+- every component's `<component>-db-admin` Secret keeps its name and key (`DB_CONNECTION`), now
+  written by an `ExternalSecret` with the generated password in the URL;
+- the MariaDB server reads root from `mariadb-dbadmin-generated` and its client config from
+  `mariadb-secrets-generated`, so its pod spec changes and the server restarts once. On that start
+  MariaDB's own start script re-creates `root` with the new password (`CREATE OR REPLACE USER` from an
+  init file), which needs no old password;
+- anything outside the blueprint that connects as MariaDB root with the old password gets refused
+  from then on and must read the new value from `openstack-credential-oslo-db-admin`. Never delete
+  that Secret.
+
 ### Components follow the umbrella's version
 
 The orchestrator registers every component `CompositionDefinition` at its own chart version
