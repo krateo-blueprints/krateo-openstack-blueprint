@@ -60,12 +60,13 @@ four things hold, and each is checked here:
      key for key, the Secret of the same name (or of the name it replaced: RENAMED) that the chart
      renders when that password is set in values instead. A drop-in that has no Secret counterpart
      (a keystone_password_conf_snippet) is not compared; every other projection must be.
-  9. NO SPLIT CLUSTER ON A COOKIE ROTATION. Every RabbitMQ node must hold the same Erlang cookie and a
-     StatefulSet rolls one pod at a time, so the rabbitmq chart refuses to roll a new cookie through
-     more than one replica (rabbitmq.erlang_cookie_rotation_check). Offline no lookup sees a live
-     StatefulSet, so the check is rendered with stand-in live objects: refused for 3 replicas running
-     the old cookie, and for 1 running with 3 wanted; allowed for 1 replica, for a StatefulSet already
-     on the generated cookie, and when there is none.
+  9. NO SPLIT CLUSTER, AND NO DEADLOCK, ON A COOKIE ROTATION. Every RabbitMQ node must hold the same
+     Erlang cookie and a StatefulSet rolls one pod at a time, so the cookie only changes on a single
+     node (rabbitmq.erlang_cookie_mode). Offline no lookup sees a live StatefulSet, so the chart is
+     rendered with stand-in live objects, and what it renders is checked: refused while more than
+     one replica is WANTED; HOLD (replicas 1, the old cookie still rendered and mounted) while more
+     than one pod still runs -- 0.3.57 refused this case, so replicas 1 could never take effect
+     (measured); rotate on one pod; normal on the generated cookie or with no StatefulSet.
   10. NO GUEST USER. RabbitMQ re-creates every user in its definitions file on every boot, and
      upstream's file declared guest, an administrator reachable from any pod, which lived until the
      next rabbit-init deleted it. The rabbitmq chart's rendered definitions script is RUN with only the
@@ -241,43 +242,70 @@ def no_guest_user(tmp):
 
 
 def cookie_rotation_cases(tmp, refs):
-    """9. Render the rabbitmq chart's own secret-erlang-cookie.yaml with its StatefulSet lookup replaced by
-    stand-in live objects, so the call site is checked together with rabbitmq.erlang_cookie_rotation_check."""
-    lookup = 'lookup "apps/v1" "StatefulSet" $envAll.Release.Namespace (printf "%s-rabbitmq" $envAll.deployment_name)'
-    src = os.path.join(BP, "rabbitmq", "chart", "templates", "secret-erlang-cookie.yaml")
+    """9. Render the rabbitmq chart with its one StatefulSet lookup (rabbitmq.erlang_cookie_live) replaced by
+    stand-in live objects, and check what each case renders: refused, hold, rotate or normal."""
+    lookup = 'lookup "apps/v1" "StatefulSet" .Release.Namespace (printf "%s-rabbitmq" .deployment_name)'
+    src = os.path.join(BP, "rabbitmq", "chart", "templates", "_erlang_cookie.tpl")
     text = open(src).read()
     if text.count(lookup) != 1:
-        fail("rabbitmq: secret-erlang-cookie.yaml no longer looks up the live StatefulSet (%s), so nothing stops a "
-             "cookie rotation from splitting a multi-replica cluster" % lookup)
+        fail("rabbitmq: _erlang_cookie.tpl no longer looks up the live StatefulSet exactly once (%s), so the cookie "
+             "rotation cannot know how many nodes run" % lookup)
         return
-    cases = [  # (label, live replicas or None for no StatefulSet, mounted Secret, wanted replicas, refused)
-        ("3 replicas on the old cookie", 3, "rabbitmq-erlang-cookie", 3, True),
-        ("1 running, 3 wanted, old cookie", 1, "rabbitmq-erlang-cookie", 3, True),
-        ("1 replica on the old cookie", 1, "rabbitmq-erlang-cookie", 1, False),
-        ("3 replicas already on the generated cookie", 3, "rabbitmq-erlang-cookie-generated", 3, False),
-        ("no StatefulSet yet", None, "", 3, False),
+    old, new = "rabbitmq-erlang-cookie", "rabbitmq-erlang-cookie-generated"
+    # (label, live: None or (spec replicas, status pods, mounted Secret), wanted, expect)
+    # expect: "refused", or (Secret the StatefulSet mounts and reads, rendered replicas, values Secret rendered?)
+    cases = [
+        ("3 running on the old cookie, 3 wanted", (3, 3, old), 3, "refused"),
+        ("1 running on the old cookie, 3 wanted", (1, 1, old), 3, "refused"),
+        ("2 running on the old cookie, 1 wanted (0.3.57 deadlocked here)", (2, 2, old), 1, (old, 1, True)),
+        ("spec 1 but a 2nd pod still terminating, old cookie", (1, 2, old), 1, (old, 1, True)),
+        ("1 running on the old cookie, 1 wanted", (1, 1, old), 1, (new, 1, False)),
+        ("3 running already on the generated cookie", (3, 3, new), 3, (new, 3, False)),
+        ("no StatefulSet yet", None, 3, (new, 3, False)),
     ]
-    for n, (label, live, mounted, wanted, refused) in enumerate(cases):
+    for n, (label, live, wanted, expect) in enumerate(cases):
         chart = stage(os.path.join(BP, "rabbitmq", "chart"), tmp, "rabbitmq-cookie-%d" % n)
         if live is None:
             obj = "(dict)"
         else:
             obj = ('(dict "spec" (dict "replicas" %d "template" (dict "spec" (dict "volumes" (list (dict "name" '
-                   '"rabbitmq-erlang-cookie" "secret" (dict "secretName" "%s")))))))' % (live, mounted))
-        open(os.path.join(chart, "templates", "secret-erlang-cookie.yaml"), "w").write(text.replace(lookup, obj))
+                   '"rabbitmq-erlang-cookie" "secret" (dict "secretName" "%s")))))) "status" (dict "replicas" %d))'
+                   % (live[0], live[2], live[1]))
+        open(os.path.join(chart, "templates", "_erlang_cookie.tpl"), "w").write(text.replace(lookup, obj))
         values = json.loads(json.dumps(refs))
         deep_merge(values, {"pod": {"replicas": {"server": wanted}}})
         rc, out, err = helm_template(chart, "rabbitmq-gate1234", values)
-        if refused and (rc == 0 or "every node of a cluster must hold the same cookie" not in err):
-            fail("rabbitmq: a cookie rotation with %s is not refused (rc=%d)" % (label, rc))
-        if not refused:
-            if rc != 0:
-                fail("rabbitmq: the cookie check refuses %s: %s" % (label, err.strip()[:200]))
-                continue
-            sts = [d for d in yaml.safe_load_all(out) if d and d.get("kind") == "StatefulSet"]
-            if [d["metadata"]["name"] for d in sts] != ["rabbitmq-rabbitmq"]:
-                fail("rabbitmq: the StatefulSet is %s, but secret-erlang-cookie.yaml looks up <deployment>-rabbitmq "
-                     "(rabbitmq-rabbitmq)" % [d["metadata"]["name"] for d in sts])
+        if expect == "refused":
+            if rc == 0 or "every node of a cluster must hold the same cookie" not in err:
+                fail("rabbitmq: a cookie rotation with %s is not refused (rc=%d)" % (label, rc))
+            continue
+        if rc != 0:
+            fail("rabbitmq: the cookie rotation refuses %s: %s" % (label, err.strip()[:200]))
+            continue
+        docs = [d for d in yaml.safe_load_all(out) if d]
+        sts = [d for d in docs if d.get("kind") == "StatefulSet"]
+        if [d["metadata"]["name"] for d in sts] != ["rabbitmq-rabbitmq"]:
+            fail("rabbitmq: the StatefulSet is %s, but the lookup reads <deployment>-rabbitmq (rabbitmq-rabbitmq)"
+                 % [d["metadata"]["name"] for d in sts])
+            continue
+        spec = sts[0]["spec"]
+        pod = spec["template"]["spec"]
+        vol = [v["secret"]["secretName"] for v in pod.get("volumes", []) if v["name"] == "rabbitmq-erlang-cookie"]
+        env = [e["valueFrom"]["secretKeyRef"]["name"] for c in pod["containers"] for e in c.get("env", [])
+               if e["name"] == "RABBITMQ_ERLANG_COOKIE" and "valueFrom" in e]
+        want_secret, want_replicas, values_secret = expect
+        if vol != [want_secret] or env != [want_secret]:
+            fail("rabbitmq: with %s the StatefulSet mounts %s and reads %s, want %s" % (label, vol, env, want_secret))
+        if spec.get("replicas") != want_replicas:
+            fail("rabbitmq: with %s the StatefulSet renders %s replicas, want %d" % (label, spec.get("replicas"),
+                                                                                    want_replicas))
+        rendered_values = any(d.get("kind") == "Secret" and d["metadata"]["name"] == old for d in docs)
+        if rendered_values != values_secret:
+            fail("rabbitmq: with %s Secret %s is %s, want %s (a mounted Secret must not be deleted while it is "
+                 "mounted)" % (label, old, "rendered" if rendered_values else "absent",
+                               "rendered" if values_secret else "absent"))
+        if not any(d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == new for d in docs):
+            fail("rabbitmq: with %s the generated cookie's ExternalSecret %s is not rendered" % (label, new))
 
 
 # A projection rendered under a new name (the rotation mechanism: a new name changes the pod spec),
