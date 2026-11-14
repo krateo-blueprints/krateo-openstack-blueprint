@@ -16,36 +16,58 @@ pod spec.
 
 Every node of a cluster must hold the same cookie. A StatefulSet rolls one pod at a time, so rotating
 the cookie under more than one replica would start a node that its peers refuse, and the cluster
-splits mid-roll. The render therefore refuses that one case -- a live StatefulSet with more than one
-replica still mounting another cookie Secret -- and says how to proceed. The decision is
-rabbitmq.erlang_cookie_rotation_check, which takes the live object as an argument so it can be
-tested without a cluster.
+splits mid-roll. So the cookie only ever changes on a single node, in two phases (rabbitmq.erlang_cookie_mode,
+from the live StatefulSet that rabbitmq.erlang_cookie_live looks up):
+
+  live StatefulSet             wanted replicas   render
+  none, or on the new cookie   any               normal: the generated cookie
+  one pod, old cookie          1                 rotate: the generated cookie (that pod restarts once)
+  more pods, old cookie        1                 hold: replicas 1 and the OLD cookie, still rendered;
+                                                 the next reconcile, with one pod left, rotates
+  old cookie                   more than 1       refused: set pod.replicas.server: 1 for the upgrade
+
+0.3.57 refused whenever more than one pod ran, so setting replicas to 1 could never take effect: the
+refused render was the one that would have scaled the StatefulSet down (measured, #228). "One pod"
+means the live spec AND status: a pod still terminating counts, so the last node restarts only after
+its peer has stopped, and it boots as the node that stopped last.
 */}}
 
 {{- define "rabbitmq.erlang_cookie_from" -}}
 {{- with .Values.endpoints.oslo_messaging.auth.erlang_cookie_from }}{{ if .secret }}true{{ end }}{{ end -}}
 {{- end -}}
 
-{{- define "rabbitmq.erlang_cookie_secret_name" -}}
-{{- if include "rabbitmq.erlang_cookie_from" . }}{{ printf "%s-erlang-cookie-generated" .deployment_name }}{{ else }}{{ printf "%s-erlang-cookie" .deployment_name }}{{ end -}}
+{{- define "rabbitmq.erlang_cookie_values_name" -}}{{ printf "%s-erlang-cookie" .deployment_name }}{{- end -}}
+{{- define "rabbitmq.erlang_cookie_generated_name" -}}{{ printf "%s-erlang-cookie-generated" .deployment_name }}{{- end -}}
+
+{{/* The live StatefulSet as JSON ({} when there is none). The only lookup: hack/validate-credentials.py
+     replaces this expression with stand-in objects. */}}
+{{- define "rabbitmq.erlang_cookie_live" -}}
+{{- lookup "apps/v1" "StatefulSet" .Release.Namespace (printf "%s-rabbitmq" .deployment_name) | toJson -}}
 {{- end -}}
 
-{{/* (list $envAll $live): fails when applying this render to the live StatefulSet $live (a dict, empty
-     when there is none) would roll a new cookie through more than one replica. */}}
-{{- define "rabbitmq.erlang_cookie_rotation_check" -}}
-{{- $envAll := index . 0 -}}{{- $live := index . 1 | default dict -}}
-{{- if $live }}
-{{- $want := include "rabbitmq.erlang_cookie_secret_name" $envAll -}}
+{{/* "" (normal), "hold", or fails (refused). Only meaningful with erlang_cookie_from. */}}
+{{- define "rabbitmq.erlang_cookie_mode" -}}
+{{- $envAll := . -}}
+{{- $live := include "rabbitmq.erlang_cookie_live" $envAll | fromJson -}}
+{{- if and $live (include "rabbitmq.erlang_cookie_from" $envAll) }}
+{{- $want := include "rabbitmq.erlang_cookie_generated_name" $envAll -}}
 {{- $mounted := "" -}}
 {{- range $v := ((($live.spec | default dict).template | default dict).spec | default dict).volumes | default list }}
 {{- if eq $v.name "rabbitmq-erlang-cookie" }}{{- $mounted = ($v.secret | default dict).secretName | default "" -}}{{- end }}
 {{- end }}
-{{- $replicas := int (($live.spec | default dict).replicas | default 1) -}}
+{{- if and $mounted (ne $mounted $want) }}
+{{- $specReplicas := int (($live.spec | default dict).replicas | default 1) -}}
+{{- $pods := int (($live.status | default dict).replicas | default 0) -}}
 {{- $wanted := int $envAll.Values.pod.replicas.server -}}
-{{- if and $mounted (ne $mounted $want) (or (gt $replicas 1) (gt $wanted 1)) }}
-{{- fail (printf "\n\nRabbitMQ's Erlang cookie changes on this upgrade (Secret %s -> %s), and every node of a cluster must hold the same cookie. The StatefulSet rolls one pod at a time, so with %d replica(s) running and %d wanted the first restarted node would be refused by its peers and the cluster would split. Set pod.replicas.server: 1 for this upgrade (componentValues.rabbitmq), let it complete, then set it back: new nodes join with the new cookie.\n" $mounted $want $replicas $wanted) }}
+{{- if gt $wanted 1 }}
+{{- fail (printf "\n\nRabbitMQ's Erlang cookie changes on this upgrade (Secret %s -> %s), and every node of a cluster must hold the same cookie. The StatefulSet rolls one pod at a time, so with %d replica(s) running and %d wanted the first restarted node would be refused by its peers and the cluster would split. Set pod.replicas.server: 1 for this upgrade (componentValues.rabbitmq): the chart scales to one node on the old cookie, then rotates it. Set it back afterwards: new nodes join with the new cookie.\n" $mounted $want (max $specReplicas $pods) $wanted) }}
+{{- else if or (gt $specReplicas 1) (gt $pods 1) }}hold{{ end }}
 {{- end }}
 {{- end }}
+{{- end -}}
+
+{{- define "rabbitmq.erlang_cookie_secret_name" -}}
+{{- if and (include "rabbitmq.erlang_cookie_from" .) (ne (include "rabbitmq.erlang_cookie_mode" .) "hold") }}{{ include "rabbitmq.erlang_cookie_generated_name" . }}{{ else }}{{ include "rabbitmq.erlang_cookie_values_name" . }}{{ end -}}
 {{- end -}}
 
 {{- define "rabbitmq.erlang_cookie_externalsecret" -}}
@@ -56,7 +78,7 @@ tested without a cluster.
 {{- fail (printf "endpoints.oslo_messaging.auth.erlang_cookie_from.%s is required" $field) }}
 {{- end }}
 {{- end }}
-{{- $name := include "rabbitmq.erlang_cookie_secret_name" $envAll }}
+{{- $name := include "rabbitmq.erlang_cookie_generated_name" $envAll }}
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
