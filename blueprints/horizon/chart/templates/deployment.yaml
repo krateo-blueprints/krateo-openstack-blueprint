@@ -193,6 +193,12 @@ spec:
               subPath: {{ base $localSettingsFile }}
               readOnly: true
             {{- end }}
+            {{- if include "horizon.secret_key_from" $envAll }}
+            - name: horizon-secret-key
+              mountPath: /etc/openstack-dashboard/local_settings.d/{{ include "horizon.secret_key_snippet_name" $envAll }}
+              subPath: {{ include "horizon.secret_key_snippet_name" $envAll }}
+              readOnly: true
+            {{- end }}
             {{- $homeSnippet := include "horizon.krateo_home.snippet_name" $envAll }}
             - name: horizon-etc
               mountPath: /etc/openstack-dashboard/local_settings.d/{{ $homeSnippet }}
@@ -251,6 +257,12 @@ spec:
           configMap:
             name: horizon-bin
             defaultMode: 0555
+        {{- if include "horizon.secret_key_from" $envAll }}
+        - name: horizon-secret-key
+          secret:
+            secretName: horizon-secret-key
+            defaultMode: 0444
+        {{- end }}
         - name: horizon-etc
           secret:
             secretName: horizon-etc

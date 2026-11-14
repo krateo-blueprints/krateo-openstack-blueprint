@@ -23,6 +23,7 @@ limitations under the License.
 {{- $mounts_neutron_netns_cleanup_cron_init := .Values.pod.mounts.neutron_netns_cleanup_cron.init_container }}
 {{- $etcSources := .Values.pod.etcSources.neutron_netns_cleanup_cron }}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "neutron") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.secret_conf_dropin_etc_source" (dict "from" (include "helm-toolkit.utils.metadata_proxy_secret_ref" . | fromJson) "name" "neutron-metadata-proxy-secret") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if .Values.manifests.secret_ks_etc }}
 {{- $etcSources = append $etcSources (dict "secret" (dict "name" "neutron-ks-etc")) }}
 {{- end }}

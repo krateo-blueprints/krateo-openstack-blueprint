@@ -46,6 +46,7 @@ exec:
 {{- $mounts_nova_scheduler_init := .Values.pod.mounts.nova_scheduler.init_container }}
 {{- $etcSources := .Values.pod.etcSources.nova_scheduler }}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "nova") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.secret_conf_dropin_etc_source" (dict "from" (include "helm-toolkit.utils.metadata_proxy_secret_ref" . | fromJson) "name" "nova-metadata-proxy-secret") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if eq .Values.manifests.secret_ks_etc true }}
 {{- $etcSources = append $etcSources (dict "secret" (dict "name" "nova-ks-etc")) }}
 {{- end }}
