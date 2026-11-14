@@ -85,6 +85,13 @@ return: |
 - name: SERVICE_OS_PASSWORD
   valueFrom:
     secretKeyRef:
+{{- with .passwordFrom }}
+      # Krateo (#228): read straight from the umbrella's root Secret, which exists before the component
+      # upgrades, so a pre-upgrade ks-user Job sets the NEW password before any reader restarts.
+      name: {{ .secret }}
+      key: {{ .key }}
+{{- else }}
       name: {{ $ksUserSecret }}
       key: OS_PASSWORD
+{{- end }}
 {{- end }}

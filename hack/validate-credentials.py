@@ -93,6 +93,12 @@ four things hold, and each is checked here:
   14. A KEY READ FROM A FILE. Horizon's SECRET_KEY: local_settings assigns it exactly once, from the
      mounted file; every pod template that mounts local_settings (the db-sync Job imports it too)
      mounts the Secret at that directory; the ExternalSecret holds exactly that file.
+  17. SERVICE USERS ROTATE BEFORE THEIR READERS. For every rotated service user, the ks-user Job that creates
+     it is post-install,pre-upgrade, reads the password from the umbrella's root (a pre-upgrade hook runs
+     before the projection is applied), and its script exempts the user from lockout BEFORE setting it.
+  18. READERS RESTART. Every Deployment, StatefulSet and DaemonSet that reads a credential ExternalSecret has a
+     pod template that changes when the references are applied (0.3.63: ks-etc kept its name, nothing hashed
+     it, and stale readers locked nova, neutron and placement for 30 minutes -- measured).
 
 Fails when helm or PyYAML is missing, when the umbrella defines no credential, when a listed chart
 does not render, and when no chart was checked.
@@ -282,6 +288,13 @@ IDUSER_DROPINS = {
     ("cyborg", "placement"): ("cyborg-identity-placement", "84-identity-placement.conf",
                               "[placement]\npassword = {{ .password }}\n"),
 }
+# Users whose ks-user entry (and config) a chart renders only in a mode the defaults do not select: rendered in
+# that mode too, so checks 1 and 17 do not pass vacuously for them.
+IDUSER_VARIANTS = {
+    ("neutron", "neutron_designate"): {"conf": {"neutron": {"DEFAULT": {"external_dns_driver": "designate"}}}},
+    ("neutron", "neutron_ironic"): {"network": {"backend": ["openvswitch", "baremetal"]}},
+    ("nova", "nova_ironic"): {"manifests": {"statefulset_compute_ironic": True}},
+}
 for _cid, _u in IDUSER_BY_ITEM.items():
     RULES[_cid] = {
         "what": "renders Keystone user %s" % _u,
@@ -293,6 +306,7 @@ for _cid, _u in IDUSER_BY_ITEM.items():
         "projections": lambda chart, cv: [],
         "carriers": True,
         "dropin_for": (lambda u: lambda chart: IDUSER_DROPINS.get((chart, u)))(_u),
+        "variants": (lambda u: lambda chart: [IDUSER_VARIANTS[(chart, u)]] if (chart, u) in IDUSER_VARIANTS else [])(_u),
     }
 for _svc in MEMCACHE:
     RULES["memcache-%s" % _svc] = {
@@ -686,6 +700,93 @@ def identity_map_check(tmp):
             fail("identity map: %s key %s is user %s, the map says %s" % (pair[0], pair[1], rendered[pair], mapped[pair]))
 
 
+def pod_template_refs(pod):
+    """Secret names a pod spec references (volumes, projected sources, env, envFrom)."""
+    refs = set()
+    for v in pod.get("volumes") or []:
+        if (v.get("secret") or {}).get("secretName"):
+            refs.add(v["secret"]["secretName"])
+        for src in (v.get("projected") or {}).get("sources") or []:
+            if (src.get("secret") or {}).get("name"):
+                refs.add(src["secret"]["name"])
+    for c in (pod.get("containers") or []) + (pod.get("initContainers") or []):
+        for e in c.get("env") or []:
+            n = ((e.get("valueFrom") or {}).get("secretKeyRef") or {}).get("name")
+            if n:
+                refs.add(n)
+        for e in c.get("envFrom") or []:
+            if (e.get("secretRef") or {}).get("name"):
+                refs.add(e["secretRef"]["name"])
+    return refs
+
+
+def readers_restart(chart, root_secrets, docs0, docs):
+    """18. Every long-running workload that reads a credential ExternalSecret has a pod template that differs
+    from the default render, so applying the references restarts it onto the new value. 0.3.63's ks-etc kept its
+    name and nothing hashed it: nova, neutron and placement kept the old password in memory and locked their
+    users (measured)."""
+    es_names = set()
+    for d in docs:
+        if d.get("kind") == "ExternalSecret":
+            keys = {(e.get("remoteRef") or {}).get("key") for e in (d.get("spec") or {}).get("data") or []}
+            if keys & set(root_secrets):
+                es_names.add(((d.get("spec") or {}).get("target") or {}).get("name") or d["metadata"]["name"])
+    before = {(d["kind"], d["metadata"]["name"]): d for d in docs0
+              if d.get("kind") in ("Deployment", "StatefulSet", "DaemonSet")}
+    for d in docs:
+        if d.get("kind") not in ("Deployment", "StatefulSet", "DaemonSet"):
+            continue
+        t = (d.get("spec") or {}).get("template") or {}
+        reads = pod_template_refs(t.get("spec") or {}) & es_names
+        old = before.get((d["kind"], d["metadata"]["name"]))
+        if not reads or old is None:
+            continue
+        if old["spec"]["template"] == t:
+            fail("%s: %s/%s reads %s but its pod template is identical with and without the references, so it "
+                 "would keep the previous value in memory (and lock its user)" % (chart, d["kind"], d["metadata"]["name"],
+                                                                                  sorted(reads)))
+
+
+KS_USER_CHECKED = []
+
+
+def ks_user_rotation(chart, cid, cv, root, docs):
+    """17. The chart's ks-user Job that creates this user runs pre-upgrade, reads the password from the root, and
+    exempts the user from lockout before setting the password."""
+    u = IDUSER_BY_ITEM[cid]
+    key = IDUSERS[u].get(chart, "gate_unmapped")
+    openrc = ((cv.get("secrets") or {}).get("identity") or {}).get(key)
+    found = False
+    for d in docs:
+        if d.get("kind") != "Job" or not d["metadata"]["name"].endswith("ks-user"):
+            continue
+        for c in d["spec"]["template"]["spec"].get("containers") or []:
+            env = {e["name"]: e for e in c.get("env") or []}
+            un = ((env.get("SERVICE_OS_USERNAME") or {}).get("valueFrom") or {}).get("secretKeyRef") or {}
+            if un.get("name") != openrc:
+                continue
+            found = True
+            hook = d["metadata"].get("annotations", {}).get("helm.sh/hook")
+            if hook != "post-install,pre-upgrade":
+                fail("%s: Job %s creates user %s with hook %r; it must be post-install,pre-upgrade so the new password "
+                     "is in Keystone before the readers restart" % (chart, d["metadata"]["name"], u, hook))
+            pw = ((env.get("SERVICE_OS_PASSWORD") or {}).get("valueFrom") or {}).get("secretKeyRef") or {}
+            if pw.get("name") != root:
+                fail("%s: Job %s sets user %s's password from %s, not the root %s (on a pre-upgrade hook the projection "
+                     "is not applied yet)" % (chart, d["metadata"]["name"], u, pw.get("name"), root))
+    if found:
+        KS_USER_CHECKED.append((chart, u))
+        script = None
+        for d in docs:
+            if d.get("kind") == "ConfigMap" and "ks-user.sh" in (d.get("data") or {}):
+                script = d["data"]["ks-user.sh"]
+        ex = script.find("--ignore-lockout-failure-attempts") if script else -1
+        pw = script.find("--password=") if script else -1
+        if not (0 <= ex < pw):
+            fail("%s: ks-user.sh must exempt the user from lockout (--ignore-lockout-failure-attempts) before it sets "
+                 "the password" % chart)
+
+
 def pod_secret_refs(docs):
     """Every Secret name a pod template in docs references (env, envFrom, volumes, projected)."""
     refs = set()
@@ -968,8 +1069,11 @@ def main():
                     elif items[cid]["secret"] not in [(e.get("remoteRef") or {}).get("key")
                                                       for e in es[0]["spec"].get("data") or []]:
                         fail("%s: ExternalSecret %s does not read %s" % (c["name"], want, items[cid]["secret"]))
+            if rc0 == 0:
+                readers_restart(c["name"], root_secrets, [d for d in yaml.safe_load_all(out0) if d], docs)
             for cid in cids:
                 if RULES[cid].get("carriers"):
+                    ks_user_rotation(c["name"], cid, cv, items[cid]["secret"], docs)
                     vsx = json.loads(json.dumps(enabled))
                     for pp in paths(RULES[cid]["password_path"](c["name"])):
                         deep_merge(vsx, nested(pp, sentinels[cid]))
@@ -1010,6 +1114,8 @@ def main():
                                                           for k in (d.get("data") or {})) for d in docsv)
                     if leaked:
                         fail("%s: with %s the %s value from values is still rendered" % (c["name"], variant, cid))
+                    if RULES[cid].get("carriers"):
+                        ks_user_rotation(c["name"], cid, cv, items[cid]["secret"], docsv)
                     if "dropin" in RULES[cid]:
                         vs = json.loads(json.dumps(enabled))
                         deep_merge(vs, json.loads(json.dumps(variant)))
@@ -1069,12 +1175,15 @@ def main():
                 fail("roots: %s shipped in %s and is no longer an item; every install running %s holds its "
                      "live password there" % (gone, latest, latest))
 
+    if checked and not KS_USER_CHECKED:
+        fail("17: no chart's ks-user Job was matched to a rotated service user; the check had no input")
     if failures:
         for f in failures:
             print("FAIL: " + f)
         sys.exit(1)
     print("OK: %d credential item(s); %d chart(s) rendered with references carry no admin password from values; "
-          "umbrella references, closure, roots, the admin lockout exemption and teardown with the release consistent" % (len(items), checked))
+          "umbrella references, closure, roots, the admin lockout exemption and teardown with the release consistent; "
+          "%d service-user ks-user Job(s) rotate pre-upgrade from the root with the exemption first" % (len(items), checked, len(KS_USER_CHECKED)))
 
 
 main()

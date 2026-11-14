@@ -122,7 +122,9 @@ spec:
 {{- include "helm-toolkit.snippets.keystone_openrc_env_vars" $env | indent 12 }}
             - name: SERVICE_OS_SERVICE_NAME
               value: {{ $serviceName | quote }}
-{{- with $env := dict "ksUserSecret" (index $envAll.Values.secrets.identity $serviceUser ) }}
+{{- $passwordFrom := (index $envAll.Values.endpoints.identity.auth $serviceUser).passwordFrom | default dict }}
+{{- if not $passwordFrom.secret }}{{- $passwordFrom = dict }}{{- end }}
+{{- with $env := dict "ksUserSecret" (index $envAll.Values.secrets.identity $serviceUser ) "passwordFrom" $passwordFrom }}
 {{- include "helm-toolkit.snippets.keystone_user_create_env_vars" $env | indent 12 }}
 {{- end }}
             - name: SERVICE_OS_ROLES
