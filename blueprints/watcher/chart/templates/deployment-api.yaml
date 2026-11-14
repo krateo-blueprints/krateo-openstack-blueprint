@@ -86,6 +86,7 @@ spec:
               mountPath: /tmp/watcher-api.sh
               subPath: watcher-api.sh
               readOnly: true
+{{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "watcher") | nindent 12 }}
             - name: watcher-etc
               mountPath: /etc/watcher/watcher.conf
               subPath: watcher.conf
@@ -110,6 +111,7 @@ spec:
           configMap:
             name: watcher-bin
             defaultMode: 0555
+{{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "watcher") | nindent 8 }}
         - name: watcher-etc
           secret:
             secretName: watcher-etc

@@ -22,6 +22,7 @@ limitations under the License.
 {{ tuple $envAll "engine" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 
 {{- $etcSources := .Values.pod.etcSources.heat_engine }}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "heat") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 ---
 apiVersion: apps/v1
 metadata:

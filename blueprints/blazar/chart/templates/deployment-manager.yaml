@@ -90,9 +90,9 @@ spec:
               mountPath: /etc/blazar/policy.yaml
               subPath: policy.yaml
               readOnly: true
-            {{- if .Values.endpoints.identity.auth.admin.passwordFrom }}
-            # The admin password as a drop-in (#228); oslo.config reads blazar.conf.d after blazar.conf.
-            - name: blazar-admin-password-etc
+            {{- if or .Values.endpoints.identity.auth.admin.passwordFrom (include "helm-toolkit.utils.memcache_secret_key_from" .) }}
+            # Generated credentials as drop-ins (#228); oslo.config reads blazar.conf.d after blazar.conf.
+            - name: blazar-manager-conf-d
               mountPath: /etc/blazar/blazar.conf.d/
               readOnly: true
             {{- end }}
@@ -114,11 +114,19 @@ spec:
           secret:
             secretName: blazar-etc
             defaultMode: 0444
-        {{- if .Values.endpoints.identity.auth.admin.passwordFrom }}
-        - name: blazar-admin-password-etc
-          secret:
-            secretName: blazar-admin-password-etc
+        {{- if or .Values.endpoints.identity.auth.admin.passwordFrom (include "helm-toolkit.utils.memcache_secret_key_from" .) }}
+        - name: blazar-manager-conf-d
+          projected:
             defaultMode: 0444
+            sources:
+              {{- if .Values.endpoints.identity.auth.admin.passwordFrom }}
+              - secret:
+                  name: blazar-admin-password-etc
+              {{- end }}
+              {{- if include "helm-toolkit.utils.memcache_secret_key_from" . }}
+              - secret:
+                  name: blazar-memcache-secret-key
+              {{- end }}
         {{- end }}
 {{- if $mounts.volumes }}
 {{ toYaml $mounts.volumes | indent 8 }}

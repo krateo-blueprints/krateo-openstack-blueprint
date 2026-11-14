@@ -87,6 +87,7 @@ spec:
               mountPath: /tmp/mistral-api.sh
               subPath: mistral-api.sh
               readOnly: true
+{{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "mistral") | nindent 12 }}
             - name: mistral-etc
               mountPath: /etc/mistral/mistral.conf
               subPath: mistral.conf
@@ -113,6 +114,7 @@ spec:
           configMap:
             name: mistral-bin
             defaultMode: 0555
+{{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "mistral") | nindent 8 }}
         - name: mistral-etc
           secret:
             secretName: mistral-etc

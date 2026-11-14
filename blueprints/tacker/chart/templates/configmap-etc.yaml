@@ -76,6 +76,7 @@ limitations under the License.
 {{- $_ := set .Values.conf.tacker.alarm_auth "password" .Values.endpoints.identity.auth.tacker.password -}}
 {{- end -}}
 ---
+{{- tuple $envAll "tacker" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

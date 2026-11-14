@@ -78,6 +78,7 @@ spec:
               mountPath: /tmp/cyborg-agent.sh
               subPath: cyborg-agent.sh
               readOnly: true
+{{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "cyborg") | nindent 12 }}
             - name: cyborg-etc
               mountPath: /etc/cyborg/cyborg.conf
               subPath: cyborg.conf
@@ -97,6 +98,7 @@ spec:
           configMap:
             name: cyborg-bin
             defaultMode: 0555
+{{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "cyborg") | nindent 8 }}
         - name: cyborg-etc
           secret:
             secretName: cyborg-etc

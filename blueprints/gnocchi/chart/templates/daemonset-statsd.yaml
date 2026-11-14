@@ -178,6 +178,7 @@ right, and a later named-targetPort refactor would then fail to resolve.
               mountPath: {{ .Values.conf.gnocchi.oslo_concurrency.lock_path }}
             - name: pod-etc-gnocchi
               mountPath: /etc/gnocchi
+{{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "gnocchi") | nindent 12 }}
             - name: gnocchi-etc
               mountPath: /etc/gnocchi/gnocchi.conf
               subPath: gnocchi.conf
@@ -218,6 +219,7 @@ right, and a later named-targetPort refactor would then fail to resolve.
           emptyDir: {}
         - name: pod-etc-gnocchi
           emptyDir: {}
+{{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "gnocchi") | nindent 8 }}
         - name: gnocchi-etc
           secret:
             secretName: gnocchi-etc

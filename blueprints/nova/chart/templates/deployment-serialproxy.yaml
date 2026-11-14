@@ -28,6 +28,7 @@ tcpSocket:
 {{- $mounts_nova_serialproxy := .Values.pod.mounts.nova_serialproxy.nova_serialproxy }}
 {{- $mounts_nova_serialproxy_init := .Values.pod.mounts.nova_serialproxy.init_serialproxy }}
 {{- $etcSources := .Values.pod.etcSources.nova_serialproxy }}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "nova") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if eq .Values.manifests.secret_ks_etc true }}
 {{- $etcSources = append $etcSources (dict "secret" (dict "name" "nova-ks-etc")) }}
 {{- end }}

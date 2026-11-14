@@ -585,6 +585,7 @@ conf:
       debug: false
     keystone_authtoken:
       auth_type: password
+      memcache_security_strategy: ENCRYPT
       username: cloudkitty
       service_token_roles_required: true
       service_token_roles: admin,rating,service

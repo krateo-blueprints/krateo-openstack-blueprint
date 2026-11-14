@@ -71,6 +71,7 @@ spec:
                   mountPath: /tmp/db-purge.sh
                   subPath: db-purge.sh
                   readOnly: true
+{{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "trove") | nindent 16 }}
                 - name: trove-etc
                   mountPath: /etc/trove/trove.conf
                   subPath: trove.conf
@@ -87,6 +88,7 @@ spec:
               configMap:
                 name: trove-bin
                 defaultMode: 0555
+{{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "trove") | nindent 12 }}
             - name: trove-etc
               secret:
                 secretName: trove-etc

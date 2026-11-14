@@ -18,6 +18,7 @@ limitations under the License.
 {{- $mounts_neutron_ovn_db_sync := .Values.pod.mounts.neutron_ovn_db_sync.neutron_ovn_db_sync }}
 {{- $mounts_neutron_ovn_db_sync_init := .Values.pod.mounts.neutron_ovn_db_sync.init_container }}
 {{- $etcSources := .Values.pod.etcSources.neutron_ovn_db_sync }}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "neutron") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if .Values.manifests.secret_ks_etc }}
 {{- $etcSources = append $etcSources (dict "secret" (dict "name" "neutron-ks-etc")) }}
 {{- end }}

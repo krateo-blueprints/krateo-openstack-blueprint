@@ -39,6 +39,7 @@ httpGet:
 {{ tuple $envAll "api" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 
 {{- $etcSources := .Values.pod.etcSources.octavia_api }}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "octavia") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if .Values.endpoints.identity.auth.admin.passwordFrom }}
 {{- /* The admin password as a drop-in (#228); oslo.config reads octavia.conf.d after octavia.conf. */}}
 {{- $etcSources = append ($etcSources | default list) (dict "secret" (dict "name" "octavia-admin-password-etc")) }}

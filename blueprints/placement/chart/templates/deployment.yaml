@@ -20,6 +20,7 @@ limitations under the License.
 {{- $mounts_placement := .Values.pod.mounts.placement.placement }}
 {{- $mounts_placement_init := .Values.pod.mounts.placement.init_container }}
 {{- $etcSources := .Values.pod.etcSources.placement }}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "placement") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if eq .Values.manifests.secret_ks_etc true }}
 {{- $etcSources = append $etcSources (dict "secret" (dict "name" "placement-ks-etc")) }}
 {{- end }}

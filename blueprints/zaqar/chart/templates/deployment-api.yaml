@@ -149,6 +149,10 @@ spec:
             sources:
               - secret:
                   name: zaqar-ks-etc
+              {{- if include "helm-toolkit.utils.memcache_secret_key_from" . }}
+              - secret:
+                  name: zaqar-memcache-secret-key
+              {{- end }}
 {{- dict "enabled" .Values.tls.oslo_db "name" .Values.secrets.tls.oslo_db.zaqar.internal | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
 {{- dict "enabled" (or .Values.manifests.certificates .Values.tls.identity) "name" .Values.secrets.tls.messaging.api.internal | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
 {{ if $mounts_zaqar_api.volumes }}{{ toYaml $mounts_zaqar_api.volumes | indent 8 }}{{ end }}
