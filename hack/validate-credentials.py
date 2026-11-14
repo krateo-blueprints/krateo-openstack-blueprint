@@ -286,7 +286,10 @@ for _cid, _u in IDUSER_BY_ITEM.items():
     RULES[_cid] = {
         "what": "renders Keystone user %s" % _u,
         "consumes": (lambda u: lambda d, has: d in IDUSERS[u])(_u),
-        "password_path": (lambda u: lambda chart: "endpoints.identity.auth.%s.password" % IDUSERS[u][chart])(_u),
+        # An umbrella listing the map does not know is reported by checks 2 and 15; render it under a key no
+        # chart has rather than crash here.
+        "password_path": (lambda u: lambda chart: "endpoints.identity.auth.%s.password"
+                          % IDUSERS[u].get(chart, "gate_unmapped"))(_u),
         "projections": lambda chart, cv: [],
         "carriers": True,
         "dropin_for": (lambda u: lambda chart: IDUSER_DROPINS.get((chart, u)))(_u),
