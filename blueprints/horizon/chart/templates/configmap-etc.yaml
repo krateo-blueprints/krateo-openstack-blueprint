@@ -22,7 +22,11 @@ metadata:
 type: Opaque
 data:
 {{- include "helm-toolkit.snippets.values_template_renderer" (dict "envAll" $envAll "template" .Values.conf.horizon.apache "key" "horizon.conf" "format" "Secret" ) | indent 2 }}
+{{- if include "horizon.secret_key_from" $envAll }}
+  local_settings: {{ include "horizon.local_settings_without_secret_key" $envAll | b64enc }}
+{{- else }}
 {{- include "helm-toolkit.snippets.values_template_renderer" (dict "envAll" $envAll "template" .Values.conf.horizon.local_settings.template "key" "local_settings" "format" "Secret" ) | indent 2 }}
+{{- end }}
 {{- if .Values.conf.horizon.security }}
 {{- include "helm-toolkit.snippets.values_template_renderer" (dict "envAll" $envAll "template" .Values.conf.horizon.security "key" "security.conf" "format" "Secret" ) | indent 2 }}
 {{- end }}

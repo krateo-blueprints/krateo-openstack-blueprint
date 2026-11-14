@@ -727,6 +727,22 @@ On the upgrade that ships it:
   token validations made under the old key are simply missed and validated again.
 - ceilometer and freezer declared a key but never used one, so nothing changes for them.
 
+### Upgrading to 0.3.61 or later: the metadata proxy secret and Horizon's SECRET_KEY rotate
+
+From 0.3.61 two shared secrets are generated per install:
+- `openstack-credential-metadata-proxy-shared-secret`. Neutron's metadata agents sign each instance's
+  metadata request with it, and nova-api-metadata trusts what verifies. With the published value
+  (`password`), any pod could forge a metadata request for any instance and read its user-data, keys
+  and vendor data. Nova (`[neutron]`) and every neutron metadata agent (`[DEFAULT]`, OVS or OVN) read
+  it from a drop-in, `81-metadata-proxy.conf`, in their `conf.d` directory;
+- `openstack-credential-horizon-secret-key`. Django signs Horizon's session cookies and CSRF tokens
+  with it, so the published value let anyone forge a session. It arrives as
+  `local_settings.d/_90_krateo_secret_key.py`, and `local_settings` no longer contains it.
+
+On the upgrade, **every Horizon user is signed out once**: sessions signed with the old key are
+rejected. Nova's metadata API and the metadata agents restart with the new secret together, and
+instances keep reading their metadata.
+
 ### Components follow the umbrella's version
 
 The orchestrator registers every component `CompositionDefinition` at its own chart version
