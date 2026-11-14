@@ -947,6 +947,9 @@ krateo-openstack-node-reader
 {{- if not $item -}}
 {{- fail (printf "component %s lists credential %q, which .Values.credentials.items does not define" $c.name $id) -}}
 {{- end -}}
+{{- if $item.retired -}}
+{{- fail (printf "component %s lists credential %q, which is retired: no chart reads it any more" $c.name $id) -}}
+{{- end -}}
 {{- $ref := dict "store" $creds.store "secret" $item.secret "key" $item.key -}}
 {{- $path := $item.path -}}
 {{- if hasKey ($item.pathFor | default dict) $c.name -}}{{- $path = index $item.pathFor $c.name -}}{{- end -}}

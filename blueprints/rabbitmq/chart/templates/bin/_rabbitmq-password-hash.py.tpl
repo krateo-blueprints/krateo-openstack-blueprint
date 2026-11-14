@@ -25,7 +25,6 @@ import re
 
 user = os.environ['RABBITMQ_ADMIN_USERNAME']
 password = os.environ['RABBITMQ_ADMIN_PASSWORD']
-guest_password = os.environ['RABBITMQ_GUEST_PASSWORD']
 output_file = os.environ['RABBITMQ_DEFINITION_FILE']
 
 def hash_rabbit_password(password):
@@ -42,13 +41,9 @@ output = {
         "password_hash": hash_rabbit_password(password),
         "hashing_algorithm": "rabbit_password_hashing_sha512",
         "tags": "administrator"
-    },
-    {
-        "name": "guest",
-        "password_hash": hash_rabbit_password(guest_password),
-        "hashing_algorithm": "rabbit_password_hashing_sha512",
-        "tags": "administrator"
     }
+    # Krateo (#228): no guest user. Upstream wrote guest (an administrator, loopback_users.guest
+    # false) here, so it came back on every RabbitMQ boot until the next rabbit-init deleted it.
     ]
 }
 

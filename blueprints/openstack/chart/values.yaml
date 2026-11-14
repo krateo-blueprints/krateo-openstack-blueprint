@@ -57,10 +57,13 @@ credentials:
       path: endpoints.oslo_messaging.auth.admin.passwordFrom
       pathFor:
         rabbitmq: endpoints.oslo_messaging.auth.user.passwordFrom
+    # Retired in 0.3.58: the rabbitmq chart no longer creates a guest user at all. Kept, never removed:
+    # installs that ran 0.3.57 hold this root. No component may list a retired item.
     - id: oslo-messaging-guest
       secret: openstack-credential-oslo-messaging-guest
       key: password
       path: endpoints.oslo_messaging.auth.guest.passwordFrom
+      retired: true
     - id: oslo-messaging-erlang-cookie
       secret: openstack-credential-oslo-messaging-erlang-cookie
       key: password
@@ -124,7 +127,6 @@ components:
     kind: Rabbitmq
     credentials:
       - oslo-messaging-admin
-      - oslo-messaging-guest
       - oslo-messaging-erlang-cookie
     deps: []
     tier: compute
