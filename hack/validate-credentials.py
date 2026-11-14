@@ -377,7 +377,7 @@ def main():
         charts = [d for d in os.listdir(BP) if os.path.isdir(os.path.join(BP, d, "chart")) and d != "openstack"]
         for cid, rule in RULES.items():
             if cid not in items:
-                continue
+                continue  # reported below: a rule without its item
             listed = {c["name"] for c in components if cid in (c.get("credentials") or [])}
             rendering = {d for d in charts if rule["consumes"](d, has_template)}
             for name in sorted(rendering - listed):
@@ -388,6 +388,11 @@ def main():
         for cid in items:
             if cid not in RULES:
                 fail("credential item %s has no closure/sentinel rule in this gate" % cid)
+        for cid in RULES:
+            if cid not in items:
+                fail("this gate has a rule for %s but the umbrella defines no such item: removing an item puts "
+                     "every consumer back on the published default (before any release ships its root, check 4 "
+                     "cannot see that)" % cid)
 
         # 3. no value from values
         checked = 0
