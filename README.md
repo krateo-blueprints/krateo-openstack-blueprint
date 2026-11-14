@@ -660,10 +660,18 @@ On the upgrade that ships it:
   `rabbitmq-erlang-cookie-generated`, so its pod spec changes and the server restarts once. On that
   start its init container writes both users, with the new password hashes, into the definitions file
   the server loads at boot, which needs no old password;
-- **with more than one RabbitMQ replica, the upgrade is refused** and the reason is written to the
-  rabbitmq component's status. Every node must hold the same cookie, and a rolling restart would
-  start a node that its peers refuse. Set `componentValues.rabbitmq.pod.replicas.server: 1` for the
-  upgrade, then set it back. The blueprint's default is 1 replica;
+- **with more than one RabbitMQ replica, use 0.3.58 or later, not 0.3.57.** Every node must hold the
+  same cookie, and a rolling restart would start a node that its peers refuse, so the cookie only
+  changes on a single node:
+  - while more than one replica is wanted, the rabbitmq render is refused. The reason is written to
+    the rabbitmq component's status (`ChartRenderable False`);
+  - set `componentValues.rabbitmq.pod.replicas.server: 1`. The chart first scales to one node, still
+    on the old cookie, then rotates the cookie on that node;
+  - set the replicas back afterwards: new nodes join with the new cookie.
+
+  On 0.3.57 the refusal also blocked the scale-down, so replicas 1 never took effect (measured: the
+  StatefulSet stayed at 2 nodes). If you are stuck there, upgrade to 0.3.58. The blueprint's
+  default is 1 replica, which is not affected;
 - the cluster-wait Job and the test Pod read the admin connection URL from that Secret. Upstream puts
   it in their pod specs, password included, as a literal env value;
 - anything outside the blueprint that logs in to RabbitMQ as `rabbitmq` or `guest` with the old
