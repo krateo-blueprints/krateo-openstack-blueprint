@@ -759,20 +759,50 @@ each:
 - nova's, neutron's, cinder's and placement's users, and the cross-service ones (`nova_neutron`,
   `neutron_nova`, `nova_cinder`, ...);
 - the service-token users (`*_service_user`), blazar and zaqar;
-- every chart's `test` user.
+- every chart's `test` user. That is the password in its openrc Secret: no Job creates test users in
+  Keystone (they are for `helm test`).
 
-The other service users follow in 0.3.64.
+**Upgrade to 0.3.64, not 0.3.63.** On 0.3.63:
+- the ks-user Jobs set the new passwords **after** the upgrade (a post-upgrade hook);
+- nova, neutron and placement never restarted. Their `<service>-ks-etc` Secret kept its name, and
+  nothing in their pod templates changed with its content.
 
-On the upgrade that ships it:
-- each owning chart's ks-user Job sets the new password in Keystone (`openstack user set`), and the
-  chart's pods restart reading it. Nova, cinder, neutron, placement, blazar and zaqar read it from
-  their `<service>-ks-etc` drop-in, now written by an ExternalSecret. Cyborg reads `nova` and
-  `placement` from `cyborg-identity-*` drop-ins;
-- service-to-service calls through a user can fail while that user's owner has set the new password
-  and its readers have not yet restarted. Five usernames are read by more than one chart: `nova`,
-  `placement` (cyborg), `glance`, `neutron-test` and `test`.
+The processes kept the old password, failed authentication five times, and Keystone's failed-login
+lockout locked `nova`, `neutron` and `placement` for 30 minutes. Their APIs answered 503 until the
+lockout expired and the pods were restarted (measured on GKE,
+[#228](https://github.com/krateo-blueprints/krateo-openstack-blueprint/issues/228)).
+
+From 0.3.64:
+- **each user's password changes in Keystone before its readers restart.** A user whose password comes
+  from the umbrella is set by `<service>-ks-user`, a **pre-upgrade** hook. A pre-upgrade hook runs
+  before the release's resources are applied, so that Job reads nothing the release renders:
+  - its script is inline, not the previous revision's `<service>-bin`;
+  - the user's fields come from values, and the password from the umbrella's Secret.
+
+  Users still set from values keep OpenStack-Helm's post-upgrade Job, named
+  `<service>-ks-user-values` when a chart has both kinds;
+- **service users are exempt from the lockout.** That Job runs
+  `openstack user set --ignore-lockout-failure-attempts` before it sets the password, so a pod still
+  holding the old value fails without locking the user;
+- **every reader restarts.** Each workload that reads `<service>-ks-etc` or the keystone openrc carries
+  a hash of it in its pod template (`secret-ks-etc-hash`, `secret-keystone-hash`). The upgrade to
+  0.3.64 restarts those 22 workloads of nova, cinder, neutron, placement, blazar, cloudkitty and zaqar
+  once.
+
+Cyborg reads `nova` and `placement` from its `cyborg-identity-*` drop-ins. Five usernames are read by
+more than one chart: `nova`, `placement` (cyborg), `glance`, `neutron-test` and `test`.
+
+If an install is already on 0.3.63 with locked users, upgrade to 0.3.64. Its Job exempts every
+rotated user, so a locked user authenticates again as soon as its pods hold the new password.
+
+The other service users follow in a later release.
+
+Three checks keep this true:
 - `hack/identity-users.yaml` records which chart reads which username. The credentials gate
-  re-renders every chart and fails if that map is stale.
+  re-renders every chart and fails if that map is stale;
+- check 17 fails unless every rotated user's ks-user Job is pre-upgrade and reads only its root;
+- check 18 fails unless every reader's pod template changes when that one user's reference is
+  applied.
 
 ### Components follow the umbrella's version
 
