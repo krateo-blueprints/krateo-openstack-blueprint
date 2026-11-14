@@ -61,6 +61,10 @@ credentials:
       secret: openstack-credential-oslo-messaging-guest
       key: password
       path: endpoints.oslo_messaging.auth.guest.passwordFrom
+    - id: oslo-messaging-erlang-cookie
+      secret: openstack-credential-oslo-messaging-erlang-cookie
+      key: password
+      path: endpoints.oslo_messaging.auth.erlang_cookie_from
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
 components:
@@ -106,6 +110,7 @@ components:
     credentials:
       - oslo-messaging-admin
       - oslo-messaging-guest
+      - oslo-messaging-erlang-cookie
     deps: []
     tier: compute
   - name: openvswitch

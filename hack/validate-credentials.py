@@ -23,7 +23,7 @@ four things hold, and each is checked here:
      MariaDB root DB_CONNECTION Secret (templates/secret-db.yaml) and to mariadb itself;
      oslo-messaging-admin to exactly the charts rendering a RabbitMQ admin connection Secret
      (templates/secret-rabbitmq.yaml) and to rabbitmq itself, whose administrator it is (at
-     auth.user); oslo-messaging-guest to rabbitmq alone.
+     auth.user); oslo-messaging-guest and oslo-messaging-erlang-cookie to rabbitmq alone.
   3. NO VALUE FROM VALUES. Each listed chart is rendered with its references AND with the admin
      password in values replaced by a unique sentinel. The sentinel must appear NOWHERE: not in any
      rendered text (configs, scripts) and not in any Secret's data once base64-decoded. A substring
@@ -59,6 +59,12 @@ four things hold, and each is checked here:
      key for key, the Secret of the same name (or of the name it replaced: RENAMED) that the chart
      renders when that password is set in values instead. A drop-in that has no Secret counterpart
      (a keystone_password_conf_snippet) is not compared; every other projection must be.
+  9. NO SPLIT CLUSTER ON A COOKIE ROTATION. Every RabbitMQ node must hold the same Erlang cookie and a
+     StatefulSet rolls one pod at a time, so the rabbitmq chart refuses to roll a new cookie through
+     more than one replica (rabbitmq.erlang_cookie_rotation_check). Offline no lookup sees a live
+     StatefulSet, so the check is rendered with stand-in live objects: refused for 3 replicas running
+     the old cookie, and for 1 running with 3 wanted; allowed for 1 replica, for a StatefulSet already
+     on the generated cookie, and when there is none.
 
 Fails when helm or PyYAML is missing, when the umbrella defines no credential, when a listed chart
 does not render, and when no chart was checked.
@@ -173,7 +179,53 @@ RULES = {
         "password_path": lambda chart: "endpoints.oslo_messaging.auth.guest.password",
         "projections": lambda chart, cv: ["rabbitmq-admin-user-generated"],
     },
+    "oslo-messaging-erlang-cookie": {
+        "what": "is RabbitMQ itself (the Erlang distribution cookie of its nodes)",
+        "consumes": lambda d, has: d == "rabbitmq",
+        "password_path": lambda chart: "endpoints.oslo_messaging.auth.erlang_cookie",
+        "projections": lambda chart, cv: ["rabbitmq-erlang-cookie-generated"],
+    },
 }
+
+
+def cookie_rotation_cases(tmp, refs):
+    """9. Render the rabbitmq chart's own secret-erlang-cookie.yaml with its StatefulSet lookup replaced by
+    stand-in live objects, so the call site is checked together with rabbitmq.erlang_cookie_rotation_check."""
+    lookup = 'lookup "apps/v1" "StatefulSet" $envAll.Release.Namespace (printf "%s-rabbitmq" $envAll.deployment_name)'
+    src = os.path.join(BP, "rabbitmq", "chart", "templates", "secret-erlang-cookie.yaml")
+    text = open(src).read()
+    if text.count(lookup) != 1:
+        fail("rabbitmq: secret-erlang-cookie.yaml no longer looks up the live StatefulSet (%s), so nothing stops a "
+             "cookie rotation from splitting a multi-replica cluster" % lookup)
+        return
+    cases = [  # (label, live replicas or None for no StatefulSet, mounted Secret, wanted replicas, refused)
+        ("3 replicas on the old cookie", 3, "rabbitmq-erlang-cookie", 3, True),
+        ("1 running, 3 wanted, old cookie", 1, "rabbitmq-erlang-cookie", 3, True),
+        ("1 replica on the old cookie", 1, "rabbitmq-erlang-cookie", 1, False),
+        ("3 replicas already on the generated cookie", 3, "rabbitmq-erlang-cookie-generated", 3, False),
+        ("no StatefulSet yet", None, "", 3, False),
+    ]
+    for n, (label, live, mounted, wanted, refused) in enumerate(cases):
+        chart = stage(os.path.join(BP, "rabbitmq", "chart"), tmp, "rabbitmq-cookie-%d" % n)
+        if live is None:
+            obj = "(dict)"
+        else:
+            obj = ('(dict "spec" (dict "replicas" %d "template" (dict "spec" (dict "volumes" (list (dict "name" '
+                   '"rabbitmq-erlang-cookie" "secret" (dict "secretName" "%s")))))))' % (live, mounted))
+        open(os.path.join(chart, "templates", "secret-erlang-cookie.yaml"), "w").write(text.replace(lookup, obj))
+        values = json.loads(json.dumps(refs))
+        deep_merge(values, {"pod": {"replicas": {"server": wanted}}})
+        rc, out, err = helm_template(chart, "rabbitmq-gate1234", values)
+        if refused and (rc == 0 or "every node of a cluster must hold the same cookie" not in err):
+            fail("rabbitmq: a cookie rotation with %s is not refused (rc=%d)" % (label, rc))
+        if not refused:
+            if rc != 0:
+                fail("rabbitmq: the cookie check refuses %s: %s" % (label, err.strip()[:200]))
+                continue
+            sts = [d for d in yaml.safe_load_all(out) if d and d.get("kind") == "StatefulSet"]
+            if [d["metadata"]["name"] for d in sts] != ["rabbitmq-rabbitmq"]:
+                fail("rabbitmq: the StatefulSet is %s, but secret-erlang-cookie.yaml looks up <deployment>-rabbitmq "
+                     "(rabbitmq-rabbitmq)" % [d["metadata"]["name"] for d in sts])
 
 
 # A projection rendered under a new name (the rotation mechanism: a new name changes the pod spec),
@@ -182,6 +234,7 @@ RENAMED = {
     "mariadb-dbadmin-generated": "mariadb-dbadmin-password",
     "mariadb-secrets-generated": "mariadb-secrets",
     "rabbitmq-admin-user-generated": "rabbitmq-admin-user",
+    "rabbitmq-erlang-cookie-generated": "rabbitmq-erlang-cookie",
 }
 
 
@@ -454,6 +507,12 @@ def main():
             elif not any(c < boot[0] for c in calls) or not any(c > boot[0] for c in calls):
                 fail("keystone: db-sync.sh must call ensure_admin_lockout_exempt before AND after bootstrap "
                      "(calls at lines %s, bootstrap at %s)" % (calls, boot[0]))
+
+        rabbit = [c for c in components if c["name"] == "rabbitmq"]
+        if "oslo-messaging-erlang-cookie" in items and rabbit:
+            cookie_rotation_cases(tmp, refs_for(rabbit[0]))
+        elif "oslo-messaging-erlang-cookie" in items:
+            fail("the umbrella defines oslo-messaging-erlang-cookie but no rabbitmq component")
 
         if checked == 0:
             print("FAILED MEASUREMENT: no chart was rendered with credential references")

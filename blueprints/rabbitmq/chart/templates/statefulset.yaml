@@ -253,7 +253,10 @@ spec:
             - name: K8S_HOSTNAME_SUFFIX
               value: ".{{ tuple "oslo_messaging" "internal" . | include "helm-toolkit.endpoints.hostname_fqdn_endpoint_lookup" }}"
             - name: RABBITMQ_ERLANG_COOKIE
-              value: "{{ $envAll.Values.endpoints.oslo_messaging.auth.erlang_cookie }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rabbitmq.erlang_cookie_secret_name" $envAll | quote }}
+                  key: erlang_cookie
             - name: PORT_HTTP
               value: "{{ tuple "oslo_messaging" "internal" $protocol . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}"
             - name: PORT_AMPQ
@@ -327,7 +330,7 @@ spec:
             defaultMode: 0444
         - name: rabbitmq-erlang-cookie
           secret:
-            secretName: {{ printf "%s-%s" $envAll.deployment_name "erlang-cookie" | quote }}
+            secretName: {{ include "rabbitmq.erlang_cookie_secret_name" $envAll | quote }}
             defaultMode: 0444
 {{ dict "enabled" $envAll.Values.manifests.certificates "name" $envAll.Values.secrets.tls.oslo_messaging.server.internal | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
         {{- if not $envAll.Values.volume.enabled }}
