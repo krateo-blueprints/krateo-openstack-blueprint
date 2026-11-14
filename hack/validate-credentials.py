@@ -84,6 +84,11 @@ four things hold, and each is checked here:
   12. A STRATEGY. Each of those files must still set memcache_security_strategy and no longer set
      memcache_secret_key: without a strategy keystonemiddleware ignores the key and leaves the cache
      unprotected (cloudkitty, cyborg, ironic and masakari shipped without one).
+  13. SHARED SECRETS ARE READ. The metadata proxy shared secret (nova [neutron], neutron's metadata
+     agents [DEFAULT]) and Horizon's SECRET_KEY arrive as drop-ins. The files that carry them are found
+     by rendering in values mode with a sentinel; with the reference, every long-running main
+     container that mounts one must receive the drop-in where its program reads drop-ins (an
+     oslo.config .conf.d, Horizon's local_settings.d), and the drop-in holds exactly the option.
 
 Fails when helm or PyYAML is missing, when the umbrella defines no credential, when a listed chart
 does not render, and when no chart was checked.
@@ -230,6 +235,33 @@ RULES = {
 MEMCACHE = sorted(d for d in os.listdir(BP)
                   if os.path.isfile(os.path.join(BP, d, "chart", "templates", "configmap-etc.yaml"))
                   and "memcache_secret_key" in open(os.path.join(BP, d, "chart", "templates", "configmap-etc.yaml")).read())
+# The metadata proxy shared secret: one value, signed by neutron's metadata agents and verified by
+# nova-api-metadata. Each chart holds it under its own conf paths (neutron: three agents' sections).
+RULES["metadata-proxy-shared-secret"] = {
+    "what": "renders the metadata proxy shared secret (nova [neutron], neutron's metadata agents)",
+    "consumes": lambda d, has: d in ("nova", "neutron"),
+    "password_path": lambda chart: (["conf.nova.neutron.metadata_proxy_shared_secret"] if chart == "nova" else
+                                    ["conf.metadata_agent.DEFAULT.metadata_proxy_shared_secret",
+                                     "conf.ovn_agent.DEFAULT.metadata_proxy_shared_secret",
+                                     "conf.ovn_metadata_agent.DEFAULT.metadata_proxy_shared_secret"]),
+    "projections": lambda chart, cv: ["%s-metadata-proxy-secret" % chart],
+    # neutron renders the OVN agents' files only with the OVN backend (instead of metadata_agent.ini), so
+    # that mode is rendered too: otherwise their copies of the secret would pass the sentinel vacuously.
+    "variants": lambda chart: ([{"network": {"backend": ["ovn"]},
+                                 "manifests": {"daemonset_ovn_agent": True, "daemonset_ovn_metadata_agent": True}}]
+                               if chart == "neutron" else []),
+    "dropin": lambda chart: ("%s-metadata-proxy-secret" % chart, "81-metadata-proxy.conf",
+                             "[%s]\nmetadata_proxy_shared_secret = {{ .password }}\n"
+                             % ("neutron" if chart == "nova" else "DEFAULT")),
+}
+# Horizon's Django SECRET_KEY, delivered as a local_settings.d snippet.
+RULES["horizon-secret-key"] = {
+    "what": "is Horizon (its Django SECRET_KEY)",
+    "consumes": lambda d, has: d == "horizon",
+    "password_path": lambda chart: "conf.horizon.local_settings.config.horizon_secret_key",
+    "projections": lambda chart, cv: ["horizon-secret-key"],
+    "dropin": lambda chart: ("horizon-secret-key", "_90_krateo_secret_key.py", "SECRET_KEY = '{{ .password }}'\n"),
+}
 for _svc in MEMCACHE:
     RULES["memcache-%s" % _svc] = {
         "what": "is %s (its keystonemiddleware memcache secret key)" % _svc,
@@ -343,6 +375,10 @@ RENAMED = {
     "mariadb-dbaudit-generated": "mariadb-dbaudit-password",
     "mysql-exporter-generated": "mysql-exporter-secrets",
 }
+
+
+def paths(p):
+    return p if isinstance(p, (list, tuple)) else [p]
 
 
 def pod_specs(docs):
@@ -464,6 +500,62 @@ def memcache_delivery(svc, cv, docs0, docs):
         if not script or "exec swift-proxy-server /etc/swift/proxy-server.conf.d" not in script:
             fail("swift: with the reference the proxy must load /etc/swift/proxy-server.conf.d (swift reads a "
                  "config directory; the drop-in is in it)")
+
+
+def dropin_delivery(chart, cid, sentinel, docs_s, docs):
+    """13. A secret delivered as a drop-in reaches every long-running main container that reads a file
+    which carried it in values mode (found by rendering with a sentinel), in a directory the program
+    reads (an oslo.config .conf.d, or Horizon's local_settings.d); and the drop-in holds exactly
+    `option = <generated>` in its section."""
+    drop, fname, content = RULES[cid]["dropin"](chart)
+    carriers = set()
+    for d in docs_s:
+        if d.get("kind") in ("Secret", "ConfigMap"):
+            for k in (d.get("data") or {}):
+                t = object_text(d, k)
+                if t and sentinel in t:
+                    carriers.add((d["kind"], d["metadata"]["name"], k))
+    if not carriers:
+        fail("%s: no rendered file carries %s in values mode, so where the generated value must arrive cannot "
+             "be determined" % (chart, cid))
+        return
+    es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == drop]
+    tdata = (((es[0].get("spec") or {}).get("target") or {}).get("template") or {}).get("data") or {} if es else {}
+    if tdata != {fname: content}:
+        fail("%s: the drop-in %s holds %s, want %s" % (chart, drop, sorted(tdata.items()), [(fname, content)]))
+    readers = 0
+    for podname, pod in pod_specs(docs):
+        if podname.split("/")[0] not in ("Deployment", "StatefulSet", "DaemonSet"):
+            continue
+        vols = {v["name"]: v for v in pod.get("volumes") or []}
+        for cont in pod.get("containers") or []:
+            mounts = cont.get("volumeMounts") or []
+            reads = set()
+            for m in mounts:
+                v = vols.get(m["name"]) or {}
+                obj = (("Secret", (v.get("secret") or {}).get("secretName")) if "secret" in v else
+                       ("ConfigMap", (v.get("configMap") or {}).get("name")) if "configMap" in v else (None, None))
+                for kind, name, key in carriers:
+                    if (kind, name) == obj and m.get("subPath") in (None, key):
+                        reads.add(key)
+            if not reads:
+                continue
+            readers += 1
+            ok = False
+            for m in mounts:
+                v = vols.get(m["name"]) or {}
+                srcs = [(v.get("secret") or {}).get("secretName")] if "secret" in v else \
+                       [(x.get("secret") or {}).get("name") for x in (v.get("projected") or {}).get("sources") or []]
+                if drop in srcs:
+                    path = m["mountPath"].rstrip("/")
+                    d = path if not m.get("subPath") else os.path.dirname(path)
+                    if d.endswith(".conf.d") or d.endswith("local_settings.d"):
+                        ok = True
+            if not ok:
+                fail("%s: %s container %s reads %s but does not receive %s where it reads drop-ins"
+                     % (chart, podname, cont["name"], sorted(reads), drop))
+    if readers == 0:
+        fail("%s: no long-running container reads a file that carried %s" % (chart, cid))
 
 
 def pod_secret_refs(docs):
@@ -622,7 +714,8 @@ def main():
             sentinels = {}
             for cid in cids:
                 sentinels[cid] = "gate-%s-sentinel-%s-7f3c9e" % (cid, c["name"])
-                deep_merge(values, nested(RULES[cid]["password_path"](c["name"]), sentinels[cid]))
+                for pp in paths(RULES[cid]["password_path"](c["name"])):
+                    deep_merge(values, nested(pp, sentinels[cid]))
             w = stage(chart_dir, tmp, c["name"])
             release = c["name"] + "-gate1234"
             rc, out, err = helm_template(w, release, values)
@@ -669,7 +762,8 @@ def main():
             known = {cid: "Gate%sFidelity%s7f3c" % (cid.replace("-", ""), c["name"].replace("-", "")) for cid in cids}
             values_g = json.loads(json.dumps(enabled))
             for cid in cids:
-                deep_merge(values_g, nested(RULES[cid]["password_path"](c["name"]), known[cid]))
+                for pp in paths(RULES[cid]["password_path"](c["name"])):
+                    deep_merge(values_g, nested(pp, known[cid]))
             rcg, outg, errg = helm_template(w, release, values_g)
             if rcg != 0:
                 fail("%s: does not render with the passwords in values: %s" % (c["name"], errg.strip()[:300]))
@@ -684,7 +778,7 @@ def main():
                     tdata = ((spec.get("target") or {}).get("template") or {}).get("data") or {}
                     src = plain.get(RENAMED.get(name, name))
                     if src is None:
-                        if any("[" in (v or "") and "]" in (v or "") for v in tdata.values()) and len(tdata) == 1:
+                        if len(tdata) == 1 and list(tdata)[0].endswith((".conf", ".py")):
                             continue  # a keystone_password_conf_snippet drop-in: no Secret counterpart
                         fail("%s: ExternalSecret %s has no Secret counterpart rendered from values to compare with"
                              % (c["name"], name))
@@ -728,6 +822,39 @@ def main():
                     elif items[cid]["secret"] not in [(e.get("remoteRef") or {}).get("key")
                                                       for e in es[0]["spec"].get("data") or []]:
                         fail("%s: ExternalSecret %s does not read %s" % (c["name"], want, items[cid]["secret"]))
+            for cid in cids:
+                if "dropin" not in RULES[cid]:
+                    continue
+                values_s = json.loads(json.dumps(enabled))
+                for pp in paths(RULES[cid]["password_path"](c["name"])):
+                    deep_merge(values_s, nested(pp, sentinels[cid]))
+                rcs, outs, errs = helm_template(w, release, values_s)
+                if rcs != 0:
+                    fail("%s: does not render in values mode with the %s sentinel: %s" % (c["name"], cid, errs.strip()[:200]))
+                else:
+                    dropin_delivery(c["name"], cid, sentinels[cid], [d for d in yaml.safe_load_all(outs) if d], docs)
+            for cid in cids:
+                for variant in (RULES[cid].get("variants") or (lambda ch: []))(c["name"]):
+                    vv = json.loads(json.dumps(values))
+                    deep_merge(vv, json.loads(json.dumps(variant)))
+                    rcv, outv, errv = helm_template(w, release, vv)
+                    if rcv != 0:
+                        fail("%s: does not render with %s and %s: %s" % (c["name"], cid, variant, errv.strip()[:200]))
+                        continue
+                    docsv = [d for d in yaml.safe_load_all(outv) if d]
+                    leaked = sentinels[cid] in outv or any(
+                        d.get("kind") == "Secret" and any(sentinels[cid] in (object_text(d, k) or "")
+                                                          for k in (d.get("data") or {})) for d in docsv)
+                    if leaked:
+                        fail("%s: with %s the %s value from values is still rendered" % (c["name"], variant, cid))
+                    if "dropin" in RULES[cid]:
+                        vs = json.loads(json.dumps(enabled))
+                        deep_merge(vs, json.loads(json.dumps(variant)))
+                        for pp in paths(RULES[cid]["password_path"](c["name"])):
+                            deep_merge(vs, nested(pp, sentinels[cid]))
+                        rcs, outs, errs = helm_template(w, release, vs)
+                        if rcs == 0:
+                            dropin_delivery(c["name"], cid, sentinels[cid], [d for d in yaml.safe_load_all(outs) if d], docsv)
             if any(cid.startswith("memcache-") for cid in cids):
                 if rc0 == 0:
                     memcache_delivery(c["name"], cv, docs0, docs)

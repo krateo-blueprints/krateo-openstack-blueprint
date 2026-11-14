@@ -178,6 +178,17 @@ credentials:
       secret: openstack-credential-memcache-zaqar
       key: password
       path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    # The metadata proxy shared secret: neutron's metadata agents sign each instance request with it and
+    # nova-api-metadata trusts what verifies, so one value shared by both charts (#228).
+    - id: metadata-proxy-shared-secret
+      secret: openstack-credential-metadata-proxy-shared-secret
+      key: password
+      path: endpoints.compute_metadata.auth.metadata_proxy_shared_secretFrom
+    # Horizon's Django SECRET_KEY: it signs session cookies and CSRF tokens (#228).
+    - id: horizon-secret-key
+      secret: openstack-credential-horizon-secret-key
+      key: password
+      path: endpoints.dashboard.auth.secret_keyFrom
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
 components:
@@ -219,6 +230,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - horizon-secret-key
     deps:
       - keystone
     tier: identity
@@ -254,6 +266,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-neutron
+      - metadata-proxy-shared-secret
     deps:
       - keystone
       - rabbitmq
@@ -266,6 +279,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-nova
+      - metadata-proxy-shared-secret
     deps:
       - keystone
       - placement
