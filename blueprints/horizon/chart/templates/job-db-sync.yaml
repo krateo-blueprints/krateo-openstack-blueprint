@@ -64,6 +64,12 @@ spec:
             mountPath: /etc/openstack-dashboard/local_settings
             subPath: local_settings
             readOnly: true
+          {{- if include "horizon.secret_key_from" $envAll }}
+          # local_settings reads SECRET_KEY from this file (#228)
+          - name: horizon-secret-key
+            mountPath: {{ include "horizon.secret_key_dir" $envAll }}
+            readOnly: true
+          {{- end }}
           - name: horizon-bin
             mountPath: /tmp/db-sync.sh
             subPath: db-sync.sh
@@ -75,6 +81,12 @@ spec:
 {{- dict "enabled" $envAll.Values.manifests.certificates "name" $envAll.Values.endpoints.oslo_db.auth.admin.secret.tls.internal "path" "/etc/mysql/certs" | include "helm-toolkit.snippets.tls_volume_mount" | indent 10 }}
 {{ if $mounts_horizon_db_sync.volumeMounts }}{{ toYaml $mounts_horizon_db_sync.volumeMounts | indent 10 }}{{ end }}
       volumes:
+      {{- if include "horizon.secret_key_from" $envAll }}
+      - name: horizon-secret-key
+        secret:
+          secretName: horizon-secret-key
+          defaultMode: 0444
+      {{- end }}
       - name: horizon-etc
         secret:
           secretName: horizon-etc

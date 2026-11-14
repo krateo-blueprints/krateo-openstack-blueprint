@@ -3,9 +3,16 @@ Horizon's SECRET_KEY (Krateo blueprint addition, issue #228). Django signs sessi
 tokens with it; OpenStack-Helm's published value lets anyone forge a session for any user.
 
 With endpoints.dashboard.auth.secret_keyFrom (store, secret, key: set by the umbrella), the key is read
-through External Secrets Operator into the snippet local_settings.d/_90_krateo_secret_key.py (Horizon
-executes local_settings.d after local_settings), and local_settings is rendered exactly as upstream
-except that its one SECRET_KEY line is replaced by a comment, so the published value renders nowhere.
+through External Secrets Operator into the Secret horizon-secret-key (one file, secret_key), mounted
+read-only at /etc/openstack-dashboard/krateo-secret-key/ in every pod that reads local_settings, and
+local_settings' one SECRET_KEY line becomes
+  SECRET_KEY = open('/etc/openstack-dashboard/krateo-secret-key/secret_key', encoding='utf-8').read().strip()
+so the published value renders nowhere.
+
+0.3.61 delivered the key as a local_settings.d snippet instead. Horizon executes only the snippets its start
+script links into openstack_dashboard/local/local_settings.d, and that one was not linked: with no SECRET_KEY
+in local_settings, settings.py generated a random key per pod in /tmp (measured: each pod a different key, not
+the root). Setting it in local_settings itself never reaches that fallback.
 Rotating it signs everyone out once: sessions signed with the old key are rejected.
 */}}
 
@@ -13,7 +20,8 @@ Rotating it signs everyone out once: sessions signed with the old key are reject
 {{- with ((.Values.endpoints.dashboard | default dict).auth | default dict).secret_keyFrom }}{{ if .secret }}true{{ end }}{{ end -}}
 {{- end -}}
 
-{{- define "horizon.secret_key_snippet_name" -}}_90_krateo_secret_key.py{{- end -}}
+{{- define "horizon.secret_key_dir" -}}/etc/openstack-dashboard/krateo-secret-key{{- end -}}
+{{- define "horizon.secret_key_line" -}}SECRET_KEY = open('{{ include "horizon.secret_key_dir" . }}/secret_key', encoding='utf-8').read().strip()  # generated per install (#228){{- end -}}
 
 {{/* local_settings as helm-toolkit.snippets.values_template_renderer renders it for a Secret. */}}
 {{- define "horizon.local_settings_text" -}}
@@ -29,7 +37,7 @@ Rotating it signs everyone out once: sessions signed with the old key are reject
 {{- if ne (len (splitList $line $t)) 2 }}
 {{- fail (printf "cannot remove SECRET_KEY from local_settings: expected exactly one %q line" "SECRET_KEY='<value>'") }}
 {{- end }}
-{{- replace $line (printf "# SECRET_KEY is set by local_settings.d/%s (generated per install, #228)\n" (include "horizon.secret_key_snippet_name" .)) $t -}}
+{{- replace $line (printf "%s\n" (include "horizon.secret_key_line" .)) $t -}}
 {{- end -}}
 
 {{- define "horizon.secret_key_externalsecret" -}}
@@ -60,7 +68,7 @@ spec:
       type: Opaque
       engineVersion: v2
       data:
-        {{ include "horizon.secret_key_snippet_name" . }}: {{ "SECRET_KEY = '{{ .password }}'\n" | quote }}
+        secret_key: {{ "{{ .password }}" | quote }}
   data:
     - secretKey: password
       remoteRef:
