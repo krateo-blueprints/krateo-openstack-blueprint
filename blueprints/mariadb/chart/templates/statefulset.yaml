@@ -100,7 +100,8 @@ metadata:
     configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
     configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
     mariadb-dbadmin-password-hash: {{ tuple "secret-dbadmin-password.yaml" . | include "helm-toolkit.utils.hash" }}
-    mariadb-sst-password-hash: {{ tuple "secret-dbadmin-password.yaml" . | include "helm-toolkit.utils.hash" }}
+    mariadb-sst-password-hash: {{ tuple "secret-sst-password.yaml" . | include "helm-toolkit.utils.hash" }}
+    mariadb-dbaudit-password-hash: {{ tuple "secret-dbaudit-password.yaml" . | include "helm-toolkit.utils.hash" }}
     configmap-bin-exporter-hash: {{ tuple "exporter-configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
     secrets-etc-exporter-hash: {{ tuple "exporter-secrets-etc.yaml" . | include "helm-toolkit.utils.hash" }}
   labels:
@@ -121,7 +122,8 @@ spec:
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
         mariadb-dbadmin-password-hash: {{ tuple "secret-dbadmin-password.yaml" . | include "helm-toolkit.utils.hash" }}
-        mariadb-sst-password-hash: {{ tuple "secret-dbadmin-password.yaml" . | include "helm-toolkit.utils.hash" }}
+        mariadb-sst-password-hash: {{ tuple "secret-sst-password.yaml" . | include "helm-toolkit.utils.hash" }}
+        mariadb-dbaudit-password-hash: {{ tuple "secret-dbaudit-password.yaml" . | include "helm-toolkit.utils.hash" }}
         secrets-etc-exporter-hash: {{ tuple "exporter-secrets-etc.yaml" . | include "helm-toolkit.utils.hash" }}
 {{ dict "envAll" $envAll "podName" "mariadb-server" "containerNames" (list "init" "mariadb-perms" "mariadb") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 8 }}
     spec:
@@ -192,7 +194,7 @@ spec:
             - name: MYSQL_DBSST_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mariadb-dbsst-password
+                  name: {{ include "mariadb.dbsst_secret_name" $envAll }}
                   key: MYSQL_DBSST_PASSWORD
             {{- if .Values.manifests.secret_dbaudit_password }}
             - name: MYSQL_DBAUDIT_USERNAME
@@ -200,7 +202,7 @@ spec:
             - name: MYSQL_DBAUDIT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mariadb-dbaudit-password
+                  name: {{ include "mariadb.dbaudit_secret_name" $envAll }}
                   key: MYSQL_DBAUDIT_PASSWORD
             {{- end }}
             - name: MYSQL_HISTFILE
@@ -252,6 +254,11 @@ spec:
               mountPath: /etc/mysql/conf.d/00-base.cnf
               subPath: 00-base.cnf
               readOnly: true
+            # Krateo (#228): wsrep_sst_auth from the sst Secret, not the ConfigMap.
+            - name: mariadb-dbsst
+              mountPath: /etc/mysql/conf.d/10-sst-auth.cnf
+              subPath: 10-sst-auth.cnf
+              readOnly: true
             {{- if .Values.conf.database.config_override }}
             - name: mariadb-etc
               mountPath: /etc/mysql/conf.d/20-override.cnf
@@ -285,17 +292,17 @@ spec:
             - name: EXPORTER_USER
               valueFrom:
                 secretKeyRef:
-                  name: mysql-exporter-secrets
+                  name: {{ include "mariadb.exporter_secret_name" $envAll }}
                   key: EXPORTER_USER
             - name: EXPORTER_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mysql-exporter-secrets
+                  name: {{ include "mariadb.exporter_secret_name" $envAll }}
                   key: EXPORTER_PASSWORD
             - name: DATA_SOURCE_NAME
               valueFrom:
                 secretKeyRef:
-                  name: mysql-exporter-secrets
+                  name: {{ include "mariadb.exporter_secret_name" $envAll }}
                   key: DATA_SOURCE_NAME
             - name: POD_IP
               valueFrom:
@@ -337,6 +344,10 @@ spec:
           secret:
             secretName: {{ include "mariadb.secrets_etc_name" $envAll }}
             defaultMode: 0444
+        - name: mariadb-dbsst
+          secret:
+            secretName: {{ include "mariadb.dbsst_secret_name" $envAll }}
+            defaultMode: 0444
 {{ dict "enabled" $envAll.Values.manifests.certificates "name" $envAll.Values.secrets.tls.oslo_db.server.internal | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
         {{- if not .Values.volume.enabled }}
         - name: mysql-data
@@ -351,7 +362,7 @@ spec:
 {{- if .Values.monitoring.prometheus.enabled }}
         - name: mysql-exporter-secrets
           secret:
-            secretName: mysql-exporter-secrets
+            secretName: {{ include "mariadb.exporter_secret_name" $envAll }}
             defaultMode: 0444
         - name: mysql-exporter-bin
           configMap:

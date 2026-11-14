@@ -57,12 +57,12 @@ spec:
             - name: EXPORTER_USER
               valueFrom:
                 secretKeyRef:
-                  name: mysql-exporter-secrets
+                  name: {{ include "mariadb.exporter_secret_name" $envAll }}
                   key: EXPORTER_USER
             - name: EXPORTER_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mysql-exporter-secrets
+                  name: {{ include "mariadb.exporter_secret_name" $envAll }}
                   key: EXPORTER_PASSWORD
 {{- if $envAll.Values.manifests.certificates }}
             - name: MARIADB_X509

@@ -23,7 +23,8 @@ four things hold, and each is checked here:
      MariaDB root DB_CONNECTION Secret (templates/secret-db.yaml) and to mariadb itself;
      oslo-messaging-admin to exactly the charts rendering a RabbitMQ admin connection Secret
      (templates/secret-rabbitmq.yaml) and to rabbitmq itself, whose administrator it is (at
-     auth.user); oslo-messaging-guest and oslo-messaging-erlang-cookie to rabbitmq alone.
+     auth.user); oslo-messaging-guest and oslo-messaging-erlang-cookie to rabbitmq alone; oslo-db-sst,
+     oslo-db-audit and oslo-db-exporter to mariadb alone.
   3. NO VALUE FROM VALUES. Each listed chart is rendered with its references AND with the admin
      password in values replaced by a unique sentinel. The sentinel must appear NOWHERE: not in any
      rendered text (configs, scripts) and not in any Secret's data once base64-decoded. A substring
@@ -66,6 +67,12 @@ four things hold, and each is checked here:
      one replica is WANTED; HOLD (replicas 1, the old cookie still rendered and mounted) while more
      than one pod still runs -- 0.3.57 refused this case, so replicas 1 could never take effect
      (measured); rotate on one pod; normal on the generated cookie or with no StatefulSet.
+  10. NO GUEST USER. RabbitMQ re-creates every user in its definitions file on every boot, and
+     upstream's file declared guest, an administrator reachable from any pod, which lived until the
+     next rabbit-init deleted it. The rabbitmq chart's rendered definitions script is RUN with only the
+     administrator's variables and must write exactly that one user. oslo-messaging-guest is
+     retired: its item stays (installs that ran 0.3.57 hold the root), marked retired, and no
+     component may list it.
 
 Fails when helm or PyYAML is missing, when the umbrella defines no credential, when a listed chart
 does not render, and when no chart was checked.
@@ -174,19 +181,64 @@ RULES = {
         # can enable it through componentValues; render it enabled, or the sentinel would pass vacuously.
         "enable": lambda chart: {} if chart == "rabbitmq" else {"manifests": {"secret_rabbitmq": True}},
     },
-    "oslo-messaging-guest": {
-        "what": "is RabbitMQ itself (the guest user is written into its definitions file)",
-        "consumes": lambda d, has: d == "rabbitmq",
-        "password_path": lambda chart: "endpoints.oslo_messaging.auth.guest.password",
-        "projections": lambda chart, cv: ["rabbitmq-admin-user-generated"],
-    },
+    # Retired in 0.3.58: no guest user exists (check 10). The item stays, marked retired, because
+    # installs that ran 0.3.57 hold its root; no component may list it.
+    "oslo-messaging-guest": {"retired": True},
     "oslo-messaging-erlang-cookie": {
         "what": "is RabbitMQ itself (the Erlang distribution cookie of its nodes)",
         "consumes": lambda d, has: d == "rabbitmq",
         "password_path": lambda chart: "endpoints.oslo_messaging.auth.erlang_cookie",
         "projections": lambda chart, cv: ["rabbitmq-erlang-cookie-generated"],
     },
+    # MariaDB's other built-in users. sst's password was also in the mariadb-etc ConfigMap
+    # (wsrep_sst_auth), which the sentinel search over all rendered text now covers.
+    "oslo-db-sst": {
+        "what": "is MariaDB itself (the Galera state-transfer user)",
+        "consumes": lambda d, has: d == "mariadb",
+        "password_path": lambda chart: "endpoints.oslo_db.auth.sst.password",
+        "projections": lambda chart, cv: ["mariadb-dbsst-generated"],
+    },
+    "oslo-db-audit": {
+        "what": "is MariaDB itself (the audit user: SELECT on every database)",
+        "consumes": lambda d, has: d == "mariadb",
+        "password_path": lambda chart: "endpoints.oslo_db.auth.audit.password",
+        "projections": lambda chart, cv: ["mariadb-dbaudit-generated"],
+    },
+    "oslo-db-exporter": {
+        "what": "is MariaDB itself (the mysqld-exporter user)",
+        "consumes": lambda d, has: d == "mariadb",
+        "password_path": lambda chart: "endpoints.oslo_db.auth.exporter.password",
+        "projections": lambda chart, cv: ["mysql-exporter-generated"],
+        # Created only with monitoring on: render it on, or the sentinel would pass vacuously.
+        "enable": lambda chart: {"monitoring": {"prometheus": {"enabled": True}}},
+    },
 }
+
+
+def no_guest_user(tmp):
+    """10. Run the rabbitmq chart's own rendered definitions script and require exactly the administrator."""
+    chart = stage(os.path.join(BP, "rabbitmq", "chart"), tmp, "rabbitmq-defs")
+    rc, out, err = helm_template(chart, "rabbitmq-gate1234")
+    script = None
+    if rc == 0:
+        for d in yaml.safe_load_all(out):
+            if d and d.get("kind") == "ConfigMap" and "rabbitmq-password-hash.py" in (d.get("data") or {}):
+                script = d["data"]["rabbitmq-password-hash.py"]
+    if script is None:
+        fail("rabbitmq: no rabbitmq-password-hash.py in a rendered ConfigMap (rc=%s %s)" % (rc, err.strip()[:200]))
+        return
+    defs = os.path.join(tmp, "gate-definitions.json")
+    env = {"PATH": os.environ.get("PATH", ""), "RABBITMQ_ADMIN_USERNAME": "gate-admin",
+           "RABBITMQ_ADMIN_PASSWORD": "gate-admin-pw", "RABBITMQ_DEFINITION_FILE": defs}
+    r = subprocess.run([sys.executable, "-I", "-c", script], env=env, capture_output=True, text=True)
+    if r.returncode != 0 or not os.path.isfile(defs):
+        fail("rabbitmq: the definitions script does not run with only the administrator's variables: %s"
+             % (r.stderr.strip()[-300:]))
+        return
+    users = [u.get("name") for u in json.load(open(defs)).get("users", [])]
+    if users != ["gate-admin"]:
+        fail("rabbitmq: the definitions file declares users %s, want only the administrator: a guest user written "
+             "there is re-created, as an administrator, on every RabbitMQ boot" % users)
 
 
 def cookie_rotation_cases(tmp, refs):
@@ -263,6 +315,9 @@ RENAMED = {
     "mariadb-secrets-generated": "mariadb-secrets",
     "rabbitmq-admin-user-generated": "rabbitmq-admin-user",
     "rabbitmq-erlang-cookie-generated": "rabbitmq-erlang-cookie",
+    "mariadb-dbsst-generated": "mariadb-dbsst-password",
+    "mariadb-dbaudit-generated": "mariadb-dbaudit-password",
+    "mysql-exporter-generated": "mysql-exporter-secrets",
 }
 
 
@@ -379,7 +434,16 @@ def main():
         charts = [d for d in os.listdir(BP) if os.path.isdir(os.path.join(BP, d, "chart")) and d != "openstack"]
         for cid, rule in RULES.items():
             if cid not in items:
+                continue  # reported below: a rule without its item
+            if rule.get("retired"):
+                if items[cid].get("retired") is not True:
+                    fail("credential %s is retired in this gate but its umbrella item lacks retired: true" % cid)
+                for c in components:
+                    if cid in (c.get("credentials") or []):
+                        fail("closure: %s lists retired credential %s" % (c["name"], cid))
                 continue
+            if items[cid].get("retired"):
+                fail("credential %s is marked retired in the umbrella but this gate still has a live rule" % cid)
             listed = {c["name"] for c in components if cid in (c.get("credentials") or [])}
             rendering = {d for d in charts if rule["consumes"](d, has_template)}
             for name in sorted(rendering - listed):
@@ -390,12 +454,17 @@ def main():
         for cid in items:
             if cid not in RULES:
                 fail("credential item %s has no closure/sentinel rule in this gate" % cid)
+        for cid in RULES:
+            if cid not in items:
+                fail("this gate has a rule for %s but the umbrella defines no such item: removing an item puts "
+                     "every consumer back on the published default (before any release ships its root, check 4 "
+                     "cannot see that)" % cid)
 
         # 3. no value from values
         checked = 0
         root_secrets = {i["secret"]: i for i in items.values()}
         for c in components:
-            cids = [cid for cid in (c.get("credentials") or []) if cid in RULES]
+            cids = [cid for cid in (c.get("credentials") or []) if cid in RULES and not RULES[cid].get("retired")]
             if not cids:
                 continue
             chart_dir = os.path.join(BP, c["name"], "chart")
@@ -536,6 +605,7 @@ def main():
                 fail("keystone: db-sync.sh must call ensure_admin_lockout_exempt before AND after bootstrap "
                      "(calls at lines %s, bootstrap at %s)" % (calls, boot[0]))
 
+        no_guest_user(tmp)
         rabbit = [c for c in components if c["name"] == "rabbitmq"]
         if "oslo-messaging-erlang-cookie" in items and rabbit:
             cookie_rotation_cases(tmp, refs_for(rabbit[0]))

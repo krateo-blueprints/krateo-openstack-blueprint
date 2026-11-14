@@ -205,9 +205,6 @@ conf:
 
       wsrep_slave_threads=12
 
-      wsrep_sst_auth={{ .Values.endpoints.oslo_db.auth.sst.username }}:{{ .Values.endpoints.oslo_db.auth.sst.password
-      }}
-
       wsrep_sst_method=mariabackup
 
 

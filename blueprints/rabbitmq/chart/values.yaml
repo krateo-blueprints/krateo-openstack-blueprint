@@ -28,7 +28,6 @@ conf:
     listeners:
       tcp:
         1: null
-    loopback_users.guest: 'false'
     management.load_definitions: /var/lib/rabbitmq/definitions.json
     queue_master_locator: min-masters
   users: {}
@@ -121,8 +120,6 @@ endpoints:
   oslo_messaging:
     auth:
       erlang_cookie: openstack-cookie
-      guest:
-        password: password
       user:
         password: password
         username: rabbitmq
