@@ -36,6 +36,9 @@ componentValues:
 # schema: an install cannot drop a credential back to OpenStack-Helm's published default.
 # NEVER rename or remove an item: its root Secret holds the live password, and a new name
 # generates a new one (hack/validate-credentials.py refuses both).
+# `pathFor` overrides `path` for the named components, where a chart holds the same credential
+# under another key (the rabbitmq server's administrator is endpoints.oslo_messaging.auth.user,
+# the user every other component's rabbit-init authenticates as through auth.admin).
 credentials:
   store: openstack-credentials
   generator: openstack-credentials
@@ -48,6 +51,20 @@ credentials:
       secret: openstack-credential-oslo-db-admin
       key: password
       path: endpoints.oslo_db.auth.admin.passwordFrom
+    - id: oslo-messaging-admin
+      secret: openstack-credential-oslo-messaging-admin
+      key: password
+      path: endpoints.oslo_messaging.auth.admin.passwordFrom
+      pathFor:
+        rabbitmq: endpoints.oslo_messaging.auth.user.passwordFrom
+    - id: oslo-messaging-guest
+      secret: openstack-credential-oslo-messaging-guest
+      key: password
+      path: endpoints.oslo_messaging.auth.guest.passwordFrom
+    - id: oslo-messaging-erlang-cookie
+      secret: openstack-credential-oslo-messaging-erlang-cookie
+      key: password
+      path: endpoints.oslo_messaging.auth.erlang_cookie_from
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
 components:
@@ -66,6 +83,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - mariadb
       - memcached
@@ -75,6 +93,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
     tier: identity
@@ -88,6 +107,10 @@ components:
     tier: identity
   - name: rabbitmq
     kind: Rabbitmq
+    credentials:
+      - oslo-messaging-admin
+      - oslo-messaging-guest
+      - oslo-messaging-erlang-cookie
     deps: []
     tier: compute
   - name: openvswitch
@@ -112,6 +135,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -122,6 +146,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - placement
@@ -135,6 +160,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - mariadb
@@ -154,6 +180,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -172,6 +199,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -182,6 +210,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -199,6 +228,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -210,6 +240,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -228,6 +259,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -244,6 +276,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -254,6 +287,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -263,6 +297,7 @@ components:
     kind: Ceilometer
     credentials:
       - identity-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -278,6 +313,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -288,6 +324,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -298,6 +335,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -308,6 +346,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -318,6 +357,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -328,6 +368,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -342,6 +383,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq
@@ -356,6 +398,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - oslo-messaging-admin
     deps:
       - keystone
       - rabbitmq

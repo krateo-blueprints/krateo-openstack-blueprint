@@ -641,6 +641,35 @@ the same ESO mechanism as the Keystone admin password above). On the upgrade tha
   from then on and must read the new value from `openstack-credential-oslo-db-admin`. Never delete
   that Secret.
 
+### Upgrading to 0.3.57 or later: RabbitMQ's passwords and Erlang cookie rotate
+
+From 0.3.57 three more RabbitMQ credentials are generated per install, using the same ESO mechanism.
+Each was OpenStack-Helm's published default:
+- `openstack-credential-oslo-messaging-admin` and `openstack-credential-oslo-messaging-guest`, the
+  passwords of RabbitMQ's two users. Both carry the `administrator` tag, and the guest user is not
+  restricted to loopback (`loopback_users.guest: false`).
+- `openstack-credential-oslo-messaging-erlang-cookie`, the Erlang distribution cookie. Whoever holds
+  it gets a remote shell on the RabbitMQ node.
+
+On the upgrade that ships it:
+- every component's `<component>-rabbitmq-admin` Secret keeps its name and keys (`RABBITMQ_CONNECTION`,
+  and `TRANSPORT_URL` where the chart has it). It is now written by an `ExternalSecret` with the
+  generated password in each URL. The components' `rabbit-init` jobs read it to create their own
+  RabbitMQ users;
+- the RabbitMQ server reads both passwords from `rabbitmq-admin-user-generated` and its cookie from
+  `rabbitmq-erlang-cookie-generated`, so its pod spec changes and the server restarts once. On that
+  start its init container writes both users, with the new password hashes, into the definitions file
+  the server loads at boot, which needs no old password;
+- **with more than one RabbitMQ replica, the upgrade is refused** and the reason is written to the
+  rabbitmq component's status. Every node must hold the same cookie, and a rolling restart would
+  start a node that its peers refuse. Set `componentValues.rabbitmq.pod.replicas.server: 1` for the
+  upgrade, then set it back. The blueprint's default is 1 replica;
+- the cluster-wait Job and the test Pod read the admin connection URL from that Secret. Upstream puts
+  it in their pod specs, password included, as a literal env value;
+- anything outside the blueprint that logs in to RabbitMQ as `rabbitmq` or `guest` with the old
+  password is refused from then on. It must read the new value from the matching root Secret. Never
+  delete those Secrets.
+
 ### Components follow the umbrella's version
 
 The orchestrator registers every component `CompositionDefinition` at its own chart version
