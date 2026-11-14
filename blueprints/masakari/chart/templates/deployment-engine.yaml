@@ -80,6 +80,7 @@ spec:
               readOnly: true
             - name: etcmasakari
               mountPath: /etc/masakari
+{{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "masakari") | nindent 12 }}
             - name: masakari-etc
               mountPath: /etc/masakari/masakari.conf
               subPath: masakari.conf
@@ -95,6 +96,7 @@ spec:
           configMap:
             name: masakari-bin
             defaultMode: 0555
+{{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "masakari") | nindent 8 }}
         - name: masakari-etc
           secret:
             secretName: masakari-etc

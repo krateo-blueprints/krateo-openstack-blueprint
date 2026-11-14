@@ -50,6 +50,7 @@ exec:
 {{- $mounts_neutron_ovn_agent := .Values.pod.mounts.neutron_ovn_agent.neutron_ovn_agent }}
 {{- $mounts_neutron_ovn_agent_init := .Values.pod.mounts.neutron_ovn_agent.init_container }}
 {{- $etcSources := .Values.pod.etcSources.neutron_ovn_agent }}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "neutron") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if .Values.manifests.secret_ks_etc }}
 {{- $etcSources = append $etcSources (dict "secret" (dict "name" "neutron-ks-etc")) }}
 {{- end }}

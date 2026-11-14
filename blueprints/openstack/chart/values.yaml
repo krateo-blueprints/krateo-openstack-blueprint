@@ -80,6 +80,104 @@ credentials:
       secret: openstack-credential-oslo-db-exporter
       key: password
       path: endpoints.oslo_db.auth.exporter.passwordFrom
+    # keystonemiddleware's memcache secret key, one per service (#228): with memcache_security_strategy
+    # ENCRYPT it protects the token-validation cache in memcached, which any pod can reach.
+    - id: memcache-aodh
+      secret: openstack-credential-memcache-aodh
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-barbican
+      secret: openstack-credential-memcache-barbican
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-blazar
+      secret: openstack-credential-memcache-blazar
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-cinder
+      secret: openstack-credential-memcache-cinder
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-cloudkitty
+      secret: openstack-credential-memcache-cloudkitty
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-cyborg
+      secret: openstack-credential-memcache-cyborg
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-designate
+      secret: openstack-credential-memcache-designate
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-glance
+      secret: openstack-credential-memcache-glance
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-gnocchi
+      secret: openstack-credential-memcache-gnocchi
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-heat
+      secret: openstack-credential-memcache-heat
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-ironic
+      secret: openstack-credential-memcache-ironic
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-magnum
+      secret: openstack-credential-memcache-magnum
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-manila
+      secret: openstack-credential-memcache-manila
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-masakari
+      secret: openstack-credential-memcache-masakari
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-mistral
+      secret: openstack-credential-memcache-mistral
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-neutron
+      secret: openstack-credential-memcache-neutron
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-nova
+      secret: openstack-credential-memcache-nova
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-octavia
+      secret: openstack-credential-memcache-octavia
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-placement
+      secret: openstack-credential-memcache-placement
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-swift
+      secret: openstack-credential-memcache-swift
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-tacker
+      secret: openstack-credential-memcache-tacker
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-trove
+      secret: openstack-credential-memcache-trove
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-watcher
+      secret: openstack-credential-memcache-watcher
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
+    - id: memcache-zaqar
+      secret: openstack-credential-memcache-zaqar
+      key: password
+      path: endpoints.oslo_cache.auth.memcache_secret_keyFrom
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
 components:
@@ -112,6 +210,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-glance
     deps:
       - keystone
     tier: identity
@@ -139,6 +238,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - memcache-placement
     deps:
       - keystone
     tier: compute
@@ -153,6 +253,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-neutron
     deps:
       - keystone
       - rabbitmq
@@ -164,6 +265,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-nova
     deps:
       - keystone
       - placement
@@ -178,6 +280,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-ironic
     deps:
       - keystone
       - mariadb
@@ -198,6 +301,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-cinder
     deps:
       - keystone
       - rabbitmq
@@ -217,6 +321,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-heat
     deps:
       - keystone
       - rabbitmq
@@ -228,6 +333,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-barbican
     deps:
       - keystone
       - rabbitmq
@@ -246,6 +352,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-designate
     deps:
       - keystone
       - rabbitmq
@@ -258,6 +365,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-octavia
     deps:
       - keystone
       - rabbitmq
@@ -277,6 +385,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-magnum
     deps:
       - keystone
       - rabbitmq
@@ -294,6 +403,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-manila
     deps:
       - keystone
       - rabbitmq
@@ -305,6 +415,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-mistral
     deps:
       - keystone
       - rabbitmq
@@ -331,6 +442,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-aodh
     deps:
       - keystone
       - rabbitmq
@@ -342,6 +454,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-cloudkitty
     deps:
       - keystone
       - rabbitmq
@@ -353,6 +466,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-masakari
     deps:
       - keystone
       - rabbitmq
@@ -364,6 +478,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-trove
     deps:
       - keystone
       - rabbitmq
@@ -375,6 +490,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-watcher
     deps:
       - keystone
       - rabbitmq
@@ -386,6 +502,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-tacker
     deps:
       - keystone
       - rabbitmq
@@ -401,6 +518,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-cyborg
     deps:
       - keystone
       - rabbitmq
@@ -416,6 +534,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - memcache-blazar
     deps:
       - keystone
       - rabbitmq
@@ -430,6 +549,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - memcache-zaqar
     deps:
       - keystone
       - mariadb
@@ -466,6 +586,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - memcache-gnocchi
     deps:
       - keystone
       - mariadb
@@ -487,6 +608,7 @@ components:
     kind: Swift
     credentials:
       - identity-admin
+      - memcache-swift
     deps:
       - keystone
     tier: compute

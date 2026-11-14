@@ -18,6 +18,7 @@ limitations under the License.
 {{- $serviceAccountName := "nova-service-cleaner" }}
 {{ tuple $envAll "service_cleaner" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 {{- $etcSources := .Values.pod.etcSources.nova_service_cleaner }}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "nova") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if eq .Values.manifests.secret_ks_etc true }}
 {{- $etcSources = append $etcSources (dict "secret" (dict "name" "nova-ks-etc")) }}
 {{- end }}

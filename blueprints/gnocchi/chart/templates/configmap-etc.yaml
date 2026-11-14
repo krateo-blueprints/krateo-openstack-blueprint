@@ -126,6 +126,7 @@ across reconciles.
 
 {{- $envAll := . }}
 ---
+{{- tuple $envAll "gnocchi" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

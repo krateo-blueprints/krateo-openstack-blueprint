@@ -24,6 +24,7 @@ limitations under the License.
 {{ tuple $envAll "evaluator" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 
 {{- $etcSources := .Values.pod.etcSources.aodh_evaluator }}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "aodh") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment

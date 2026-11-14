@@ -55,6 +55,7 @@ spec:
               subPath: manage-db.sh
             - name: etcmasakari
               mountPath: /etc/masakari
+{{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "masakari") | nindent 12 }}
             - name: masakari-etc
               mountPath: /etc/masakari/masakari.conf
               subPath: masakari.conf
@@ -63,6 +64,7 @@ spec:
           emptyDir: {}
         - name: etcmasakari
           emptyDir: {}
+{{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "masakari") | nindent 8 }}
         - name: masakari-etc
           secret:
             secretName: masakari-etc

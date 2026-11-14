@@ -28,6 +28,7 @@ tcpSocket:
 {{- $mounts_nova_spiceproxy := .Values.pod.mounts.nova_spiceproxy.nova_spiceproxy }}
 {{- $mounts_nova_spiceproxy_init := .Values.pod.mounts.nova_spiceproxy.init_spiceproxy }}
 {{- $etcSources := .Values.pod.etcSources.nova_spiceproxy }}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "nova") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if eq .Values.manifests.secret_ks_etc true }}
 {{- $etcSources = append $etcSources (dict "secret" (dict "name" "nova-ks-etc")) }}
 {{- end }}

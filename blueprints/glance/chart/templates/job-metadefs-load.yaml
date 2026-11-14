@@ -16,6 +16,7 @@ limitations under the License.
 {{- $envAll := . }}
 
 {{- $etcSources := .Values.pod.etcSources.glance_metadefs_load }}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "glance") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 
 {{- $serviceAccountName := "glance-metadefs-load" }}
 {{ tuple $envAll "metadefs_load" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}

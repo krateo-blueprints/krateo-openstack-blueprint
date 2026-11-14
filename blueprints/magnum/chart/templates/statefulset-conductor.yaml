@@ -94,6 +94,7 @@ spec:
               readOnly: true
             - name: pod-etc-magnum
               mountPath: /etc/magnum
+{{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "magnum") | nindent 12 }}
             - name: magnum-etc
               mountPath: /etc/magnum/magnum.conf
               subPath: magnum.conf
@@ -132,6 +133,7 @@ spec:
           configMap:
             name: magnum-bin
             defaultMode: 0555
+{{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "magnum") | nindent 8 }}
         - name: magnum-etc
           secret:
             secretName: magnum-etc

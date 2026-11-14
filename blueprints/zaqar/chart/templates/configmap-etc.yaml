@@ -53,6 +53,7 @@ dependencies.static.api's wait on the redis Service resolve from. See #131.
 {{- $_ := set .Values.conf.logging "formatter_fluent" $formatter_fluent -}}
 {{- end -}}
 ---
+{{- tuple $envAll "zaqar" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

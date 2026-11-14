@@ -35,6 +35,7 @@ exec:
 {{- $mounts_neutron_bgp_dragent := .Values.pod.mounts.bgp_dragent.bgp_dragent }}
 {{- $mounts_neutron_bgp_dragent_init := .Values.pod.mounts.bgp_dragent.init_container }}
 {{- $etcSources := .Values.pod.etcSources.bgp_dragent }}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "neutron") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if .Values.manifests.secret_ks_etc }}
 {{- $etcSources = append $etcSources (dict "secret" (dict "name" "neutron-ks-etc")) }}
 {{- end }}

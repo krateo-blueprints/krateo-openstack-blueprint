@@ -73,6 +73,17 @@ four things hold, and each is checked here:
      administrator's variables and must write exactly that one user. oslo-messaging-guest is
      retired: its item stays (installs that ran 0.3.57 hold the root), marked retired, and no
      component may list it.
+  11. THE GENERATED MEMCACHE KEY IS READ. keystonemiddleware's memcache_secret_key (one item per
+     service, every chart whose configmap-etc.yaml sets it) arrives as a drop-in Secret. The files
+     that carried the published key are found in the default render; with the reference, every
+     container of a Deployment, StatefulSet or DaemonSet (the long-running servers keystonemiddleware
+     runs in; Jobs and init containers never validate a token) that mounts one of them must also receive
+     <service>-memcache-secret-key in a .conf.d
+     directory (a projected etcSources volume or a file mount), and swift's proxy must load its
+     config directory. A key in a Secret no daemon reads protects nothing.
+  12. A STRATEGY. Each of those files must still set memcache_security_strategy and no longer set
+     memcache_secret_key: without a strategy keystonemiddleware ignores the key and leaves the cache
+     unprotected (cloudkitty, cyborg, ironic and masakari shipped without one).
 
 Fails when helm or PyYAML is missing, when the umbrella defines no credential, when a listed chart
 does not render, and when no chart was checked.
@@ -214,6 +225,19 @@ RULES = {
     },
 }
 
+# keystonemiddleware's memcache secret key, one item per service: every chart whose configmap-etc.yaml
+# sets memcache_secret_key (derived from the repo, not listed by hand, so a new consumer cannot be missed).
+MEMCACHE = sorted(d for d in os.listdir(BP)
+                  if os.path.isfile(os.path.join(BP, d, "chart", "templates", "configmap-etc.yaml"))
+                  and "memcache_secret_key" in open(os.path.join(BP, d, "chart", "templates", "configmap-etc.yaml")).read())
+for _svc in MEMCACHE:
+    RULES["memcache-%s" % _svc] = {
+        "what": "is %s (its keystonemiddleware memcache secret key)" % _svc,
+        "consumes": (lambda s: lambda d, has: d == s)(_svc),
+        "password_path": lambda chart: "endpoints.oslo_cache.auth.memcache_secret_key",
+        "projections": (lambda s: lambda chart, cv: ["%s-memcache-secret-key" % s])(_svc),
+    }
+
 
 def no_guest_user(tmp):
     """10. Run the rabbitmq chart's own rendered definitions script and require exactly the administrator."""
@@ -319,6 +343,127 @@ RENAMED = {
     "mariadb-dbaudit-generated": "mariadb-dbaudit-password",
     "mysql-exporter-generated": "mysql-exporter-secrets",
 }
+
+
+def pod_specs(docs):
+    """(object name, pod spec) for every pod template in docs."""
+    out = []
+    for d in docs:
+        spec = d.get("spec") or {}
+        kind = d.get("kind")
+        if kind == "Pod":
+            pod = spec
+        elif kind == "CronJob":
+            pod = (((spec.get("jobTemplate") or {}).get("spec") or {}).get("template") or {}).get("spec")
+        else:
+            pod = (spec.get("template") or {}).get("spec")
+        if isinstance(pod, dict) and (pod.get("containers") or pod.get("initContainers")):
+            out.append(("%s/%s" % (kind, d["metadata"]["name"]), pod))
+    return out
+
+
+def object_text(d, key):
+    v = (d.get("data") or {}).get(key)
+    if v is None:
+        return None
+    if d.get("kind") == "Secret":
+        try:
+            return base64.b64decode(v).decode("utf-8", "replace")
+        except Exception:
+            return None
+    return str(v)
+
+
+def memcache_delivery(svc, cv, docs0, docs):
+    """11/12. The generated memcache key reaches every container that reads a config file which carried
+    the published key, through a .conf.d directory; and that file still sets a strategy."""
+    published = str((((cv.get("endpoints") or {}).get("oslo_cache") or {}).get("auth") or {})
+                    .get("memcache_secret_key") or "")
+    carriers = set()
+    for d in docs0:
+        if d.get("kind") in ("Secret", "ConfigMap"):
+            for k in (d.get("data") or {}):
+                t = object_text(d, k)
+                if published and t and published in t:
+                    carriers.add((d["kind"], d["metadata"]["name"], k))
+    if not carriers:
+        fail("%s: no rendered config file carries its memcache_secret_key at defaults, so where the generated "
+             "key must arrive cannot be determined" % svc)
+        return
+    byname = {(d.get("kind"), d["metadata"]["name"]): d for d in docs}
+    sections = set()
+    for kind, name, key in sorted(carriers):
+        d = byname.get((kind, name))
+        t = object_text(d, key) if d else None
+        if t is None:
+            fail("%s: %s %s/%s carried the key at defaults and is not rendered with the reference" % (svc, kind, name, key))
+            continue
+        if "memcache_security_strategy" not in t:
+            fail("%s: %s %s/%s sets no memcache_security_strategy, so no key protects the token cache" % (svc, kind, name, key))
+        if "memcache_secret_key" in t:
+            fail("%s: %s %s/%s still sets memcache_secret_key itself" % (svc, kind, name, key))
+        section = None
+        for line in t.splitlines():
+            line = line.strip()
+            if line.startswith("[") and line.endswith("]"):
+                section = line[1:-1]
+            elif line.replace(" ", "").startswith("memcache_security_strategy="):
+                sections.add(section)
+    drop = "%s-memcache-secret-key" % svc
+    es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == drop]
+    tdata = (((es[0].get("spec") or {}).get("target") or {}).get("template") or {}).get("data") or {} if es else {}
+    # keystonemiddleware reads its options from [keystone_authtoken] (swift: the paste [filter:authtoken]);
+    # client sections that copy the strategy (octavia [service_auth], manila [nova] ...) are keystoneauth
+    # sessions, which never use a memcache key.
+    mw = "filter:authtoken" if svc == "swift" else "keystone_authtoken"
+    want = {"80-memcache-secret-key.conf": "[%s]\nmemcache_secret_key = {{ .password }}\n" % mw}
+    if mw not in sections:
+        fail("%s: [%s] sets no memcache_security_strategy, so keystonemiddleware ignores any key" % (svc, mw))
+    if tdata != want:
+        fail("%s: the drop-in %s holds %s, want %s" % (svc, drop, sorted(tdata.items()), sorted(want.items())))
+    readers = 0
+    for podname, pod in pod_specs(docs):
+        # keystonemiddleware runs in long-running servers only; one-shot Jobs, CronJobs and test Pods read
+        # the file for other settings (database, messaging) and never validate a token.
+        if podname.split("/")[0] not in ("Deployment", "StatefulSet", "DaemonSet"):
+            continue
+        vols = {v["name"]: v for v in pod.get("volumes") or []}
+        for cont in pod.get("containers") or []:  # init containers are one-shot too
+            mounts = cont.get("volumeMounts") or []
+            reads = []
+            for m in mounts:
+                v = vols.get(m["name"]) or {}
+                obj = (("Secret", (v.get("secret") or {}).get("secretName")) if "secret" in v else
+                       ("ConfigMap", (v.get("configMap") or {}).get("name")) if "configMap" in v else (None, None))
+                for kind, name, key in carriers:
+                    if (kind, name) == obj and m.get("subPath") in (None, key):
+                        reads.append(key)
+            if not reads:
+                continue
+            readers += 1
+            delivered = False
+            for m in mounts:
+                v = vols.get(m["name"]) or {}
+                srcs = [(v.get("secret") or {}).get("secretName")] if "secret" in v else \
+                       [(x.get("secret") or {}).get("name") for x in (v.get("projected") or {}).get("sources") or []]
+                if drop in srcs:
+                    path = m["mountPath"].rstrip("/")
+                    if (path if not m.get("subPath") else os.path.dirname(path)).endswith(".conf.d"):
+                        delivered = True
+            if not delivered:
+                fail("%s: %s container %s reads %s but does not receive %s in a .conf.d directory: the "
+                     "generated key would sit in a Secret no daemon reads" % (svc, podname, cont["name"],
+                                                                            sorted(set(reads)), drop))
+    if readers == 0:
+        fail("%s: no container reads a config file that carried the memcache key" % svc)
+    if svc == "swift":
+        script = None
+        for d in docs:
+            if d.get("kind") == "ConfigMap" and "proxy-start.sh" in (d.get("data") or {}):
+                script = d["data"]["proxy-start.sh"]
+        if not script or "exec swift-proxy-server /etc/swift/proxy-server.conf.d" not in script:
+            fail("swift: with the reference the proxy must load /etc/swift/proxy-server.conf.d (swift reads a "
+                 "config directory; the drop-in is in it)")
 
 
 def pod_secret_refs(docs):
@@ -583,6 +728,11 @@ def main():
                     elif items[cid]["secret"] not in [(e.get("remoteRef") or {}).get("key")
                                                       for e in es[0]["spec"].get("data") or []]:
                         fail("%s: ExternalSecret %s does not read %s" % (c["name"], want, items[cid]["secret"]))
+            if any(cid.startswith("memcache-") for cid in cids):
+                if rc0 == 0:
+                    memcache_delivery(c["name"], cv, docs0, docs)
+                else:
+                    fail("%s: does not render at defaults, so memcache delivery cannot be checked" % c["name"])
         # 5. the admin user is exempt from lockout, before and after bootstrap
         w = stage(os.path.join(BP, "keystone", "chart"), tmp, "keystone-lockout")
         rc, out, err = helm_template(w, "keystone-gate1234")

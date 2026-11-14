@@ -186,6 +186,7 @@ spec:
               mountPath: /tmp/pod-shared
             - name: pod-var-cache-ironic
               mountPath: /var/cache/ironic
+{{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "ironic") | nindent 12 }}
             - name: ironic-etc
               mountPath: /etc/ironic/ironic.conf
               subPath: ironic.conf
@@ -270,6 +271,7 @@ spec:
           configMap:
             name: ironic-bin
             defaultMode: 0555
+{{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "ironic") | nindent 8 }}
         - name: ironic-etc
           secret:
             secretName: ironic-etc

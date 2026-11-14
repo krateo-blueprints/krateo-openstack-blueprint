@@ -147,6 +147,7 @@ conf:
       service_token_roles_required: true
       auth_type: password
       auth_version: v3
+      memcache_security_strategy: ENCRYPT
     neutron:
       auth_type: password
     pxe:

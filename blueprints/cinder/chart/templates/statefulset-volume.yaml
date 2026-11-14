@@ -20,6 +20,7 @@ limitations under the License.
 {{- $mounts_cinder_volume := .Values.pod.mounts.cinder_volume.cinder_volume }}
 {{- $mounts_cinder_volume_init := .Values.pod.mounts.cinder_volume.init_container }}
 {{- $etcSources := .Values.pod.etcSources.cinder_volume }}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "cinder") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if eq .Values.manifests.secret_ks_etc true }}
 {{- $etcSources = append $etcSources (dict "secret" (dict "name" "cinder-ks-etc")) }}
 {{- end }}

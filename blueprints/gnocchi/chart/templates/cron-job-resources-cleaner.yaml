@@ -84,6 +84,7 @@ spec:
                   readOnly: true
                 - name: pod-etc-gnocchi
                   mountPath: /etc/gnocchi
+{{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "gnocchi") | nindent 16 }}
                 - name: gnocchi-etc
                   mountPath: /etc/gnocchi/gnocchi.conf
                   subPath: gnocchi.conf
@@ -94,6 +95,7 @@ spec:
               emptyDir: {}
             - name: pod-etc-gnocchi
               emptyDir: {}
+{{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "gnocchi") | nindent 12 }}
             - name: gnocchi-etc
               secret:
                 secretName: gnocchi-etc

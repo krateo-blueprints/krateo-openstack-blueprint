@@ -81,6 +81,7 @@ spec:
             mountPath: "/etc/tacker/api-paste.ini"
             readOnly: yes
             subPath: api-paste.ini
+{{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "tacker") | nindent 10 }}
           - name: tacker-etc
             mountPath: "/etc/tacker/tacker.conf"
             readOnly: yes
@@ -109,6 +110,7 @@ spec:
         - name: localtime
           hostPath:
             path: "/etc/localtime"
+{{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "tacker") | nindent 8 }}
         - name: tacker-etc
           secret:
             defaultMode: 292

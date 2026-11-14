@@ -18,6 +18,7 @@ limitations under the License.
 {{- $mounts_nova_compute_ironic := .Values.pod.mounts.nova_compute_ironic.nova_compute_ironic }}
 {{- $mounts_nova_compute_ironic_init := .Values.pod.mounts.nova_compute_ironic.init_container }}
 {{- $etcSources := .Values.pod.etcSources.nova_compute_ironic }}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "nova") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if eq .Values.manifests.secret_ks_etc true }}
 {{- $etcSources = append $etcSources (dict "secret" (dict "name" "nova-ks-etc")) }}
 {{- end }}

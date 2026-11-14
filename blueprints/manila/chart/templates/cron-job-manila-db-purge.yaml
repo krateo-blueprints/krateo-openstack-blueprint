@@ -18,6 +18,7 @@ limitations under the License.
 {{- $mounts_manila_db_purge := .Values.pod.mounts.manila_db_purge.manila_db_purge }}
 {{- $mounts_manila_db_purge_init := .Values.pod.mounts.manila_db_purge.init_container }}
 {{- $etcSources := .Values.pod.etcSources.manila_db_purge }}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "manila") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 
 {{- $serviceAccountName := "manila-db-purge" }}
 {{ tuple $envAll "db_purge" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}

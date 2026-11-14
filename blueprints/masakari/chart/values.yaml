@@ -625,6 +625,7 @@ conf:
       graceful_shutdown_timeout: 5
     keystone_authtoken:
       auth_type: password
+      memcache_security_strategy: ENCRYPT
       service_type: instance-ha
     database:
       max_retries: -1

@@ -102,6 +102,13 @@ spec:
               mountPath: /etc/swift/proxy-server.conf
               subPath: proxy-server.conf
               readOnly: true
+            {{- if include "helm-toolkit.utils.memcache_secret_key_from" . }}
+            - name: swift-etc
+              mountPath: /etc/swift/proxy-server.conf.d/00-proxy-server.conf
+              subPath: proxy-server.conf
+              readOnly: true
+            {{- end }}
+{{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "swift" "/etc/swift/proxy-server.conf.d") | nindent 12 }}
             - name: swift-etc
               mountPath: /etc/swift/container-sync-realms.conf
               subPath: container-sync-realms.conf
@@ -126,6 +133,7 @@ spec:
           configMap:
             name: swift-bin
             defaultMode: 0555
+{{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "swift") | nindent 8 }}
         - name: swift-etc
           configMap:
             name: swift-etc
