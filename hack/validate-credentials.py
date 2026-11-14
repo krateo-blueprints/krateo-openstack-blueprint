@@ -23,7 +23,8 @@ four things hold, and each is checked here:
      MariaDB root DB_CONNECTION Secret (templates/secret-db.yaml) and to mariadb itself;
      oslo-messaging-admin to exactly the charts rendering a RabbitMQ admin connection Secret
      (templates/secret-rabbitmq.yaml) and to rabbitmq itself, whose administrator it is (at
-     auth.user); oslo-messaging-guest and oslo-messaging-erlang-cookie to rabbitmq alone.
+     auth.user); oslo-messaging-guest and oslo-messaging-erlang-cookie to rabbitmq alone; oslo-db-sst,
+     oslo-db-audit and oslo-db-exporter to mariadb alone.
   3. NO VALUE FROM VALUES. Each listed chart is rendered with its references AND with the admin
      password in values replaced by a unique sentinel. The sentinel must appear NOWHERE: not in any
      rendered text (configs, scripts) and not in any Secret's data once base64-decoded. A substring
@@ -185,6 +186,28 @@ RULES = {
         "password_path": lambda chart: "endpoints.oslo_messaging.auth.erlang_cookie",
         "projections": lambda chart, cv: ["rabbitmq-erlang-cookie-generated"],
     },
+    # MariaDB's other built-in users. sst's password was also in the mariadb-etc ConfigMap
+    # (wsrep_sst_auth), which the sentinel search over all rendered text now covers.
+    "oslo-db-sst": {
+        "what": "is MariaDB itself (the Galera state-transfer user)",
+        "consumes": lambda d, has: d == "mariadb",
+        "password_path": lambda chart: "endpoints.oslo_db.auth.sst.password",
+        "projections": lambda chart, cv: ["mariadb-dbsst-generated"],
+    },
+    "oslo-db-audit": {
+        "what": "is MariaDB itself (the audit user: SELECT on every database)",
+        "consumes": lambda d, has: d == "mariadb",
+        "password_path": lambda chart: "endpoints.oslo_db.auth.audit.password",
+        "projections": lambda chart, cv: ["mariadb-dbaudit-generated"],
+    },
+    "oslo-db-exporter": {
+        "what": "is MariaDB itself (the mysqld-exporter user)",
+        "consumes": lambda d, has: d == "mariadb",
+        "password_path": lambda chart: "endpoints.oslo_db.auth.exporter.password",
+        "projections": lambda chart, cv: ["mysql-exporter-generated"],
+        # Created only with monitoring on: render it on, or the sentinel would pass vacuously.
+        "enable": lambda chart: {"monitoring": {"prometheus": {"enabled": True}}},
+    },
 }
 
 
@@ -235,6 +258,9 @@ RENAMED = {
     "mariadb-secrets-generated": "mariadb-secrets",
     "rabbitmq-admin-user-generated": "rabbitmq-admin-user",
     "rabbitmq-erlang-cookie-generated": "rabbitmq-erlang-cookie",
+    "mariadb-dbsst-generated": "mariadb-dbsst-password",
+    "mariadb-dbaudit-generated": "mariadb-dbaudit-password",
+    "mysql-exporter-generated": "mysql-exporter-secrets",
 }
 
 

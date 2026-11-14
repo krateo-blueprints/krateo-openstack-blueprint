@@ -65,6 +65,18 @@ credentials:
       secret: openstack-credential-oslo-messaging-erlang-cookie
       key: password
       path: endpoints.oslo_messaging.auth.erlang_cookie_from
+    - id: oslo-db-sst
+      secret: openstack-credential-oslo-db-sst
+      key: password
+      path: endpoints.oslo_db.auth.sst.passwordFrom
+    - id: oslo-db-audit
+      secret: openstack-credential-oslo-db-audit
+      key: password
+      path: endpoints.oslo_db.auth.audit.passwordFrom
+    - id: oslo-db-exporter
+      secret: openstack-credential-oslo-db-exporter
+      key: password
+      path: endpoints.oslo_db.auth.exporter.passwordFrom
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
 components:
@@ -72,6 +84,9 @@ components:
     kind: Mariadb
     credentials:
       - oslo-db-admin
+      - oslo-db-sst
+      - oslo-db-audit
+      - oslo-db-exporter
     deps: []
     tier: identity
   - name: memcached
