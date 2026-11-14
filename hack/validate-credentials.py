@@ -271,6 +271,26 @@ RULES["horizon-secret-key"] = {
                                "line": "SECRET_KEY = open('/etc/openstack-dashboard/krateo-secret-key/secret_key', "
                                        "encoding='utf-8').read().strip()  # generated per install (#228)"},
 }
+# Service Keystone users: one item per USERNAME (id identity-user-<username with - for _>). Which charts render
+# which username under which key is the committed map hack/identity-users.yaml, re-verified by check 15.
+IDUSERS = (yaml.safe_load(open(os.path.join(ROOT, "hack", "identity-users.yaml"))) or {}).get("users") or {}
+IDUSER_BY_ITEM = {"identity-user-" + u.replace("_", "-"): u for u in IDUSERS}
+# Charts that read a service user from their main config and receive it as a drop-in (the others project it
+# through <chart>-ks-etc or only their openrc Secret).
+IDUSER_DROPINS = {
+    ("cyborg", "nova"): ("cyborg-identity-nova", "83-identity-nova.conf", "[nova]\npassword = {{ .password }}\n"),
+    ("cyborg", "placement"): ("cyborg-identity-placement", "84-identity-placement.conf",
+                              "[placement]\npassword = {{ .password }}\n"),
+}
+for _cid, _u in IDUSER_BY_ITEM.items():
+    RULES[_cid] = {
+        "what": "renders Keystone user %s" % _u,
+        "consumes": (lambda u: lambda d, has: d in IDUSERS[u])(_u),
+        "password_path": (lambda u: lambda chart: "endpoints.identity.auth.%s.password" % IDUSERS[u][chart])(_u),
+        "projections": lambda chart, cv: [],
+        "carriers": True,
+        "dropin_for": (lambda u: lambda chart: IDUSER_DROPINS.get((chart, u)))(_u),
+    }
 for _svc in MEMCACHE:
     RULES["memcache-%s" % _svc] = {
         "what": "is %s (its keystonemiddleware memcache secret key)" % _svc,
@@ -605,6 +625,64 @@ def fileread_check(chart, cid, docs):
         fail("%s: no container reads %s/%s" % (chart, cname, ckey))
 
 
+def identity_carriers(chart, cid, sentinel, docs_s, docs):
+    """16. Every Secret that carried a service user's password in values mode is, with the reference, an
+    ExternalSecret reading that user's root -- or a config whose copy was stripped, which then needs that
+    chart's drop-in for the user (a stripped password with nothing delivering it is a broken service)."""
+    root = None
+    for i in ITEMS_REF.values():
+        if i["id"] == cid:
+            root = i["secret"]
+    carriers = sorted({d["metadata"]["name"] for d in docs_s if d.get("kind") == "Secret"
+                       and any(sentinel in (object_text(d, k) or "") for k in (d.get("data") or {}))})
+    if not carriers:
+        fail("%s: no Secret carries %s in values mode" % (chart, cid))
+    for name in carriers:
+        es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == name]
+        if es:
+            keys = [(e.get("remoteRef") or {}).get("key") for e in es[0]["spec"].get("data") or []]
+            if root not in keys:
+                fail("%s: ExternalSecret %s carried %s but reads %s, not %s" % (chart, name, cid, keys, root))
+        elif not RULES[cid]["dropin_for"](chart):
+            fail("%s: %s carried %s in values mode and is still a plain Secret with no drop-in for it" % (chart, name, cid))
+
+
+def identity_map_check(tmp):
+    """15. hack/identity-users.yaml is exactly what the charts render: every chart with service users is
+    rendered with a sentinel per endpoints.identity.auth key, and the (chart, key) pairs that render must equal
+    the map's, with the map's username for each."""
+    rendered = {}
+    for d in sorted(os.listdir(BP)):
+        vf = os.path.join(BP, d, "chart", "values.yaml")
+        if d == "openstack" or not os.path.isfile(vf):
+            continue
+        auth = ((((yaml.safe_load(open(vf)) or {}).get("endpoints") or {}).get("identity") or {}).get("auth") or {})
+        users = {k: v for k, v in auth.items() if k != "admin" and isinstance(v, dict) and "password" in v}
+        if not users:
+            continue
+        sent = {k: "gate-idmap-%s-%s-7f3c" % (d, k) for k in users}
+        w = stage(os.path.join(BP, d, "chart"), tmp, "idmap-" + d)
+        rc, out, err = helm_template(w, d + "-gate1234", {"endpoints": {"identity": {"auth": {k: {"password": v} for k, v in sent.items()}}}})
+        if rc != 0:
+            fail("%s: does not render for the identity map: %s" % (d, err.strip()[:200]))
+            continue
+        decoded = out
+        for doc in yaml.safe_load_all(out):
+            if doc and doc.get("kind") == "Secret":
+                decoded += "\n".join(object_text(doc, k) or "" for k in (doc.get("data") or {}))
+        for k, sv in sent.items():
+            if sv in decoded:
+                rendered[(d, k)] = users[k].get("username")
+    mapped = {(c, k): u for u, cs in IDUSERS.items() for c, k in cs.items()}
+    for pair in sorted(set(rendered) - set(mapped)):
+        fail("identity map: %s renders key %s (user %s) but hack/identity-users.yaml does not list it" % (pair[0], pair[1], rendered[pair]))
+    for pair in sorted(set(mapped) - set(rendered)):
+        fail("identity map: hack/identity-users.yaml lists %s key %s, which the chart does not render" % pair)
+    for pair in sorted(set(mapped) & set(rendered)):
+        if mapped[pair] != rendered[pair]:
+            fail("identity map: %s key %s is user %s, the map says %s" % (pair[0], pair[1], rendered[pair], mapped[pair]))
+
+
 def pod_secret_refs(docs):
     """Every Secret name a pod template in docs references (env, envFrom, volumes, projected)."""
     refs = set()
@@ -643,6 +721,9 @@ def provided(docs):
     return out
 
 
+ITEMS_REF = {}
+
+
 def git(*args):
     r = subprocess.run(["git", "-C", ROOT] + list(args), capture_output=True, text=True)
     return r.returncode, r.stdout
@@ -656,6 +737,16 @@ def main():
         print("FAILED MEASUREMENT: the umbrella defines no credentials.items, so nothing protects any install")
         sys.exit(2)
     components = uv.get("components") or []
+    ITEMS_REF.update(items)
+    for cid in IDUSER_BY_ITEM:
+        if cid in items:
+            for c in components:
+                if cid in (c.get("credentials") or []):
+                    want = "endpoints.identity.auth.%s.passwordFrom" % IDUSERS[IDUSER_BY_ITEM[cid]].get(c["name"], "?")
+                    got = (items[cid].get("pathFor") or {}).get(c["name"], items[cid]["path"])
+                    if got != want:
+                        fail("umbrella: %s reaches %s at %s, but that chart holds user %s under %s"
+                             % (cid, c["name"], got, IDUSER_BY_ITEM[cid], want))
 
     def refs_for(c):
         out = {}
@@ -739,6 +830,8 @@ def main():
             if cid not in RULES:
                 fail("credential item %s has no closure/sentinel rule in this gate" % cid)
         for cid in RULES:
+            if cid in IDUSER_BY_ITEM and cid not in items:
+                continue  # service users ship in releases (0.3.63, 0.3.64); a username without an item is not yet rotated
             if cid not in items:
                 fail("this gate has a rule for %s but the umbrella defines no such item: removing an item puts "
                      "every consumer back on the published default (before any release ships its root, check 4 "
@@ -873,6 +966,21 @@ def main():
                                                       for e in es[0]["spec"].get("data") or []]:
                         fail("%s: ExternalSecret %s does not read %s" % (c["name"], want, items[cid]["secret"]))
             for cid in cids:
+                if RULES[cid].get("carriers"):
+                    vsx = json.loads(json.dumps(enabled))
+                    for pp in paths(RULES[cid]["password_path"](c["name"])):
+                        deep_merge(vsx, nested(pp, sentinels[cid]))
+                    rcx, outx, errx = helm_template(w, release, vsx)
+                    if rcx == 0:
+                        dsx = [d for d in yaml.safe_load_all(outx) if d]
+                        identity_carriers(c["name"], cid, sentinels[cid], dsx, docs)
+                        di = RULES[cid]["dropin_for"](c["name"])
+                        if di:
+                            RULES[cid]["dropin"] = lambda chart, di=di: di
+                            dropin_delivery(c["name"], cid, sentinels[cid], dsx, docs)
+                            RULES[cid].pop("dropin", None)
+                    else:
+                        fail("%s: does not render in values mode with the %s sentinel: %s" % (c["name"], cid, errx.strip()[:200]))
                 if "fileread" in RULES[cid]:
                     fileread_check(c["name"], cid, docs)
                 if "dropin" not in RULES[cid]:
@@ -935,6 +1043,7 @@ def main():
                      "(calls at lines %s, bootstrap at %s)" % (calls, boot[0]))
 
         no_guest_user(tmp)
+        identity_map_check(tmp)
         rabbit = [c for c in components if c["name"] == "rabbitmq"]
         if "oslo-messaging-erlang-cookie" in items and rabbit:
             cookie_rotation_cases(tmp, refs_for(rabbit[0]))

@@ -132,6 +132,8 @@ limitations under the License.
 {{- end -}}
 
 ---
+{{- dict "envAll" $envAll "from" ($envAll.Values.endpoints.identity.auth.nova.passwordFrom | default dict) "option" "password" "confKey" "cyborg" "sections" (list "nova") | include "helm-toolkit.utils.secret_option_strip_sections" }}
+{{- dict "envAll" $envAll "from" ($envAll.Values.endpoints.identity.auth.placement.passwordFrom | default dict) "option" "password" "confKey" "cyborg" "sections" (list "placement") | include "helm-toolkit.utils.secret_option_strip_sections" }}
 {{- tuple $envAll "cyborg" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 apiVersion: v1
 kind: Secret
