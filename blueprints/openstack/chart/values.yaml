@@ -189,6 +189,128 @@ credentials:
       secret: openstack-credential-horizon-secret-key
       key: password
       path: endpoints.dashboard.auth.secret_keyFrom
+    # Service Keystone users (#228 tier 2): one item per Keystone USERNAME (each consumer has its own user,
+    # created by its chart's ks-user Job; the few shared usernames list every chart that reads them).
+    - id: identity-user-blazar
+      secret: openstack-credential-identity-user-blazar
+      key: password
+      path: endpoints.identity.auth.blazar.passwordFrom
+    - id: identity-user-blazar-test
+      secret: openstack-credential-identity-user-blazar-test
+      key: password
+      path: endpoints.identity.auth.test.passwordFrom
+    - id: identity-user-blazar-service-user
+      secret: openstack-credential-identity-user-blazar-service-user
+      key: password
+      path: endpoints.identity.auth.service.passwordFrom
+    - id: identity-user-ceilometer-test
+      secret: openstack-credential-identity-user-ceilometer-test
+      key: password
+      path: endpoints.identity.auth.test.passwordFrom
+    - id: identity-user-cinder
+      secret: openstack-credential-identity-user-cinder
+      key: password
+      path: endpoints.identity.auth.cinder.passwordFrom
+    - id: identity-user-cinder-test
+      secret: openstack-credential-identity-user-cinder-test
+      key: password
+      path: endpoints.identity.auth.test.passwordFrom
+    - id: identity-user-cinder-nova
+      secret: openstack-credential-identity-user-cinder-nova
+      key: password
+      path: endpoints.identity.auth.nova.passwordFrom
+    - id: identity-user-cinder-service-user
+      secret: openstack-credential-identity-user-cinder-service-user
+      key: password
+      path: endpoints.identity.auth.service.passwordFrom
+    - id: identity-user-designate-test
+      secret: openstack-credential-identity-user-designate-test
+      key: password
+      path: endpoints.identity.auth.test.passwordFrom
+    - id: identity-user-glance-test
+      secret: openstack-credential-identity-user-glance-test
+      key: password
+      path: endpoints.identity.auth.test.passwordFrom
+    - id: identity-user-heat-test
+      secret: openstack-credential-identity-user-heat-test
+      key: password
+      path: endpoints.identity.auth.test.passwordFrom
+    - id: identity-user-keystone-test
+      secret: openstack-credential-identity-user-keystone-test
+      key: password
+      path: endpoints.identity.auth.test.passwordFrom
+    - id: identity-user-mistral-test
+      secret: openstack-credential-identity-user-mistral-test
+      key: password
+      path: endpoints.identity.auth.test.passwordFrom
+    - id: identity-user-neutron
+      secret: openstack-credential-identity-user-neutron
+      key: password
+      path: endpoints.identity.auth.neutron.passwordFrom
+    - id: identity-user-neutron-test
+      secret: openstack-credential-identity-user-neutron-test
+      key: password
+      path: endpoints.identity.auth.test.passwordFrom
+    - id: identity-user-neutron-designate
+      secret: openstack-credential-identity-user-neutron-designate
+      key: password
+      path: endpoints.identity.auth.designate.passwordFrom
+    - id: identity-user-neutron-ironic
+      secret: openstack-credential-identity-user-neutron-ironic
+      key: password
+      path: endpoints.identity.auth.ironic.passwordFrom
+    - id: identity-user-neutron-nova
+      secret: openstack-credential-identity-user-neutron-nova
+      key: password
+      path: endpoints.identity.auth.nova.passwordFrom
+    - id: identity-user-neutron-placement
+      secret: openstack-credential-identity-user-neutron-placement
+      key: password
+      path: endpoints.identity.auth.placement.passwordFrom
+    - id: identity-user-nova-test
+      secret: openstack-credential-identity-user-nova-test
+      key: password
+      path: endpoints.identity.auth.test.passwordFrom
+    - id: identity-user-nova-cinder
+      secret: openstack-credential-identity-user-nova-cinder
+      key: password
+      path: endpoints.identity.auth.cinder.passwordFrom
+    - id: identity-user-nova-ironic
+      secret: openstack-credential-identity-user-nova-ironic
+      key: password
+      path: endpoints.identity.auth.ironic.passwordFrom
+    - id: identity-user-nova-neutron
+      secret: openstack-credential-identity-user-nova-neutron
+      key: password
+      path: endpoints.identity.auth.neutron.passwordFrom
+    - id: identity-user-nova-placement
+      secret: openstack-credential-identity-user-nova-placement
+      key: password
+      path: endpoints.identity.auth.placement.passwordFrom
+    - id: identity-user-nova-service-user
+      secret: openstack-credential-identity-user-nova-service-user
+      key: password
+      path: endpoints.identity.auth.service.passwordFrom
+    - id: identity-user-test
+      secret: openstack-credential-identity-user-test
+      key: password
+      path: endpoints.identity.auth.test.passwordFrom
+    - id: identity-user-zaqar
+      secret: openstack-credential-identity-user-zaqar
+      key: password
+      path: endpoints.identity.auth.zaqar.passwordFrom
+    - id: identity-user-zaqar-test
+      secret: openstack-credential-identity-user-zaqar-test
+      key: password
+      path: endpoints.identity.auth.test.passwordFrom
+    - id: identity-user-nova
+      secret: openstack-credential-identity-user-nova
+      key: password
+      path: endpoints.identity.auth.nova.passwordFrom
+    - id: identity-user-placement
+      secret: openstack-credential-identity-user-placement
+      key: password
+      path: endpoints.identity.auth.placement.passwordFrom
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
 components:
@@ -211,6 +333,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - oslo-messaging-admin
+      - identity-user-keystone-test
     deps:
       - mariadb
       - memcached
@@ -222,6 +345,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-glance
+      - identity-user-glance-test
     deps:
       - keystone
     tier: identity
@@ -251,6 +375,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - memcache-placement
+      - identity-user-placement
     deps:
       - keystone
     tier: compute
@@ -267,6 +392,12 @@ components:
       - oslo-messaging-admin
       - memcache-neutron
       - metadata-proxy-shared-secret
+      - identity-user-neutron
+      - identity-user-neutron-designate
+      - identity-user-neutron-ironic
+      - identity-user-neutron-nova
+      - identity-user-neutron-placement
+      - identity-user-neutron-test
     deps:
       - keystone
       - rabbitmq
@@ -280,6 +411,13 @@ components:
       - oslo-messaging-admin
       - memcache-nova
       - metadata-proxy-shared-secret
+      - identity-user-nova
+      - identity-user-nova-cinder
+      - identity-user-nova-ironic
+      - identity-user-nova-neutron
+      - identity-user-nova-placement
+      - identity-user-nova-service-user
+      - identity-user-nova-test
     deps:
       - keystone
       - placement
@@ -316,6 +454,10 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-cinder
+      - identity-user-cinder
+      - identity-user-cinder-nova
+      - identity-user-cinder-service-user
+      - identity-user-cinder-test
     deps:
       - keystone
       - rabbitmq
@@ -336,6 +478,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-heat
+      - identity-user-heat-test
     deps:
       - keystone
       - rabbitmq
@@ -367,6 +510,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-designate
+      - identity-user-designate-test
     deps:
       - keystone
       - rabbitmq
@@ -380,6 +524,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-octavia
+      - identity-user-test
     deps:
       - keystone
       - rabbitmq
@@ -430,6 +575,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-mistral
+      - identity-user-mistral-test
     deps:
       - keystone
       - rabbitmq
@@ -440,6 +586,7 @@ components:
     credentials:
       - identity-admin
       - oslo-messaging-admin
+      - identity-user-ceilometer-test
     deps:
       - keystone
       - rabbitmq
@@ -469,6 +616,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-cloudkitty
+      - identity-user-test
     deps:
       - keystone
       - rabbitmq
@@ -481,6 +629,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-masakari
+      - identity-user-neutron-test
     deps:
       - keystone
       - rabbitmq
@@ -505,6 +654,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-watcher
+      - identity-user-test
     deps:
       - keystone
       - rabbitmq
@@ -533,6 +683,8 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-cyborg
+      - identity-user-nova
+      - identity-user-placement
     deps:
       - keystone
       - rabbitmq
@@ -549,6 +701,9 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-blazar
+      - identity-user-blazar
+      - identity-user-blazar-service-user
+      - identity-user-blazar-test
     deps:
       - keystone
       - rabbitmq
@@ -564,6 +719,8 @@ components:
       - identity-admin
       - oslo-db-admin
       - memcache-zaqar
+      - identity-user-zaqar
+      - identity-user-zaqar-test
     deps:
       - keystone
       - mariadb

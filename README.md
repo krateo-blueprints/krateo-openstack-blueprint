@@ -747,6 +747,33 @@ On the upgrade, **every Horizon user is signed out once**: sessions signed with 
 rejected. Nova's metadata API and the metadata agents restart with the new secret together, and
 instances keep reading their metadata.
 
+### Upgrading to 0.3.63 or later: the compute service users rotate
+
+Every OpenStack service authenticates to Keystone as its own service user. In this blueprint each
+consumer has its own Keystone username: nova reaches neutron as `nova_neutron`, cinder reaches nova
+as `cinder_nova`. Each chart's ks-user Job creates those users. All of them used OpenStack-Helm's
+published password.
+
+From 0.3.63, 30 of them are generated per install, one `openstack-credential-identity-user-<username>`
+each:
+- nova's, neutron's, cinder's and placement's users, and the cross-service ones (`nova_neutron`,
+  `neutron_nova`, `nova_cinder`, ...);
+- the service-token users (`*_service_user`), blazar and zaqar;
+- every chart's `test` user.
+
+The other service users follow in 0.3.64.
+
+On the upgrade that ships it:
+- each owning chart's ks-user Job sets the new password in Keystone (`openstack user set`), and the
+  chart's pods restart reading it. Nova, cinder, neutron, placement, blazar and zaqar read it from
+  their `<service>-ks-etc` drop-in, now written by an ExternalSecret. Cyborg reads `nova` and
+  `placement` from `cyborg-identity-*` drop-ins;
+- service-to-service calls through a user can fail while that user's owner has set the new password
+  and its readers have not yet restarted. Five usernames are read by more than one chart: `nova`,
+  `placement` (cyborg), `glance`, `neutron-test` and `test`.
+- `hack/identity-users.yaml` records which chart reads which username. The credentials gate
+  re-renders every chart and fails if that map is stale.
+
 ### Components follow the umbrella's version
 
 The orchestrator registers every component `CompositionDefinition` at its own chart version

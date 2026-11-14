@@ -86,3 +86,37 @@ spec:
 {{- define "helm-toolkit.utils.metadata_proxy_secret_ref" -}}
 {{- (((.Values.endpoints.compute_metadata | default dict).auth | default dict).metadata_proxy_shared_secretFrom | default dict) | toJson -}}
 {{- end -}}
+
+{{/* (dict "envAll" $ "from" $ref "option" "password" "confKey" "cyborg" "sections" (list "nova")): with the
+     reference, delete <option> from exactly these sections of .Values.conf.<confKey> (a service user's
+     password where the same file holds other users' passwords that are not rotated by this reference). */}}
+{{- define "helm-toolkit.utils.secret_option_strip_sections" -}}
+{{- if include "helm-toolkit.utils.secret_option_from" .from }}
+{{- $conf := index .envAll.Values.conf .confKey | default dict -}}
+{{- $option := .option -}}
+{{- range $section := .sections }}
+{{- $opts := index $conf $section -}}
+{{- if kindIs "map" $opts }}{{- $_ := unset $opts $option -}}{{- end }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/* (dict "from" $ref "name" "<secret>" "file" "<file>" "dir" "/etc/<p>/<p>.conf.d"): a volumeMount of the
+     drop-in file, for charts without pod.etcSources. Indent at the call site. */}}
+{{- define "helm-toolkit.snippets.secret_conf_dropin_mount" -}}
+{{- if include "helm-toolkit.utils.secret_option_from" .from }}
+- name: {{ .name }}
+  mountPath: {{ printf "%s/%s" .dir .file }}
+  subPath: {{ .file }}
+  readOnly: true
+{{- end }}
+{{- end -}}
+
+{{- define "helm-toolkit.snippets.secret_conf_dropin_volume" -}}
+{{- if include "helm-toolkit.utils.secret_option_from" .from }}
+- name: {{ .name }}
+  secret:
+    secretName: {{ .name }}
+    defaultMode: 0444
+{{- end }}
+{{- end -}}
