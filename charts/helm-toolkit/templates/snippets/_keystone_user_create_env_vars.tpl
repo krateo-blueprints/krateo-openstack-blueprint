@@ -57,6 +57,27 @@ return: |
 
 {{- define "helm-toolkit.snippets.keystone_user_create_env_vars" }}
 {{- $ksUserSecret := .ksUserSecret }}
+{{- with .passwordFrom }}
+{{- /* Krateo (#228): a pre-upgrade ks-user Job runs before this release's resources are applied, so it must
+       not read the openrc Secret the release renders (absent for a user the upgrade enables). The user's
+       fields come from values, the password from the umbrella's root Secret, which exists before. */}}
+{{- $user := $.user }}
+- name: SERVICE_OS_REGION_NAME
+  value: {{ $user.region_name | quote }}
+- name: SERVICE_OS_PROJECT_DOMAIN_NAME
+  value: {{ $user.project_domain_name | quote }}
+- name: SERVICE_OS_PROJECT_NAME
+  value: {{ $user.project_name | quote }}
+- name: SERVICE_OS_USER_DOMAIN_NAME
+  value: {{ $user.user_domain_name | quote }}
+- name: SERVICE_OS_USERNAME
+  value: {{ $user.username | quote }}
+- name: SERVICE_OS_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ .secret }}
+      key: {{ .key }}
+{{- else }}
 - name: SERVICE_OS_REGION_NAME
   valueFrom:
     secretKeyRef:
@@ -85,12 +106,6 @@ return: |
 - name: SERVICE_OS_PASSWORD
   valueFrom:
     secretKeyRef:
-{{- with .passwordFrom }}
-      # Krateo (#228): read straight from the umbrella's root Secret, which exists before the component
-      # upgrades, so a pre-upgrade ks-user Job sets the NEW password before any reader restarts.
-      name: {{ .secret }}
-      key: {{ .key }}
-{{- else }}
       name: {{ $ksUserSecret }}
       key: OS_PASSWORD
 {{- end }}

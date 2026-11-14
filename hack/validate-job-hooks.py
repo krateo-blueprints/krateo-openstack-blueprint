@@ -14,11 +14,6 @@ So every Job a chart renders must be one of:
   - post-install,post-upgrade, with before-hook-creation, a numeric weight, and never
     hook-succeeded (kubernetes-entrypoint finds a completed Job by name; a Job deleted on success
     would leave every pod waiting on it forever);
-  - post-install,pre-upgrade, for the ks-user Jobs only (#228): on an upgrade they must set the
-    service users' new passwords in Keystone BEFORE the readers restart onto them; a post-upgrade
-    ks-user ran after the readers and stale readers locked the users (measured, 0.3.63). On a fresh
-    install they stay post-install, ordered by weight like the others; on an upgrade they must not
-    wait on another Job of the chart, which runs after them;
   - pre-delete, for teardown Jobs (db-drop, and the clean Jobs that delete images or secrets),
     which must not run on install or upgrade at all.
 
@@ -124,16 +119,14 @@ def classify(job):
         return "plain", "not a Helm hook, so a changed pod template fails the upgrade"
     if hook == {"pre-delete"}:
         return "teardown", None
-    name = (job.get("metadata") or {}).get("name", "")
-    rotate = hook == {"post-install", "pre-upgrade"} and name.endswith("ks-user")
-    if hook != {"post-install", "post-upgrade"} and not rotate:
+    if hook != {"post-install", "post-upgrade"}:
         return "bad", f"hook {sorted(hook)}: must be post-install,post-upgrade (or pre-delete for teardown)"
     if "before-hook-creation" not in policy:
         return "bad", "no before-hook-creation delete policy, so the next upgrade cannot re-create it"
     if "hook-succeeded" in policy:
         return "bad", "hook-succeeded deletes the completed Job that kubernetes-entrypoint waits on by name"
     try:
-        return ("rotate" if rotate else "upgrade"), int(str(a.get("helm.sh/hook-weight", "")))
+        return "upgrade", int(str(a.get("helm.sh/hook-weight", "")))
     except ValueError:
         return "bad", f"hook-weight {a.get('helm.sh/hook-weight')!r} is not an integer"
 
@@ -156,7 +149,7 @@ def check(component, docs):
         shape[name] = (kind, info)
         if kind in ("plain", "bad") and (component, name) not in ALLOWED:
             failures.append(f"Job {name}: {info}")
-        if kind in ("upgrade", "rotate", "teardown"):
+        if kind in ("upgrade", "teardown"):
             # Helm waits for every hook Job, and the controller sets no limit on a Helm operation,
             # so an unbounded hook that can never finish holds its release in pending-install
             # forever with no condition on the Composition (#204: cinder-storage-init on Ceph
@@ -180,7 +173,7 @@ def check(component, docs):
         return out
 
     for name, (kind, weight) in shape.items():
-        if kind not in ("upgrade", "rotate"):
+        if kind != "upgrade":
             continue
         _, _, _, j, s, _ = jobs[name]
         eff = {x for x in j if x in jobs}
@@ -191,10 +184,7 @@ def check(component, docs):
             dkind, dweight = shape[dep]
             if dkind == "teardown":
                 failures.append(f"Job {name} waits on {dep}, which only runs at uninstall")
-            elif kind == "rotate":
-                failures.append(f"Job {name} runs pre-upgrade (it rotates service passwords before the readers "
-                                f"restart, #228) and must not wait on {dep}, which runs later in the same upgrade")
-            elif dkind in ("upgrade", "rotate") and dweight >= weight:
+            elif dkind == "upgrade" and dweight >= weight:
                 failures.append(f"Job {name} (weight {weight}) waits on {dep} (weight {dweight}); "
                                 f"Helm runs hooks in weight order, so {dep} must sort strictly first")
     return len(jobs), failures

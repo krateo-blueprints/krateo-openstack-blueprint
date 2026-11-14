@@ -778,39 +778,55 @@ def ks_user_job_keys(chart):
 
 def ks_user_rotation(chart, cid, cv, root, docs):
     """17. The chart's ks-user Job that creates this user runs pre-upgrade, reads the password from the root, and
-    exempts the user from lockout before setting the password."""
+    exempts the user from lockout before setting the password. A pre-upgrade hook runs before the release's
+    resources are applied, so the Job may read nothing the release renders except what exists since the first
+    install (the admin openrc and the TLS secret): no ConfigMap (the previous revision's <svc>-bin lacks the
+    exemption), no user openrc (absent for a user the upgrade enables)."""
     u = IDUSER_BY_ITEM[cid]
     key = IDUSERS[u].get(chart, "gate_unmapped")
-    openrc = ((cv.get("secrets") or {}).get("identity") or {}).get(key)
+    ident = (cv.get("secrets") or {}).get("identity") or {}
+    openrc = ident.get(key)
     found = False
     for d in docs:
-        if d.get("kind") != "Job" or not d["metadata"]["name"].endswith("ks-user"):
+        if d.get("kind") != "Job" or "ks-user" not in d["metadata"]["name"]:
             continue
-        for c in d["spec"]["template"]["spec"].get("containers") or []:
+        pod = d["spec"]["template"]["spec"]
+        for c in pod.get("containers") or []:
             env = {e["name"]: e for e in c.get("env") or []}
-            un = ((env.get("SERVICE_OS_USERNAME") or {}).get("valueFrom") or {}).get("secretKeyRef") or {}
-            if un.get("name") != openrc:
+            un = env.get("SERVICE_OS_USERNAME") or {}
+            if un.get("value") != u and ((un.get("valueFrom") or {}).get("secretKeyRef") or {}).get("name") != openrc:
                 continue
             found = True
+            job = d["metadata"]["name"]
             hook = d["metadata"].get("annotations", {}).get("helm.sh/hook")
             if hook != "post-install,pre-upgrade":
                 fail("%s: Job %s creates user %s with hook %r; it must be post-install,pre-upgrade so the new password "
-                     "is in Keystone before the readers restart" % (chart, d["metadata"]["name"], u, hook))
+                     "is in Keystone before the readers restart" % (chart, job, u, hook))
             pw = ((env.get("SERVICE_OS_PASSWORD") or {}).get("valueFrom") or {}).get("secretKeyRef") or {}
             if pw.get("name") != root:
                 fail("%s: Job %s sets user %s's password from %s, not the root %s (on a pre-upgrade hook the projection "
-                     "is not applied yet)" % (chart, d["metadata"]["name"], u, pw.get("name"), root))
+                     "is not applied yet)" % (chart, job, u, pw.get("name"), root))
+            allowed = {root, ident.get("admin")} | {(v.get("secret") or {}).get("secretName") for v in pod.get("volumes") or []
+                                                    if "tls" in v.get("name", "")}
+            used = pod_template_refs({"containers": [c], "volumes": pod.get("volumes")})
+            cms = [v["configMap"]["name"] for v in pod.get("volumes") or [] if v.get("configMap")]
+            if (used - allowed) or cms:
+                fail("%s: pre-upgrade Job %s reads %s, rendered by this release (a pre-upgrade hook sees the previous "
+                     "revision's, or none for a user the upgrade enables)" % (chart, job, sorted((used - allowed) | set(cms))))
+            for ic in pod.get("initContainers") or []:
+                ienv = {e["name"]: e.get("value") for e in ic.get("env") or []}
+                if (ienv.get("DEPENDENCY_JOBS") or "").strip():
+                    fail("%s: pre-upgrade Job %s waits on Job(s) %s; on an upgrade those run after it (post-upgrade) or "
+                         "are the previous revision's" % (chart, job, ienv["DEPENDENCY_JOBS"]))
+            cmd = c.get("command") or []
+            script = cmd[-1] if len(cmd) == 3 and cmd[:2] == ["/bin/bash", "-c"] else ""
+            ex = script.find("--ignore-lockout-failure-attempts")
+            setpw = script.find('openstack user set --password=')
+            if not (0 <= ex < setpw):
+                fail("%s: Job %s's inline script must exempt user %s from lockout (--ignore-lockout-failure-attempts) "
+                     "before it sets the password" % (chart, job, u))
     if found:
         KS_USER_CHECKED.append((chart, u))
-        script = None
-        for d in docs:
-            if d.get("kind") == "ConfigMap" and "ks-user.sh" in (d.get("data") or {}):
-                script = d["data"]["ks-user.sh"]
-        ex = script.find("--ignore-lockout-failure-attempts") if script else -1
-        pw = script.find("--password=") if script else -1
-        if not (0 <= ex < pw):
-            fail("%s: ks-user.sh must exempt the user from lockout (--ignore-lockout-failure-attempts) before it sets "
-                 "the password" % chart)
 
 
 def pod_secret_refs(docs):

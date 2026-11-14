@@ -81,13 +81,13 @@ return: |
 {{- fail (printf "helm-toolkit.snippets.job_upgrade_hook: no hook weight for Job role %q; add it to the table in _job_upgrade_hook.tpl in the band of its dependency depth, and run hack/validate-job-hooks.py" $role) -}}
 {{- end -}}
 {{- if ne (toString $envAll.Values.helm3_hook) "false" -}}
-{{- if has $role (list "ks-user" "domain-ks-user") }}
-{{- /* Krateo (#228): on an upgrade the service users' passwords must change in Keystone BEFORE the readers
-       restart onto them (a post-upgrade hook ran after the readers, and stale readers locked the users).
-       Fresh installs keep post-install: the Job's ServiceAccount and admin openrc are release resources
-       that do not exist before the first install. */}}
+{{- if and (gt (len .) 2) (eq (index . 2) "pre-upgrade") -}}
+{{- /* Krateo (#228): a ks-user Job whose users all read their password from the umbrella's root changes it
+       in Keystone BEFORE the readers restart onto it (post-upgrade ran after them, and the stale readers
+       locked the users). Fresh installs keep post-install: the Job's ServiceAccount and admin openrc are
+       release resources that do not exist before the first install. */ -}}
 helm.sh/hook: post-install,pre-upgrade
-{{- else }}
+{{- else -}}
 helm.sh/hook: post-install,post-upgrade
 {{- end }}
 helm.sh/hook-delete-policy: before-hook-creation

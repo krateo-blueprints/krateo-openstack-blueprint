@@ -46,21 +46,42 @@ limitations under the License.
 {{- end }}
 {{- end }}
 {{- $restartPolicy := index . "restartPolicy" | default $restartPolicy_ -}}
+{{- $ksUserScript := index . "ksUserScript" | default (include "helm-toolkit.scripts.keystone_user" (dict "krateoRotate" true)) -}}
 
 {{- $serviceAccountName := printf "%s-ks-user" $serviceNamePretty }}
 {{ tuple $envAll "ks_user" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
+{{- /* Krateo (#228): users whose password comes from the umbrella's root (passwordFrom) are rotated by a
+       PRE-upgrade Job, <svc>-ks-user, so Keystone holds the new password before any reader restarts onto it.
+       A pre-upgrade hook runs before this release's resources are applied, so that Job reads nothing the
+       release renders: its script is inline (not the previous revision's <svc>-bin), the user's fields come
+       from values and the password from the root. Users still set from values keep upstream's post-upgrade
+       Job reading their openrc Secret (named <svc>-ks-user-values when both kinds exist). */}}
+{{- $refUsers := list -}}
+{{- $valUsers := list -}}
+{{- range $u := $serviceUsers }}
+{{- $pf := (index $envAll.Values.endpoints.identity.auth $u).passwordFrom | default dict }}
+{{- if $pf.secret }}{{- $refUsers = append $refUsers $u -}}{{- else }}{{- $valUsers = append $valUsers $u -}}{{- end }}
+{{- end }}
+{{- $jobs := list -}}
+{{- if $refUsers }}
+{{- $jobs = append $jobs (dict "name" (printf "%s-ks-user" $serviceNamePretty) "users" $refUsers "rotate" true) -}}
+{{- end }}
+{{- if $valUsers }}
+{{- $jobs = append $jobs (dict "name" (printf "%s-ks-user%s" $serviceNamePretty (ternary "-values" "" (gt (len $refUsers) 0))) "users" $valUsers "rotate" false) -}}
+{{- end }}
+{{- range $job := $jobs }}
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ printf "%s-ks-user" $serviceNamePretty | quote }}
+  name: {{ $job.name | quote }}
   labels:
 {{ tuple $envAll $serviceName "ks-user" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 {{- if $jobLabels }}
 {{ toYaml $jobLabels | indent 4 }}
 {{- end }}
   annotations:
-{{ tuple "ks-user" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
+{{ tuple "ks-user" $envAll (ternary "pre-upgrade" "post-upgrade" $job.rotate) | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
 {{ tuple $serviceAccountName $envAll | include "helm-toolkit.snippets.custom_job_annotations" | indent 4 -}}
 {{- if $jobAnnotations }}
 {{ toYaml $jobAnnotations | indent 4 }}
@@ -90,7 +111,7 @@ spec:
       initContainers:
 {{ tuple $envAll "ks_user" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
-{{- range $serviceUser := $serviceUsers }}
+{{- range $serviceUser := $job.users }}
         - name: {{ printf "%s-ks-user" $serviceUser | replace "_" "-" | quote }}
           image: {{ $envAll.Values.images.tags.ks_user }}
           imagePullPolicy: {{ $envAll.Values.images.pull_policy }}
@@ -99,14 +120,20 @@ spec:
           command:
             - /bin/bash
             - -c
+{{- if $job.rotate }}
+            - {{ $ksUserScript | toJson }}
+{{- else }}
             - /tmp/ks-user.sh
+{{- end }}
           volumeMounts:
             - name: pod-tmp
               mountPath: /tmp
+{{- if not $job.rotate }}
             - name: ks-user-sh
               mountPath: /tmp/ks-user.sh
               subPath: ks-user.sh
               readOnly: true
+{{- end }}
 {{ dict "enabled" true "name" $tlsSecret "ca" true | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
           env:
 {{- $identityOpenrc := dict }}
@@ -122,9 +149,8 @@ spec:
 {{- include "helm-toolkit.snippets.keystone_openrc_env_vars" $env | indent 12 }}
             - name: SERVICE_OS_SERVICE_NAME
               value: {{ $serviceName | quote }}
-{{- $passwordFrom := (index $envAll.Values.endpoints.identity.auth $serviceUser).passwordFrom | default dict }}
-{{- if not $passwordFrom.secret }}{{- $passwordFrom = dict }}{{- end }}
-{{- with $env := dict "ksUserSecret" (index $envAll.Values.secrets.identity $serviceUser ) "passwordFrom" $passwordFrom }}
+{{- $user := index $envAll.Values.endpoints.identity.auth $serviceUser }}
+{{- with $env := dict "ksUserSecret" (index $envAll.Values.secrets.identity $serviceUser ) "passwordFrom" (ternary ($user.passwordFrom | default dict) dict $job.rotate) "user" $user }}
 {{- include "helm-toolkit.snippets.keystone_user_create_env_vars" $env | indent 12 }}
 {{- end }}
             - name: SERVICE_OS_ROLES
@@ -138,6 +164,7 @@ spec:
       volumes:
         - name: pod-tmp
           emptyDir: {}
+{{- if not $job.rotate }}
         - name: ks-user-sh
 {{- if $secretBin }}
           secret:
@@ -148,5 +175,7 @@ spec:
             name: {{ $configMapBin | quote }}
             defaultMode: 0555
 {{- end }}
+{{- end }}
 {{- dict "enabled" true "name" $tlsSecret | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
+{{- end }}
 {{- end -}}
