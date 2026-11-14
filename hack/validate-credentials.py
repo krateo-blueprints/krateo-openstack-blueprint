@@ -105,8 +105,10 @@ Fails when helm or PyYAML is missing, when the umbrella defines no credential, w
 does not render, and when no chart was checked.
 """
 import base64
+import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -757,6 +759,23 @@ def readers_restart(chart, cid, root, docs_without, docs_with):
 KS_USER_CHECKED = []
 
 
+def ks_user_job_keys(chart):
+    """The endpoints.identity.auth keys a chart's ks-user Job can create users for, read from its template:
+    serviceName alone, or every key of serviceUsers (the tuple and each conditional append)."""
+    keys = set()
+    for f in glob.glob(os.path.join(BP, chart, "chart", "templates", "job-ks-user.yaml")):
+        t = open(f).read()
+        m = re.search(r'"serviceName" "([^"]+)"', t)
+        lists = re.findall(r'\(tuple((?:\s+"[^"]+")+)\s*\)', t)
+        if "serviceUsers" in t and lists:
+            for l in lists:
+                keys.update(re.findall(r'"([^"]+)"', l))
+            keys.update(re.findall(r'append \$serviceUsers "([^"]+)"', t))
+        elif m:
+            keys.add(m.group(1))
+    return keys
+
+
 def ks_user_rotation(chart, cid, cv, root, docs):
     """17. The chart's ks-user Job that creates this user runs pre-upgrade, reads the password from the root, and
     exempts the user from lockout before setting the password."""
@@ -1198,6 +1217,15 @@ def main():
 
     if checked and not READERS_CHECKED:
         fail("18: no workload reading a credential projection was found; the check had no input")
+    # every rotated user a ks-user Job can create must have been matched in some render (a mode that only a
+    # condition selects needs an IDUSER_VARIANTS entry, or the user's rotation goes unchecked)
+    for cid, u in IDUSER_BY_ITEM.items():
+        if cid not in items:
+            continue
+        for chart, key in IDUSERS[u].items():
+            if key in ks_user_job_keys(chart) and (chart, u) not in KS_USER_CHECKED:
+                fail("17: %s's ks-user Job can create user %s (key %s) but no render matched it; add the mode that "
+                     "renders it to IDUSER_VARIANTS" % (chart, u, key))
     if checked and not KS_USER_CHECKED:
         fail("17: no chart's ks-user Job was matched to a rotated service user; the check had no input")
     if failures:
