@@ -85,10 +85,14 @@ four things hold, and each is checked here:
      memcache_secret_key: without a strategy keystonemiddleware ignores the key and leaves the cache
      unprotected (cloudkitty, cyborg, ironic and masakari shipped without one).
   13. SHARED SECRETS ARE READ. The metadata proxy shared secret (nova [neutron], neutron's metadata
-     agents [DEFAULT]) and Horizon's SECRET_KEY arrive as drop-ins. The files that carry them are found
-     by rendering in values mode with a sentinel; with the reference, every long-running main
-     container that mounts one must receive the drop-in where its program reads drop-ins (an
-     oslo.config .conf.d, Horizon's local_settings.d), and the drop-in holds exactly the option.
+     agents [DEFAULT]) arrives as an oslo.config drop-in. The files that carry it are found by
+     rendering in values mode with a sentinel; with the reference, every long-running main container
+     that mounts one must receive the drop-in in a .conf.d directory, and the drop-in holds exactly the
+     option. (A directory name is not proof a program reads it: 0.3.61 mounted Horizon's key into
+     /etc/.../local_settings.d, which Horizon never executes -- measured, a random key per pod.)
+  14. A KEY READ FROM A FILE. Horizon's SECRET_KEY: local_settings assigns it exactly once, from the
+     mounted file; every pod template that mounts local_settings (the db-sync Job imports it too)
+     mounts the Secret at that directory; the ExternalSecret holds exactly that file.
 
 Fails when helm or PyYAML is missing, when the umbrella defines no credential, when a listed chart
 does not render, and when no chart was checked.
@@ -260,7 +264,12 @@ RULES["horizon-secret-key"] = {
     "consumes": lambda d, has: d == "horizon",
     "password_path": lambda chart: "conf.horizon.local_settings.config.horizon_secret_key",
     "projections": lambda chart, cv: ["horizon-secret-key"],
-    "dropin": lambda chart: ("horizon-secret-key", "_90_krateo_secret_key.py", "SECRET_KEY = '{{ .password }}'\n"),
+    # Set in local_settings itself, read from a mounted file (0.3.61's local_settings.d snippet was never
+    # executed: Horizon runs only the snippets its start script links, and fell back to a random key per pod).
+    "fileread": lambda chart: {"secret": "horizon-secret-key", "dir": "/etc/openstack-dashboard/krateo-secret-key",
+                               "file": "secret_key", "carrier": ("horizon-etc", "local_settings"),
+                               "line": "SECRET_KEY = open('/etc/openstack-dashboard/krateo-secret-key/secret_key', "
+                                       "encoding='utf-8').read().strip()  # generated per install (#228)"},
 }
 for _svc in MEMCACHE:
     RULES["memcache-%s" % _svc] = {
@@ -549,13 +558,51 @@ def dropin_delivery(chart, cid, sentinel, docs_s, docs):
                 if drop in srcs:
                     path = m["mountPath"].rstrip("/")
                     d = path if not m.get("subPath") else os.path.dirname(path)
-                    if d.endswith(".conf.d") or d.endswith("local_settings.d"):
+                    if d.endswith(".conf.d"):
                         ok = True
             if not ok:
                 fail("%s: %s container %s reads %s but does not receive %s where it reads drop-ins"
                      % (chart, podname, cont["name"], sorted(reads), drop))
     if readers == 0:
         fail("%s: no long-running container reads a file that carried %s" % (chart, cid))
+
+
+def fileread_check(chart, cid, docs):
+    """14. A secret that a config line reads from a mounted file: the carrier renders exactly that line,
+    once, and every pod template that mounts the carrier (Jobs included: a db-sync imports it too) mounts
+    the Secret at the directory the line reads; the ExternalSecret holds exactly the file."""
+    f = RULES[cid]["fileread"](chart)
+    cname, ckey = f["carrier"]
+    carrier = [d for d in docs if d.get("kind") == "Secret" and d["metadata"]["name"] == cname]
+    text = object_text(carrier[0], ckey) if carrier else None
+    if text is None:
+        fail("%s: %s/%s is not rendered with the reference" % (chart, cname, ckey))
+        return
+    var = f["line"].split("=", 1)[0].strip()
+    assigns = [l for l in text.splitlines() if l.replace(" ", "").startswith(var + "=")]
+    if assigns != [f["line"]]:
+        fail("%s: %s/%s assigns %s as %s, want exactly [%r]" % (chart, cname, ckey, var, assigns, f["line"]))
+    es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == f["secret"]]
+    tdata = (((es[0].get("spec") or {}).get("target") or {}).get("template") or {}).get("data") or {} if es else {}
+    if tdata != {f["file"]: "{{ .password }}"}:
+        fail("%s: %s holds %s, want {%r: '{{ .password }}'}" % (chart, f["secret"], sorted(tdata), f["file"]))
+    readers = 0
+    for podname, pod in pod_specs(docs):
+        vols = {v["name"]: v for v in pod.get("volumes") or []}
+        for cont in (pod.get("containers") or []) + (pod.get("initContainers") or []):
+            mounts = cont.get("volumeMounts") or []
+            reads = any((vols.get(m["name"]) or {}).get("secret", {}).get("secretName") == cname
+                        and m.get("subPath") in (None, ckey) for m in mounts)
+            if not reads:
+                continue
+            readers += 1
+            ok = any((vols.get(m["name"]) or {}).get("secret", {}).get("secretName") == f["secret"]
+                     and not m.get("subPath") and m["mountPath"].rstrip("/") == f["dir"] for m in mounts)
+            if not ok:
+                fail("%s: %s container %s reads %s/%s but does not mount %s at %s, so the line would fail"
+                     % (chart, podname, cont["name"], cname, ckey, f["secret"], f["dir"]))
+    if readers == 0:
+        fail("%s: no container reads %s/%s" % (chart, cname, ckey))
 
 
 def pod_secret_refs(docs):
@@ -778,6 +825,9 @@ def main():
                     tdata = ((spec.get("target") or {}).get("template") or {}).get("data") or {}
                     src = plain.get(RENAMED.get(name, name))
                     if src is None:
+                        fileread = {RULES[x]["fileread"](c["name"])["secret"] for x in cids if "fileread" in RULES[x]}
+                        if name in fileread:
+                            continue  # a raw key file read by a config line: check 14 validates it
                         if len(tdata) == 1 and list(tdata)[0].endswith((".conf", ".py")):
                             continue  # a keystone_password_conf_snippet drop-in: no Secret counterpart
                         fail("%s: ExternalSecret %s has no Secret counterpart rendered from values to compare with"
@@ -823,6 +873,8 @@ def main():
                                                       for e in es[0]["spec"].get("data") or []]:
                         fail("%s: ExternalSecret %s does not read %s" % (c["name"], want, items[cid]["secret"]))
             for cid in cids:
+                if "fileread" in RULES[cid]:
+                    fileread_check(c["name"], cid, docs)
                 if "dropin" not in RULES[cid]:
                     continue
                 values_s = json.loads(json.dumps(enabled))
