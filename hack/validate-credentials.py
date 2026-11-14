@@ -245,6 +245,11 @@ RULES["metadata-proxy-shared-secret"] = {
                                      "conf.ovn_agent.DEFAULT.metadata_proxy_shared_secret",
                                      "conf.ovn_metadata_agent.DEFAULT.metadata_proxy_shared_secret"]),
     "projections": lambda chart, cv: ["%s-metadata-proxy-secret" % chart],
+    # neutron renders the OVN agents' files only with the OVN backend (instead of metadata_agent.ini), so
+    # that mode is rendered too: otherwise their copies of the secret would pass the sentinel vacuously.
+    "variants": lambda chart: ([{"network": {"backend": ["ovn"]},
+                                 "manifests": {"daemonset_ovn_agent": True, "daemonset_ovn_metadata_agent": True}}]
+                               if chart == "neutron" else []),
     "dropin": lambda chart: ("%s-metadata-proxy-secret" % chart, "81-metadata-proxy.conf",
                              "[%s]\nmetadata_proxy_shared_secret = {{ .password }}\n"
                              % ("neutron" if chart == "nova" else "DEFAULT")),
@@ -828,6 +833,28 @@ def main():
                     fail("%s: does not render in values mode with the %s sentinel: %s" % (c["name"], cid, errs.strip()[:200]))
                 else:
                     dropin_delivery(c["name"], cid, sentinels[cid], [d for d in yaml.safe_load_all(outs) if d], docs)
+            for cid in cids:
+                for variant in (RULES[cid].get("variants") or (lambda ch: []))(c["name"]):
+                    vv = json.loads(json.dumps(values))
+                    deep_merge(vv, json.loads(json.dumps(variant)))
+                    rcv, outv, errv = helm_template(w, release, vv)
+                    if rcv != 0:
+                        fail("%s: does not render with %s and %s: %s" % (c["name"], cid, variant, errv.strip()[:200]))
+                        continue
+                    docsv = [d for d in yaml.safe_load_all(outv) if d]
+                    leaked = sentinels[cid] in outv or any(
+                        d.get("kind") == "Secret" and any(sentinels[cid] in (object_text(d, k) or "")
+                                                          for k in (d.get("data") or {})) for d in docsv)
+                    if leaked:
+                        fail("%s: with %s the %s value from values is still rendered" % (c["name"], variant, cid))
+                    if "dropin" in RULES[cid]:
+                        vs = json.loads(json.dumps(enabled))
+                        deep_merge(vs, json.loads(json.dumps(variant)))
+                        for pp in paths(RULES[cid]["password_path"](c["name"])):
+                            deep_merge(vs, nested(pp, sentinels[cid]))
+                        rcs, outs, errs = helm_template(w, release, vs)
+                        if rcs == 0:
+                            dropin_delivery(c["name"], cid, sentinels[cid], [d for d in yaml.safe_load_all(outs) if d], docsv)
             if any(cid.startswith("memcache-") for cid in cids):
                 if rc0 == 0:
                     memcache_delivery(c["name"], cv, docs0, docs)
