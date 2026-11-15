@@ -144,17 +144,24 @@ kubectl create namespace openstack-system
 # the 0.3.42 release notes say how to recover an install that has it. 0.3.43 through 0.3.45
 # publish broken Marketplace icons for 23 charts (#214); they install and run correctly.
 #
-# What 0.3.55 has actually been run through, stated so you know what is NOT covered:
-#   - 0.3.55 freshly installed with these exact steps (External Secrets Operator included),
+# What 0.3.64 has actually been run through, stated so you know what is NOT covered:
+#   - 0.3.64 freshly installed with these exact steps (External Secrets Operator included),
 #     profile: full-strict, on a 3-node GKE cluster (n2-standard-16, Kubernetes 1.36.4,
-#     core-provider 2.13.94): all 32 components Ready 28 min and the umbrella 29 min after the
-#     apply. The umbrella reported Ready=False/Creating until the last DAG tier existed (#257) and
-#     only then Ready. No container restarted, cyborg's agents and conductor, mariadb's controller
-#     and watcher's decision engine included, and none in a 10-minute window started after the
-#     install was complete (311 containers); 174 pods, none Pending. Every install's Keystone admin
-#     password is generated (#228): all 25 <component>-keystone-admin Secrets hold it, Keystone
-#     accepts it and rejects OpenStack-Helm's published default. Deleting the install took about
-#     1.5 min, glance's pre-delete hook included (#254);
+#     core-provider 2.13.94): all 32 components and the umbrella Ready 32 min after the apply.
+#     No container restarted, and none in a 10-minute window started after the install was
+#     complete (611 containers); 253 pods, none Pending. Keystone accepts the generated admin
+#     password and rejects OpenStack-Helm's published default; so it does for the compute service
+#     users (nova, nova_neutron, nova_placement, nova_cinder, neutron, neutron_nova, placement),
+#     generated per install since 0.3.63 (#228). Every ks-user Job succeeded. Deleting the install
+#     took about 1.5 min;
+#   - a fresh 0.3.62 install upgraded straight to 0.3.64, twice, the second time recorded every 10 s
+#     (#228): 32 components Ready about 11 min after the upgrade started; afterwards every rotated
+#     service user has the lockout exemption, Keystone accepts the generated passwords and rejects the
+#     published ones, and the value each reader loads is its generated one. DURING that upgrade the
+#     composition controller briefly ran the old chart with the new values and applied the new
+#     Deployments before the pre-upgrade password Job: `nova` was locked for about 1 minute and the
+#     compute and network APIs were unavailable for about 3.5 minutes. A core-provider fix is in
+#     progress; until it ships, plan an upgrade that rotates service users for a short API outage;
 #   - a fresh 0.3.51 install upgraded straight to 0.3.53 (the rotating upgrade): the admin
 #     password moved off the published default, the admin user is exempt from failed-login lockout
 #     (#252), and openstack-keystone-operator-kog 0.4.1 picked up the new password without a
@@ -179,7 +186,7 @@ kubectl create namespace openstack-system
 # version: the 36-component profile: full, kind, a VNC console in a browser, and the
 # per-component path further down.
 
-BP_VERSION=0.3.55
+BP_VERSION=0.3.64
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 
