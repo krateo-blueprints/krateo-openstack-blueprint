@@ -231,6 +231,10 @@ jobs:
       # so keystone-api ran two releases behind its own db-sync schema (#229).
       - name: Every keystone-oidc image named is the series of the chart's keystone images
         run: python3 hack/validate-keystone-oidc-image-series.py .
+      # Every chart said appVersion "2025.1" while the images were 2026.1 since 0.3.46, and consumers pinned docs to
+      # the wrong release (#235): appVersion is the software the chart runs (hack/app-versions.yaml).
+      - name: Every chart's appVersion is the version of the software it runs
+        run: python3 hack/validate-app-version.py .
       # A default cluster's StorageClass is ReadWriteOnce: no default claim may ask for
       # ReadWriteMany, and pods sharing a ReadWriteOnce claim must be co-located (#201).
       - name: Every default claim can be bound, and shared ReadWriteOnce claims are co-located

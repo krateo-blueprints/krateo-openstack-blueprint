@@ -12,7 +12,7 @@ name: openstack
 description: Krateo umbrella that orchestrates the per-component OpenStack blueprints into one ordered, readiness-gated installation.
 type: application
 version: CHART_VERSION
-appVersion: "2025.1"
+appVersion: "2026.1"
 home: https://krateo.io
 icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 keywords:

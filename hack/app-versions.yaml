@@ -1,0 +1,114 @@
+# appVersion is the version of the software the chart runs (#235, decided 2026-11-15): Helm's meaning, and
+# what the Marketplace index and every Helm consumer show. hack/validate-app-version.py checks every Chart.yaml
+# in the repo against this map, and fails on a chart it does not list.
+#
+# source:
+#   series     an OpenStack service chart: every <series>-ubuntu_<distro> image tag in its values.yaml is the
+#              same series, and appVersion is that series (e.g. 2026.1).
+#   series-of  the series of another chart (the umbrella and the capabilities chart deploy that OpenStack).
+#   tag        appVersion is the version in the tag of images.tags.<image> (e.g. memcached:1.6.32 -> 1.6.32).
+#   measured   the tag carries no software version (a build date, or the series of a non-OpenStack program):
+#              appVersion is the version measured in that exact image, recorded with how; the gate fails when
+#              images.tags.<image> no longer has the recorded tag, so an image bump forces a new measurement.
+#   library    a library chart (no app); its appVersion is not checked.
+#   excluded   not a published blueprint chart; reason given.
+charts:
+  blueprints/aodh/chart:
+    source: series
+  blueprints/barbican/chart:
+    source: series
+  blueprints/blazar/chart:
+    source: series
+  blueprints/ceilometer/chart:
+    source: series
+  blueprints/cinder/chart:
+    source: series
+  blueprints/cloudkitty/chart:
+    source: series
+  blueprints/cyborg/chart:
+    source: series
+  blueprints/designate/chart:
+    source: series
+  blueprints/freezer/chart:
+    source: series
+  blueprints/glance/chart:
+    source: series
+  blueprints/gnocchi/chart:
+    source: series
+  blueprints/heat/chart:
+    source: series
+  blueprints/horizon/chart:
+    source: series
+  blueprints/ironic/chart:
+    source: series
+  blueprints/keystone/chart:
+    source: series
+  blueprints/libvirt/chart:
+    source: measured
+    image: libvirt
+    tag: 2026.1-ubuntu_noble
+    version: "10.0.0"
+    how: "exec in the running pod of that exact image (GKE, blueprint 0.3.64 cold install, 2026-11-15): libvirtd --version -> libvirtd (libvirt) 10.0.0"
+  blueprints/magnum/chart:
+    source: series
+  blueprints/manila/chart:
+    source: series
+  blueprints/mariadb/chart:
+    source: measured
+    image: mariadb
+    tag: ubuntu_noble-20261030
+    version: "11.4.8"
+    how: "exec in the running pod of that exact image (GKE, blueprint 0.3.64 cold install, 2026-11-15): mariadbd --version -> Ver 11.4.8-MariaDB-ubu2404"
+  blueprints/masakari/chart:
+    source: series
+  blueprints/memcached/chart:
+    source: tag
+    image: memcached
+  blueprints/mistral/chart:
+    source: series
+  blueprints/neutron/chart:
+    source: series
+  blueprints/nova/chart:
+    source: series
+  blueprints/octavia/chart:
+    source: series
+  blueprints/openstack/chart:
+    source: series-of
+    chart: blueprints/keystone/chart
+  blueprints/openvswitch/chart:
+    source: measured
+    image: openvswitch_vswitchd
+    tag: ubuntu_noble-20261030
+    version: "3.3.9"
+    how: "exec in the running pod of that exact image (GKE, blueprint 0.3.64 cold install, 2026-11-15): ovs-vswitchd --version -> ovs-vswitchd (Open vSwitch) 3.3.9"
+  blueprints/placement/chart:
+    source: series
+  blueprints/powerdns/chart:
+    source: tag
+    image: powerdns
+  blueprints/rabbitmq/chart:
+    source: tag
+    image: rabbitmq
+  blueprints/redis/chart:
+    source: tag
+    image: redis
+  blueprints/skyline/chart:
+    source: series
+  blueprints/swift/chart:
+    source: series
+  blueprints/tacker/chart:
+    source: series
+  blueprints/trove/chart:
+    source: series
+  blueprints/watcher/chart:
+    source: series
+  blueprints/zaqar/chart:
+    source: series
+  blueprints/openstack/capabilities:
+    source: series-of
+    chart: blueprints/keystone/chart
+  charts/helm-toolkit:
+    source: library
+  distribution/identity-derive-poc:
+    source: excluded
+    reason: a proof-of-concept chart under distribution/, not published by the release workflow

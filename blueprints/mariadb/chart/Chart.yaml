@@ -12,7 +12,7 @@
 
 ---
 apiVersion: v2
-appVersion: "2025.1"
+appVersion: "11.4.8"
 description: OpenStack-Helm MariaDB
 name: mariadb
 type: application
