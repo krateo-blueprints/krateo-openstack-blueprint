@@ -252,22 +252,6 @@ krateo.io/composition-origin-version
 {{- end -}}
 {{- end -}}
 
-{{/* The version compositions.yaml emits <kind>/<name> at. See osh.resolveVersion for the decision.
-
-     compositions.yaml calls this ONCE per component and uses the answer for both the gate and the
-     emitted apiVersion. Before #166 those were two derivations of one fact, the gate asking
-     osh.version and the emitter asking osh.pinVersion, and that is how they came to disagree. <exists>
-     is the caller's osh.exists answer for the same reason: asking again here would be a second
-     read of one object, and an answer that can differ from the gate's.
-
-     Under `helm template` there is no cluster, so osh.originVersion finds nothing and this is
-     the current version for every component -- the offline render is byte-identical to one
-     with no pinning at all, which is what hack/validate-origin-version-pin.py asserts across
-     all four install selections.
-
-     Read osh.pinVersion before changing anything here: it carries what the pin does and does
-     not do, the pruning cost an older schema imposes, and the one upgrade setting that releases
-     it. */}}
 {{/* Whether core-provider's engine is approved to migrate <name>'s instances to <current>: the
      SAME predicate the engine evaluates, CompositionDefinition.MigrationApproved(targetVersion)
      at core-provider 2.13.82 (apis/compositiondefinitions/v1alpha1/types.go:258-269):
@@ -292,14 +276,34 @@ true
 {{- end -}}
 {{- end -}}
 
-{{/* osh.migrationApproved for component <name>, read off its LIVE CompositionDefinition, so an
-     operator's `kubectl patch ... upgradePolicy` counts exactly as it does for the engine. One
-     named GET in the release namespace, where templates/definitions.yaml registers it. No
-     CompositionDefinition found -- the first render, or `helm template` where lookup is
-     disabled -- reads as unset, which the CRD defaults to Automatic. */}}
-{{- define "osh.migrationApprovedFor" -}}
+{{/* Component <name>'s LIVE CompositionDefinition, as JSON ("{}" when there is none): the ONE
+     named GET of it per render, in the release namespace where templates/definitions.yaml
+     registers it. No CompositionDefinition found -- the first render, or `helm template` where
+     lookup is disabled -- is the empty object.
+
+     compositions.yaml calls this once per selected component and hands the parsed object to the
+     two readers of it, osh.migrationApprovedFor and the values-phase decision (osh.holdValues,
+     through osh.definitionApiVersion and osh.definitionReady). Both used to be, or would have
+     been, their own GET of the same object: osh.migrationApprovedFor performed this lookup itself
+     until the two-phase emission needed the definition's status too. One read means the policy
+     the version is chosen by and the status the values are released by are the same snapshot of
+     the object, not two reads that can straddle a reconcile of it. Returned as JSON because a
+     template can only return text.
+
+     hack/validate-two-phase-values.py asserts this structurally, because offline `lookup` returns
+     nothing and a gutted helper answers exactly what this one answers without a cluster. */}}
+{{- define "osh.definition" -}}
 {{- $top := index . 0 -}}{{- $name := index . 1 -}}
 {{- $cd := lookup "core.krateo.io/v1alpha1" "CompositionDefinition" $top.Release.Namespace $name | default dict -}}
+{{- $cd | toJson -}}
+{{- end -}}
+
+{{/* osh.migrationApproved for a component, read off <cd>, its LIVE CompositionDefinition as
+     osh.definition returned it, so an operator's `kubectl patch ... upgradePolicy` counts exactly
+     as it does for the engine. An empty <cd> reads as unset, which the CRD defaults to Automatic.
+     A pure function of (<top>, <cd>): the read is osh.definition's. */}}
+{{- define "osh.migrationApprovedFor" -}}
+{{- $top := index . 0 -}}{{- $cd := index . 1 | default dict -}}
 {{- $policy := (($cd.spec).upgradePolicy) | default "" -}}
 {{- $upgradeTo := index ((($cd.metadata).annotations) | default dict) "krateo.io/upgrade-to-version" | default "" -}}
 {{- include "osh.migrationApproved" (list $policy $upgradeTo (include "osh.version" (list $top))) -}}
@@ -321,12 +325,142 @@ true
 {{- if ne $approved "true" -}}{{- $origin -}}{{- end -}}
 {{- end -}}
 
+{{/* The version compositions.yaml emits <kind>/<name> at. See osh.resolveVersion for the decision.
+
+     compositions.yaml calls this ONCE per component and uses the answer for both the gate and the
+     emitted apiVersion. Before #166 those were two derivations of one fact, the gate asking
+     osh.version and the emitter asking osh.pinVersion, and that is how they came to disagree. <exists>
+     is the caller's osh.exists answer for the same reason: asking again here would be a second
+     read of one object, and an answer that can differ from the gate's. <approved> is the caller's
+     osh.migrationApprovedFor answer for that reason too: the values-phase decision in
+     compositions.yaml needs the same answer, and it must not be derived twice.
+
+     Under `helm template` there is no cluster, so osh.originVersion finds nothing and this is
+     the current version for every component -- the offline render is byte-identical to one
+     with no pinning at all, which is what hack/validate-origin-version-pin.py asserts across
+     all four install selections.
+
+     Read osh.pinVersion before changing anything here: it carries what the pin does and does
+     not do, the pruning cost an older schema imposes, and the one upgrade setting that releases
+     it. */}}
 {{- define "osh.emitVersion" -}}
-{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $crds := index . 3 -}}{{- $exists := index . 4 -}}
+{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $crds := index . 3 -}}{{- $exists := index . 4 -}}{{- $approved := index . 5 -}}
 {{- $current := include "osh.version" (list $top) -}}
-{{- $approved := include "osh.migrationApprovedFor" (list $top $name) -}}
 {{- $origin := include "osh.effectiveOrigin" (list (include "osh.originVersion" (list $top $kind $name $crds)) $approved) -}}
 {{- include "osh.resolveVersion" (list $current $origin $exists $kind $crds) -}}
+{{- end -}}
+
+{{/* <cd>'s status.apiVersion, the apiVersion its CRD serves for it as core-provider last applied
+     it ("composition.krateo.io/v0-3-65"), or "" when <cd> is empty or has no status yet. A pure
+     function of <cd>, which is osh.definition's read; it performs no lookup of its own. */}}
+{{- define "osh.definitionApiVersion" -}}
+{{- $cd := index . 0 | default dict -}}
+{{- (($cd.status).apiVersion) | default "" | toString -}}
+{{- end -}}
+
+{{/* The STATUS of <cd>'s condition of type Ready ("True", "False", "Unknown"), or "" when it has
+     none. A pure function of <cd>, which is osh.definition's read.
+
+     Type and status only, never the reason. Ready=True is reported with more than one reason --
+     Available for a definition whose controller is running, ScaledToZero for one that opted into
+     scale-to-zero and has no instances (core-provider types.go, ScaleToZero) -- and both mean the
+     definition serves its version. A gate on a reason string holds every scaled-to-zero component
+     back forever, and the next reason core-provider adds holds back whatever reports it.
+
+     ControllerActive is deliberately NOT read. It is absent for a definition whose controller runs
+     on a remote target and False for an idle scale-to-zero one, so requiring it would hold both
+     forever. The umbrella does not need the new controller to be running: see osh.holdValues for
+     why writing at the new version is safe before it does. */}}
+{{- define "osh.definitionReady" -}}
+{{- $cd := index . 0 | default dict -}}
+{{- $r := "" -}}
+{{- range ((($cd.status).conditions) | default list) -}}
+{{- if eq (.type | toString) "Ready" -}}{{- $r = .status | toString -}}{{- end -}}
+{{- end -}}
+{{- $r -}}
+{{- end -}}
+
+{{/* "true" when this render must NOT write the component's new values, and must re-emit its live
+     spec instead; "" when the values the chart computed are emitted, as before this existed.
+
+     Arguments: (<current>, <emitVer>, <approved>, <exists>, <cdApiVersion>, <cdReady>) -- the
+     chart's version, the version osh.emitVersion resolved, osh.migrationApprovedFor's answer,
+     osh.exists's answer, and the component definition's status.apiVersion and Ready status. A
+     pure function of them, no `lookup`, so hack/validate-two-phase-values.py asserts every branch
+     with synthetic input.
+
+     # The defect: new values written at the old version
+
+     One umbrella render moves a component's CompositionDefinition to the new chart version AND
+     writes the component's new values. In that render the component's CRD does not serve the new
+     version yet -- the definition rendered in the same pass is what adds it -- so osh.resolveVersion
+     answers the served OLD version (it must: an unserved version closes the gate and prunes, #166).
+     core-provider's krateo-composition-version MutatingAdmissionPolicy stamps the label
+     krateo.io/composition-version from the apiVersion of each write, so the object stays labelled
+     with the old version, and the OLD version's controller -- still running, selecting on that
+     label -- owns it and runs the OLD chart with the NEW values. Measured on a GKE upgrade 0.3.64 to
+     0.3.65: 3 of 33 components did exactly that, and the old chart's pre-upgrade Job rotated
+     passwords ahead of the release that was meant to. core-provider confirmed the reading from its
+     code.
+
+     # The two phases
+
+     A component's new values are written only AT the new apiVersion, and only once its definition
+     serves that version: status.apiVersion is composition.krateo.io/<current> AND it reports Ready
+     with status True (osh.definitionReady says why the reason and ControllerActive are not read),
+     AND this render emits at <current>. That is the signal core-provider agreed from its code.
+     Until then, an existing component's spec is not changed: compositions.yaml re-emits the live
+     spec at <emitVer>, the served version it resolved.
+
+     Writing at the new apiVersion is safe before the new controller runs: the write moves the
+     label, the old controller's selector stops matching and it drops the object, and nothing runs
+     the old chart with the new values. Holding at <emitVer> when that is already <current> (the
+     CRD serves the new version but the definition is not Ready on it yet) writes the OLD spec at
+     the new version, which is what core-provider's own instance migration writes: the new chart
+     with the values it already had, never the old chart with new ones.
+
+     # What is not held
+
+       * A component that does not EXIST: there is no old chart running it, and it is created
+         exactly as before -- osh.resolveVersion already keeps it waiting for the current CRD.
+       * A component whose migration is NOT approved (pinned at its origin, #233): the engine is
+         holding it on purpose, it is written at its origin with the values the chart computes,
+         and that path keeps its behaviour and its documented cost (osh.pinVersion). Holding it
+         would freeze its values for as long as the operator keeps it paused.
+
+     Offline nothing exists, so this is "" for every component and the render is byte-identical to
+     the chart without it. In a steady state the signal holds and this is "" too; a definition that
+     stops reporting Ready later (its own reconcile failing) defers a values change until it is
+     Ready again rather than writing it at a version it may not serve. */}}
+{{- define "osh.holdValues" -}}
+{{- $current := index . 0 | toString -}}{{- $emitVer := index . 1 | toString -}}{{- $approved := index . 2 | toString -}}
+{{- $exists := index . 3 | toString -}}{{- $cdApiVersion := index . 4 | toString -}}{{- $cdReady := index . 5 | toString -}}
+{{- if and (eq $exists "true") (eq $approved "true") -}}
+{{- if not (and (eq $emitVer $current) (eq $cdApiVersion (include "osh.apiVersionAt" (list $current))) (eq $cdReady "True")) -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The live spec of <kind>/<name>, as JSON, read at <ver>; "" when no such object exists.
+
+     One named GET of the one object, made ONLY while osh.holdValues holds: compositions.yaml calls
+     it inside that branch, so a steady-state render pays nothing for it, and an upgrade pays one GET
+     per held component for the passes until its definition is Ready on the new version. It is a
+     third GET of an object osh.exists and osh.originVersion already read, for the reason
+     osh.originVersion gives for being the second: hoisting one shared read into compositions.yaml
+     would make this component's existence test different code from every dependency's.
+
+     Read at <ver>, which is the version the held document is emitted at, so the spec read and the
+     spec written go through the same schema: nothing a narrower schema would prune on the way in is
+     re-written on the way out. Guarded by osh.crdExists at <ver> for the reason osh.exists is: a
+     `lookup` at a version nothing serves errors, it does not return empty. compositions.yaml only
+     reaches here once $crd has said <ver> is served, so the guard is belt-and-braces there and is
+     what keeps a probe calling it directly from erroring. */}}
+{{- define "osh.liveSpec" -}}
+{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $ver := index . 3 -}}{{- $crds := index . 4 -}}
+{{- if eq (include "osh.crdExists" (list $kind $ver $crds)) "true" -}}
+{{- $o := lookup (include "osh.apiVersionAt" (list $ver)) $kind $top.Release.Namespace $name -}}
+{{- if $o -}}{{- (($o.spec) | default dict) | toJson -}}{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/* Returns "true" if a Composition of <kind>/<name> reports Ready=True. Takes the cluster's CRD

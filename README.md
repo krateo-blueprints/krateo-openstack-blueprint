@@ -1043,6 +1043,31 @@ The mechanism is in
 `hack/validate-origin-version-pin.py`, and tracked as
 [krateo-platformops/core-provider#303](https://github.com/krateo-platformops/core-provider/issues/303).
 
+### New values land one pass later, at the new version
+
+On an upgrade, a component whose migration is approved gets its **new values only once its
+`CompositionDefinition` serves the new version**: `status.apiVersion` is the new
+`composition.krateo.io/<version>` and its `Ready` condition has status `True` (any reason,
+`ScaledToZero` included; `ControllerActive` is not required). Until then the umbrella re-emits the
+component's live spec unchanged, at the version the cluster serves.
+
+Before this, the render that moved a definition to the new chart also wrote the new values at the
+OLD API version, because the new one was not served yet. The object kept its old
+`krateo.io/composition-version` label, so the old controller ran the old chart with the new
+values. Measured on GKE, 0.3.64 to 0.3.65: 3 of 33 components did that, and the old chart's
+pre-upgrade Job rotated passwords early.
+
+What you see: during an upgrade a component's spec does not change on the first pass. A
+`componentValues` change made while a definition is not `Ready` is applied once it is. A component
+that does not exist yet, and a component whose migration is not approved (pinned, above), are
+emitted as before. The mechanism is `osh.holdValues` in the same file, asserted by
+`hack/validate-two-phase-values.py`.
+
+```sh
+kubectl -n openstack get compositiondefinitions \
+  -o custom-columns='NAME:.metadata.name,API:.status.apiVersion,READY:.status.conditions[?(@.type=="Ready")].status'
+```
+
 ## Configure
 
 For anything between the profiles, set **`spec.enabled`** to an explicit component list — it

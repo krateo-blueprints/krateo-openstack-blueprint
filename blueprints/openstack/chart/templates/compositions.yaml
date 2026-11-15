@@ -104,9 +104,13 @@
        osh.pinVersion, while it is served. Otherwise a live object is emitted at
        osh.servedVersion's answer, the current version if served and else the newest served one.
        $exists is asked here, once, because the resolution needs it and the gate below uses the
-       same answer. */ -}}
+       same answer. The component's CompositionDefinition is read here once for the same reason:
+       its upgrade policy decides the version (osh.emitVersion) and its status decides whether the
+       new values are written (osh.holdValues, below), and the two must see one snapshot of it. */ -}}
 {{- $exists := include "osh.exists" (list $ $c.kind $c.name $crds) }}
-{{- $emitVer := include "osh.emitVersion" (list $ $c.kind $c.name $crds $exists) }}
+{{- $cd := include "osh.definition" (list $ $c.name) | fromJson }}
+{{- $approved := include "osh.migrationApprovedFor" (list $ $cd) }}
+{{- $emitVer := include "osh.emitVersion" (list $ $c.kind $c.name $crds $exists $approved) }}
 {{- $crd := include "osh.crdExists" (list $c.kind $emitVer $crds) }}
 {{- /* Partition this component's dependencies by the gate each edge is in, so that which
        semantics applies to which dependency is visible here and not buried in a helper. */ -}}
@@ -155,6 +159,30 @@
        componentValues entry wins. osh.credentialRefs says what is passed and why. */ -}}
 {{- $refs := include "osh.credentialRefs" (list $ $c) | fromYaml }}
 {{- if $refs }}{{- $ov = mergeOverwrite $refs (deepCopy $ov) }}{{- end }}
+{{- /* TWO PHASES: a live component's NEW values are written only at the new apiVersion, and only
+       once its CompositionDefinition serves it (status.apiVersion at the current version, Ready
+       status True). Until then its spec is not changed: the live spec is re-emitted, at the served
+       version $emitVer, exactly as it is stored.
+
+       Measured on a GKE upgrade 0.3.64 to 0.3.65: the render that moved each definition to the new
+       chart also wrote the new values, at the OLD apiVersion, because the new one was not served
+       yet. The object kept the old krateo.io/composition-version label, the old version's
+       controller kept it, and ran the OLD chart with the NEW values -- 3 of 33 components, whose old
+       pre-upgrade Job rotated passwords early. osh.holdValues carries the mechanism, the agreed
+       signal and why it reads Ready's status and never its reason or ControllerActive.
+
+       Not held, so unchanged: a component that does not exist yet, and one whose migration is not
+       approved (pinned at its origin, #233). Offline nothing exists, so nothing is held and the
+       render is byte-identical to the chart without this; hack/validate-two-phase-values.py proves
+       that differentially and drives this block end to end with the cluster reads stubbed.
+
+       If the object is gone by the time its spec is read (deleted between osh.exists and here),
+       there is no live spec to keep and the computed values are emitted, as before this block. */ -}}
+{{- $hold := include "osh.holdValues" (list (include "osh.version" (list $)) $emitVer $approved $exists (include "osh.definitionApiVersion" (list $cd)) (include "osh.definitionReady" (list $cd))) }}
+{{- if eq $hold "true" }}
+{{- $live := include "osh.liveSpec" (list $ $c.kind $c.name $emitVer $crds) }}
+{{- if $live }}{{- $ov = $live | fromJson }}{{- end }}
+{{- end }}
 {{- /* The apiVersion is PINNED to the version this object was born at, when it has one.
 
        A new component renders at the current version. One that already exists renders at its
