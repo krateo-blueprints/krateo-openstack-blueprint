@@ -144,6 +144,13 @@ kubectl create namespace openstack-system
 # the 0.3.42 release notes say how to recover an install that has it. 0.3.43 through 0.3.45
 # publish broken Marketplace icons for 23 charts (#214); they install and run correctly.
 #
+# DO NOT INSTALL OR UPGRADE TO 0.3.65 (#228 slice 2b). Measured on GKE, upgrading from 0.3.64:
+#   - watcher's decision engine crash-loops ("password is a required attribute"). watcher re-reads
+#     its configuration without the drop-in directory that now holds its service password;
+#   - ceilometer's upgrade never completes. Its db-sync Job does not mount that drop-in, so its
+#     post-upgrade hook fails on every retry.
+# The fix ships in 0.3.66. Stay on 0.3.64 until then.
+#
 # What 0.3.64 has actually been run through, stated so you know what is NOT covered:
 #   - 0.3.64 freshly installed with these exact steps (External Secrets Operator included),
 #     profile: full-strict, on a 3-node GKE cluster (n2-standard-16, Kubernetes 1.36.4,
@@ -803,6 +810,9 @@ If an install is already on 0.3.63 with locked users, upgrade to 0.3.64. Its Job
 rotated user, so a locked user authenticates again as soon as its pods hold the new password.
 
 ### Upgrading to the next release: the other 25 service users rotate
+
+> **Not in 0.3.65.** 0.3.65 shipped this and is broken: watcher's decision engine crash-loops and
+> ceilometer's upgrade fails (measured on GKE, see the warning in the install block). Wait for 0.3.66.
 
 The release after 0.3.64 generates the remaining service users' passwords the same way, one
 `openstack-credential-identity-user-<username>` each:
