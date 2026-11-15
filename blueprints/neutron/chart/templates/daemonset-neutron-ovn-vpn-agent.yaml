@@ -82,6 +82,7 @@ spec:
 {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
+        secret-ks-etc-hash: {{ tuple "secret-ks-etc.yaml" . | include "helm-toolkit.utils.hash" }}
     spec:
 {{ dict "envAll" $envAll "application" "ovn_vpn_agent" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
 {{ tuple "ovn_vpn_agent" . | include "helm-toolkit.snippets.kubernetes_pod_priority_class" | indent 6 }}

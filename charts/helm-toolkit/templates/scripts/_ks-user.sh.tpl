@@ -71,6 +71,14 @@ USER_ID=$(openstack user create --or-show --enable -f value -c id \
     --description="${USER_DESC}" \
     "${SERVICE_OS_USERNAME}");
 
+{{ if and (kindIs "map" .) (index . "krateoRotate") -}}
+# Krateo (#228): a machine user must never be locked out. While its password rotates, a reader still holding
+# the previous value fails authentication; with Keystone's failed-login lockout five such failures locked
+# nova, neutron and placement for 30 minutes (measured, 0.3.63). Set BEFORE the password changes. Only in
+# the pre-upgrade Job's inline copy (job_ks_user passes krateoRotate), so <svc>-bin keeps upstream's script.
+openstack user set --ignore-lockout-failure-attempts "${USER_ID}"
+
+{{ end -}}
 # Manage user password (we do this in a seperate step to ensure the password is updated if required)
 set +x
 echo "Setting user password via: openstack user set --password=xxxxxxx ${USER_ID}"
