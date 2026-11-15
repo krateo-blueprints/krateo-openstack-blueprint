@@ -141,6 +141,7 @@ limitations under the License.
 {{- end -}}
 ---
 {{- tuple $envAll "glance" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
+{{- dict "envAll" $envAll "entries" (include "glance.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "glance" | include "helm-toolkit.utils.identity_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -160,6 +161,8 @@ data:
 {{- $filePrefix := replace "_" "-"  $key }}
   {{ printf "%s.filters" $filePrefix }}: {{ $value.content | b64enc }}
 {{- end }}
+{{- if not (.Values.endpoints.identity.auth.glance.passwordFrom | default dict).secret }}
 {{- include "helm-toolkit.snippets.values_template_renderer" ( dict "envAll" $envAll "template" .Values.conf.swift_store "key" "swift-store.conf" "format" "Secret" ) | indent 2 }}
+{{- end }}
 {{- include "helm-toolkit.snippets.values_template_renderer" ( dict "envAll" $envAll "template" .Values.conf.nginx "key" "nginx.conf" "format" "Secret" ) | indent 2 }}
 {{- end }}

@@ -64,7 +64,7 @@ spec:
               mountPath: /tmp/skyline-apiserver-init.sh
               subPath: skyline-apiserver-init.sh
               readOnly: true
-            - name: skyline-etc
+            - name: {{ ternary "skyline-config" "skyline-etc" (not (empty (.Values.endpoints.identity.auth.skyline.passwordFrom | default dict).secret)) }}
               mountPath: /etc/skyline/skyline.yaml
               subPath: skyline.yaml
               readOnly: true
@@ -138,7 +138,7 @@ spec:
               mountPath: /tmp
             - name: skyline-var-lib
               mountPath: /var/lib/skyline
-            - name: skyline-etc
+            - name: {{ ternary "skyline-config" "skyline-etc" (not (empty (.Values.endpoints.identity.auth.skyline.passwordFrom | default dict).secret)) }}
               mountPath: /etc/skyline/skyline.yaml
               subPath: skyline.yaml
               readOnly: true
@@ -166,5 +166,11 @@ spec:
           secret:
             secretName: skyline-etc
             defaultMode: 0444
+{{- if (.Values.endpoints.identity.auth.skyline.passwordFrom | default dict).secret }}
+        - name: skyline-config
+          secret:
+            secretName: skyline-config
+            defaultMode: 0444
+{{- end }}
 {{ if $mounts_skyline.volumes}}{{ toYaml $mounts_skyline.volumes | indent 8 }}{{ end }}
 {{- end }}

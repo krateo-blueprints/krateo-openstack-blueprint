@@ -85,6 +85,7 @@ spec:
                 - name: pod-etc-gnocchi
                   mountPath: /etc/gnocchi
 {{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "gnocchi") | nindent 16 }}
+{{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "gnocchi.identity_dropin_entries" . | fromJsonArray) "gnocchi") | nindent 16 }}
                 - name: gnocchi-etc
                   mountPath: /etc/gnocchi/gnocchi.conf
                   subPath: gnocchi.conf
@@ -96,6 +97,7 @@ spec:
             - name: pod-etc-gnocchi
               emptyDir: {}
 {{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "gnocchi") | nindent 12 }}
+{{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "gnocchi.identity_dropin_entries" . | fromJsonArray) "gnocchi") | nindent 12 }}
             - name: gnocchi-etc
               secret:
                 secretName: gnocchi-etc

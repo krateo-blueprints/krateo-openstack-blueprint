@@ -48,6 +48,7 @@ limitations under the License.
 
 ---
 {{- tuple $envAll "proxy_server" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
+{{- dict "envAll" $envAll "entries" (include "swift.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "proxy_server" | include "helm-toolkit.utils.identity_dropin_strip" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

@@ -100,6 +100,7 @@ spec:
             - name: etcmasakari
               mountPath: /etc/masakari
 {{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "masakari") | nindent 12 }}
+{{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "masakari.identity_dropin_entries" . | fromJsonArray) "masakari") | nindent 12 }}
             - name: masakari-etc
               mountPath: /etc/masakari/masakari.conf
               subPath: masakari.conf
@@ -118,6 +119,7 @@ spec:
             name: masakari-bin
             defaultMode: 0555
 {{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "masakari") | nindent 8 }}
+{{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "masakari.identity_dropin_entries" . | fromJsonArray) "masakari") | nindent 8 }}
         - name: masakari-etc
           secret:
             secretName: masakari-etc

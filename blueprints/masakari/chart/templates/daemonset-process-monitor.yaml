@@ -106,11 +106,13 @@ spec:
             - name: masakari-etc
               mountPath: /etc/masakari/masakarimonitors.conf
               subPath: masakarimonitors.conf
+{{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "masakari.identity_dropin_entries" . | fromJsonArray) "masakari" "/etc/masakarimonitors/masakarimonitors.conf.d") | nindent 12 }}
             - name: varrun
               mountPath: /var/run
             - name: run
               mountPath: /run
       volumes:
+{{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "masakari.identity_dropin_entries" . | fromJsonArray) "masakari") | nindent 8 }}
         - name: pod-tmp
           emptyDir: {}
         - name: oslo-lock-path

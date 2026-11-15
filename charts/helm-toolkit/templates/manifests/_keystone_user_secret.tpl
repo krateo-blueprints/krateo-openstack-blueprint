@@ -102,3 +102,68 @@ data:
 {{- end }}
 {{- end }}
 {{- end -}}
+
+{{/*
+Krateo blueprint addition (issue #228): the openrc Secret of a DOMAIN-scoped service user (heat's and magnum's
+stack users: OS_DOMAIN_NAME, no project), as the charts rendered it by hand. With
+endpoints.identity.auth.<userClass>.passwordFrom it is an ExternalSecret with the same keys, the password read
+from the umbrella's root; without, the plain Secret exactly as before.
+usage: {{ tuple "heat_stack_user" .Values.secrets.identity.heat_stack_user $envAll | include "helm-toolkit.manifests.keystone_domain_user_secret" }}
+*/}}
+{{- define "helm-toolkit.manifests.keystone_domain_user_secret" -}}
+{{- $userClass := index . 0 -}}
+{{- $secretName := index . 1 -}}
+{{- $envAll := index . 2 -}}
+{{- $user := index $envAll.Values.endpoints.identity.auth $userClass -}}
+{{- $from := $user.passwordFrom | default dict -}}
+{{- if $from.secret }}
+{{- range $field := list "store" "secret" "key" }}
+{{- if not (index $from $field) }}
+{{- fail (printf "endpoints.identity.auth.%s.passwordFrom.%s is required" $userClass $field) }}
+{{- end }}
+{{- end }}
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ $secretName }}
+  annotations:
+    krateo.io/teardown: with-release
+{{ tuple "identity" $userClass $envAll | include "helm-toolkit.snippets.custom_secret_annotations" | indent 4 }}
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: {{ $from.store | quote }}
+  target:
+    name: {{ $secretName }}
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      engineVersion: v2
+      data:
+        OS_AUTH_URL: {{ tuple "identity" "internal" "api" $envAll | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" | quote }}
+        OS_REGION_NAME: {{ $user.region_name | quote }}
+        OS_DOMAIN_NAME: {{ $user.domain_name | quote }}
+        OS_USERNAME: {{ $user.username | quote }}
+        OS_PASSWORD: {{ "{{ .password }}" | quote }}
+  data:
+    - secretKey: password
+      remoteRef:
+        key: {{ $from.secret | quote }}
+        property: {{ $from.key | quote }}
+{{- else }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  annotations:
+{{ tuple "identity" $userClass $envAll | include "helm-toolkit.snippets.custom_secret_annotations" | indent 4 }}
+type: Opaque
+data:
+  OS_AUTH_URL: {{ tuple "identity" "internal" "api" $envAll | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" | b64enc }}
+  OS_REGION_NAME: {{ $user.region_name | b64enc }}
+  OS_DOMAIN_NAME: {{ $user.domain_name | b64enc }}
+  OS_USERNAME: {{ $user.username | b64enc }}
+  OS_PASSWORD: {{ $user.password | b64enc }}
+{{- end }}
+{{- end -}}

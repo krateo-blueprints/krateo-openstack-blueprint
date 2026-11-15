@@ -90,7 +90,8 @@ spec:
             defaultMode: 0555
         - name: db-sync-conf
           secret:
-            secretName: {{ $configMapEtc | quote }}
+            {{- /* Krateo (#228): skyline.yaml comes from skyline-config when the skyline user's password is generated */}}
+            secretName: {{ ternary "skyline-config" $configMapEtc (not (empty ($envAll.Values.endpoints.identity.auth.skyline.passwordFrom | default dict).secret)) | quote }}
             defaultMode: 0444
 {{- dict "enabled" $envAll.Values.manifests.certificates "name" $dbAdminTlsSecret | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
 {{- end }}

@@ -71,6 +71,7 @@ spec:
               subPath: watcher-applier.sh
               readOnly: true
 {{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "watcher") | nindent 12 }}
+{{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "watcher.identity_dropin_entries" . | fromJsonArray) "watcher") | nindent 12 }}
             - name: watcher-etc
               mountPath: /etc/watcher/watcher.conf
               subPath: watcher.conf
@@ -92,6 +93,7 @@ spec:
             name: watcher-bin
             defaultMode: 0555
 {{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "watcher") | nindent 8 }}
+{{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "watcher.identity_dropin_entries" . | fromJsonArray) "watcher") | nindent 8 }}
         - name: watcher-etc
           secret:
             secretName: watcher-etc

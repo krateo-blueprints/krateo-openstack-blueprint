@@ -111,6 +111,7 @@ limitations under the License.
 {{- end -}}
 ---
 {{- tuple $envAll "cinder" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
+{{- dict "envAll" $envAll "entries" (include "cinder.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "cinder" | include "helm-toolkit.utils.identity_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

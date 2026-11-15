@@ -50,9 +50,9 @@ if [ -n "$MEMCACHE_HOST" ] && [ "$MEMCACHE_HOST" != "null" ]; then
 fi
 
 echo "Starting Swift Proxy Server..."
-{{- if include "helm-toolkit.utils.memcache_secret_key_from" . }}
-# Krateo (#228): a config directory, so the generated memcache secret key is a drop-in
-# (80-memcache-secret-key.conf, [filter:authtoken]) read after 00-proxy-server.conf.
+{{- if include "swift.proxy_conf_dir" . }}
+# Krateo (#228): a config directory, so the generated secrets are drop-ins read after 00-proxy-server.conf:
+# 80-memcache-secret-key.conf and 85-identity.conf, both [filter:authtoken].
 exec swift-proxy-server /etc/swift/proxy-server.conf.d --verbose
 {{- else }}
 exec swift-proxy-server /etc/swift/proxy-server.conf --verbose

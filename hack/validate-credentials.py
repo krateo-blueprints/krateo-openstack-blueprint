@@ -96,6 +96,9 @@ four things hold, and each is checked here:
   17. SERVICE USERS ROTATE BEFORE THEIR READERS. For every rotated service user, the ks-user Job that creates
      it is post-install,pre-upgrade, reads the password from the umbrella's root (a pre-upgrade hook runs
      before the projection is applied), and its script exempts the user from lockout BEFORE setting it.
+  16b. RELOCATED FILES. A file that carried a service user's password and that the references render drops from
+     its Secret (glance's swift-store.conf) is rendered by an ExternalSecret reading that user's root, identical
+     to the values-mode file with the sentinel, and mounted at the same path by every container that read it.
   18. READERS RESTART. Every Deployment, StatefulSet and DaemonSet that reads an ExternalSecret projecting an
      item's root has a pod template that differs between the render without that one item's reference and the
      render with it, every other reference set in both (0.3.63: ks-etc kept its name, nothing hashed it, and
@@ -297,7 +300,38 @@ IDUSER_VARIANTS = {
     ("neutron", "neutron_designate"): {"conf": {"neutron": {"DEFAULT": {"external_dns_driver": "designate"}}}},
     ("neutron", "neutron_ironic"): {"network": {"backend": ["openvswitch", "baremetal"]}},
     ("nova", "nova_ironic"): {"manifests": {"statefulset_compute_ironic": True}},
+    # masakari's monitor DaemonSets (off by default) read the masakari user from masakarimonitors.conf
+    ("masakari", "masakari"): {"manifests": {"host_monitor": True, "instance_monitor": True, "process_monitor": True,
+                                             "introspective_instance_monitor": True}},
 }
+
+
+def iduser_dropin(chart, u):
+    """The drop-in that delivers user u's password to chart's main config: a dedicated one (IDUSER_DROPINS),
+    or the chart's single identity drop-in (slice 2b: the chart lists its entries in
+    templates/_identity_dropin_entries.tpl), whose expected lines check 13 derives from the sentinel render."""
+    if (chart, u) in IDUSER_DROPINS:
+        return IDUSER_DROPINS[(chart, u)]
+    f = os.path.join(BP, chart, "chart", "templates", "_identity_dropin_entries.tpl")
+    if os.path.exists(f) and ('"user" "%s"' % IDUSERS[u].get(chart, "gate_unmapped")) in open(f).read():
+        return ("%s-identity" % chart, "85-identity.conf", None)
+    return None
+
+
+def ini_sentinel_options(text, sentinel):
+    """(section, option) pairs whose value is exactly the sentinel in an ini-style text."""
+    out, section = set(), None
+    for line in text.splitlines():
+        t = line.strip()
+        if t.startswith("[") and t.endswith("]"):
+            section = t[1:-1]
+        elif "=" in t and not t.startswith(("#", ";")):
+            k, _, val = t.partition("=")
+            if val.strip() == sentinel:
+                out.add((section, k.strip()))
+    return out
+
+
 for _cid, _u in IDUSER_BY_ITEM.items():
     RULES[_cid] = {
         "what": "renders Keystone user %s" % _u,
@@ -308,7 +342,7 @@ for _cid, _u in IDUSER_BY_ITEM.items():
                           % IDUSERS[u].get(chart, "gate_unmapped"))(_u),
         "projections": lambda chart, cv: [],
         "carriers": True,
-        "dropin_for": (lambda u: lambda chart: IDUSER_DROPINS.get((chart, u)))(_u),
+        "dropin_for": (lambda u: lambda chart: iduser_dropin(chart, u))(_u),
         "variants": (lambda u: lambda chart: [IDUSER_VARIANTS[(chart, u)]] if (chart, u) in IDUSER_VARIANTS else [])(_u),
     }
 for _svc in MEMCACHE:
@@ -570,8 +604,42 @@ def dropin_delivery(chart, cid, sentinel, docs_s, docs):
         return
     es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == drop]
     tdata = (((es[0].get("spec") or {}).get("target") or {}).get("template") or {}).get("data") or {} if es else {}
-    if tdata != {fname: content}:
+    if content is not None and tdata != {fname: content}:
         fail("%s: the drop-in %s holds %s, want %s" % (chart, drop, sorted(tdata.items()), [(fname, content)]))
+    if content is None:
+        # One drop-in per chart holding every rotated user's options: each (section, option) where THIS user's
+        # sentinel sat in values mode must be in the drop-in as option = {{ .pw_<key> }}, and pw_<key> must read
+        # this user's root.
+        u = IDUSER_BY_ITEM[cid]
+        key = IDUSERS[u].get(chart, "gate_unmapped")
+        want = set()
+        converted = {d["metadata"]["name"] for d in docs if d.get("kind") == "ExternalSecret"}
+        kept = {(d["kind"], d["metadata"]["name"], k) for d in docs if d.get("kind") in ("Secret", "ConfigMap")
+                for k in (d.get("data") or {})}
+        for kind, name, k in carriers:
+            if name in converted or (kind, name, k) not in kept:
+                continue  # projected whole by its own ExternalSecret (<chart>-ks-etc, glance-swift-store), not the drop-in
+            for d in docs_s:
+                if d.get("kind") == kind and d["metadata"]["name"] == name:
+                    want |= ini_sentinel_options(object_text(d, k) or "", sentinel)
+        if not want:
+            fail("%s: no ini option carried %s in values mode, so its drop-in lines cannot be determined" % (chart, cid))
+        got = {}
+        section = None
+        for line in (tdata.get(fname) or "").splitlines():
+            t = line.strip()
+            if t.startswith("[") and t.endswith("]"):
+                section = t[1:-1]
+            elif "=" in t:
+                o, _, val = t.partition("=")
+                got[(section, o.strip())] = val.strip()
+        for so in sorted(want, key=str):
+            if got.get(so) != "{{ .pw_%s }}" % key:
+                fail("%s: drop-in %s has %s = %r for %s, want {{ .pw_%s }}" % (chart, drop, so, got.get(so), cid, key))
+        root = [i["secret"] for i in ITEMS_REF.values() if i["id"] == cid]
+        data = {e.get("secretKey"): (e.get("remoteRef") or {}).get("key") for e in (es[0]["spec"].get("data") or [])} if es else {}
+        if not root or data.get("pw_%s" % key) != root[0]:
+            fail("%s: drop-in %s reads pw_%s from %s, not %s's root" % (chart, drop, key, data.get("pw_%s" % key), cid))
     readers = 0
     for podname, pod in pod_specs(docs):
         if podname.split("/")[0] not in ("Deployment", "StatefulSet", "DaemonSet"):
@@ -657,7 +725,13 @@ def identity_carriers(chart, cid, sentinel, docs_s, docs):
                        and any(sentinel in (object_text(d, k) or "") for k in (d.get("data") or {}))})
     if not carriers:
         fail("%s: no Secret carries %s in values mode" % (chart, cid))
+    kept = {(d["metadata"]["name"], k) for d in docs if d.get("kind") == "Secret" for k in (d.get("data") or {})}
     for name in carriers:
+        keys_s = [k for d in docs_s if d.get("kind") == "Secret" and d["metadata"]["name"] == name
+                  for k in (d.get("data") or {}) if sentinel in (object_text(d, k) or "")]
+        if not any((name, k) in kept for k in keys_s) and \
+                not any(d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == name for d in docs):
+            continue  # every key that carried it moved out of this Secret (a relocated file): check 16b
         es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == name]
         if es:
             keys = [(e.get("remoteRef") or {}).get("key") for e in es[0]["spec"].get("data") or []]
@@ -665,6 +739,70 @@ def identity_carriers(chart, cid, sentinel, docs_s, docs):
                 fail("%s: ExternalSecret %s carried %s but reads %s, not %s" % (chart, name, cid, keys, root))
         elif not RULES[cid]["dropin_for"](chart):
             fail("%s: %s carried %s in values mode and is still a plain Secret with no drop-in for it" % (chart, name, cid))
+
+
+def relocated_files(chart, cid, sentinel, docs_s, docs):
+    """16b. A file that carried a service user's password in values mode and that the references render drops
+    from its Secret (glance's swift-store.conf) must be rendered by an ExternalSecret reading that user's root,
+    byte for byte the values-mode file once the placeholder holds the sentinel; and every workload that mounted
+    the old key mounts the ExternalSecret's file at the same path."""
+    root = [i["secret"] for i in ITEMS_REF.values() if i["id"] == cid]
+    kept = {(d["kind"], d["metadata"]["name"], k) for d in docs if d.get("kind") in ("Secret", "ConfigMap")
+            for k in (d.get("data") or {})}
+    converted = {d["metadata"]["name"] for d in docs if d.get("kind") == "ExternalSecret"}
+    for d in docs_s:
+        if d.get("kind") not in ("Secret", "ConfigMap") or d["metadata"]["name"] in converted:
+            continue
+        for k in (d.get("data") or {}):
+            text = object_text(d, k) or ""
+            if sentinel not in text or (d["kind"], d["metadata"]["name"], k) in kept:
+                continue
+            found = None
+            for e in docs:
+                if e.get("kind") != "ExternalSecret":
+                    continue
+                tdata = (((e.get("spec") or {}).get("target") or {}).get("template") or {}).get("data") or {}
+                if k not in tdata:
+                    continue
+                keys = {x.get("secretKey"): (x.get("remoteRef") or {}).get("key") for x in e["spec"].get("data") or []}
+                got = tdata[k]
+                for sk, rk in keys.items():
+                    if root and rk == root[0]:
+                        got = got.replace("{{ .%s }}" % sk, sentinel).replace("{{ .%s | toJson }}" % sk, json.dumps(sentinel))
+                same = got == text
+                if not same and k.endswith((".yaml", ".yml")):
+                    try:
+                        same = yaml.safe_load(got) == yaml.safe_load(text)  # toJson quotes the scalar; same document
+                    except yaml.YAMLError:
+                        same = False
+                if same:
+                    found = e
+            if not found:
+                fail("%s: %s/%s key %s carried %s in values mode and is gone from it, but no ExternalSecret reading "
+                     "its root renders the same file" % (chart, d["kind"], d["metadata"]["name"], k, cid))
+                continue
+            target = ((found["spec"].get("target") or {}).get("name")) or found["metadata"]["name"]
+            olds = {}
+            for podname, pod in pod_specs(docs_s):
+                vols = {v["name"]: (v.get("secret") or {}).get("secretName") or (v.get("configMap") or {}).get("name")
+                        for v in pod.get("volumes") or []}
+                for c in pod.get("containers") or []:
+                    for m in c.get("volumeMounts") or []:
+                        if vols.get(m["name"]) == d["metadata"]["name"] and m.get("subPath") == k:
+                            olds[(podname, c["name"])] = m["mountPath"]
+            if not olds:
+                fail("%s: nothing mounted %s key %s in values mode" % (chart, d["metadata"]["name"], k))
+            news = {}
+            for podname, pod in pod_specs(docs):
+                vols = {v["name"]: (v.get("secret") or {}).get("secretName") for v in pod.get("volumes") or []}
+                for c in pod.get("containers") or []:
+                    for m in c.get("volumeMounts") or []:
+                        if vols.get(m["name"]) == target and m.get("subPath") == k:
+                            news[(podname, c["name"])] = m["mountPath"]
+            for pc, path in sorted(olds.items()):
+                if news.get(pc) != path:
+                    fail("%s: %s container %s mounted %s at %s in values mode; with the reference it must mount %s's "
+                         "file there (has %s)" % (chart, pc[0], pc[1], k, path, target, news.get(pc)))
 
 
 def identity_map_check(tmp):
@@ -794,7 +932,10 @@ def ks_user_rotation(chart, cid, cv, root, docs):
         for c in pod.get("containers") or []:
             env = {e["name"]: e for e in c.get("env") or []}
             un = env.get("SERVICE_OS_USERNAME") or {}
-            if un.get("value") != u and ((un.get("valueFrom") or {}).get("secretKeyRef") or {}).get("name") != openrc:
+            ref = ((un.get("valueFrom") or {}).get("secretKeyRef") or {}).get("name")
+            # by the literal username (rotate mode) or by the user's openrc Secret (values mode); a chart without
+            # an openrc for this user (cyborg has none for nova) must not match a literal of another user
+            if un.get("value") != u and not (openrc and ref == openrc):
                 continue
             found = True
             job = d["metadata"]["name"]
@@ -1071,6 +1212,8 @@ def main():
                             continue  # a raw key file read by a config line: check 14 validates it
                         if len(tdata) == 1 and list(tdata)[0].endswith((".conf", ".py")):
                             continue  # a keystone_password_conf_snippet drop-in: no Secret counterpart
+                        if len(tdata) == 1 and any(list(tdata)[0] in (p.get("data") or {}) for p in plain.values()):
+                            continue  # a file relocated out of a values-mode Secret (skyline.yaml): check 16b
                         fail("%s: ExternalSecret %s has no Secret counterpart rendered from values to compare with"
                              % (c["name"], name))
                         continue
@@ -1137,6 +1280,7 @@ def main():
                     if rcx == 0:
                         dsx = [d for d in yaml.safe_load_all(outx) if d]
                         identity_carriers(c["name"], cid, sentinels[cid], dsx, docs)
+                        relocated_files(c["name"], cid, sentinels[cid], dsx, docs)
                         di = RULES[cid]["dropin_for"](c["name"])
                         if di:
                             RULES[cid]["dropin"] = lambda chart, di=di: di
@@ -1172,6 +1316,19 @@ def main():
                         fail("%s: with %s the %s value from values is still rendered" % (c["name"], variant, cid))
                     if RULES[cid].get("carriers"):
                         ks_user_rotation(c["name"], cid, cv, items[cid]["secret"], docsv)
+                        di = RULES[cid]["dropin_for"](c["name"])
+                        if di:
+                            vs = json.loads(json.dumps(enabled))
+                            deep_merge(vs, json.loads(json.dumps(variant)))
+                            for pp in paths(RULES[cid]["password_path"](c["name"])):
+                                deep_merge(vs, nested(pp, sentinels[cid]))
+                            rcs, outs, errs = helm_template(w, release, vs)
+                            if rcs != 0:
+                                fail("%s: does not render with %s and the %s sentinel: %s" % (c["name"], variant, cid, errs.strip()[:200]))
+                            else:
+                                RULES[cid]["dropin"] = lambda chart, di=di: di
+                                dropin_delivery(c["name"], cid, sentinels[cid], [d for d in yaml.safe_load_all(outs) if d], docsv)
+                                RULES[cid].pop("dropin", None)
                     if "dropin" in RULES[cid]:
                         vs = json.loads(json.dumps(enabled))
                         deep_merge(vs, json.loads(json.dumps(variant)))

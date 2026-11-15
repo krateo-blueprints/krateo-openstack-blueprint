@@ -78,6 +78,7 @@ limitations under the License.
 
 ---
 {{- tuple $envAll "cloudkitty" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
+{{- dict "envAll" $envAll "entries" (include "cloudkitty.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "cloudkitty" | include "helm-toolkit.utils.identity_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

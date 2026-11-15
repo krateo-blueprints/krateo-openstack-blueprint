@@ -802,7 +802,38 @@ more than one chart: `nova`, `placement` (cyborg), `glance`, `neutron-test` and 
 If an install is already on 0.3.63 with locked users, upgrade to 0.3.64. Its Job exempts every
 rotated user, so a locked user authenticates again as soon as its pods hold the new password.
 
-The other service users follow in a later release.
+### Upgrading to the next release: the other 25 service users rotate
+
+The release after 0.3.64 generates the remaining service users' passwords the same way, one
+`openstack-credential-identity-user-<username>` each:
+
+> aodh, barbican, ceilometer, cinder_swift, cloudkitty, cyborg, designate, freezer, glance, gnocchi, heat,
+> heat-domain, heat-trust, ironic, magnum, magnum-domain, manila, masakari, mistral, octavia, skyline,
+> swift, tacker, trove, watcher
+
+After it, no service user keeps OpenStack-Helm's published password.
+
+How each reader gets its password:
+- **Main oslo.config file.** Each chart gets one drop-in, `<chart>-identity`
+  (`/etc/<project>/<project>.conf.d/85-identity.conf`). It holds every rotated user's option from that
+  chart's main config: `[keystone_authtoken] password`, `[service_credentials]`, `[nova]`, `[glance]`
+  and the like. It also covers the options with other names:
+  - heat's `stack_domain_admin_password` and `[trustee]`;
+  - magnum's `trustee_domain_admin_password`;
+  - cloudkitty's and masakari's `os_privileged_user_password`;
+  - cinder's `backup_swift_key`.
+
+  masakari's monitors read the same file from `/etc/masakarimonitors/masakarimonitors.conf.d/`.
+- **Files that are not oslo.config drop-ins.** Two files are rendered whole by an ExternalSecret and
+  mounted at the same path:
+  - glance's `swift-store.conf`, from `glance-swift-store`;
+  - skyline's `skyline.yaml`, from `skyline-config`.
+- **swift's proxy** loads `proxy-server.conf.d/` once any drop-in exists, the memcache key or this one.
+- **heat's and magnum's stack users** (domain-scoped) get an ExternalSecret openrc. Their domain ks-user
+  Jobs rotate pre-upgrade with the lockout exemption, like the other ks-user Jobs.
+
+The upgrade restarts every reader of a rotated user once.
+
 
 Three checks keep this true:
 - `hack/identity-users.yaml` records which chart reads which username. The credentials gate
