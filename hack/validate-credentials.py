@@ -300,6 +300,9 @@ IDUSER_VARIANTS = {
     ("neutron", "neutron_designate"): {"conf": {"neutron": {"DEFAULT": {"external_dns_driver": "designate"}}}},
     ("neutron", "neutron_ironic"): {"network": {"backend": ["openvswitch", "baremetal"]}},
     ("nova", "nova_ironic"): {"manifests": {"statefulset_compute_ironic": True}},
+    # masakari's monitor DaemonSets (off by default) read the masakari user from masakarimonitors.conf
+    ("masakari", "masakari"): {"manifests": {"host_monitor": True, "instance_monitor": True, "process_monitor": True,
+                                             "introspective_instance_monitor": True}},
 }
 
 
@@ -1313,6 +1316,19 @@ def main():
                         fail("%s: with %s the %s value from values is still rendered" % (c["name"], variant, cid))
                     if RULES[cid].get("carriers"):
                         ks_user_rotation(c["name"], cid, cv, items[cid]["secret"], docsv)
+                        di = RULES[cid]["dropin_for"](c["name"])
+                        if di:
+                            vs = json.loads(json.dumps(enabled))
+                            deep_merge(vs, json.loads(json.dumps(variant)))
+                            for pp in paths(RULES[cid]["password_path"](c["name"])):
+                                deep_merge(vs, nested(pp, sentinels[cid]))
+                            rcs, outs, errs = helm_template(w, release, vs)
+                            if rcs != 0:
+                                fail("%s: does not render with %s and the %s sentinel: %s" % (c["name"], variant, cid, errs.strip()[:200]))
+                            else:
+                                RULES[cid]["dropin"] = lambda chart, di=di: di
+                                dropin_delivery(c["name"], cid, sentinels[cid], [d for d in yaml.safe_load_all(outs) if d], docsv)
+                                RULES[cid].pop("dropin", None)
                     if "dropin" in RULES[cid]:
                         vs = json.loads(json.dumps(enabled))
                         deep_merge(vs, json.loads(json.dumps(variant)))
