@@ -235,6 +235,10 @@ jobs:
       # the wrong release (#235): appVersion is the software the chart runs (hack/app-versions.yaml).
       - name: Every chart's appVersion is the version of the software it runs
         run: python3 hack/validate-app-version.py .
+      # designate-sink.sh shipped without its `function start () {` line and swift's bootstrap.sh assigned an unquoted
+      # URL containing parentheses: both off by default, both rendered, neither noticed. Every rendered script parses.
+      - name: Every shell script a chart renders parses (bash -n)
+        run: python3 hack/validate-bin-scripts.py .
       # A default cluster's StorageClass is ReadWriteOnce: no default claim may ask for
       # ReadWriteMany, and pods sharing a ReadWriteOnce claim must be co-located (#201).
       - name: Every default claim can be bound, and shared ReadWriteOnce claims are co-located
