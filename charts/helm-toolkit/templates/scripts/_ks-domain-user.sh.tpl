@@ -46,16 +46,10 @@ SERVICE_OS_USERID=$(openstack user create --or-show --enable -f value -c id \
     --password="${SERVICE_OS_PASSWORD}" \
     "${SERVICE_OS_USERNAME}")
 
-{{ if and (kindIs "map" .) (index . "krateoRotate") -}}
-# Krateo (#228): a machine user must never be locked out. While its password rotates, a reader still holding
-# the previous value fails authentication, and five failures lock the user for 30 minutes. Set BEFORE the
-# password changes; only in the pre-upgrade Job's inline copy (the chart passes krateoRotate).
-openstack user set --ignore-lockout-failure-attempts "${SERVICE_OS_USERID}"
-
-{{ end -}}
+{{ if not (and (kindIs "map" .) (index . "krateoRotate")) -}}
 # Manage user password (we do this to ensure the password is updated if required)
 openstack user set --password="${SERVICE_OS_PASSWORD}" "${SERVICE_OS_USERID}"
-
+{{ end }}
 # Display user
 openstack user show "${SERVICE_OS_USERID}"
 
@@ -76,4 +70,15 @@ openstack role assignment list \
           --role="${SERVICE_OS_ROLE_ID}" \
           --user-domain="${SERVICE_OS_DOMAIN_ID}" \
           --user="${SERVICE_OS_USERID}"
+{{- if and (kindIs "map" .) (index . "krateoRotate") }}
+
+# Krateo (#228): only in the pre-upgrade Job's inline copy (the chart passes krateoRotate).
+# A machine user must never be locked out: while its password rotates, a reader still holding the previous value
+# fails authentication, and five failures lock the user for 30 minutes. So the exemption comes BEFORE the password.
+openstack user set --ignore-lockout-failure-attempts "${SERVICE_OS_USERID}"
+
+# The password changes LAST, after the domain, user and role assignment exist: every reader still holding the
+# previous value fails from here until it restarts, after this Job completes (measured, 0.3.65).
+openstack user set --password="${SERVICE_OS_PASSWORD}" "${SERVICE_OS_USERID}"
+{{- end }}
 {{- end }}

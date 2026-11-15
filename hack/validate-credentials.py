@@ -95,7 +95,9 @@ four things hold, and each is checked here:
      mounts the Secret at that directory; the ExternalSecret holds exactly that file.
   17. SERVICE USERS ROTATE BEFORE THEIR READERS. For every rotated service user, the ks-user Job that creates
      it is post-install,pre-upgrade, reads the password from the umbrella's root (a pre-upgrade hook runs
-     before the projection is applied), and its script exempts the user from lockout BEFORE setting it.
+     before the projection is applied), and its script exempts the user from lockout BEFORE setting it and
+     sets the password LAST, after every other openstack command (0.3.65: setting it first made the readers'
+     failure window the Job's whole 1-3 minute run).
   16b. RELOCATED FILES. A file that carried a service user's password and that the references render drops from
      its Secret (glance's swift-store.conf) is rendered by an ExternalSecret reading that user's root, identical
      to the values-mode file with the sentinel, and mounted at the same path by every container that read it.
@@ -961,11 +963,24 @@ def ks_user_rotation(chart, cid, cv, root, docs):
                          "are the previous revision's" % (chart, job, ienv["DEPENDENCY_JOBS"]))
             cmd = c.get("command") or []
             script = cmd[-1] if len(cmd) == 3 and cmd[:2] == ["/bin/bash", "-c"] else ""
+            # the command itself (a line that runs it), not the echo that announces it with a masked value
             ex = script.find("--ignore-lockout-failure-attempts")
-            setpw = script.find('openstack user set --password=')
+            runs = [m.start() for m in re.finditer(r"(?m)^[ \t]*openstack user set --password=", script)]
+            setpw = runs[-1] if runs else -1
             if not (0 <= ex < setpw):
                 fail("%s: Job %s's inline script must exempt user %s from lockout (--ignore-lockout-failure-attempts) "
                      "before it sets the password" % (chart, job, u))
+            # The password changes LAST: every reader still holding the previous value fails from that moment until it
+            # restarts, which is after this Job completes. Any openstack command after it (role assignments took 1 to
+            # 3 minutes per user) widens that window for nothing (measured on 0.3.65: about 221 failed logins).
+            if setpw >= 0:
+                after = [l.strip() for l in script[setpw:].splitlines()[1:]
+                         if l.strip() and not l.strip().startswith("#")]
+                later = [l for l in after if re.search(r"(^|[\s$(])openstack\s", l)]
+                if later:
+                    fail("%s: Job %s's inline script runs %d openstack command(s) after it sets user %s's password "
+                         "(first: %r); the password must change last, so readers fail only until they restart"
+                         % (chart, job, len(later), u, later[0][:80]))
     if found:
         KS_USER_CHECKED.append((chart, u))
 
