@@ -15,7 +15,7 @@ name: openstack-capabilities
 description: Per-cluster capability ClusterRoles and admission guards for the Krateo OpenStack blueprint, installed before any Openstack instance.
 type: application
 version: CHART_VERSION
-appVersion: "2025.1"
+appVersion: "2026.1"
 home: https://krateo.io
 icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 keywords:

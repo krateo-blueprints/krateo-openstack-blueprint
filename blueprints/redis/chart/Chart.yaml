@@ -12,7 +12,7 @@
 
 ---
 apiVersion: v2
-appVersion: "2025.1"
+appVersion: "7.2.17"
 description: OpenStack-Helm Redis
 name: redis
 type: application
