@@ -17,6 +17,7 @@ limitations under the License.
 
 {{- if .Values.manifests.job_db_init }}
 {{- $dbInitJob := dict "envAll" . "serviceName" "heat" -}}
+{{- $_ := set $dbInitJob "etcSources" (include "heat.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.tls.oslo_db -}}
 {{- $_ := set $dbInitJob "dbAdminTlsSecret" .Values.secrets.tls.oslo_db.heat.internal -}}
 {{- end -}}

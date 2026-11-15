@@ -14,5 +14,6 @@ limitations under the License.
 
 {{- if .Values.manifests.job_db_init }}
 {{- $dbInitJob := dict "envAll" . "serviceName" "cyborg" -}}
+{{- $_ := set $dbInitJob "etcSources" (include "cyborg.dropin_etc_sources" . | fromJsonArray) -}}
 {{ $dbInitJob | include "helm-toolkit.manifests.job_db_init_mysql" }}
 {{- end }}

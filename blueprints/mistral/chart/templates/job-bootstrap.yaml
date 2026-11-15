@@ -17,5 +17,6 @@ limitations under the License.
 
 {{- if and .Values.manifests.job_bootstrap .Values.bootstrap.enabled }}
 {{- $bootstrapJob := dict "envAll" . "serviceName" "mistral" "keystoneUser" .Values.bootstrap.ks_user "logConfigFile" .Values.conf.mistral.DEFAULT.log_config_append "jobAnnotations" (include "metadata.annotations.job.bootstrap" . | fromYaml) -}}
+{{- $_ := set $bootstrapJob "etcSources" (include "mistral.dropin_etc_sources" . | fromJsonArray) -}}
 {{ $bootstrapJob | include "helm-toolkit.manifests.job_bootstrap" }}
 {{- end }}

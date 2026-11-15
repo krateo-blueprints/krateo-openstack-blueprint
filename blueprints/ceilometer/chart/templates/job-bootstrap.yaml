@@ -14,6 +14,7 @@ limitations under the License.
 
 {{- if and .Values.manifests.job_bootstrap .Values.bootstrap.enabled }}
 {{- $bootstrapJob := dict "envAll" . "serviceName" "ceilometer" "keystoneUser" .Values.bootstrap.ks_user -}}
+{{- $_ := set $bootstrapJob "etcSources" (include "ceilometer.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.pod.tolerations.ceilometer.enabled -}}
 {{- $_ := set $bootstrapJob "tolerationsEnabled" true -}}
 {{- end -}}

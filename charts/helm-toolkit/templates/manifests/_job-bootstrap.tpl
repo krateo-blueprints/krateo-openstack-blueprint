@@ -38,6 +38,10 @@ limitations under the License.
 {{- $backoffLimit := index . "backoffLimit" | default "1000" -}}
 {{- $activeDeadlineSeconds := index . "activeDeadlineSeconds" -}}
 {{- $serviceNamePretty := $serviceName | replace "_" "-" -}}
+{{- /* Krateo (#228): the chart's drop-in sources (memcache key, service-user identity) projected into the main config's
+       conf.d. Every container that mounts a main config receives its drop-ins: 0.3.65's ceilometer-db-sync, given
+       none, read ceilometer.conf without its password. Nothing renders when the chart passes none. */ -}}
+{{- $etcSources := index . "etcSources" | default list -}}
 
 {{- $serviceAccountName := printf "%s-%s" $serviceNamePretty "bootstrap" }}
 {{ tuple $envAll "bootstrap" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
@@ -122,6 +126,11 @@ spec:
               mountPath: {{ $logConfigFile | quote }}
               subPath: {{ base $logConfigFile | quote }}
               readOnly: true
+{{- if $etcSources }}
+            - name: bootstrap-conf-dir
+              mountPath: {{ printf "%s.d" $configFile | quote }}
+              readOnly: true
+{{- end }}
 {{ dict "enabled" (ne $tlsSecret "") "name" $tlsSecret | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
 {{- if $podVolMounts }}
 {{ $podVolMounts | toYaml | indent 12 }}
@@ -145,6 +154,12 @@ spec:
           secret:
             secretName: {{ $configMapEtc | quote }}
             defaultMode: 0444
+{{- if $etcSources }}
+        - name: bootstrap-conf-dir
+          projected:
+            sources:
+{{ toYaml $etcSources | indent 14 }}
+{{- end }}
 {{- dict "enabled" (ne $tlsSecret "") "name" $tlsSecret | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
 {{- if $podVols }}
 {{ $podVols | toYaml | indent 8 }}

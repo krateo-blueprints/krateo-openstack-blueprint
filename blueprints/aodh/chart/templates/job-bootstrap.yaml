@@ -16,6 +16,7 @@ limitations under the License.
 
 {{- if and .Values.manifests.job_bootstrap .Values.bootstrap.enabled }}
 {{- $bootstrapJob := dict "envAll" . "serviceName" "aodh" "keystoneUser" .Values.bootstrap.ks_user -}}
+{{- $_ := set $bootstrapJob "etcSources" (include "aodh.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.pod.tolerations.aodh.enabled -}}
 {{- $_ := set $bootstrapJob "tolerationsEnabled" true -}}
 {{- end -}}

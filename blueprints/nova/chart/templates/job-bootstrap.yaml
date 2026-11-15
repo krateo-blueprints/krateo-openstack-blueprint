@@ -106,6 +106,12 @@ spec:
               subPath: {{ base .Values.conf.nova.DEFAULT.log_config_append | quote }}
               readOnly: true
             {{- end }}
+{{- /* Krateo (#228): every container that mounts nova.conf receives the chart's drop-ins (nova.dropin_etc_sources). */}}
+{{- if include "nova.dropin_etc_sources" . | fromJsonArray }}
+            - name: bootstrap-conf-dir
+              mountPath: {{ printf "%s.d" $configFile | quote }}
+              readOnly: true
+{{- end }}
 {{- dict "enabled" (or .Values.manifests.certificates .Values.tls.identity) "name" .Values.secrets.tls.compute.osapi.internal | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
       volumes:
         - name: pod-tmp
@@ -120,6 +126,12 @@ spec:
           secret:
             secretName: {{ $configMapEtc | quote }}
             defaultMode: 0444
+{{- with include "nova.dropin_etc_sources" . | fromJsonArray }}
+        - name: bootstrap-conf-dir
+          projected:
+            sources:
+{{ toYaml . | indent 14 }}
+{{- end }}
 {{- dict "enabled" (or .Values.manifests.certificates .Values.tls.identity) "name" .Values.secrets.tls.compute.osapi.internal | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
 ---
 kind: ClusterRole

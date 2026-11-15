@@ -17,6 +17,7 @@ limitations under the License.
 
 {{- if and .Values.manifests.job_bootstrap .Values.bootstrap.enabled }}
 {{- $bootstrapJob := dict "envAll" . "serviceName" "barbican" "keystoneUser" .Values.bootstrap.ks_user "logConfigFile" .Values.conf.barbican.DEFAULT.log_config_append "jobAnnotations" (include "metadata.annotations.job.bootstrap" . | fromYaml) -}}
+{{- $_ := set $bootstrapJob "etcSources" (include "barbican.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.pod.tolerations.barbican.enabled -}}
 {{- $_ := set $bootstrapJob "tolerationsEnabled" true -}}
 {{- end -}}

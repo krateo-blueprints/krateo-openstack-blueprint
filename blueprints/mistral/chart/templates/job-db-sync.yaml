@@ -18,5 +18,6 @@ limitations under the License.
 
 {{- if .Values.manifests.job_db_sync }}
 {{- $dbSyncJob := dict "envAll" . "serviceName" "mistral" "podVolMounts" .Values.pod.mounts.mistral_db_sync.mistral_db_sync.volumeMounts "podVols" .Values.pod.mounts.mistral_db_sync.mistral_db_sync.volumes "jobAnnotations" (include "metadata.annotations.job.db_sync" . | fromYaml) -}}
+{{- $_ := set $dbSyncJob "etcSources" (include "mistral.dropin_etc_sources" . | fromJsonArray) -}}
 {{ $dbSyncJob | include "helm-toolkit.manifests.job_db_sync" }}
 {{- end }}

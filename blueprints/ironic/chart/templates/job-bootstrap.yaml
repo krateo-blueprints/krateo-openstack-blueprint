@@ -18,6 +18,7 @@ limitations under the License.
 {{- if and .Values.manifests.job_bootstrap .Values.bootstrap.image.enabled }}
 {{- if .Values.bootstrap.image.openstack.enabled }}
 {{- $bootstrapJob := dict "envAll" . "serviceName" "ironic" "keystoneUser" .Values.bootstrap.image.openstack.ks_user "logConfigFile" .Values.conf.ironic.DEFAULT.log_config_append -}}
+{{- $_ := set $bootstrapJob "etcSources" (include "ironic.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.pod.tolerations.ironic.enabled -}}
 {{- $_ := set $bootstrapJob "tolerationsEnabled" true -}}
 {{- end -}}

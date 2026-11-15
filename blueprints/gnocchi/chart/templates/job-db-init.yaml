@@ -14,6 +14,7 @@ limitations under the License.
 
 {{- if .Values.manifests.job_db_init }}
 {{- $dbInitJob := dict "envAll" . "serviceName" "gnocchi" -}}
+{{- $_ := set $dbInitJob "etcSources" (include "gnocchi.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.pod.tolerations.gnocchi.enabled -}}
 {{- $_ := set $dbInitJob "tolerationsEnabled" true -}}
 {{- end -}}

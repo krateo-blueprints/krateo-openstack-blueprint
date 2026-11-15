@@ -19,6 +19,7 @@ limitations under the License.
 
 {{- if .Values.manifests.job_db_sync }}
 {{- $dbSyncJob := dict "envAll" . "serviceName" "placement" -}}
+{{- $_ := set $dbSyncJob "etcSources" (include "placement.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.manifests.certificates -}}
 {{- $_ := set $dbSyncJob "dbAdminTlsSecret" .Values.endpoints.oslo_db.auth.admin.secret.tls.internal -}}
 {{- end -}}
