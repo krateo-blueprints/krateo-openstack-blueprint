@@ -161,14 +161,17 @@
 {{- if $refs }}{{- $ov = mergeOverwrite $refs (deepCopy $ov) }}{{- end }}
 {{- /* TWO PHASES: a live component's NEW values are written only at the new apiVersion, and only
        once its CompositionDefinition serves it (status.apiVersion at the current version, Ready
-       status True). Until then its spec is not changed: the live spec is re-emitted, at the served
-       version $emitVer, exactly as it is stored.
+       status True). Until then the object is not changed at all: its live spec is re-emitted at the
+       version it was last written at (its krateo.io/composition-version label, osh.holdVersion), so
+       neither its spec nor its label moves. If that label is absent or names a version no longer
+       served, it falls back to $emitVer, which the gate above already passed. $emitVer is
+       reassigned here and only here, to a version osh.holdVersion guarantees is served.
 
-       Measured on a GKE upgrade 0.3.64 to 0.3.65: the render that moved each definition to the new
-       chart also wrote the new values, at the OLD apiVersion, because the new one was not served
-       yet. The object kept the old krateo.io/composition-version label, the old version's
-       controller kept it, and ran the OLD chart with the NEW values -- 3 of 33 components, whose old
-       pre-upgrade Job rotated passwords early. osh.holdValues carries the mechanism, the agreed
+       Measured on GKE 2026-11-15 (0.3.64 → 0.3.65, core-provider 2.13.102; #228): the render that
+       moved each definition to the new chart also wrote the new values, at the OLD apiVersion,
+       because the new one was not served yet. The object kept the old krateo.io/composition-version
+       label, the old version's controller kept it, and ran the OLD chart with the NEW values -- 3 of
+       33 components, whose old pre-upgrade Job rotated passwords early. osh.holdValues carries the mechanism, the agreed
        signal and why it reads Ready's status and never its reason or ControllerActive.
 
        Not held, so unchanged: a component that does not exist yet, and one whose migration is not
@@ -180,8 +183,12 @@
        there is no live spec to keep and the computed values are emitted, as before this block. */ -}}
 {{- $hold := include "osh.holdValues" (list (include "osh.version" (list $)) $emitVer $approved $exists (include "osh.definitionApiVersion" (list $cd)) (include "osh.definitionReady" (list $cd))) }}
 {{- if eq $hold "true" }}
-{{- $live := include "osh.liveSpec" (list $ $c.kind $c.name $emitVer $crds) }}
-{{- if $live }}{{- $ov = $live | fromJson }}{{- end }}
+{{- $live := include "osh.liveState" (list $ $c.kind $c.name $emitVer $crds) }}
+{{- if $live }}
+{{- $state := $live | fromJson }}
+{{- $ov = $state.spec | default dict }}
+{{- $emitVer = include "osh.holdVersion" (list ($state.version | default "") $emitVer $c.kind $crds) }}
+{{- end }}
 {{- end }}
 {{- /* The apiVersion is PINNED to the version this object was born at, when it has one.
 

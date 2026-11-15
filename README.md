@@ -1049,18 +1049,32 @@ On an upgrade, a component whose migration is approved gets its **new values onl
 `CompositionDefinition` serves the new version**: `status.apiVersion` is the new
 `composition.krateo.io/<version>` and its `Ready` condition has status `True` (any reason,
 `ScaledToZero` included; `ControllerActive` is not required). Until then the umbrella re-emits the
-component's live spec unchanged, at the version the cluster serves.
+component **unchanged**: its live spec, at the version it was last written at (its
+`krateo.io/composition-version` label, which core-provider stamps on every write). Neither the
+spec nor the label moves, so the controller that owned it keeps it. If the label is missing or
+names a version the CRD no longer serves, the umbrella re-emits at the version it resolved instead.
 
 Before this, the render that moved a definition to the new chart also wrote the new values at the
 OLD API version, because the new one was not served yet. The object kept its old
 `krateo.io/composition-version` label, so the old controller ran the old chart with the new
-values. Measured on GKE, 0.3.64 to 0.3.65: 3 of 33 components did that, and the old chart's
-pre-upgrade Job rotated passwords early.
+values. Measured on GKE 2026-11-15 (0.3.64 → 0.3.65, core-provider 2.13.102; #228): 3 of 33
+components did that, and the old chart's pre-upgrade Job rotated passwords early.
 
-What you see: during an upgrade a component's spec does not change on the first pass. A
-`componentValues` change made while a definition is not `Ready` is applied once it is. A component
-that does not exist yet, and a component whose migration is not approved (pinned, above), are
-emitted as before. The mechanism is `osh.holdValues` in the same file, asserted by
+What you see, and what it costs:
+- During an upgrade a component does not change on the first pass(es); its new values land in
+  the pass after its definition reports the new version `Ready`.
+- A `componentValues` change made while a definition is not `Ready` (including outside an
+  upgrade, if its reconcile is failing) is applied once it is `Ready` again.
+- While held, the umbrella re-emits the whole live spec, so its release records every field in
+  it. A field added to a component Composition by hand (not through `componentValues`) is
+  therefore removed by the next write of the new values, where before it would have been left
+  alone. Set component values through `componentValues`.
+- If a component's Composition is deleted at the instant its spec is read, there is no live spec
+  to keep, and the umbrella emits the values it computed, as before.
+- A component that does not exist yet, and a component whose migration is not approved (pinned,
+  above), are emitted exactly as before.
+
+The mechanism is `osh.holdValues` and `osh.holdVersion` in the same file, asserted by
 `hack/validate-two-phase-values.py`.
 
 ```sh

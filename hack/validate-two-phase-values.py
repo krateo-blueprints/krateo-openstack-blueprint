@@ -9,21 +9,28 @@ gate and prune (#166) -- and the umbrella writes the NEW values at the OLD apiVe
 provider's krateo-composition-version MutatingAdmissionPolicy stamps krateo.io/composition-version
 from the apiVersion of each write, so the object stays labelled old, the OLD version's controller
 (still running, selecting on that label) owns it, and it runs the OLD chart with the NEW values.
-Measured on a GKE upgrade 0.3.64 to 0.3.65: 3 of 33 components did exactly that, and the old
-chart's pre-upgrade Job rotated passwords early. core-provider confirmed the reading of the code.
+Measured on GKE 2026-11-15 (0.3.64 → 0.3.65, core-provider 2.13.102; #228): 3 of 33 components
+did exactly that, and the old chart's pre-upgrade Job rotated passwords early. core-provider
+confirmed the reading of the code.
 
 THE FIX (osh.holdValues). Two phases. For an EXISTING component whose migration is approved, the
 new values are emitted only when this render emits at the current version AND the component's
 CompositionDefinition reports status.apiVersion == composition.krateo.io/<current> AND a condition
-of type Ready with status True. Until then the live spec is re-emitted unchanged at the served
-version. A component that does not exist, and one whose migration is NOT approved (pinned, #233),
-are emitted exactly as before.
+of type Ready with status True. Until then the object is re-emitted UNCHANGED: its live spec, at
+the version it was last written through -- its krateo.io/composition-version label, which core-
+provider's MutatingAdmissionPolicy stamps with request.requestKind.version on every write
+(osh.holdVersion) -- falling back to the resolved version when the label is absent or not served.
+Holding at the resolved version instead wrote the OLD spec at the NEW version whenever the CRD
+already served it but the definition was not Ready: the label moved and the new chart ran with the
+old values. A component that does not exist, and one whose migration is NOT approved (pinned,
+#233), are emitted exactly as before.
 
 What this asserts, in five parts:
 
  1. THE DECISION, WITH SYNTHETIC INPUT. osh.holdValues is a pure function of (current, emitted
     version, approved, exists, CD status.apiVersion, CD Ready status); a probe calls it for every
-    branch, including the r065 state itself.
+    branch, including the r065 state itself; and osh.holdVersion, the version a held component is
+    re-emitted at, for every combination of label and served versions.
 
  2. THE SIGNAL IS READ AS AGREED. osh.definitionApiVersion and osh.definitionReady are pure
     readers of the CompositionDefinition object; a probe hands them synthetic definitions shaped
@@ -33,7 +40,7 @@ What this asserts, in five parts:
 
  3. THE CHART DOES IT, END TO END. The real compositions.yaml is rendered with only the
     cluster-reading helpers replaced by constants (osh.exists, osh.definition, osh.originVersion,
-    osh.liveSpec, osh.depsReady, osh.depsExist) and the CRD list replaced by a synthetic one --
+    osh.liveState, osh.depsReady, osh.depsExist) and the CRD list replaced by a synthetic one --
     the stubbing hack/validate-umbrella-multidoc.py uses -- and the emitted Composition's
     apiVersion and spec are asserted per cluster state. Parts 1-2 cannot see compositions.yaml;
     this sees whether it consumes the decision at all.
@@ -44,8 +51,9 @@ What this asserts, in five parts:
     asserted as exact text: one named GET of the component's own CompositionDefinition, the only
     CompositionDefinition lookup in the chart, parsed once in compositions.yaml and handed to the
     readers that feed osh.holdValues; the readers and the decision perform no read of their own;
-    osh.liveSpec is one named GET of the component at the emitted version, called only inside
-    the hold. The behavioural proof of the reads needs an apiserver.
+    osh.liveState is one named GET of the component at the resolved version, called only inside
+    the hold, and is where the label is read; the label key is core-provider's and is spelled once,
+    in osh.compositionVersionLabel. The behavioural proof of the reads needs an apiserver.
 
  5. THE OFFLINE RENDER IS UNCHANGED, PROVED DIFFERENTIALLY. Offline nothing exists, so nothing
     is held. Built against a counterfactual chart whose $hold is the constant "", in the four
@@ -330,6 +338,24 @@ APPROVAL_CASES = (
     ("manual_to_older", definition(policy="Manual", upgrade_to=OLDER), ""),
 )
 
+# (id, label, emitVer, served versions of the probe kind, want, what). The version a HELD component
+# is re-emitted at. Each served list is (name, served).
+HOLD_VERSION_CASES = (
+    ("label_old_both_served", OLDER, CURRENT, ((OLDER, True), (CURRENT, True)), OLDER,
+     "label at the old version, both served: the window where the CRD serves the new version and "
+     "the definition is not Ready yet"),
+    ("label_old_bump", OLDER, OLDER, ((OLDER, True),), OLDER, "label at the old version, the bump instant"),
+    ("label_current", CURRENT, CURRENT, ((OLDER, True), (CURRENT, True)), CURRENT,
+     "label already at the current version (the engine migrated the instance)"),
+    ("label_absent", "", CURRENT, ((OLDER, True), (CURRENT, True)), CURRENT, "no label at all"),
+    ("label_not_listed", "v0-3-27", CURRENT, ((OLDER, True), (CURRENT, True)), CURRENT,
+     "a label naming a version the CRD no longer lists"),
+    ("label_listed_unserved", OLDER, CURRENT, ((OLDER, False), (CURRENT, True)), CURRENT,
+     "a label naming a version listed with served: false"),
+    ("label_newer_than_list", CURRENT, OLDER, ((OLDER, True),), OLDER,
+     "a label naming a version this render's CRD list does not serve yet"),
+)
+
 PURE_CHART = stage(CHART, "pure")
 lines = ["{{- $cur := include \"osh.version\" (list $) }}", "---", "apiVersion: v1",
          "kind: ConfigMap", "metadata:", "  name: gate-probe", "data:",
@@ -344,6 +370,12 @@ for k, cd in CD.items():
     lines.append(f"  chain_{k}: {{{{ include \"osh.holdValues\" (list $cur $cur \"true\" \"true\" "
                  f"(include \"osh.definitionApiVersion\" (list ({lit} | fromJson))) "
                  f"(include \"osh.definitionReady\" (list ({lit} | fromJson)))) | quote }}}}")
+for vid, label, emit, served, _, _ in HOLD_VERSION_CASES:
+    crds = [{"spec": {"group": GROUP, "names": {"kind": PROBE_KIND},
+                      "versions": [{"name": n, "served": sv} for n, sv in served]}}]
+    lines.append(f"  holdver_{vid}: {{{{ include \"osh.holdVersion\" (list {json.dumps(label)} {json.dumps(emit)} "
+                 f"{json.dumps(PROBE_KIND)} ({gotmpl_raw(json.dumps(crds))} | fromJsonArray)) | quote }}}}")
+lines.append('  label: {{ include "osh.compositionVersionLabel" $ | quote }}')
 for aid, cd, _ in APPROVAL_CASES:
     lit = gotmpl_raw(json.dumps(cd))
     lines.append(f"  approved_{aid}: {{{{ include \"osh.migrationApprovedFor\" (list $ ({lit} | fromJson)) | quote }}}}")
@@ -370,8 +402,8 @@ for cid, emit, appr, exists, cdapi, ready, want, what in HOLD_CASES:
             "REGRESSION OF THE 0.3.65 DEFECT: osh.holdValues does not hold " + what + ". The "
             "umbrella writes the NEW values at the OLD apiVersion, the object keeps the old "
             "krateo.io/composition-version label, and the old controller runs the OLD chart with "
-            "the NEW values (3 of 33 components on GKE, 0.3.64 -> 0.3.65; the old pre-upgrade Job "
-            "rotated passwords early).")
+            "the NEW values (measured on GKE 2026-11-15, 0.3.64 → 0.3.65, core-provider 2.13.102, "
+            "#228: 3 of 33 components; the old pre-upgrade Job rotated passwords early).")
     elif cid.startswith("pinned"):
         problems.append(
             f"osh.holdValues answers {got!r} for {what}; it must answer {want!r}. The hold is "
@@ -424,6 +456,41 @@ for k in CD:
                "RELEASES the new values although it does not report the new version with Ready "
                "status True."))
 
+for vid, label, emit, served, want, what in HOLD_VERSION_CASES:
+    got = pure.get(f"holdver_{vid}")
+    if got == want:
+        continue
+    if vid == "label_old_both_served":
+        problems.append(
+            f"osh.holdVersion answers {got!r} for {what}; it must answer {want!r}, the label. "
+            "Re-emitting the held (OLD) spec at the NEW version moves the label: the old controller "
+            "drops the object and the new chart runs with the old values -- an intermediate upgrade "
+            "in a pass that must change nothing.")
+    elif want == emit and label:
+        problems.append(
+            f"osh.holdVersion answers {got!r} for {what}; it must fall back to {want!r}. Emitting at "
+            "a version the CRD does not serve 500s the render (\"no matches for kind\") on every "
+            "reconcile, and a release that stops rendering is uninstalled (#68).")
+    else:
+        problems.append(f"osh.holdVersion answers {got!r} for {what}; it must answer {want!r}.")
+
+# The label key is core-provider's MutatingAdmissionPolicy's, spelled once.
+VERSION_LABEL = "krateo.io/composition-version"
+if pure.get("label") != VERSION_LABEL:
+    problems.append(
+        f"osh.compositionVersionLabel is {pure.get('label')!r}, not {VERSION_LABEL!r}: the label "
+        "core-provider's krateo-composition-version MutatingAdmissionPolicy stamps with "
+        "request.requestKind.version on every write (helm/core-provider/templates/"
+        "compositions-version-policy.yaml). A key that does not match is never found, and every held "
+        "component falls back to the resolved version -- the intermediate upgrade the label prevents.")
+LABEL_DEF = re.compile(r"\{\{-?\s*define\s+\"osh\.compositionVersionLabel\"\s*-?\}\}\s*[^\s{]+\s*\{\{-?\s*end\s*-?\}\}")
+spelled = [p.relative_to(ROOT).as_posix() for p in template_files
+           if VERSION_LABEL in LABEL_DEF.sub("", strip_comments(p.read_text(errors="replace")))]
+if spelled:
+    problems.append(f"{VERSION_LABEL} is spelled literally in {', '.join(spelled)} as well as in "
+                    "osh.compositionVersionLabel. One spelling, one place: it is an agreement with "
+                    "core-provider, and the failure mode of missing a copy on a rename is silence.")
+
 for aid, _, want in APPROVAL_CASES:
     got = pure.get(f"approved_{aid}")
     if got != want:
@@ -452,6 +519,11 @@ BUMP = crd_list([OLDER])            # the bump instant: only the old version ser
 BOTH = crd_list([OLDER, CURRENT])   # the new version added, the old still served
 
 LIVE = {"gateLiveMarker": "held-live-spec"}
+
+
+def held(spec=None, version=OLDER):
+    """What osh.liveState returns for a live object: its spec and its composition-version label."""
+    return {"spec": LIVE if spec is None else spec, "version": version}
 NEW_MARKER = "new-values-from-this-chart"
 
 
@@ -485,7 +557,7 @@ def e2e(crds, exists, cd, origin, live):
     for name, body in (("osh.exists", exists),
                        ("osh.definition", gotmpl_raw(json.dumps(cd)).join(("{{- ", " -}}"))),
                        ("osh.originVersion", origin),
-                       ("osh.liveSpec", "" if live is None else gotmpl_raw(json.dumps(live)).join(("{{- ", " -}}"))),
+                       ("osh.liveState", "" if live is None else gotmpl_raw(json.dumps(live)).join(("{{- ", " -}}"))),
                        ("osh.depsReady", "true"),
                        ("osh.depsExist", "true")):
         h = stub_define(h, name, body)
@@ -507,43 +579,54 @@ def e2e(crds, exists, cd, origin, live):
     return None
 
 
-# (id, crds, exists, cd, origin, live, want apiVersion or None for "not emitted", want spec, what)
+# (id, crds, exists, cd, origin, live state, want apiVersion or None for "not emitted", want spec,
+# what). The live state's version is the object's krateo.io/composition-version label.
 E2E_CASES = (
-    ("r065_bump_instant", BUMP, "true", CD["ready_on_old"], "", LIVE, OLDER, "live",
+    ("r065_bump_instant", BUMP, "true", CD["ready_on_old"], "", held(), OLDER, "live",
      "an existing approved component at the bump instant"),
-    ("crd_served_cd_not_moved", BOTH, "true", CD["ready_on_old"], "", LIVE, CURRENT, "live",
-     "an existing approved component, both versions served, its definition still on the old one"),
-    ("released_available", BOTH, "true", CD["available"], "", LIVE, CURRENT, "new",
+    ("crd_served_cd_not_moved", BOTH, "true", CD["ready_on_old"], "", held(version=OLDER), OLDER, "live",
+     "an existing approved component labelled at the old version, the CRD already serving the new "
+     "one, its definition not Ready on it yet"),
+    ("window_label_absent", BOTH, "true", CD["ready_on_old"], "", held(version=""), CURRENT, "live",
+     "the same window, the object carrying no composition-version label (fallback)"),
+    ("window_label_unserved", BOTH, "true", CD["ready_on_old"], "", held(version="v0-3-27"), CURRENT, "live",
+     "the same window, the label naming a version the CRD no longer serves (fallback)"),
+    ("window_label_current", BOTH, "true", CD["not_ready_reason_available"], "", held(version=CURRENT),
+     CURRENT, "live",
+     "an existing approved component already labelled at the new version, its definition not Ready"),
+    ("bump_label_not_yet_served", BUMP, "true", CD["ready_on_old"], "", held(version=CURRENT), OLDER, "live",
+     "the bump instant, the label naming a version this render's CRD list does not serve (fallback)"),
+    ("released_available", BOTH, "true", CD["available"], "", held(), CURRENT, "new",
      "an existing approved component whose definition serves the new version (Available)"),
-    ("released_scaled_to_zero", BOTH, "true", CD["scaled_to_zero"], "", LIVE, CURRENT, "new",
+    ("released_scaled_to_zero", BOTH, "true", CD["scaled_to_zero"], "", held(), CURRENT, "new",
      "an existing approved component whose definition serves the new version scaled to zero "
      "(Ready=True/ScaledToZero, ControllerActive=False)"),
-    ("released_remote", BOTH, "true", CD["remote"], "", LIVE, CURRENT, "new",
+    ("released_remote", BOTH, "true", CD["remote"], "", held(), CURRENT, "new",
      "an existing approved component whose definition serves the new version on a remote target "
      "(no ControllerActive condition)"),
-    ("not_ready_reason_available", BOTH, "true", CD["not_ready_reason_available"], "", LIVE, CURRENT, "live",
-     "an existing approved component whose definition is Ready=False with reason Available"),
+    ("not_ready_reason_available", BOTH, "true", CD["not_ready_reason_available"], "", held(), OLDER, "live",
+     "an existing approved component labelled old whose definition is Ready=False with reason Available"),
     ("manual_approved_bump", BUMP, "true",
      definition(av(OLDER), [condition("Ready", "True", "Available")], policy="Manual", upgrade_to=CURRENT),
-     "", LIVE, OLDER, "live",
+     "", held(), OLDER, "live",
      "an existing component approved by Manual + upgrade-to-version, at the bump instant"),
     ("pinned_paused_bump", BUMP, "true",
      definition(av(OLDER), [condition("Ready", "True", "Available")], policy="Paused"),
-     OLDER, LIVE, OLDER, "new",
+     OLDER, held(), OLDER, "new",
      "an existing PAUSED component stamped at its origin, at the bump instant"),
     ("pinned_paused_both", BOTH, "true",
      definition(av(CURRENT), [condition("Ready", "False", "Creating")], policy="Paused"),
-     OLDER, LIVE, OLDER, "new",
+     OLDER, held(), OLDER, "new",
      "an existing PAUSED component stamped at its origin, both versions served"),
     ("pinned_manual_unapproved", BOTH, "true",
      definition(av(CURRENT), [condition("Ready", "False", "Creating")], policy="Manual"),
-     OLDER, LIVE, OLDER, "new",
+     OLDER, held(), OLDER, "new",
      "an existing Manual component without upgrade-to-version, stamped at its origin"),
-    ("fresh_both", BOTH, "", CD["not_ready_reason_available"], "", LIVE, CURRENT, "new",
+    ("fresh_both", BOTH, "", CD["not_ready_reason_available"], "", held(), CURRENT, "new",
      "a component that does not exist yet, both versions served, its definition not Ready"),
-    ("fresh_bump", BUMP, "", CD["ready_on_old"], "", LIVE, None, None,
+    ("fresh_bump", BUMP, "", CD["ready_on_old"], "", held(), None, None,
      "a component that does not exist yet at the bump instant"),
-    ("held_empty_live_spec", BUMP, "true", CD["ready_on_old"], "", {}, OLDER, "empty",
+    ("held_empty_live_spec", BUMP, "true", CD["ready_on_old"], "", held(spec={}), OLDER, "empty",
      "an existing approved component at the bump instant whose live spec is empty"),
     ("held_object_gone", BUMP, "true", CD["ready_on_old"], "", None, OLDER, "new",
      "an existing approved component deleted before its spec was read (documented fallback)"),
@@ -573,7 +656,14 @@ for cid, crds, exists, cd, origin, live, want_ver, want_spec, what in E2E_CASES:
             new_specs.append(spec)
     if got_ver == av(want_ver) and ok:
         continue
-    if cid == "r065_bump_instant" or (cid == "manual_approved_bump" and spec.get("gateMarker") == NEW_MARKER):
+    if cid == "crd_served_cd_not_moved" and spec == LIVE and got_ver == av(CURRENT):
+        problems.append(
+            f"INTERMEDIATE UPGRADE: compositions.yaml re-emits {what} at {got_ver}, the NEW version, "
+            f"with its OLD spec; it must be re-emitted at its label's version {av(want_ver)}. The "
+            "write moves the krateo.io/composition-version label, the old controller drops the object "
+            "and the new chart runs with the old values, in a pass that must change nothing. Hold at "
+            "the object's own version (osh.holdVersion), not at $emitVer.")
+    elif cid == "r065_bump_instant" or (cid == "manual_approved_bump" and spec.get("gateMarker") == NEW_MARKER):
         problems.append(
             f"REGRESSION OF THE 0.3.65 DEFECT, end to end: compositions.yaml emits {what} at "
             f"{got_ver} with spec {json.dumps(spec)[:160]}; it must re-emit the LIVE spec "
@@ -620,8 +710,12 @@ WIRING = (
      "status of the SAME definition read -- not a value, not a second lookup"),
 )
 HOLD_BLOCK = ('{{- if eq $hold "true" }}\n'
-              '{{- $live := include "osh.liveSpec" (list $ $c.kind $c.name $emitVer $crds) }}\n'
-              '{{- if $live }}{{- $ov = $live | fromJson }}{{- end }}\n'
+              '{{- $live := include "osh.liveState" (list $ $c.kind $c.name $emitVer $crds) }}\n'
+              '{{- if $live }}\n'
+              '{{- $state := $live | fromJson }}\n'
+              '{{- $ov = $state.spec | default dict }}\n'
+              '{{- $emitVer = include "osh.holdVersion" (list ($state.version | default "") $emitVer $c.kind $crds) }}\n'
+              '{{- end }}\n'
               '{{- end }}\n')
 for line, why in WIRING:
     n = comp_code.count(line)
@@ -630,8 +724,10 @@ for line, why in WIRING:
 if comp_code.count(HOLD_BLOCK) != 1:
     problems.append(
         "compositions.yaml does not consume the decision with the hold block this gate expects "
-        "(replace $ov by the live spec read at $emitVer when $hold is \"true\"). Without it the "
-        "decision is computed and ignored: the 0.3.65 defect, new values at the old apiVersion.")
+        "(when $hold is \"true\": $ov becomes the live spec and $emitVer the version its label says, "
+        "through osh.holdVersion). Without it the decision is computed and ignored -- the 0.3.65 "
+        "defect, new values at the old apiVersion -- or the held spec is written at the new version, "
+        "an intermediate upgrade.")
 else:
     at = comp_code.index(HOLD_BLOCK)
     merge_at = comp_code.find("mergeOverwrite")
@@ -643,7 +739,14 @@ else:
     if re.search(r"\$ov\s*=", comp_code[at + len(HOLD_BLOCK):doc_at]):
         problems.append("$ov is reassigned after the hold block, so the held live spec can be "
                         "overwritten with new values before the document is emitted.")
-for var in ("$cd", "$approved", "$hold", "$live"):
+reassigned = [m.start() for m in re.finditer(r"\$emitVer\s*=(?!=)", comp_code)]
+if len(reassigned) != 1 or comp_code.count(HOLD_BLOCK) != 1 or not (
+        comp_code.index(HOLD_BLOCK) < reassigned[0] < comp_code.index(HOLD_BLOCK) + len(HOLD_BLOCK)):
+    problems.append(
+        f"$emitVer is reassigned {len(reassigned)} time(s) in compositions.yaml; it must be reassigned "
+        "exactly once, inside the hold block, to osh.holdVersion's answer -- a version the CRD serves "
+        "and that the gate's $crd check therefore still covers.")
+for var in ("$cd", "$approved", "$hold", "$live", "$state"):
     if len(re.findall(re.escape(var) + r"\s*:?=(?!=)", comp_code)) != 1:
         problems.append(f"compositions.yaml assigns {var} more than once (or never): the decision "
                         "inputs must come from the one read, not be replaced on the way.")
@@ -677,7 +780,8 @@ elif re.sub(r"\s+", "", body) != re.sub(r"\s+", "", DEF_BODY):
         "the status the values are released by is not the definition's. Found: "
         + re.sub(r"\s+", " ", body).strip()[:300])
 
-for name in ("osh.holdValues", "osh.definitionApiVersion", "osh.definitionReady", "osh.migrationApprovedFor"):
+for name in ("osh.holdValues", "osh.holdVersion", "osh.definitionApiVersion", "osh.definitionReady",
+             "osh.migrationApprovedFor"):
     b = define_body(helpers_code, name)
     if b is None:
         problems.append(f"{name} is missing from _helpers.tpl.")
@@ -698,22 +802,36 @@ if re.search(r"\.reason\b", rb) or "ControllerActive" in rb:
         "with reason Available or ScaledToZero, and ControllerActive is absent for a remote "
         "definition and False for an idle scale-to-zero one: gate on Ready's type and status only.")
 
-ls = define_body(helpers_code, "osh.liveSpec")
+ls = define_body(helpers_code, "osh.liveState")
 if ls is None:
-    problems.append("osh.liveSpec is missing: nothing reads the live spec the hold must re-emit.")
+    problems.append("osh.liveState is missing: nothing reads the live spec and version the hold must "
+                    "re-emit.")
 else:
     calls = lookup_args(ls)
     want = ['(include "osh.apiVersionAt" (list $ver))', "$kind", "$top.Release.Namespace", "$name"]
     if calls != [want]:
         problems.append(
-            f"osh.liveSpec performs {calls}; it must perform exactly one named GET, "
-            f"`lookup {' '.join(want)}`: the component's own object, at the version the held "
-            "document is emitted at, so the spec is read and written through one schema.")
-    if "(($o.spec) | default dict) | toJson" not in ls:
-        problems.append("osh.liveSpec does not return the looked-up object's spec as JSON.")
-n_live = sum(strip_comments(p.read_text(errors="replace")).count('include "osh.liveSpec"') for p in template_files)
+            f"osh.liveState performs {calls}; it must perform exactly one named GET, "
+            f"`lookup {' '.join(want)}`: the component's own object, whose spec and label both come "
+            "from that one read.")
+    flat = re.sub(r"\s+", " ", ls)
+    for frag, why in (
+            ('$labels := (($o.metadata).labels) | default dict', "read the looked-up object's labels"),
+            ('"spec" (($o.spec) | default dict)', "return the looked-up object's spec"),
+            ('"version" ((index $labels (include "osh.compositionVersionLabel" $top)) | default "")',
+             "return the label osh.compositionVersionLabel names, from those labels"),
+            ('| toJson', "return them as JSON")):
+        if frag not in flat:
+            problems.append(
+                f"osh.liveState does not {why} (`{frag}`). Offline `lookup` returns nothing, so a "
+                "helper that takes the version from anywhere else answers exactly what this one "
+                "answers without a cluster; on a cluster the hold would write at the wrong version.")
+for gone in ("osh.liveSpec",):
+    if gone in helpers_code or gone in comp_code:
+        problems.append(f"{gone} is still defined or called; it was replaced by osh.liveState.")
+n_live = sum(strip_comments(p.read_text(errors="replace")).count('include "osh.liveState"') for p in template_files)
 if n_live != 1:
-    problems.append(f"osh.liveSpec is called {n_live} times across the templates; it must be called "
+    problems.append(f"osh.liveState is called {n_live} times across the templates; it must be called "
                     "once, inside the hold block, so a render that holds nothing makes no extra GET.")
 for p, calls in all_lookups.items():
     for a in calls:
@@ -771,7 +889,8 @@ else:
                     "`helm template` an operator runs.")
 
 # ---------------------------------------------------------------------------
-print(f"two-phase values: {len(HOLD_CASES)} decisions, {len(CD)} synthetic definitions, "
+print(f"two-phase values: {len(HOLD_CASES)} decisions, {len(HOLD_VERSION_CASES)} hold versions, "
+      f"{len(CD)} synthetic definitions, "
       f"{len(APPROVAL_CASES)} approvals, {len(E2E_CASES)} end-to-end cluster states, "
       f"{len(SELECTIONS)} selections x 2 modes rendered twice")
 if problems:
@@ -782,6 +901,7 @@ if problems:
     print(f"FAIL: {len(problems)} problem(s). See the module docstring for what each part asserts.")
     sys.exit(1)
 print("OK: an existing approved component's new values are written only at the new apiVersion once "
-      "its definition serves it (Ready by type and status); fresh and pinned components are "
+      "its definition serves it (Ready by type and status), and until then it is re-emitted unchanged "
+      "at its label's version; fresh and pinned components are "
       "unchanged; the reads are the named GETs; the offline render is byte-identical. NOT covered: "
       "the lookups themselves need a live cluster -- see part 4.")

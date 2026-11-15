@@ -398,10 +398,10 @@ true
      core-provider's krateo-composition-version MutatingAdmissionPolicy stamps the label
      krateo.io/composition-version from the apiVersion of each write, so the object stays labelled
      with the old version, and the OLD version's controller -- still running, selecting on that
-     label -- owns it and runs the OLD chart with the NEW values. Measured on a GKE upgrade 0.3.64 to
-     0.3.65: 3 of 33 components did exactly that, and the old chart's pre-upgrade Job rotated
-     passwords ahead of the release that was meant to. core-provider confirmed the reading from its
-     code.
+     label -- owns it and runs the OLD chart with the NEW values. Measured on GKE 2026-11-15
+     (0.3.64 → 0.3.65, core-provider 2.13.102; #228): 3 of 33 components did exactly that, and the
+     old chart's pre-upgrade Job rotated passwords ahead of the release that was meant to.
+     core-provider confirmed the reading from its code.
 
      # The two phases
 
@@ -409,15 +409,18 @@ true
      serves that version: status.apiVersion is composition.krateo.io/<current> AND it reports Ready
      with status True (osh.definitionReady says why the reason and ControllerActive are not read),
      AND this render emits at <current>. That is the signal core-provider agreed from its code.
-     Until then, an existing component's spec is not changed: compositions.yaml re-emits the live
-     spec at <emitVer>, the served version it resolved.
+     Until then, an existing component is not changed AT ALL: compositions.yaml re-emits its live
+     spec at the version it was last written at (osh.holdVersion), so the held write changes
+     neither the spec nor the krateo.io/composition-version label, and the controller that owned
+     the object keeps it with the values it already had.
 
      Writing at the new apiVersion is safe before the new controller runs: the write moves the
      label, the old controller's selector stops matching and it drops the object, and nothing runs
-     the old chart with the new values. Holding at <emitVer> when that is already <current> (the
-     CRD serves the new version but the definition is not Ready on it yet) writes the OLD spec at
-     the new version, which is what core-provider's own instance migration writes: the new chart
-     with the values it already had, never the old chart with new ones.
+     the old chart with the new values. What must not happen is the half-way state: the OLD spec
+     written at the NEW version. That is what holding at <emitVer> did whenever the CRD already
+     served the new version but the definition was not Ready on it yet -- the label moved and the
+     new chart ran with the old values, an upgrade nobody asked for that pass. Hence the hold is
+     at the object's own version, not at <emitVer>.
 
      # What is not held
 
@@ -440,26 +443,71 @@ true
 {{- end -}}
 {{- end -}}
 
-{{/* The live spec of <kind>/<name>, as JSON, read at <ver>; "" when no such object exists.
+{{/* The label core-provider's cluster-wide krateo-composition-version MutatingAdmissionPolicy
+     stamps on every CREATE and UPDATE of a composition.krateo.io object, with the value
+     request.requestKind.version: the served version the object was LAST WRITTEN THROUGH ("v0-3-64").
+     Confirmed in core-provider helm/core-provider/templates/compositions-version-policy.yaml, whose
+     header says the same, and by core-provider on 2026-11-15. Every composition-dynamic-controller
+     selects its instances on exact equality of it, so it names the controller that owns the object.
+
+     It is useless as an origin for exactly that reason (osh.originVersionAnnotation) and exactly
+     right as "the version this object is at now", which is what the two-phase hold needs.
+
+     A literal here and nowhere else, read back by hack/validate-two-phase-values.py, for the same
+     reason osh.originVersionAnnotation is one: it is an agreement with another component, and a
+     rename on either side produces no error anywhere -- the hold would simply stop finding the
+     version and fall back to the one it resolved. */}}
+{{- define "osh.compositionVersionLabel" -}}
+krateo.io/composition-version
+{{- end -}}
+
+{{/* The live state of <kind>/<name>, read at <ver>, as JSON {"spec": ..., "version": ...}: its spec,
+     and the version its osh.compositionVersionLabel says it was last written through ("" when the
+     label is absent). "" when no such object exists.
 
      One named GET of the one object, made ONLY while osh.holdValues holds: compositions.yaml calls
      it inside that branch, so a steady-state render pays nothing for it, and an upgrade pays one GET
-     per held component for the passes until its definition is Ready on the new version. It is a
-     third GET of an object osh.exists and osh.originVersion already read, for the reason
-     osh.originVersion gives for being the second: hoisting one shared read into compositions.yaml
-     would make this component's existence test different code from every dependency's.
+     per held component for the passes until its definition is Ready on the new version. Both
+     answers come from this one GET; the label is not read anywhere else. It is a third GET of an
+     object osh.exists and osh.originVersion already read, for the reason osh.originVersion gives
+     for being the second: hoisting one shared read into compositions.yaml would make this
+     component's existence test different code from every dependency's.
 
-     Read at <ver>, which is the version the held document is emitted at, so the spec read and the
-     spec written go through the same schema: nothing a narrower schema would prune on the way in is
-     re-written on the way out. Guarded by osh.crdExists at <ver> for the reason osh.exists is: a
-     `lookup` at a version nothing serves errors, it does not return empty. compositions.yaml only
-     reaches here once $crd has said <ver> is served, so the guard is belt-and-braces there and is
-     what keeps a probe calling it directly from erroring. */}}
-{{- define "osh.liveSpec" -}}
+     Read at <ver>, the version compositions.yaml resolved, because the version the object is at is
+     what this read finds out. When the hold then emits at an older label version, the spec has
+     been read through the newer schema, which can add that schema's defaults; written back through
+     the older one, any field that schema does not know is pruned on the way in, so storage does
+     not change. Guarded by osh.crdExists at <ver> for the reason osh.exists is: a `lookup` at a
+     version nothing serves errors, it does not return empty. compositions.yaml only reaches here
+     once $crd has said <ver> is served, so the guard is belt-and-braces there and is what keeps a
+     probe calling it directly from erroring. */}}
+{{- define "osh.liveState" -}}
 {{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $ver := index . 3 -}}{{- $crds := index . 4 -}}
 {{- if eq (include "osh.crdExists" (list $kind $ver $crds)) "true" -}}
 {{- $o := lookup (include "osh.apiVersionAt" (list $ver)) $kind $top.Release.Namespace $name -}}
-{{- if $o -}}{{- (($o.spec) | default dict) | toJson -}}{{- end -}}
+{{- if $o -}}
+{{- $labels := (($o.metadata).labels) | default dict -}}
+{{- dict "spec" (($o.spec) | default dict) "version" ((index $labels (include "osh.compositionVersionLabel" $top)) | default "") | toJson -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The version a HELD component is re-emitted at: <label>, the version it was last written
+     through, while <kind>'s CRD still serves it; otherwise <emitVer>, the version compositions.yaml
+     resolved. A pure function of its arguments, so every branch is asserted with synthetic input.
+
+     The label is preferred because a held write must change nothing (osh.holdValues). The fallback
+     is for a label that is absent (an object written before the policy existed, or with the label
+     removed by hand) or names a version no longer served: emitting there would 500 the render ("no
+     matches for kind"), and a release that stops rendering is uninstalled (#68). <emitVer> is
+     served by construction -- the gate already passed on it -- so the answer is always a version
+     the cluster serves, which is the invariant osh.resolveVersion keeps for a live object (#166). */}}
+{{- define "osh.holdVersion" -}}
+{{- $label := index . 0 | toString -}}{{- $emitVer := index . 1 | toString -}}{{- $kind := index . 2 -}}{{- $crds := index . 3 -}}
+{{- if and (ne $label "") (eq (include "osh.crdExists" (list $kind $label $crds)) "true") -}}
+{{- $label -}}
+{{- else -}}
+{{- $emitVer -}}
 {{- end -}}
 {{- end -}}
 
