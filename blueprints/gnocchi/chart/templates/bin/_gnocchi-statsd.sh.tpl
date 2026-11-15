@@ -16,4 +16,4 @@ limitations under the License.
 
 set -x
 exec gnocchi-statsd \
-      --config-file /etc/gnocchi/gnocchi.conf
+      --config-file /etc/gnocchi/gnocchi.conf $([ -d /etc/gnocchi/gnocchi.conf.d ] && echo --config-dir /etc/gnocchi/gnocchi.conf.d)

@@ -18,4 +18,4 @@ limitations under the License.
 
 set -ex
 
-placement-manage db sync
+placement-manage $([ -d /etc/placement/placement.conf.d ] && echo --config-dir /etc/placement/placement.conf.d) db sync

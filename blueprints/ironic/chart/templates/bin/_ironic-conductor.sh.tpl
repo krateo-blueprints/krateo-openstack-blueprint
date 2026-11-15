@@ -28,5 +28,5 @@ OPTIONS="${OPTIONS} --config-file /tmp/pod-shared/cleaning-network.conf"
 
 exec ironic-conductor \
       --config-file /etc/ironic/ironic.conf \
-      --config-file /tmp/pod-shared/conductor-local-ip.conf \
+      --config-file /tmp/pod-shared/conductor-local-ip.conf $([ -d /etc/ironic/ironic.conf.d ] && echo --config-dir /etc/ironic/ironic.conf.d) \
       ${OPTIONS}

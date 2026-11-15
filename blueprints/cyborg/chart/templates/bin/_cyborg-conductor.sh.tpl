@@ -17,5 +17,5 @@ limitations under the License.
 set -x
 
 exec cyborg-conductor \
-      --config-file /etc/cyborg/cyborg.conf \
+      --config-file /etc/cyborg/cyborg.conf $([ -d /etc/cyborg/cyborg.conf.d ] && echo --config-dir /etc/cyborg/cyborg.conf.d) \
       --log-config-append  /etc/cyborg/logging.conf

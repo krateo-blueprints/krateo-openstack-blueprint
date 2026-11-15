@@ -17,20 +17,20 @@ limitations under the License.
 set -ex
 
 function manage_cells () {
-  nova-manage cell_v2 map_cell0
-  nova-manage cell_v2 list_cells | grep -q " cell1 " || \
-    nova-manage cell_v2 create_cell --name=cell1 --verbose
+  nova-manage $([ -d /etc/nova/nova.conf.d ] && echo --config-dir /etc/nova/nova.conf.d) cell_v2 map_cell0
+  nova-manage $([ -d /etc/nova/nova.conf.d ] && echo --config-dir /etc/nova/nova.conf.d) cell_v2 list_cells | grep -q " cell1 " || \
+    nova-manage $([ -d /etc/nova/nova.conf.d ] && echo --config-dir /etc/nova/nova.conf.d) cell_v2 create_cell --name=cell1 --verbose
 
-  CELL0_ID=$(nova-manage cell_v2 list_cells | awk -F '|' '/ cell0 / { print $3 }' | tr -d ' ')
-  CELL1_ID=$(nova-manage cell_v2 list_cells | awk -F '|' '/ cell1 / { print $3 }' | tr -d ' ')
+  CELL0_ID=$(nova-manage $([ -d /etc/nova/nova.conf.d ] && echo --config-dir /etc/nova/nova.conf.d) cell_v2 list_cells | awk -F '|' '/ cell0 / { print $3 }' | tr -d ' ')
+  CELL1_ID=$(nova-manage $([ -d /etc/nova/nova.conf.d ] && echo --config-dir /etc/nova/nova.conf.d) cell_v2 list_cells | awk -F '|' '/ cell1 / { print $3 }' | tr -d ' ')
   set +x
 
-  CELL0_TRANSPORT=$(nova-manage cell_v2 list_cells | awk -F '|' '/ cell0 / { print $4 }' | tr -d ' ')
+  CELL0_TRANSPORT=$(nova-manage $([ -d /etc/nova/nova.conf.d ] && echo --config-dir /etc/nova/nova.conf.d) cell_v2 list_cells | awk -F '|' '/ cell0 / { print $4 }' | tr -d ' ')
   if [ -z "${DB_CONNECTION_CELL0}" ]; then
     echo "ERROR: missing DB_CONNECTION_CELL0"
     exit 1
   fi
-  nova-manage cell_v2 update_cell \
+  nova-manage $([ -d /etc/nova/nova.conf.d ] && echo --config-dir /etc/nova/nova.conf.d) cell_v2 update_cell \
     --cell_uuid="${CELL0_ID}" \
     --name="cell0" \
     --transport-url="${CELL0_TRANSPORT}" \
@@ -42,7 +42,7 @@ function manage_cells () {
       exit 1
     fi
   done
-  nova-manage cell_v2 update_cell \
+  nova-manage $([ -d /etc/nova/nova.conf.d ] && echo --config-dir /etc/nova/nova.conf.d) cell_v2 update_cell \
     --cell_uuid="${CELL1_ID}" \
     --name="cell1" \
     --transport-url="${TRANSPORT_URL}" \
@@ -50,11 +50,11 @@ function manage_cells () {
   set -x
 }
 
-nova-manage api_db sync
+nova-manage $([ -d /etc/nova/nova.conf.d ] && echo --config-dir /etc/nova/nova.conf.d) api_db sync
 manage_cells
 
-nova-manage db sync
+nova-manage $([ -d /etc/nova/nova.conf.d ] && echo --config-dir /etc/nova/nova.conf.d) db sync
 
-nova-manage db online_data_migrations
+nova-manage $([ -d /etc/nova/nova.conf.d ] && echo --config-dir /etc/nova/nova.conf.d) db online_data_migrations
 
 echo 'Finished DB migrations'

@@ -14,5 +14,5 @@
 
 set -ex
 
-designate-manage database sync
+designate-manage $([ -d /etc/designate/designate.conf.d ] && echo --config-dir /etc/designate/designate.conf.d) database sync
 

@@ -17,4 +17,4 @@ limitations under the License.
 set -ex
 
 # Purge deleted instances older than 30 days
-trove-manage --config-file /etc/trove/trove.conf db_purge --age_in_days 30
+trove-manage --config-file /etc/trove/trove.conf $([ -d /etc/trove/trove.conf.d ] && echo --config-dir /etc/trove/trove.conf.d) db_purge --age_in_days 30

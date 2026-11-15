@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-exec gnocchi-upgrade
+exec gnocchi-upgrade $([ -d /etc/gnocchi/gnocchi.conf.d ] && echo --config-dir /etc/gnocchi/gnocchi.conf.d)

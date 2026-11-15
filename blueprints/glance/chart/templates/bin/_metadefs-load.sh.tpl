@@ -16,6 +16,6 @@ limitations under the License.
 
 
 glance-manage \
-    --config-file /etc/glance/glance-api.conf \
+    --config-file /etc/glance/glance-api.conf $([ -d /etc/glance/glance.conf.d ] && echo --config-dir /etc/glance/glance.conf.d) \
     --config-dir /etc/glance/glance.conf.d \
     db_load_metadefs /var/lib/openstack/etc/glance/metadefs

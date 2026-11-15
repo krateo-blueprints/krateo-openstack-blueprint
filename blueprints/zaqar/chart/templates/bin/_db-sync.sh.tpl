@@ -18,5 +18,5 @@ limitations under the License.
 set -ex
 
 zaqar-sql-db-manage \
-  --config-file /etc/zaqar/zaqar.conf \
+  --config-file /etc/zaqar/zaqar.conf $([ -d /etc/zaqar/zaqar.conf.d ] && echo --config-dir /etc/zaqar/zaqar.conf.d) \
   upgrade head

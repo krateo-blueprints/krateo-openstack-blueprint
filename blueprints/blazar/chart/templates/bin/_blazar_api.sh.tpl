@@ -19,7 +19,7 @@ COMMAND="${@:-start}"
 
 function start () {
   exec blazar-api \
-        --config-file /etc/blazar/blazar.conf
+        --config-file /etc/blazar/blazar.conf $([ -d /etc/blazar/blazar.conf.d ] && echo --config-dir /etc/blazar/blazar.conf.d)
 }
 
 function stop () {

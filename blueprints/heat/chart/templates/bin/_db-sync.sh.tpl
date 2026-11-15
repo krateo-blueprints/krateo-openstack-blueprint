@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-heat-manage db_sync
+heat-manage $([ -d /etc/heat/heat.conf.d ] && echo --config-dir /etc/heat/heat.conf.d) db_sync

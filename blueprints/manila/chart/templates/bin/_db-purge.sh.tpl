@@ -17,6 +17,6 @@ limitations under the License.
 set -ex
 
 exec manila-manage \
-     --config-file /etc/manila/manila.conf \
+     --config-file /etc/manila/manila.conf $([ -d /etc/manila/manila.conf.d ] && echo --config-dir /etc/manila/manila.conf.d) \
      --config-dir /etc/manila/manila.conf.d \
      db purge {{ .Values.conf.manila.db_purge.before }}

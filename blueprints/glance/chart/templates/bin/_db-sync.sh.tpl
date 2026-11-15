@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-glance-manage db_sync
+glance-manage $([ -d /etc/glance/glance.conf.d ] && echo --config-dir /etc/glance/glance.conf.d) db_sync

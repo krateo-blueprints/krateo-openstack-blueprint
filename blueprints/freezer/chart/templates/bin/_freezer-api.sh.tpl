@@ -19,7 +19,7 @@ set -ex
 COMMAND="${@:-start}"
 
 function start () {
-  exec freezer-api --config-file /etc/freezer/freezer.conf
+  exec freezer-api --config-file /etc/freezer/freezer.conf $([ -d /etc/freezer/freezer.conf.d ] && echo --config-dir /etc/freezer/freezer.conf.d)
 }
 function stop () {
   kill -TERM 1

@@ -17,6 +17,6 @@ limitations under the License.
 set -ex
 
 exec cinder-manage \
-     --config-file /etc/cinder/cinder.conf \
+     --config-file /etc/cinder/cinder.conf $([ -d /etc/cinder/cinder.conf.d ] && echo --config-dir /etc/cinder/cinder.conf.d) \
      --config-dir /etc/cinder/cinder.conf.d \
      db purge {{ .Values.conf.db_purge.before }}

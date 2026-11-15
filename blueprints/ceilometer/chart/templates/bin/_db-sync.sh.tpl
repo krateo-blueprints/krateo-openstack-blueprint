@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-exec ceilometer-upgrade
+exec ceilometer-upgrade $([ -d /etc/ceilometer/ceilometer.conf.d ] && echo --config-dir /etc/ceilometer/ceilometer.conf.d)

@@ -17,4 +17,4 @@ limitations under the License.
 set -ex
 
 exec trove-api \
-  --config-file /etc/trove/trove.conf
+  --config-file /etc/trove/trove.conf $([ -d /etc/trove/trove.conf.d ] && echo --config-dir /etc/trove/trove.conf.d)

@@ -60,7 +60,7 @@ spec:
           command:
             - bash
             - -c
-            - 'eval "echo \"$(cat /tmp/designate_pools.template)\"" > /etc/designate/pools.yaml && designate-manage pool update'
+            - 'eval "echo \"$(cat /tmp/designate_pools.template)\"" > /etc/designate/pools.yaml && designate-manage $([ -d /etc/designate/designate.conf.d ] && echo --config-dir /etc/designate/designate.conf.d) pool update'
           {{- /* The pool template is shell-expanded by the `eval` above, so the API key reaches
                  pools.yaml the same way the service hosts do -- as an environment variable. It
                  is never a chart value and never lands in a ConfigMap; powerdns's

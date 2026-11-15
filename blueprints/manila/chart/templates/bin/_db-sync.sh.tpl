@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-exec manila-manage db sync
+exec manila-manage $([ -d /etc/manila/manila.conf.d ] && echo --config-dir /etc/manila/manila.conf.d) db sync

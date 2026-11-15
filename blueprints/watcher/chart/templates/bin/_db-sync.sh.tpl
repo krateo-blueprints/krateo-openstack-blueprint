@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-watcher-db-manage --config-file /etc/watcher/watcher.conf upgrade
+watcher-db-manage --config-file /etc/watcher/watcher.conf $([ -d /etc/watcher/watcher.conf.d ] && echo --config-dir /etc/watcher/watcher.conf.d) upgrade

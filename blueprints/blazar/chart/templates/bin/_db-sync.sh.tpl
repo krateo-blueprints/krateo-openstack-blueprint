@@ -17,5 +17,5 @@ limitations under the License.
 set -ex
 
 blazar-db-manage \
-  --config-file /etc/blazar/blazar.conf \
+  --config-file /etc/blazar/blazar.conf $([ -d /etc/blazar/blazar.conf.d ] && echo --config-dir /etc/blazar/blazar.conf.d) \
   upgrade head

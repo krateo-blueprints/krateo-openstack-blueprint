@@ -18,4 +18,4 @@ limitations under the License.
 
 set -ex
 
-exec aodh-dbsync
+exec aodh-dbsync $([ -d /etc/aodh/aodh.conf.d ] && echo --config-dir /etc/aodh/aodh.conf.d)
