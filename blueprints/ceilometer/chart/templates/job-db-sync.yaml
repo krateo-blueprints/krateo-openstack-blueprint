@@ -14,6 +14,9 @@ limitations under the License.
 
 {{- if .Values.manifests.job_db_sync }}
 {{- $dbSyncJob := dict "envAll" . "serviceName" "ceilometer" "podVolMounts" .Values.pod.mounts.ceilometer_db_sync.ceilometer_db_sync.volumeMounts "podVols" .Values.pod.mounts.ceilometer_db_sync.ceilometer_db_sync.volumes -}}
+{{- /* Krateo (#228): ceilometer-upgrade authenticates to gnocchi with [service_credentials], whose password is in the
+       ceilometer-identity drop-in once the user is generated. */ -}}
+{{- $_ := set $dbSyncJob "etcSources" (include "helm-toolkit.snippets.dropin_etc_sources" (tuple . "ceilometer" (include "ceilometer.identity_dropin_entries" . | fromJsonArray)) | fromJsonArray) -}}
 {{- if .Values.pod.tolerations.ceilometer.enabled -}}
 {{- $_ := set $dbSyncJob "tolerationsEnabled" true -}}
 {{- end -}}

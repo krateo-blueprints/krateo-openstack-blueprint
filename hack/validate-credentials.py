@@ -644,7 +644,11 @@ def dropin_delivery(chart, cid, sentinel, docs_s, docs):
             fail("%s: drop-in %s reads pw_%s from %s, not %s's root" % (chart, drop, key, data.get("pw_%s" % key), cid))
     readers = 0
     for podname, pod in pod_specs(docs):
-        if podname.split("/")[0] not in ("Deployment", "StatefulSet", "DaemonSet"):
+        # Every workload kind, Jobs and CronJobs included: unlike the memcache key (keystonemiddleware, servers only),
+        # a service password is used by one-shot programs too. 0.3.65's ceilometer-db-sync (ceilometer-upgrade talks
+        # to gnocchi) read ceilometer.conf without the drop-in and failed its post-upgrade hook on every retry.
+        # Helm test Pods are left out: they run on demand, not in an install or an upgrade.
+        if podname.split("/")[0] not in ("Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"):
             continue
         vols = {v["name"]: v for v in pod.get("volumes") or []}
         for cont in pod.get("containers") or []:
@@ -674,7 +678,7 @@ def dropin_delivery(chart, cid, sentinel, docs_s, docs):
                 fail("%s: %s container %s reads %s but does not receive %s where it reads drop-ins"
                      % (chart, podname, cont["name"], sorted(reads), drop))
     if readers == 0:
-        fail("%s: no long-running container reads a file that carried %s" % (chart, cid))
+        fail("%s: no container reads a file that carried %s" % (chart, cid))
 
 
 def fileread_check(chart, cid, docs):

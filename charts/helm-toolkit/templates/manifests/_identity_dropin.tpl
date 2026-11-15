@@ -132,3 +132,14 @@ spec:
     defaultMode: 0444
 {{- end }}
 {{- end -}}
+
+{{/* (tuple $envAll $service $entries): every drop-in source the chart's main config has (memcache key, service-user
+     identity) as a JSON list, for a pod.etcSources-style projected conf.d. For callers that mount the main config but
+     build no per-workload etcSources, e.g. helm-toolkit job_db_sync (its "etcSources" parameter). */}}
+{{- define "helm-toolkit.snippets.dropin_etc_sources" -}}
+{{- $envAll := index . 0 -}}{{- $service := index . 1 -}}{{- $entries := index . 2 -}}
+{{- $out := list -}}
+{{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple $envAll $service) }}{{- $out = append $out (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple $envAll $entries $service) }}{{- $out = append $out (fromJson .) }}{{- end }}
+{{- $out | toJson -}}
+{{- end -}}
