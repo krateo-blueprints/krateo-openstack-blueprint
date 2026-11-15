@@ -13,8 +13,9 @@ echo "Swift bootstrap started"
 # ConfigMap, so a literal password here would be readable by anyone who can read ConfigMaps, and
 # would be the published default even when the Secret's password is generated (#228).
 
-# Wait for Swift proxy to be ready
-SWIFT_ENDPOINT={{ tuple "object_store" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" }}
+# Wait for Swift proxy to be ready. The healthcheck middleware answers at the server root, not under the API path
+# (the full API URI is .../v1/AUTH_%(tenant_id)s, which bash cannot even assign unquoted).
+SWIFT_ENDPOINT="{{ tuple "object_store" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_scheme_lookup" }}://{{ tuple "object_store" "internal" "api" . | include "helm-toolkit.endpoints.host_and_port_endpoint_uri_lookup" }}"
 echo "Waiting for Swift endpoint at ${SWIFT_ENDPOINT}..."
 count=0
 while ! curl -s -o /dev/null -w '%{http_code}' "${SWIFT_ENDPOINT}/healthcheck" | grep -q "200"; do
