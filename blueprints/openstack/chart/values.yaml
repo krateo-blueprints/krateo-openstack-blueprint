@@ -311,6 +311,108 @@ credentials:
       secret: openstack-credential-identity-user-placement
       key: password
       path: endpoints.identity.auth.placement.passwordFrom
+    # Slice 2b (0.3.65): the other service users, each read from its chart's main config through one drop-in per
+    # chart (<chart>-identity), its openrc Secret, and the few irregular files (#228).
+    - id: identity-user-aodh
+      secret: openstack-credential-identity-user-aodh
+      key: password
+      path: endpoints.identity.auth.aodh.passwordFrom
+    - id: identity-user-barbican
+      secret: openstack-credential-identity-user-barbican
+      key: password
+      path: endpoints.identity.auth.barbican.passwordFrom
+    - id: identity-user-ceilometer
+      secret: openstack-credential-identity-user-ceilometer
+      key: password
+      path: endpoints.identity.auth.ceilometer.passwordFrom
+    - id: identity-user-cinder-swift
+      secret: openstack-credential-identity-user-cinder-swift
+      key: password
+      path: endpoints.identity.auth.swift.passwordFrom
+    - id: identity-user-cloudkitty
+      secret: openstack-credential-identity-user-cloudkitty
+      key: password
+      path: endpoints.identity.auth.cloudkitty.passwordFrom
+    - id: identity-user-cyborg
+      secret: openstack-credential-identity-user-cyborg
+      key: password
+      path: endpoints.identity.auth.cyborg.passwordFrom
+    - id: identity-user-designate
+      secret: openstack-credential-identity-user-designate
+      key: password
+      path: endpoints.identity.auth.designate.passwordFrom
+    - id: identity-user-freezer
+      secret: openstack-credential-identity-user-freezer
+      key: password
+      path: endpoints.identity.auth.freezer.passwordFrom
+    - id: identity-user-glance
+      secret: openstack-credential-identity-user-glance
+      key: password
+      path: endpoints.identity.auth.glance.passwordFrom
+    - id: identity-user-gnocchi
+      secret: openstack-credential-identity-user-gnocchi
+      key: password
+      path: endpoints.identity.auth.gnocchi.passwordFrom
+    - id: identity-user-heat
+      secret: openstack-credential-identity-user-heat
+      key: password
+      path: endpoints.identity.auth.heat.passwordFrom
+    - id: identity-user-heat-domain
+      secret: openstack-credential-identity-user-heat-domain
+      key: password
+      path: endpoints.identity.auth.heat_stack_user.passwordFrom
+    - id: identity-user-heat-trust
+      secret: openstack-credential-identity-user-heat-trust
+      key: password
+      path: endpoints.identity.auth.heat_trustee.passwordFrom
+    - id: identity-user-ironic
+      secret: openstack-credential-identity-user-ironic
+      key: password
+      path: endpoints.identity.auth.ironic.passwordFrom
+    - id: identity-user-magnum
+      secret: openstack-credential-identity-user-magnum
+      key: password
+      path: endpoints.identity.auth.magnum.passwordFrom
+    - id: identity-user-magnum-domain
+      secret: openstack-credential-identity-user-magnum-domain
+      key: password
+      path: endpoints.identity.auth.magnum_stack_user.passwordFrom
+    - id: identity-user-manila
+      secret: openstack-credential-identity-user-manila
+      key: password
+      path: endpoints.identity.auth.manila.passwordFrom
+    - id: identity-user-masakari
+      secret: openstack-credential-identity-user-masakari
+      key: password
+      path: endpoints.identity.auth.masakari.passwordFrom
+    - id: identity-user-mistral
+      secret: openstack-credential-identity-user-mistral
+      key: password
+      path: endpoints.identity.auth.mistral.passwordFrom
+    - id: identity-user-octavia
+      secret: openstack-credential-identity-user-octavia
+      key: password
+      path: endpoints.identity.auth.octavia.passwordFrom
+    - id: identity-user-skyline
+      secret: openstack-credential-identity-user-skyline
+      key: password
+      path: endpoints.identity.auth.skyline.passwordFrom
+    - id: identity-user-swift
+      secret: openstack-credential-identity-user-swift
+      key: password
+      path: endpoints.identity.auth.swift.passwordFrom
+    - id: identity-user-tacker
+      secret: openstack-credential-identity-user-tacker
+      key: password
+      path: endpoints.identity.auth.tacker.passwordFrom
+    - id: identity-user-trove
+      secret: openstack-credential-identity-user-trove
+      key: password
+      path: endpoints.identity.auth.trove.passwordFrom
+    - id: identity-user-watcher
+      secret: openstack-credential-identity-user-watcher
+      key: password
+      path: endpoints.identity.auth.watcher.passwordFrom
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
 components:
@@ -346,6 +448,7 @@ components:
       - oslo-messaging-admin
       - memcache-glance
       - identity-user-glance-test
+      - identity-user-glance
     deps:
       - keystone
     tier: identity
@@ -433,6 +536,8 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-ironic
+      - identity-user-glance
+      - identity-user-ironic
     deps:
       - keystone
       - mariadb
@@ -458,6 +563,8 @@ components:
       - identity-user-cinder-nova
       - identity-user-cinder-service-user
       - identity-user-cinder-test
+      - identity-user-cinder-swift
+      - identity-user-glance
     deps:
       - keystone
       - rabbitmq
@@ -479,6 +586,9 @@ components:
       - oslo-messaging-admin
       - memcache-heat
       - identity-user-heat-test
+      - identity-user-heat
+      - identity-user-heat-domain
+      - identity-user-heat-trust
     deps:
       - keystone
       - rabbitmq
@@ -491,6 +601,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-barbican
+      - identity-user-barbican
     deps:
       - keystone
       - rabbitmq
@@ -511,6 +622,7 @@ components:
       - oslo-messaging-admin
       - memcache-designate
       - identity-user-designate-test
+      - identity-user-designate
     deps:
       - keystone
       - rabbitmq
@@ -525,6 +637,7 @@ components:
       - oslo-messaging-admin
       - memcache-octavia
       - identity-user-test
+      - identity-user-octavia
     deps:
       - keystone
       - rabbitmq
@@ -545,6 +658,8 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-magnum
+      - identity-user-magnum
+      - identity-user-magnum-domain
     deps:
       - keystone
       - rabbitmq
@@ -563,6 +678,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-manila
+      - identity-user-manila
     deps:
       - keystone
       - rabbitmq
@@ -576,6 +692,7 @@ components:
       - oslo-messaging-admin
       - memcache-mistral
       - identity-user-mistral-test
+      - identity-user-mistral
     deps:
       - keystone
       - rabbitmq
@@ -587,6 +704,7 @@ components:
       - identity-admin
       - oslo-messaging-admin
       - identity-user-ceilometer-test
+      - identity-user-ceilometer
     deps:
       - keystone
       - rabbitmq
@@ -604,6 +722,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-aodh
+      - identity-user-aodh
     deps:
       - keystone
       - rabbitmq
@@ -617,6 +736,7 @@ components:
       - oslo-messaging-admin
       - memcache-cloudkitty
       - identity-user-test
+      - identity-user-cloudkitty
     deps:
       - keystone
       - rabbitmq
@@ -630,6 +750,7 @@ components:
       - oslo-messaging-admin
       - memcache-masakari
       - identity-user-neutron-test
+      - identity-user-masakari
     deps:
       - keystone
       - rabbitmq
@@ -642,6 +763,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-trove
+      - identity-user-trove
     deps:
       - keystone
       - rabbitmq
@@ -655,6 +777,7 @@ components:
       - oslo-messaging-admin
       - memcache-watcher
       - identity-user-test
+      - identity-user-watcher
     deps:
       - keystone
       - rabbitmq
@@ -667,6 +790,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - memcache-tacker
+      - identity-user-tacker
     deps:
       - keystone
       - rabbitmq
@@ -685,6 +809,7 @@ components:
       - memcache-cyborg
       - identity-user-nova
       - identity-user-placement
+      - identity-user-cyborg
     deps:
       - keystone
       - rabbitmq
@@ -739,6 +864,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - identity-user-freezer
     deps:
       - keystone
       - rabbitmq
@@ -749,6 +875,7 @@ components:
     credentials:
       - identity-admin
       - oslo-db-admin
+      - identity-user-skyline
     deps:
       - keystone
     tier: compute
@@ -758,6 +885,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - memcache-gnocchi
+      - identity-user-gnocchi
     deps:
       - keystone
       - mariadb
@@ -780,6 +908,7 @@ components:
     credentials:
       - identity-admin
       - memcache-swift
+      - identity-user-swift
     deps:
       - keystone
     tier: compute

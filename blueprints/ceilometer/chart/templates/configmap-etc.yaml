@@ -54,6 +54,7 @@ limitations under the License.
 {{- end -}}
 
 ---
+{{- dict "envAll" $envAll "entries" (include "ceilometer.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "ceilometer" | include "helm-toolkit.utils.identity_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

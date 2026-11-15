@@ -46,6 +46,13 @@ SERVICE_OS_USERID=$(openstack user create --or-show --enable -f value -c id \
     --password="${SERVICE_OS_PASSWORD}" \
     "${SERVICE_OS_USERNAME}")
 
+{{ if and (kindIs "map" .) (index . "krateoRotate") -}}
+# Krateo (#228): a machine user must never be locked out. While its password rotates, a reader still holding
+# the previous value fails authentication, and five failures lock the user for 30 minutes. Set BEFORE the
+# password changes; only in the pre-upgrade Job's inline copy (the chart passes krateoRotate).
+openstack user set --ignore-lockout-failure-attempts "${SERVICE_OS_USERID}"
+
+{{ end -}}
 # Manage user password (we do this to ensure the password is updated if required)
 openstack user set --password="${SERVICE_OS_PASSWORD}" "${SERVICE_OS_USERID}"
 

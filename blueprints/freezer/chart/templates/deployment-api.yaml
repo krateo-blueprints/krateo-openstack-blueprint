@@ -101,6 +101,7 @@ spec:
               mountPath: /etc/freezer/freezer.conf
               subPath: freezer.conf
               readOnly: true
+{{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "freezer.identity_dropin_entries" . | fromJsonArray) "freezer") | nindent 12 }}
             - name: freezer-etc
               mountPath: /etc/freezer/api-paste.ini
               subPath: api-paste.ini
@@ -119,6 +120,7 @@ spec:
       volumes:
         - name: oslo-lock-path
           emptyDir: {}
+{{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "freezer.identity_dropin_entries" . | fromJsonArray) "freezer") | nindent 8 }}
         - name: freezer-bin
           configMap:
             name: freezer-bin

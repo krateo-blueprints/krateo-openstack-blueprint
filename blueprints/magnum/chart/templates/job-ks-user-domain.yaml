@@ -14,6 +14,12 @@ limitations under the License.
 
 {{- if .Values.manifests.job_ks_user_domain }}
 {{- $envAll := . }}
+{{- /* Krateo (#228): with the stack user's password from the umbrella (passwordFrom) this Job rotates it
+       BEFORE the readers restart: pre-upgrade, the script inline (not the previous revision's magnum-bin), the user's
+       fields from values and the password from the root (a pre-upgrade hook runs before this release's resources
+       are applied). */}}
+{{- $suser := index .Values.endpoints.identity.auth "magnum_stack_user" }}
+{{- $rotate := ($suser.passwordFrom | default dict).secret | default "" | ne "" }}
 
 {{- $serviceAccountName := "magnum-ks-user-domain" }}
 {{ tuple $envAll "ks_user" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
@@ -23,7 +29,7 @@ kind: Job
 metadata:
   name: magnum-domain-ks-user
   annotations:
-{{ tuple "domain-ks-user" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
+{{ tuple "domain-ks-user" $envAll (ternary "pre-upgrade" "post-upgrade" $rotate) | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
 spec:
 {{ tuple $envAll nil | include "helm-toolkit.snippets.job_hook_deadline" | indent 2 }}
@@ -42,20 +48,41 @@ spec:
         - name: magnum-ks-domain-user
 {{ tuple $envAll "ks_user" | include "helm-toolkit.snippets.image" | indent 10 }}
           command:
+{{- if $rotate }}
+            - /bin/bash
+            - -c
+            - {{ include "helm-toolkit.scripts.keystone_domain_user" (dict "krateoRotate" true) | toJson }}
+{{- else }}
             - /tmp/ks-domain-user.sh
+{{- end }}
           volumeMounts:
             - name: pod-tmp
               mountPath: /tmp
+{{- if not $rotate }}
             - name: ks-user-sh
               mountPath: /tmp/ks-domain-user.sh
               subPath: ks-domain-user.sh
               readOnly: true
+{{- end }}
           env:
 {{- with $env := dict "ksUserSecret" $envAll.Values.secrets.identity.admin }}
 {{- include "helm-toolkit.snippets.keystone_openrc_env_vars" $env | indent 12 }}
 {{- end }}
             - name: SERVICE_OS_SERVICE_NAME
               value: "magnum"
+{{- if $rotate }}
+            - name: SERVICE_OS_REGION_NAME
+              value: {{ $suser.region_name | quote }}
+            - name: SERVICE_OS_DOMAIN_NAME
+              value: {{ $suser.domain_name | quote }}
+            - name: SERVICE_OS_USERNAME
+              value: {{ $suser.username | quote }}
+            - name: SERVICE_OS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $suser.passwordFrom.secret }}
+                  key: {{ $suser.passwordFrom.key }}
+{{- else }}
             - name: SERVICE_OS_REGION_NAME
               valueFrom:
                 secretKeyRef:
@@ -76,13 +103,16 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.identity.magnum_stack_user }}
                   key: OS_PASSWORD
+{{- end }}
             - name: SERVICE_OS_ROLE
               value: {{ .Values.endpoints.identity.auth.magnum_stack_user.role | quote }}
       volumes:
         - name: pod-tmp
           emptyDir: {}
+{{- if not $rotate }}
         - name: ks-user-sh
           configMap:
             name: magnum-bin
             defaultMode: 0555
+{{- end }}
 {{- end }}

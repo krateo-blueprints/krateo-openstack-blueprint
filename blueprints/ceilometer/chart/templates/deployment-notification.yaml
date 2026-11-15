@@ -22,6 +22,7 @@ limitations under the License.
 {{ tuple $envAll "notification" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 
 {{- $etcSources := .Values.pod.etcSources.ceilometer_notification }}
+{{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "ceilometer.identity_dropin_entries" . | fromJsonArray) "ceilometer") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment

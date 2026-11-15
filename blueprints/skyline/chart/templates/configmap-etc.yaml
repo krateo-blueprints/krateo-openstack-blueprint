@@ -44,6 +44,13 @@ limitations under the License.
 {{- if empty .Values.conf.skyline.openstack.system_user_password -}}
 {{- $_ := set .Values.conf.skyline.openstack "system_user_password" .Values.endpoints.identity.auth.skyline.password -}}
 {{- end -}}
+{{- /* Krateo (#228): with the skyline user's password from the umbrella (passwordFrom), skyline.yaml is rendered
+       by the ExternalSecret skyline-config instead (below) and this Secret omits it: the password goes in as
+       {{ .password | toJson }}, a valid YAML scalar whatever the value. */}}
+{{- $from := .Values.endpoints.identity.auth.skyline.passwordFrom | default dict -}}
+{{- if $from.secret -}}
+{{- $_ := set .Values.conf.skyline.openstack "system_user_password" "KRATEO_SKYLINE_SYSTEM_USER_PASSWORD" -}}
+{{- end -}}
 
 {{- if empty .Values.conf.skyline.default.database_url -}}
 {{- $connection := tuple "oslo_db" "skyline" "skyline" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" -}}
@@ -61,8 +68,43 @@ metadata:
   name: {{ $configMapName }}
 type: Opaque
 data:
+{{- if not $from.secret }}
   skyline.yaml: {{ .Values.conf.skyline | toYaml | b64enc }}
+{{- end }}
   gunicorn.py: {{ .Values.conf.gunicorn | b64enc }}
+{{- if $from.secret }}
+{{- range $field := list "store" "secret" "key" }}
+{{- if not (index $from $field) }}
+{{- fail (printf "endpoints.identity.auth.skyline.passwordFrom needs %s (store, secret and key)" $field) }}
+{{- end }}
+{{- end }}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: skyline-config
+  annotations:
+    # Deleted by helm WITH the release, after the pre-delete hooks (#254).
+    krateo.io/teardown: with-release
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: {{ $from.store | quote }}
+  target:
+    name: skyline-config
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      engineVersion: v2
+      data:
+        skyline.yaml: {{ .Values.conf.skyline | toYaml | replace "KRATEO_SKYLINE_SYSTEM_USER_PASSWORD" "{{ .password | toJson }}" | quote }}
+  data:
+    - secretKey: password
+      remoteRef:
+        key: {{ $from.secret | quote }}
+        property: {{ $from.key | quote }}
+{{- end }}
 {{- end }}
 {{- end }}
 

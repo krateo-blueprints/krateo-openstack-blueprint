@@ -77,6 +77,7 @@ spec:
               subPath: cyborg-conductor.sh
               readOnly: true
 {{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "cyborg") | nindent 12 }}
+{{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "cyborg.identity_dropin_entries" . | fromJsonArray) "cyborg") | nindent 12 }}
 {{- include "helm-toolkit.snippets.secret_conf_dropin_mount" (dict "from" (.Values.endpoints.identity.auth.nova.passwordFrom | default dict) "name" "cyborg-identity-nova" "file" "83-identity-nova.conf" "dir" "/etc/cyborg/cyborg.conf.d") | nindent 12 }}
 {{- include "helm-toolkit.snippets.secret_conf_dropin_mount" (dict "from" (.Values.endpoints.identity.auth.placement.passwordFrom | default dict) "name" "cyborg-identity-placement" "file" "84-identity-placement.conf" "dir" "/etc/cyborg/cyborg.conf.d") | nindent 12 }}
             - name: cyborg-etc
@@ -102,6 +103,7 @@ spec:
             name: cyborg-bin
             defaultMode: 0555
 {{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "cyborg") | nindent 8 }}
+{{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "cyborg.identity_dropin_entries" . | fromJsonArray) "cyborg") | nindent 8 }}
 {{- include "helm-toolkit.snippets.secret_conf_dropin_volume" (dict "from" (.Values.endpoints.identity.auth.nova.passwordFrom | default dict) "name" "cyborg-identity-nova") | nindent 8 }}
 {{- include "helm-toolkit.snippets.secret_conf_dropin_volume" (dict "from" (.Values.endpoints.identity.auth.placement.passwordFrom | default dict) "name" "cyborg-identity-placement") | nindent 8 }}
         - name: cyborg-etc

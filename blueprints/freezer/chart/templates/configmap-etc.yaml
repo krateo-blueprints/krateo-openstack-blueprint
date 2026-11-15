@@ -58,6 +58,7 @@ limitations under the License.
 {{- $_ := set .Values.conf.logging "formatter_fluent" $formatter_fluent -}}
 {{- end -}}
 ---
+{{- dict "envAll" $envAll "entries" (include "freezer.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "freezer" | include "helm-toolkit.utils.identity_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:
