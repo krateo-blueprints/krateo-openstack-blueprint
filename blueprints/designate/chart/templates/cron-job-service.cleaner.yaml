@@ -9,6 +9,7 @@
 {{- $etcSources := .Values.pod.etcSources.designate_service_cleaner }}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "designate") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "designate.identity_dropin_entries" . | fromJsonArray) "designate") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "designate.db_dropin_entries" . | fromJsonArray) "designate") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 
 {{- $serviceAccountName := "designate-service-cleaner" }}
 {{ tuple $envAll "service_cleaner" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
@@ -46,6 +47,9 @@ spec:
 {{ tuple "designate_service_cleaner" . | include "helm-toolkit.snippets.kubernetes_pod_runtime_class" | indent 6 }}
           serviceAccountName: {{ $serviceAccountName }}
           restartPolicy: OnFailure
+{{- if $envAll.Values.pod.tolerations.designate.enabled }}
+{{ tuple $envAll "designate" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 10 }}
+{{- end }}
           nodeSelector:
             {{ .Values.labels.service_cleaner.node_selector_key }}: {{ .Values.labels.service_cleaner.node_selector_value }}
           initContainers:

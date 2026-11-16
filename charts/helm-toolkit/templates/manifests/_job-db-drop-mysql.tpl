@@ -38,6 +38,10 @@ limitations under the License.
 {{- $activeDeadlineSeconds := index . "activeDeadlineSeconds" -}}
 {{- $serviceNamePretty := $serviceName | replace "_" "-" -}}
 {{- $dbAdminTlsSecret := index . "dbAdminTlsSecret" | default "" -}}
+{{- /* Krateo (#228): the chart's drop-in sources projected into the main config's conf.d, as for db-init: with a
+       generated database password the connection URL is only in a drop-in (helm-toolkit.manifests.db_dropin), which
+       db-drop.py reads from <configFile>.d. Nothing renders when the chart passes none. */ -}}
+{{- $etcSources := index . "etcSources" | default list -}}
 
 {{- $serviceAccountName := printf "%s-%s" $serviceNamePretty "db-drop" }}
 {{ tuple $envAll "db_drop" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
@@ -132,6 +136,11 @@ spec:
               mountPath: {{ $dbToDrop.logConfigFile | quote }}
               subPath: {{ base $dbToDrop.logConfigFile | quote }}
               readOnly: true
+{{- if $etcSources }}
+            - name: db-drop-conf-dir
+              mountPath: {{ printf "%s.d" $dbToDrop.configFile | quote }}
+              readOnly: true
+{{- end }}
 {{- end }}
 {{- if $envAll.Values.manifests.certificates }}
 {{- dict "enabled" $envAll.Values.manifests.certificates "name" $dbAdminTlsSecret "path" "/etc/mysql/certs" | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
@@ -164,6 +173,12 @@ spec:
           secret:
             secretName: {{ $configMapEtc | quote }}
             defaultMode: 0444
+{{- if $etcSources }}
+        - name: db-drop-conf-dir
+          projected:
+            sources:
+{{ toYaml $etcSources | indent 14 }}
+{{- end }}
 {{- end -}}
 {{- end -}}
 {{- end -}}

@@ -22,9 +22,28 @@ own, smaller schemas; the orchestrator's `componentValues` mirrors them.
 | `enabled` | array of string \| null | `[]` | Deploy exactly these components plus their transitive dependencies, **overriding** `profile`. E.g. `["heat"]` also brings up keystone, rabbitmq, mariadb and memcached. Empty uses `profile`. |
 | `installDefinitions` | boolean | `true` | Register each component blueprint's `CompositionDefinition` as the first step. |
 | `ociRepo` | string | `oci://ghcr.io/krateo-blueprints/charts` | Registry path holding the per-component blueprint charts. They are pulled at the orchestrator's own chart version. Up to 0.3.37 a `chartVersion` value chose it, and its schema default was frozen into every Composition at create time, so upgrades left the components behind (#179). A stale `chartVersion` in an existing Composition is accepted and ignored. |
+| `tolerations` | array of toleration \| null | `null` | Kubernetes tolerations applied to **every pod** of every component: Deployments, StatefulSets, DaemonSets, Jobs and CronJobs, helm-toolkit's Jobs included. Each component receives them as OpenStack-Helm's `pod.tolerations.<component>` `{enabled: true, tolerations: <list>}`; an explicit `componentValues` entry wins. Needed on tainted nodes (see below). |
 | `componentValues` | object \| null | `null` | Per-component Composition `spec` overrides (see below). |
 | `serviceContract` | object | chart default | Service integration descriptor, contract v1 (see below). |
 | `contractEmitter` | object | absent | Removed in 0.3.68 (see below). |
+
+## `tolerations` — tainted nodes
+
+A trusted-tenant vcluster (krateo-acmp) copies its node pool's taint, `krateo.io/trusted-tenant=<namespace>:NoSchedule`,
+onto every child node. A pod without a matching toleration schedules nowhere: every DaemonSet desires 0 pods and every
+Deployment, Job and CronJob sits Pending. One list on the Openstack resource reaches every pod:
+
+```yaml
+spec:
+  tolerations:
+    - key: krateo.io/trusted-tenant
+      operator: Equal
+      value: my-namespace
+      effect: NoSchedule
+```
+
+`hack/validate-tolerations.py` renders every chart, at defaults and with every workload manifest on, and fails if a pod
+template carries anything but that list. Without `tolerations` nothing changes: every chart renders as before.
 
 ## `componentValues.<name>` — per-component overrides
 

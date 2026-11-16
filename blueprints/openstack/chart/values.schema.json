@@ -27,6 +27,45 @@
       },
       "default": []
     },
+    "tolerations": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "title": "Tolerations",
+      "description": "Kubernetes tolerations applied to every pod of every component (Deployments, StatefulSets, DaemonSets, Jobs and CronJobs), as each component's pod.tolerations.<component>. An explicit componentValues entry wins. E.g. a trusted-tenant vcluster's pool taint krateo.io/trusted-tenant=<namespace>:NoSchedule. Empty changes nothing.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "Exists",
+              "Equal"
+            ]
+          },
+          "value": {
+            "type": "string"
+          },
+          "effect": {
+            "type": "string",
+            "enum": [
+              "NoSchedule",
+              "PreferNoSchedule",
+              "NoExecute"
+            ]
+          },
+          "tolerationSeconds": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
+      "default": []
+    },
     "installDefinitions": {
       "type": "boolean",
       "title": "Register component CompositionDefinitions",

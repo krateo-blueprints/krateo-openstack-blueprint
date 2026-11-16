@@ -16,6 +16,19 @@ profile: identity
 # rabbitmq, mariadb and memcached. Leave empty (null) to use `profile`.
 enabled:
 
+# tolerations: one list of Kubernetes tolerations applied to EVERY pod the blueprint renders, in every component
+# (Deployments, StatefulSets, DaemonSets, Jobs and CronJobs, helm-toolkit's Jobs included). Passed to each component
+# as OpenStack-Helm's pod.tolerations.<component> {enabled: true, tolerations: <this list>}, merged UNDER that
+# component's componentValues, so an explicit componentValues entry wins. Empty (the default) changes nothing.
+# Needed on tainted nodes: a trusted-tenant vcluster copies the pool taint (krateo.io/trusted-tenant=<ns>:NoSchedule)
+# onto its nodes, and without a matching toleration every DaemonSet desires 0 pods. e.g.
+#   tolerations:
+#     - key: krateo.io/trusted-tenant
+#       operator: Equal
+#       value: my-namespace
+#       effect: NoSchedule
+tolerations:
+
 # componentValues: per-component spec passed through to that component's Composition, keyed by
 # component name. Each value is exactly that component's own spec (its curated schema),
 # so you can configure any component through the umbrella instead of dropping to a
@@ -430,6 +443,130 @@ credentials:
       key: privateKey
       publicKey: publicKey
       path: endpoints.sharev2.auth.service_instance_ssh_keyFrom
+    # Per-service MariaDB users (0.3.68, #228): one item per MariaDB USERNAME, reaching only the chart that owns it.
+    # The chart builds every URL that logs in as that user from the root: its main config's connection URLs
+    # through the drop-in <chart>-db-connection, <chart>-db-user (DB_CONNECTION) and its siblings as ExternalSecrets,
+    # and db-init sets the password on the existing user (ALTER USER), so a published password is replaced.
+    - id: oslo-db-aodh
+      secret: openstack-credential-oslo-db-aodh
+      key: password
+      path: endpoints.oslo_db.auth.aodh.passwordFrom
+    - id: oslo-db-barbican
+      secret: openstack-credential-oslo-db-barbican
+      key: password
+      path: endpoints.oslo_db.auth.barbican.passwordFrom
+    - id: oslo-db-blazar
+      secret: openstack-credential-oslo-db-blazar
+      key: password
+      path: endpoints.oslo_db.auth.blazar.passwordFrom
+    - id: oslo-db-cinder
+      secret: openstack-credential-oslo-db-cinder
+      key: password
+      path: endpoints.oslo_db.auth.cinder.passwordFrom
+    - id: oslo-db-cloudkitty
+      secret: openstack-credential-oslo-db-cloudkitty
+      key: password
+      path: endpoints.oslo_db.auth.cloudkitty.passwordFrom
+    - id: oslo-db-cyborg
+      secret: openstack-credential-oslo-db-cyborg
+      key: password
+      path: endpoints.oslo_db.auth.cyborg.passwordFrom
+    - id: oslo-db-designate
+      secret: openstack-credential-oslo-db-designate
+      key: password
+      path: endpoints.oslo_db.auth.designate.passwordFrom
+    - id: oslo-db-freezer
+      secret: openstack-credential-oslo-db-freezer
+      key: password
+      path: endpoints.oslo_db.auth.freezer.passwordFrom
+    - id: oslo-db-glance
+      secret: openstack-credential-oslo-db-glance
+      key: password
+      path: endpoints.oslo_db.auth.glance.passwordFrom
+    - id: oslo-db-gnocchi
+      secret: openstack-credential-oslo-db-gnocchi
+      key: password
+      path: endpoints.oslo_db.auth.gnocchi.passwordFrom
+    - id: oslo-db-heat
+      secret: openstack-credential-oslo-db-heat
+      key: password
+      path: endpoints.oslo_db.auth.heat.passwordFrom
+    - id: oslo-db-horizon
+      secret: openstack-credential-oslo-db-horizon
+      key: password
+      path: endpoints.oslo_db.auth.horizon.passwordFrom
+    - id: oslo-db-ironic
+      secret: openstack-credential-oslo-db-ironic
+      key: password
+      path: endpoints.oslo_db.auth.ironic.passwordFrom
+    - id: oslo-db-keystone
+      secret: openstack-credential-oslo-db-keystone
+      key: password
+      path: endpoints.oslo_db.auth.keystone.passwordFrom
+    - id: oslo-db-magnum
+      secret: openstack-credential-oslo-db-magnum
+      key: password
+      path: endpoints.oslo_db.auth.magnum.passwordFrom
+    - id: oslo-db-manila
+      secret: openstack-credential-oslo-db-manila
+      key: password
+      path: endpoints.oslo_db.auth.manila.passwordFrom
+    - id: oslo-db-masakari
+      secret: openstack-credential-oslo-db-masakari
+      key: password
+      path: endpoints.oslo_db.auth.masakari.passwordFrom
+    - id: oslo-db-mistral
+      secret: openstack-credential-oslo-db-mistral
+      key: password
+      path: endpoints.oslo_db.auth.mistral.passwordFrom
+    - id: oslo-db-neutron
+      secret: openstack-credential-oslo-db-neutron
+      key: password
+      path: endpoints.oslo_db.auth.neutron.passwordFrom
+    # nova's three databases log in as ONE MariaDB account ('nova'@'%'), so one root reaches all three keys: two
+    # roots for one account would have db-init's ALTER USER set them in turn (the chart refuses that too).
+    - id: oslo-db-nova
+      secret: openstack-credential-oslo-db-nova
+      key: password
+      path: endpoints.oslo_db.auth.nova.passwordFrom
+      extraPaths:
+        - endpoints.oslo_db_api.auth.nova.passwordFrom
+        - endpoints.oslo_db_cell0.auth.nova.passwordFrom
+    # octavia's taskflow persistence database logs in as the same MariaDB account ('octavia'@'%'): one root.
+    - id: oslo-db-octavia
+      secret: openstack-credential-oslo-db-octavia
+      key: password
+      path: endpoints.oslo_db.auth.octavia.passwordFrom
+      extraPaths:
+        - endpoints.oslo_db_persistence.auth.octavia.passwordFrom
+    - id: oslo-db-placement
+      secret: openstack-credential-oslo-db-placement
+      key: password
+      path: endpoints.oslo_db.auth.placement.passwordFrom
+    - id: oslo-db-powerdns
+      secret: openstack-credential-oslo-db-powerdns
+      key: password
+      path: endpoints.oslo_db.auth.powerdns.passwordFrom
+    - id: oslo-db-skyline
+      secret: openstack-credential-oslo-db-skyline
+      key: password
+      path: endpoints.oslo_db.auth.skyline.passwordFrom
+    - id: oslo-db-tacker
+      secret: openstack-credential-oslo-db-tacker
+      key: password
+      path: endpoints.oslo_db.auth.tacker.passwordFrom
+    - id: oslo-db-trove
+      secret: openstack-credential-oslo-db-trove
+      key: password
+      path: endpoints.oslo_db.auth.trove.passwordFrom
+    - id: oslo-db-watcher
+      secret: openstack-credential-oslo-db-watcher
+      key: password
+      path: endpoints.oslo_db.auth.watcher.passwordFrom
+    - id: oslo-db-zaqar
+      secret: openstack-credential-oslo-db-zaqar
+      key: password
+      path: endpoints.oslo_db.auth.zaqar.passwordFrom
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
 components:
@@ -453,6 +590,7 @@ components:
       - oslo-db-admin
       - oslo-messaging-admin
       - identity-user-keystone-test
+      - oslo-db-keystone
     deps:
       - mariadb
       - memcached
@@ -466,6 +604,7 @@ components:
       - memcache-glance
       - identity-user-glance-test
       - identity-user-glance
+      - oslo-db-glance
     deps:
       - keystone
     tier: identity
@@ -475,6 +614,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - horizon-secret-key
+      - oslo-db-horizon
     deps:
       - keystone
     tier: identity
@@ -496,6 +636,7 @@ components:
       - oslo-db-admin
       - memcache-placement
       - identity-user-placement
+      - oslo-db-placement
     deps:
       - keystone
     tier: compute
@@ -518,6 +659,7 @@ components:
       - identity-user-neutron-nova
       - identity-user-neutron-placement
       - identity-user-neutron-test
+      - oslo-db-neutron
     deps:
       - keystone
       - rabbitmq
@@ -538,6 +680,7 @@ components:
       - identity-user-nova-placement
       - identity-user-nova-service-user
       - identity-user-nova-test
+      - oslo-db-nova
     deps:
       - keystone
       - placement
@@ -555,6 +698,7 @@ components:
       - memcache-ironic
       - identity-user-glance
       - identity-user-ironic
+      - oslo-db-ironic
     deps:
       - keystone
       - mariadb
@@ -582,6 +726,7 @@ components:
       - identity-user-cinder-test
       - identity-user-cinder-swift
       - identity-user-glance
+      - oslo-db-cinder
     deps:
       - keystone
       - rabbitmq
@@ -606,6 +751,7 @@ components:
       - identity-user-heat
       - identity-user-heat-domain
       - identity-user-heat-trust
+      - oslo-db-heat
     deps:
       - keystone
       - rabbitmq
@@ -619,6 +765,7 @@ components:
       - oslo-messaging-admin
       - memcache-barbican
       - identity-user-barbican
+      - oslo-db-barbican
     deps:
       - keystone
       - rabbitmq
@@ -628,6 +775,7 @@ components:
     kind: Powerdns
     credentials:
       - oslo-db-admin
+      - oslo-db-powerdns
     deps:
       - mariadb
     tier: compute
@@ -640,6 +788,7 @@ components:
       - memcache-designate
       - identity-user-designate-test
       - identity-user-designate
+      - oslo-db-designate
     deps:
       - keystone
       - rabbitmq
@@ -655,6 +804,7 @@ components:
       - memcache-octavia
       - identity-user-test
       - identity-user-octavia
+      - oslo-db-octavia
     deps:
       - keystone
       - rabbitmq
@@ -677,6 +827,7 @@ components:
       - memcache-magnum
       - identity-user-magnum
       - identity-user-magnum-domain
+      - oslo-db-magnum
     deps:
       - keystone
       - rabbitmq
@@ -697,6 +848,7 @@ components:
       - memcache-manila
       - identity-user-manila
       - manila-service-instance-ssh-key
+      - oslo-db-manila
     deps:
       - keystone
       - rabbitmq
@@ -711,6 +863,7 @@ components:
       - memcache-mistral
       - identity-user-mistral-test
       - identity-user-mistral
+      - oslo-db-mistral
     deps:
       - keystone
       - rabbitmq
@@ -741,6 +894,7 @@ components:
       - oslo-messaging-admin
       - memcache-aodh
       - identity-user-aodh
+      - oslo-db-aodh
     deps:
       - keystone
       - rabbitmq
@@ -755,6 +909,7 @@ components:
       - memcache-cloudkitty
       - identity-user-test
       - identity-user-cloudkitty
+      - oslo-db-cloudkitty
     deps:
       - keystone
       - rabbitmq
@@ -769,6 +924,7 @@ components:
       - memcache-masakari
       - identity-user-neutron-test
       - identity-user-masakari
+      - oslo-db-masakari
     deps:
       - keystone
       - rabbitmq
@@ -782,6 +938,7 @@ components:
       - oslo-messaging-admin
       - memcache-trove
       - identity-user-trove
+      - oslo-db-trove
     deps:
       - keystone
       - rabbitmq
@@ -796,6 +953,7 @@ components:
       - memcache-watcher
       - identity-user-test
       - identity-user-watcher
+      - oslo-db-watcher
     deps:
       - keystone
       - rabbitmq
@@ -809,6 +967,7 @@ components:
       - oslo-messaging-admin
       - memcache-tacker
       - identity-user-tacker
+      - oslo-db-tacker
     deps:
       - keystone
       - rabbitmq
@@ -828,6 +987,7 @@ components:
       - identity-user-nova
       - identity-user-placement
       - identity-user-cyborg
+      - oslo-db-cyborg
     deps:
       - keystone
       - rabbitmq
@@ -847,6 +1007,7 @@ components:
       - identity-user-blazar
       - identity-user-blazar-service-user
       - identity-user-blazar-test
+      - oslo-db-blazar
     deps:
       - keystone
       - rabbitmq
@@ -865,6 +1026,7 @@ components:
       - identity-user-zaqar
       - identity-user-zaqar-test
       - zaqar-signed-url-secret-key
+      - oslo-db-zaqar
     deps:
       - keystone
       - mariadb
@@ -884,6 +1046,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - identity-user-freezer
+      - oslo-db-freezer
     deps:
       - keystone
       - rabbitmq
@@ -895,6 +1058,7 @@ components:
       - identity-admin
       - oslo-db-admin
       - identity-user-skyline
+      - oslo-db-skyline
     deps:
       - keystone
     tier: compute
@@ -905,6 +1069,7 @@ components:
       - oslo-db-admin
       - memcache-gnocchi
       - identity-user-gnocchi
+      - oslo-db-gnocchi
     deps:
       - keystone
       - mariadb

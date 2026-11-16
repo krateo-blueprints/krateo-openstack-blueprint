@@ -21,5 +21,6 @@ limitations under the License.
 {{- if .Values.pod.tolerations.neutron.enabled -}}
 {{- $_ := set $dbDropJob "tolerationsEnabled" true -}}
 {{- end -}}
+{{- $_ := set $dbDropJob "etcSources" (include "neutron.dropin_etc_sources" . | fromJsonArray) -}}
 {{ $dbDropJob | include "helm-toolkit.manifests.job_db_drop_mysql" }}
 {{- end }}

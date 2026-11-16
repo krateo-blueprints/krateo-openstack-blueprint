@@ -47,6 +47,9 @@ spec:
       serviceAccountName: {{ $serviceAccountName }}
       affinity:
 {{ tuple $envAll "watcher" "api" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+{{- if $envAll.Values.pod.tolerations.watcher.enabled }}
+{{ tuple $envAll "watcher" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.api.node_selector_key }}: {{ .Values.labels.api.node_selector_value }}
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.api.timeout | default "30" }}
@@ -88,6 +91,7 @@ spec:
               readOnly: true
 {{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "watcher") | nindent 12 }}
 {{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "watcher.identity_dropin_entries" . | fromJsonArray) "watcher") | nindent 12 }}
+{{- include "helm-toolkit.snippets.db_dropin_mount" (tuple . (include "watcher.db_dropin_entries" . | fromJsonArray) "watcher") | nindent 12 }}
             - name: watcher-etc
               mountPath: /etc/watcher/watcher.conf
               subPath: watcher.conf
@@ -114,6 +118,7 @@ spec:
             defaultMode: 0555
 {{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "watcher") | nindent 8 }}
 {{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "watcher.identity_dropin_entries" . | fromJsonArray) "watcher") | nindent 8 }}
+{{- include "helm-toolkit.snippets.db_dropin_volume" (tuple . (include "watcher.db_dropin_entries" . | fromJsonArray) "watcher") | nindent 8 }}
         - name: watcher-etc
           secret:
             secretName: watcher-etc

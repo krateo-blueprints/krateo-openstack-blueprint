@@ -20,5 +20,6 @@ limitations under the License.
 {{- if .Values.pod.tolerations.freezer.enabled -}}
 {{- $_ := set $dbDropJob "tolerationsEnabled" true -}}
 {{- end -}}
+{{- $_ := set $dbDropJob "etcSources" (include "freezer.dropin_etc_sources" . | fromJsonArray) -}}
 {{ $dbDropJob | include "helm-toolkit.manifests.job_db_drop_mysql" }}
 {{- end }}

@@ -59,6 +59,7 @@ limitations under the License.
 {{- $_ := set .Values.conf.manila.keystone_authtoken "memcache_secret_key" $memcache_secret_key -}}
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "manila.db_dropin_entries" $envAll | fromJsonArray) "confKey" "manila" | include "helm-toolkit.utils.db_dropin_refuse" }}
 {{- if and (not (kindIs "invalid" .Values.conf.manila.database.connection)) (empty .Values.conf.manila.database.connection) -}}
 {{- $_ := tuple "oslo_db" "internal" "manila" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup"| set .Values.conf.manila.database "connection" -}}
 {{- end -}}
@@ -231,6 +232,7 @@ limitations under the License.
 ---
 {{- tuple $envAll "manila" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 {{- dict "envAll" $envAll "entries" (include "manila.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "manila" | include "helm-toolkit.utils.identity_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "manila.db_dropin_entries" $envAll | fromJsonArray) "confKey" "manila" | include "helm-toolkit.utils.db_dropin_strip" }}
 {{- /* The service-instance login (#228, 0.3.67): with the generated key, no password at all
        (templates/_service_instance_ssh_key.tpl). */}}
 {{- if include "manila.ssh_key_from" $envAll }}

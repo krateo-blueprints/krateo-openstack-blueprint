@@ -6,5 +6,6 @@
 {{- $out := list -}}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "magnum") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "magnum.identity_dropin_entries" . | fromJsonArray) "magnum") }}{{- $out = append $out (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "magnum.db_dropin_entries" . | fromJsonArray) "magnum") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- $out | toJson -}}
 {{- end -}}

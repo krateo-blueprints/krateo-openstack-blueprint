@@ -460,6 +460,16 @@ conf:
       datefmt: "%Y-%m-%d %H:%M:%S"
 
 pod:
+  tolerations:
+    watcher:
+      enabled: false
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
   user:
     watcher:
       uid: 1000

@@ -15,5 +15,8 @@ limitations under the License.
 {{- if .Values.manifests.job_db_sync }}
 {{- $dbSyncJob := dict "envAll" . "serviceName" "cyborg" -}}
 {{- $_ := set $dbSyncJob "etcSources" (include "cyborg.dropin_etc_sources" . | fromJsonArray) -}}
+{{- if .Values.pod.tolerations.cyborg.enabled -}}
+{{- $_ := set $dbSyncJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $dbSyncJob | include "helm-toolkit.manifests.job_db_sync" }}
 {{- end }}

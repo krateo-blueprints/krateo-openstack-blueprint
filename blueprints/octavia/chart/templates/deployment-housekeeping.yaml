@@ -26,6 +26,7 @@ limitations under the License.
 {{- $etcSources := .Values.pod.etcSources.octavia_housekeeping }}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "octavia") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "octavia.identity_dropin_entries" . | fromJsonArray) "octavia") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "octavia.db_dropin_entries" . | fromJsonArray) "octavia") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if .Values.endpoints.identity.auth.admin.passwordFrom }}
 {{- /* The admin password as a drop-in (#228); oslo.config reads octavia.conf.d after octavia.conf. */}}
 {{- $etcSources = append ($etcSources | default list) (dict "secret" (dict "name" "octavia-admin-password-etc")) }}
@@ -62,6 +63,9 @@ spec:
       hostNetwork: true
       affinity:
 {{ tuple $envAll "octavia" "housekeeping" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+{{- if $envAll.Values.pod.tolerations.octavia.enabled }}
+{{ tuple $envAll "octavia" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.housekeeping.node_selector_key }}: {{ .Values.labels.housekeeping.node_selector_value }}
       initContainers:

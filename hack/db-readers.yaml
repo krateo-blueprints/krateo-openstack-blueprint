@@ -1,0 +1,27 @@
+# The containers that use a chart's database, for charts whose config is read by programs that never do (#228).
+# Read by hack/validate-credentials.py check 22: in a listed chart, a container that mounts a config which carried the
+# MariaDB user's URL receives the URL drop-in only when it is listed here, and every other one must NOT receive it, so the
+# password reaches no program that does not use it. A listed container that no render shows reading the config fails
+# (a list that keeps entries nothing checks stops meaning anything).
+#
+# neutron, measured 2026-11-16 on neutron stable/2026.1 (the 2026.1 images' series):
+#   - the readers are the API and RPC servers and the database tools: neutron-server (uwsgi, neutron.wsgi.api),
+#     neutron-rpc-server (neutron.cmd.server:main_rpc), neutron-db-manage (db-sync), the helm-toolkit db-init and db-drop
+#     scripts, and neutron-ovn-db-sync-util (the ovn-db-sync CronJob, which syncs the neutron database into OVN);
+#   - every agent reaches neutron-server over RPC and opens no database session: neutron-dhcp-agent,
+#     neutron-l3-agent and neutron-openvswitch-agent import no database module at all (their entry modules' neutron.*
+#     imports followed four levels deep); neutron-metadata-agent, neutron-netns-cleanup, neutron-sriov-nic-agent,
+#     neutron-ovn-agent and neutron-ovn-metadata-agent reach database modules only through shared libraries
+#     (neutron.common.utils, neutron.api.api_common, the versioned objects the RPC push layer deserializes), never from
+#     their own code. neutron's install guide likewise has the agent nodes' neutron.conf carry no [database]
+#     connection. The other agents this chart can run (bgp-dragent, l2gw, ironic-neutron-agent, ovn-vpn-agent) are RPC
+#     agents of the same kind.
+charts:
+  neutron:
+    readers:
+      - neutron-server
+      - neutron-rpc-server
+      - neutron-db-sync
+      - neutron-db-init-0
+      - neutron-db-drop-0
+      - neutron-ovn-db-sync

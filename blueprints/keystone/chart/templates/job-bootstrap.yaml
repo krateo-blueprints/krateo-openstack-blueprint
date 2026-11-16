@@ -30,5 +30,6 @@ limitations under the License.
 {{- $_ := set $bootstrapJob "activeDeadlineSeconds" .Values.jobs.bootstrap.activeDeadlineSeconds -}}
 {{- end }}
 
+{{- $_ := set $bootstrapJob "etcSources" (include "keystone.dropin_etc_sources" . | fromJsonArray) -}}
 {{ $bootstrapJob | include "helm-toolkit.manifests.job_bootstrap" }}
 {{- end }}

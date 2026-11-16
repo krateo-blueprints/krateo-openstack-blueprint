@@ -12,3 +12,10 @@ spec:
   # identity = MariaDB+Memcached+Keystone+Glance+Horizon
   # full     = also RabbitMQ+Placement+OVS+libvirt+Neutron+Nova (compute; amd64 + OVS kernel module)
   profile: identity
+  # On tainted nodes (a trusted-tenant vcluster copies its pool taint onto every node), give every pod the
+  # toleration; without it every DaemonSet desires 0 pods. Applied to every workload of every component.
+  # tolerations:
+  #   - key: krateo.io/trusted-tenant
+  #     operator: Equal
+  #     value: openstack
+  #     effect: NoSchedule

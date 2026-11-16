@@ -17,6 +17,7 @@
 {{- $etcSources := .Values.pod.etcSources.designate_central }}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "designate") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "designate.identity_dropin_entries" . | fromJsonArray) "designate") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "designate.db_dropin_entries" . | fromJsonArray) "designate") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 
 {{- $serviceAccountName := "designate-central" }}
 {{ tuple $envAll "central" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
@@ -50,6 +51,9 @@ spec:
       serviceAccountName: {{ $serviceAccountName }}
       affinity:
 {{ tuple $envAll "designate" "central" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+{{- if $envAll.Values.pod.tolerations.designate.enabled }}
+{{ tuple $envAll "designate" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.central.node_selector_key }}: {{ .Values.labels.central.node_selector_value }}
       initContainers:

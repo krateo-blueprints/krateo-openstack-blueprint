@@ -198,6 +198,12 @@ spec:
               mountPath: {{ include "horizon.secret_key_dir" $envAll }}
               readOnly: true
             {{- end }}
+            {{- if include "horizon.db_password_from" $envAll }}
+            # local_settings reads the database password from this file (#228)
+            - name: horizon-db-password
+              mountPath: {{ include "horizon.db_password_dir" $envAll }}
+              readOnly: true
+            {{- end }}
             {{- $homeSnippet := include "horizon.krateo_home.snippet_name" $envAll }}
             - name: horizon-etc
               mountPath: /etc/openstack-dashboard/local_settings.d/{{ $homeSnippet }}
@@ -260,6 +266,12 @@ spec:
         - name: horizon-secret-key
           secret:
             secretName: horizon-secret-key
+            defaultMode: 0444
+        {{- end }}
+        {{- if include "horizon.db_password_from" $envAll }}
+        - name: horizon-db-password
+          secret:
+            secretName: horizon-db-password
             defaultMode: 0444
         {{- end }}
         - name: horizon-etc

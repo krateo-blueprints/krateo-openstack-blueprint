@@ -15,5 +15,8 @@ limitations under the License.
 {{- if .Values.manifests.job_db_init }}
 {{- $dbInitJob := dict "envAll" . "serviceName" "watcher" -}}
 {{- $_ := set $dbInitJob "etcSources" (include "watcher.dropin_etc_sources" . | fromJsonArray) -}}
+{{- if .Values.pod.tolerations.watcher.enabled -}}
+{{- $_ := set $dbInitJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $dbInitJob | include "helm-toolkit.manifests.job_db_init_mysql" }}
 {{- end }}

@@ -15,6 +15,7 @@ limitations under the License.
 {{- if .Values.manifests.configmap_etc }}
 {{- $envAll := . }}
 
+{{- dict "envAll" $envAll "entries" (include "tacker.db_dropin_entries" $envAll | fromJsonArray) "confKey" "tacker" | include "helm-toolkit.utils.db_dropin_refuse" }}
 {{- if and (not (kindIs "invalid" .Values.conf.tacker.database.connection)) (empty .Values.conf.tacker.database.connection) -}}
 {{- $connection := tuple "oslo_db" "internal" "tacker" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" -}}
 {{- if .Values.manifests.certificates -}}
@@ -78,6 +79,7 @@ limitations under the License.
 ---
 {{- tuple $envAll "tacker" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 {{- dict "envAll" $envAll "entries" (include "tacker.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "tacker" | include "helm-toolkit.utils.identity_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "tacker.db_dropin_entries" $envAll | fromJsonArray) "confKey" "tacker" | include "helm-toolkit.utils.db_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

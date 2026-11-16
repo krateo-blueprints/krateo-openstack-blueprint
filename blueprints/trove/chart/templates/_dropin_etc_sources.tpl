@@ -6,5 +6,6 @@
 {{- $out := list -}}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "trove") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "trove.identity_dropin_entries" . | fromJsonArray) "trove") }}{{- $out = append $out (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "trove.db_dropin_entries" . | fromJsonArray) "trove") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- $out | toJson -}}
 {{- end -}}

@@ -36,6 +36,9 @@ spec:
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
     spec:
+{{- if $envAll.Values.pod.tolerations.tacker.enabled }}
+{{ tuple $envAll "tacker" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.server.node_selector_key }}: {{ .Values.labels.server.node_selector_value }}
       serviceAccountName: tacker-server
@@ -63,6 +66,7 @@ spec:
             subPath: api-paste.ini
 {{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "tacker") | nindent 10 }}
 {{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "tacker.identity_dropin_entries" . | fromJsonArray) "tacker") | nindent 10 }}
+{{- include "helm-toolkit.snippets.db_dropin_mount" (tuple . (include "tacker.db_dropin_entries" . | fromJsonArray) "tacker") | nindent 10 }}
           - name: tacker-etc
             mountPath: "/etc/tacker/tacker.conf"
             readOnly: yes
@@ -93,6 +97,7 @@ spec:
             path: "/etc/localtime"
 {{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "tacker") | nindent 8 }}
 {{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "tacker.identity_dropin_entries" . | fromJsonArray) "tacker") | nindent 8 }}
+{{- include "helm-toolkit.snippets.db_dropin_volume" (tuple . (include "tacker.db_dropin_entries" . | fromJsonArray) "tacker") | nindent 8 }}
         - name: tacker-etc
           secret:
             defaultMode: 292

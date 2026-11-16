@@ -1115,7 +1115,8 @@ krateo-openstack-node-reader
        YAML dict to merge into its spec. For each id in $c.credentials, the item of
        .Values.credentials.items with that id contributes {store, secret, key} at the item's dotted
        `path` (e.g. endpoints.identity.auth.admin.passwordFrom), or at the item's `pathFor.<component>`
-       when it names this component (a chart holding the same credential under another key). An SSHKey
+       when it names this component (a chart holding the same credential under another key), and again at
+       each of the item's `extraPaths` (one credential a chart holds under several keys). An SSHKey
        item's reference also carries publicKey, the root's key holding the public half. A
        value is never passed: the chart
        projects it from the root Secret through the store. An id no item defines fails the render,
@@ -1137,6 +1138,9 @@ krateo-openstack-node-reader
 {{- if $item.publicKey -}}{{- $_ := set $ref "publicKey" $item.publicKey -}}{{- end -}}
 {{- $path := $item.path -}}
 {{- if hasKey ($item.pathFor | default dict) $c.name -}}{{- $path = index $item.pathFor $c.name -}}{{- end -}}
+{{- /* extraPaths: the same reference at further paths, for a credential a chart holds under several keys (nova's
+       one MariaDB account under oslo_db, oslo_db_api and oslo_db_cell0): one root, never one per key. */ -}}
+{{- range $path := prepend ($item.extraPaths | default list) $path -}}
 {{- $parts := splitList "." $path -}}
 {{- $node := $out -}}
 {{- range $idx, $p := $parts -}}
@@ -1145,6 +1149,7 @@ krateo-openstack-node-reader
 {{- else -}}
 {{- if not (hasKey $node $p) -}}{{- $_ := set $node $p (dict) -}}{{- end -}}
 {{- $node = index $node $p -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

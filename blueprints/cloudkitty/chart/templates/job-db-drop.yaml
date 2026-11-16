@@ -15,5 +15,9 @@ limitations under the License.
 {{- if .Values.manifests.job_db_drop }}
 {{- $dbToDrop := dict "inputType" "secret" "adminSecret" .Values.secrets.oslo_db.admin "userSecret" .Values.secrets.oslo_db.cloudkitty -}}
 {{- $dbDropJob := dict "envAll" . "serviceName" "cloudkitty" "dbToDrop" $dbToDrop -}}
+{{- $_ := set $dbDropJob "etcSources" (include "cloudkitty.dropin_etc_sources" . | fromJsonArray) -}}
+{{- if .Values.pod.tolerations.cloudkitty.enabled -}}
+{{- $_ := set $dbDropJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $dbDropJob | include "helm-toolkit.manifests.job_db_drop_mysql" }}
 {{- end }}

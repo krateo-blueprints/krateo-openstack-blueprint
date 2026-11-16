@@ -159,6 +159,12 @@
        componentValues entry wins. osh.credentialRefs says what is passed and why. */ -}}
 {{- $refs := include "osh.credentialRefs" (list $ $c) | fromYaml }}
 {{- if $refs }}{{- $ov = mergeOverwrite $refs (deepCopy $ov) }}{{- end }}
+{{- /* Tolerations: the umbrella's one list, as OpenStack-Helm's pod.tolerations.<component>, which every workload
+       of every component applies (hack/validate-tolerations.py). Merged UNDER componentValues: an explicit entry wins. */ -}}
+{{- with $.Values.tolerations }}
+{{- $tol := dict "pod" (dict "tolerations" (dict $c.name (dict "enabled" true "tolerations" .))) }}
+{{- $ov = mergeOverwrite $tol (deepCopy $ov) }}
+{{- end }}
 {{- /* TWO PHASES: a live component's NEW values are written only at the new apiVersion, and only
        once its CompositionDefinition serves it (status.apiVersion at the current version, Ready
        status True). Until then the object is not changed at all: its live spec is re-emitted at the

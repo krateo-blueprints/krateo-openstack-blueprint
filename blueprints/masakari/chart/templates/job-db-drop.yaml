@@ -15,5 +15,9 @@ limitations under the License.
 {{- if .Values.manifests.job_db_drop }}
 {{- $dbToDrop := dict "inputType" "secret" "adminSecret" .Values.secrets.oslo_db.admin "userSecret" .Values.secrets.oslo_db.masakari -}}
 {{- $dbDropJob := dict "envAll" . "serviceName" "masakari" "dbToDrop" $dbToDrop -}}
+{{- $_ := set $dbDropJob "etcSources" (include "masakari.dropin_etc_sources" . | fromJsonArray) -}}
+{{- if .Values.pod.tolerations.masakari.enabled -}}
+{{- $_ := set $dbDropJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $dbDropJob | include "helm-toolkit.manifests.job_db_drop_mysql" }}
 {{- end }}

@@ -50,6 +50,9 @@ spec:
 {{ dict "envAll" $envAll "application" "masakari-engine" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       affinity:
 {{ tuple $envAll "masakari" "engine" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+{{- if $envAll.Values.pod.tolerations.masakari.enabled }}
+{{ tuple $envAll "masakari" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.masakari.node_selector_key }}: {{ .Values.labels.masakari.node_selector_value }}
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.masakari_engine.timeout | default "30" }}
@@ -82,6 +85,7 @@ spec:
               mountPath: /etc/masakari
 {{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "masakari") | nindent 12 }}
 {{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "masakari.identity_dropin_entries" . | fromJsonArray) "masakari") | nindent 12 }}
+{{- include "helm-toolkit.snippets.db_dropin_mount" (tuple . (include "masakari.db_dropin_entries" . | fromJsonArray) "masakari") | nindent 12 }}
             - name: masakari-etc
               mountPath: /etc/masakari/masakari.conf
               subPath: masakari.conf
@@ -99,6 +103,7 @@ spec:
             defaultMode: 0555
 {{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "masakari") | nindent 8 }}
 {{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "masakari.identity_dropin_entries" . | fromJsonArray) "masakari") | nindent 8 }}
+{{- include "helm-toolkit.snippets.db_dropin_volume" (tuple . (include "masakari.db_dropin_entries" . | fromJsonArray) "masakari") | nindent 8 }}
         - name: masakari-etc
           secret:
             secretName: masakari-etc

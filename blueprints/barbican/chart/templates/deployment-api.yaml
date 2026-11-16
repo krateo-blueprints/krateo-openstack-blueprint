@@ -28,6 +28,7 @@ httpGet:
 {{- $etcSources := .Values.pod.etcSources.barbican_api }}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "barbican") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "barbican.identity_dropin_entries" . | fromJsonArray) "barbican") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "barbican.db_dropin_entries" . | fromJsonArray) "barbican") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 
 {{- $serviceAccountName := "barbican-api" }}
 {{ tuple $envAll "api" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}

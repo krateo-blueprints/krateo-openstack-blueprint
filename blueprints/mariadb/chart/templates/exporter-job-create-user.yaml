@@ -42,6 +42,9 @@ spec:
 {{ dict "envAll" $envAll "application" "prometheus_create_mysql_user" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       activeDeadlineSeconds: {{ .Values.jobs.exporter_create_sql_user.activeDeadlineSeconds }}
       restartPolicy: OnFailure
+{{- if $envAll.Values.pod.tolerations.mariadb.enabled }}
+{{ tuple $envAll "mariadb" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.prometheus_mysql_exporter.node_selector_key }}: {{ .Values.labels.prometheus_mysql_exporter.node_selector_value }}
       initContainers:

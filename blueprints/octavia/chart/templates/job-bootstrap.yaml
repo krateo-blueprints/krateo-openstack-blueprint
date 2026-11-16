@@ -20,5 +20,8 @@ limitations under the License.
 {{- if and .Values.manifests.job_bootstrap .Values.bootstrap.enabled }}
 {{- $bootstrapJob := dict "envAll" . "serviceName" "octavia" "keystoneUser" .Values.bootstrap.ks_user "logConfigFile" .Values.conf.octavia.DEFAULT.log_config_append "jobAnnotations" (include "metadata.annotations.job.bootstrap" . | fromYaml) -}}
 {{- $_ := set $bootstrapJob "etcSources" (include "octavia.dropin_etc_sources" . | fromJsonArray) -}}
+{{- if .Values.pod.tolerations.octavia.enabled -}}
+{{- $_ := set $bootstrapJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $bootstrapJob | include "helm-toolkit.manifests.job_bootstrap" }}
 {{- end }}

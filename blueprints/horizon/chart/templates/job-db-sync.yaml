@@ -70,6 +70,12 @@ spec:
             mountPath: {{ include "horizon.secret_key_dir" $envAll }}
             readOnly: true
           {{- end }}
+          {{- if include "horizon.db_password_from" $envAll }}
+          # local_settings reads the database password from this file (#228)
+          - name: horizon-db-password
+            mountPath: {{ include "horizon.db_password_dir" $envAll }}
+            readOnly: true
+          {{- end }}
           - name: horizon-bin
             mountPath: /tmp/db-sync.sh
             subPath: db-sync.sh
@@ -85,6 +91,12 @@ spec:
       - name: horizon-secret-key
         secret:
           secretName: horizon-secret-key
+          defaultMode: 0444
+      {{- end }}
+      {{- if include "horizon.db_password_from" $envAll }}
+      - name: horizon-db-password
+        secret:
+          secretName: horizon-db-password
           defaultMode: 0444
       {{- end }}
       - name: horizon-etc

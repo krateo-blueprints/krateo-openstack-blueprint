@@ -13,5 +13,6 @@
 {{- $out := list -}}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "zaqar") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.secret_conf_dropin_etc_source" (dict "from" (include "zaqar.signed_url_key_ref" . | fromJson) "name" "zaqar-signed-url-secret-key") }}{{- $out = append $out (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "zaqar.db_dropin_entries" . | fromJsonArray) "zaqar") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- $out | toJson -}}
 {{- end -}}

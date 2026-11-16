@@ -5,5 +5,6 @@
 {{- define "freezer.dropin_etc_sources" -}}
 {{- $out := list -}}
 {{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "freezer.identity_dropin_entries" . | fromJsonArray) "freezer") }}{{- $out = append $out (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "freezer.db_dropin_entries" . | fromJsonArray) "freezer") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- $out | toJson -}}
 {{- end -}}

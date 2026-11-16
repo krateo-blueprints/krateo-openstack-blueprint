@@ -16,6 +16,9 @@
 {{- if .Values.manifests.job_ks_endpoints }}
 
 {{- $ksServiceJob := dict "envAll" . "serviceName" "designate" "serviceTypes" ( tuple "dns" ) "jobAnnotations" (include "metadata.annotations.job.ks_endpoints" . | fromYaml) -}}
+{{- if .Values.pod.tolerations.designate.enabled -}}
+{{- $_ := set $ksServiceJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $ksServiceJob | include "helm-toolkit.manifests.job_ks_endpoints" }}
 
 {{- end }}

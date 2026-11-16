@@ -6,5 +6,6 @@
 {{- $out := list -}}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "nova") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.secret_conf_dropin_etc_source" (dict "from" (include "helm-toolkit.utils.metadata_proxy_secret_ref" . | fromJson) "name" "nova-metadata-proxy-secret") }}{{- $out = append $out (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "nova.db_dropin_entries" . | fromJsonArray) "nova") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- $out | toJson -}}
 {{- end -}}

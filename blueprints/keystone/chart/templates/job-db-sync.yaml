@@ -85,5 +85,6 @@ volumes:
 {{- if .Values.pod.tolerations.keystone.enabled -}}
 {{- $_ := set $dbSyncJob "tolerationsEnabled" true -}}
 {{- end -}}
+{{- $_ := set $dbSyncJob "etcSources" (include "keystone.dropin_etc_sources" . | fromJsonArray) -}}
 {{ $dbSyncJob | include "helm-toolkit.manifests.job_db_sync" }}
 {{- end }}

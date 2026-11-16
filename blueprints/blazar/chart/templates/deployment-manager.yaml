@@ -50,6 +50,9 @@ spec:
 {{ dict "envAll" $envAll "application" "blazar" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       affinity:
 {{ tuple $envAll "blazar" "manager" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+{{- if $envAll.Values.pod.tolerations.blazar.enabled }}
+{{ tuple $envAll "blazar" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.manager.node_selector_key }}: {{ .Values.labels.manager.node_selector_value | quote }}
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.manager.timeout | default "30" }}

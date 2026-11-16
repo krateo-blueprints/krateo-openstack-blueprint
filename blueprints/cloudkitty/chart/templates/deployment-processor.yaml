@@ -20,6 +20,7 @@ limitations under the License.
 {{- $etcSources := .Values.pod.etcSources.cloudkitty_processor }}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "cloudkitty") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "cloudkitty.identity_dropin_entries" . | fromJsonArray) "cloudkitty") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "cloudkitty.db_dropin_entries" . | fromJsonArray) "cloudkitty") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if .Values.manifests.secret_ks_etc }}
 {{- $etcSources = append $etcSources (dict "secret" (dict "name" "cloudkitty-ks-etc")) }}
 {{- end }}
@@ -57,6 +58,9 @@ spec:
 {{ dict "envAll" $envAll "application" "cloudkitty-processor" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       affinity:
 {{ tuple $envAll "cloudkitty" "processor" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+{{- if $envAll.Values.pod.tolerations.cloudkitty.enabled }}
+{{ tuple $envAll "cloudkitty" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.cloudkitty.node_selector_key }}: {{ .Values.labels.cloudkitty.node_selector_value }}
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.cloudkitty_processor.timeout | default "30" }}

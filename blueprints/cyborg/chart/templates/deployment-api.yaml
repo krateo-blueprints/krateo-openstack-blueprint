@@ -50,6 +50,9 @@ spec:
 {{ dict "envAll" $envAll "application" "cyborg" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       affinity:
 {{ tuple $envAll "cyborg" "api" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+{{- if $envAll.Values.pod.tolerations.cyborg.enabled }}
+{{ tuple $envAll "cyborg" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.api.node_selector_key }}: {{ .Values.labels.api.node_selector_value }}
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.api.timeout | default "30" }}
@@ -105,6 +108,7 @@ spec:
               readOnly: true
 {{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "cyborg") | nindent 12 }}
 {{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "cyborg.identity_dropin_entries" . | fromJsonArray) "cyborg") | nindent 12 }}
+{{- include "helm-toolkit.snippets.db_dropin_mount" (tuple . (include "cyborg.db_dropin_entries" . | fromJsonArray) "cyborg") | nindent 12 }}
 {{- include "helm-toolkit.snippets.secret_conf_dropin_mount" (dict "from" (.Values.endpoints.identity.auth.nova.passwordFrom | default dict) "name" "cyborg-identity-nova" "file" "83-identity-nova.conf" "dir" "/etc/cyborg/cyborg.conf.d") | nindent 12 }}
 {{- include "helm-toolkit.snippets.secret_conf_dropin_mount" (dict "from" (.Values.endpoints.identity.auth.placement.passwordFrom | default dict) "name" "cyborg-identity-placement" "file" "84-identity-placement.conf" "dir" "/etc/cyborg/cyborg.conf.d") | nindent 12 }}
             - name: cyborg-etc
@@ -141,6 +145,7 @@ spec:
             defaultMode: 0555
 {{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "cyborg") | nindent 8 }}
 {{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "cyborg.identity_dropin_entries" . | fromJsonArray) "cyborg") | nindent 8 }}
+{{- include "helm-toolkit.snippets.db_dropin_volume" (tuple . (include "cyborg.db_dropin_entries" . | fromJsonArray) "cyborg") | nindent 8 }}
 {{- include "helm-toolkit.snippets.secret_conf_dropin_volume" (dict "from" (.Values.endpoints.identity.auth.nova.passwordFrom | default dict) "name" "cyborg-identity-nova") | nindent 8 }}
 {{- include "helm-toolkit.snippets.secret_conf_dropin_volume" (dict "from" (.Values.endpoints.identity.auth.placement.passwordFrom | default dict) "name" "cyborg-identity-placement") | nindent 8 }}
         - name: cyborg-etc

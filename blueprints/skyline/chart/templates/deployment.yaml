@@ -47,6 +47,9 @@ spec:
     spec:
       serviceAccountName: {{ $serviceAccountName }}
 {{ dict "envAll" $envAll "application" "skyline" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
+{{- if $envAll.Values.pod.tolerations.skyline.enabled }}
+{{ tuple $envAll "skyline" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.skyline.node_selector_key }}: {{ .Values.labels.skyline.node_selector_value }}
       initContainers:
@@ -64,7 +67,7 @@ spec:
               mountPath: /tmp/skyline-apiserver-init.sh
               subPath: skyline-apiserver-init.sh
               readOnly: true
-            - name: {{ ternary "skyline-config" "skyline-etc" (not (empty (.Values.endpoints.identity.auth.skyline.passwordFrom | default dict).secret)) }}
+            - name: {{ ternary "skyline-config" "skyline-etc" (not (empty (include "skyline.config_from_roots" .))) }}
               mountPath: /etc/skyline/skyline.yaml
               subPath: skyline.yaml
               readOnly: true
@@ -138,7 +141,7 @@ spec:
               mountPath: /tmp
             - name: skyline-var-lib
               mountPath: /var/lib/skyline
-            - name: {{ ternary "skyline-config" "skyline-etc" (not (empty (.Values.endpoints.identity.auth.skyline.passwordFrom | default dict).secret)) }}
+            - name: {{ ternary "skyline-config" "skyline-etc" (not (empty (include "skyline.config_from_roots" .))) }}
               mountPath: /etc/skyline/skyline.yaml
               subPath: skyline.yaml
               readOnly: true
@@ -166,7 +169,7 @@ spec:
           secret:
             secretName: skyline-etc
             defaultMode: 0444
-{{- if (.Values.endpoints.identity.auth.skyline.passwordFrom | default dict).secret }}
+{{- if include "skyline.config_from_roots" . }}
         - name: skyline-config
           secret:
             secretName: skyline-config
