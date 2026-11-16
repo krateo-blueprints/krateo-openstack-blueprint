@@ -121,6 +121,10 @@ four things hold, and each is checked here:
   15b. hack/db-users.yaml is exactly what the charts render: every per-service endpoints.oslo_db*.auth key, rendered with a
      sentinel, with the map's username; and the umbrella's oslo-db-<user> item reaches exactly the map's keys (path and
      extraPaths) in the chart that lists it.
+  25. ONE ACCOUNT, ONE PASSWORD. A MariaDB username a chart names under several keys (nova's three databases, octavia's
+     persistence database) is one account. Rendered with two different passwords in values, two different references,
+     or a reference on one key only, the chart must refuse, naming the keys and no password; with the same password or
+     reference under every key it renders (db-init's ALTER USER would otherwise set each in turn).
   22. THE DATABASE URL DROP-IN. For a per-service MariaDB user with its root, every ini option of the chart's config that
      carried the user's password in values mode (found by rendering with a sentinel) is gone from that config and is in
      the drop-in <chart>-db-connection (87-db-connection.conf), as exactly the values-mode URL with the password read from
@@ -1272,6 +1276,60 @@ def cell_mapping_check(docs_s, docs, sentinel, label=""):
         CELLMAP_CHECKED.append((label, cmds, loaders))
 
 
+ONE_ACCOUNT_CHECKED = []
+
+
+def one_account_check(tmp):
+    """25. ONE ACCOUNT, ONE PASSWORD. A MariaDB username a chart names under several keys (nova's oslo_db, oslo_db_api and
+    oslo_db_cell0; octavia's oslo_db and oslo_db_persistence) is one account: db-init's ALTER USER would set two different
+    passwords in turn, the last winning and the other readers refused. Rendered with two different passwords in values,
+    with two different references, and with a reference on one key only, the chart must refuse, naming both keys; with
+    the same password, or the same reference, under every key it renders."""
+    for u, charts in sorted(DBUSERS.items()):
+        for chart, ks in sorted((charts or {}).items()):
+            if len(ks) < 2:
+                continue
+            w = stage(os.path.join(BP, chart, "chart"), tmp, "oneacct-%s-%s" % (chart, u))
+            pairs = [tuple(k.split(".", 1)) for k in ks]
+            names = ["endpoints.%s.auth.%s" % p for p in pairs]
+
+            def vals(pw=None, refs=None):
+                v = {}
+                for i, (fam, key) in enumerate(pairs):
+                    a = {}
+                    if pw:
+                        a["password"] = pw[i]
+                    if refs and refs[i]:
+                        a["passwordFrom"] = {"store": "openstack-credentials", "secret": refs[i], "key": "password"}
+                    deep_merge(v, {"endpoints": {fam: {"auth": {key: a}}}})
+                return v
+            last = len(pairs) - 1
+            cases = [
+                ("different passwords in values", vals(pw=["GateSame7f3c"] * last + ["GateOther7f3c"]), False),
+                ("different references", vals(refs=["gate-root-a"] * last + ["gate-root-b"]), False),
+                ("a reference on one key only", vals(refs=["gate-root-a"] * last + [None]), False),
+                ("the same password in values", vals(pw=["GateSame7f3c"] * len(pairs)), True),
+                ("the same reference", vals(refs=["gate-root-a"] * len(pairs)), True),
+            ]
+            for label, values, ok in cases:
+                rc, out, err = helm_template(w, chart + "-gate1234", values)
+                if ok and rc != 0:
+                    fail("25: %s: MariaDB user %s with %s under %s does not render: %s" % (chart, u, label, names,
+                                                                                         err.strip()[:200]))
+                elif not ok and rc == 0:
+                    fail("25: %s: MariaDB user %s renders with %s under %s; one account has one password, so it must be "
+                         "refused" % (chart, u, label, names))
+                elif not ok and not (names[0] in err and names[-1] in err):
+                    fail("25: %s: MariaDB user %s with %s is refused, but not by naming %s and %s: %s" % (
+                        chart, u, label, names[0], names[-1], err.strip()[:200]))
+                elif not ok and ("GateSame7f3c" in err or "GateOther7f3c" in err):
+                    fail("25: %s: the refusal for MariaDB user %s prints a password" % (chart, u))
+                else:
+                    ONE_ACCOUNT_CHECKED.append((chart, u, label))
+    if not ONE_ACCOUNT_CHECKED:
+        fail("25: hack/db-users.yaml names no MariaDB user under two keys of one chart; the check had no input")
+
+
 def db_map_check(tmp):
     """15b. hack/db-users.yaml is exactly what the charts render: every chart is rendered with a sentinel per per-service
     endpoints.oslo_db*.auth key (MariaDB's own users and the PostgreSQL family are not per-service MariaDB users), and the
@@ -1291,11 +1349,15 @@ def db_map_check(tmp):
                     keys["%s.%s" % (fam, k)] = a.get("username")
         if not keys:
             continue
-        sent = {k: "gate-dbmap-%s-%s-7f3c" % (d, k.replace(".", "-").replace("_", "-")) for k in keys}
+        # one sentinel per USERNAME: one account has one password, and the charts refuse two (check 25). Where a username
+        # sits under several keys, which of them renders is told by the database its URL names.
+        sent = {k: "gate-dbmap-%s-%s-7f3c" % (d, str(u).replace("_", "-")) for k, u in keys.items()}
         vals = {}
         for k, s in sent.items():
             fam, key = k.split(".", 1)
             deep_merge(vals, {"endpoints": {fam: {"auth": {key: {"password": s}}}}})
+        shared = {u for u in keys.values() if list(keys.values()).count(u) > 1}
+        dbname = {k: str((ep.get(k.split(".", 1)[0]) or {}).get("path") or "").lstrip("/") for k in keys}
         w = stage(os.path.join(BP, d, "chart"), tmp, "dbmap-" + d)
         rc, out, err = helm_template(w, d + "-gate1234", vals)
         if rc != 0:
@@ -1306,7 +1368,12 @@ def db_map_check(tmp):
             if doc and doc.get("kind") == "Secret":
                 decoded += "\n".join(object_text(doc, k) or "" for k in (doc.get("data") or {}))
         for k, s in sent.items():
-            if s in decoded:
+            if keys[k] in shared:
+                hit = re.search(r"://[^:/@\s]+:%s@[^/\s'\"]+/%s(?=[?\s'\"]|$)" % (re.escape(s), re.escape(dbname[k])), decoded,
+                                re.M)
+            else:
+                hit = s in decoded
+            if hit:
                 rendered[(d, k)] = keys[k]
     mapped = {(c, k): u for u, cs in DBUSERS.items() for c, ks in (cs or {}).items() for k in ks}
     if not rendered:
@@ -2315,6 +2382,7 @@ def main():
         no_guest_user(tmp)
         identity_map_check(tmp)
         db_map_check(tmp)
+        one_account_check(tmp)
         rabbit = [c for c in components if c["name"] == "rabbitmq"]
         if "oslo-messaging-erlang-cookie" in items and rabbit:
             cookie_rotation_cases(tmp, refs_for(rabbit[0]))

@@ -22,8 +22,9 @@ passwordFrom reference:
 With no referenced user all of these render nothing and change nothing.
 
 One MariaDB account has one password. A chart that names the same username under two entries (nova's three
-databases, octavia's persistence database) must reference the same root under both, or render none: two roots for one
-account would have db-init's ALTER USER set them in turn. helm-toolkit.manifests.db_dropin refuses anything else.
+databases, octavia's persistence database) must reference the same root under both, or, without references, set the
+same password in values under both: two passwords for one account would have db-init's ALTER USER set them in turn.
+helm-toolkit.manifests.db_dropin refuses anything else, in both modes.
 */}}
 
 {{- define "helm-toolkit.utils.db_dropin_file" -}}87-db-connection.conf{{- end -}}
@@ -106,7 +107,15 @@ account would have db-init's ALTER USER set them in turn. helm-toolkit.manifests
 {{- if and $seen (ne $seen.ref $ref) }}
 {{- fail (printf "MariaDB user %s is endpoints.%s.auth.%s and endpoints.%s.auth.%s, with different password references (%q, %q): one account has one password, so both must name the same root (db-init's ALTER USER would set each in turn) (#228)" $u.username $seen.where.endpoint $seen.where.user $ep $e.user $seen.ref $ref) }}
 {{- end }}
-{{- $_ := set $byName $u.username (dict "ref" $ref "where" (dict "endpoint" $ep "user" $e.user)) -}}
+{{- /* values mode too: with no reference, the password in values is the account's, and two different ones would have
+       db-init's ALTER USER set each in turn, the last winning and the other readers refused. Compared by hash, so the
+       message names the families and never a password. */ -}}
+{{- if and $seen (not $from.secret) (ne $seen.pw ($u.password | toString | sha256sum)) }}
+{{- fail (printf "MariaDB user %s is endpoints.%s.auth.%s and endpoints.%s.auth.%s, with different passwords: one account has one password, so both must set the same (db-init's ALTER USER would set each in turn, and the readers of the other would be refused) (#228)" $u.username $seen.where.endpoint $seen.where.user $ep $e.user) }}
+{{- end }}
+{{- if not $seen }}
+{{- $_ := set $byName $u.username (dict "ref" $ref "pw" ($u.password | toString | sha256sum) "where" (dict "endpoint" $ep "user" $e.user)) -}}
+{{- end }}
 {{- end }}
 {{- $active := include "helm-toolkit.utils.db_dropin_active" (tuple $envAll .entries) | fromJsonArray -}}
 {{- if $active }}
