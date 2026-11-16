@@ -53,6 +53,7 @@ spec:
 {{ dict "envAll" $envAll "podName" "manila-share" "containerNames" (list "init" "manila-share" "manila-share-init") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 8 }}
     spec:
 {{ dict "envAll" $envAll "application" "manila" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
+{{- include "manila.ssh_key_fs_group" (dict "envAll" $envAll) }}
 {{ tuple "manila_share" . | include "helm-toolkit.snippets.kubernetes_pod_priority_class" | indent 6 }}
 {{ tuple "manila_share" . | include "helm-toolkit.snippets.kubernetes_pod_runtime_class" | indent 6 }}
       serviceAccountName: {{ $serviceAccountName }}
@@ -136,6 +137,7 @@ spec:
             - name: manila-etc-snippets
               mountPath: /etc/manila/manila.conf.d/
               readOnly: true
+{{- include "manila.ssh_key_volume_mount" . | indent 12 }}
             - name: manila-etc
               mountPath: /etc/manila/rootwrap.conf
               subPath: rootwrap.conf
@@ -222,6 +224,7 @@ spec:
           configMap:
             name: manila-bin
             defaultMode: 0555
+{{- include "manila.ssh_key_volume" . | indent 8 }}
 {{- if $isCephfsEnabled }}
         - name: etcceph
           emptyDir: {}

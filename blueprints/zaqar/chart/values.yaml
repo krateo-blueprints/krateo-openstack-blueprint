@@ -545,6 +545,8 @@ conf:
       bind: 0.0.0.0
       port: 8888
     signed_url:
+      # Published upstream. With endpoints.messaging.auth.signed_url_secret_keyFrom (the umbrella sets it) it is
+      # removed and the generated key arrives as the drop-in zaqar-signed-url-secret-key (#228).
       secret_key: SOMELONGSECRETKEY
     oslo_concurrency:
       lock_path: /var/lock

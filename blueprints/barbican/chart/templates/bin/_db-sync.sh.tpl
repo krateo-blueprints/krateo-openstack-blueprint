@@ -16,7 +16,11 @@ limitations under the License.
 
 set -ex
 
-barbican-db-manage $([ -d /etc/barbican/barbican.conf.d ] && echo --config-dir /etc/barbican/barbican.conf.d) upgrade
+# Krateo (#228): no --config-dir here. barbican-db-manage parses its own arguments with argparse (only --dburl), not
+# oslo.config's, and 0.3.66 crash-looped this Job with "invalid choice: '/etc/barbican/barbican.conf.d'" (measured on
+# GKE 2026-11-16). It reads its configuration through barbican.common.config, which parses with project='barbican', so
+# barbican.conf.d is found there; and it needs only the database URL. hack/oslo-config-dir-programs.yaml records it.
+barbican-db-manage upgrade
 
 {{- $kek := (index (index .Values.conf.barbican "simple_crypto_plugin" | default dict) "kek") | default "" }}
 {{- $old_kek := index .Values.conf.simple_crypto_kek_rewrap "old_kek" | default ""}}

@@ -18,6 +18,7 @@ limitations under the License.
 {{- if .Values.manifests.job_db_init }}
 {{- $dbToInit := dict "adminSecret" .Values.secrets.oslo_db.admin "configFile" "/etc/zaqar/zaqar.conf" "logConfigFile" "/etc/zaqar/logging.conf" "configDbSection" "drivers:management_store:sqlalchemy" "configDbKey" "uri" -}}
 {{- $dbInitJob := dict "envAll" . "serviceName" "zaqar" "dbToInit" $dbToInit -}}
+{{- $_ := set $dbInitJob "etcSources" (include "zaqar.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.tls.oslo_db -}}
 {{- $_ := set $dbInitJob "dbAdminTlsSecret" .Values.secrets.tls.oslo_db.zaqar.internal -}}
 {{- end -}}

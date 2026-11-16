@@ -413,6 +413,23 @@ credentials:
       secret: openstack-credential-identity-user-watcher
       key: password
       path: endpoints.identity.auth.watcher.passwordFrom
+    # zaqar's signed-URL key (0.3.67, #228): zaqar signs pre-signed queue URLs with an HMAC under [signed_url]
+    # secret_key, and the chart published SOMELONGSECRETKEY there, so anyone could sign a URL of their own for any
+    # queue without a token. Server-side only: zaqar both signs and verifies, nothing else holds it.
+    - id: zaqar-signed-url-secret-key
+      secret: openstack-credential-zaqar-signed-url-secret-key
+      key: password
+      path: endpoints.messaging.auth.signed_url_secret_keyFrom
+    # manila's service-instance SSH key (0.3.67, #228), replacing [generic] service_instance_password (published:
+    # manila). A key pair, not a password: the stock manila-service-image has user manila with password manila
+    # built in, so a generated password would lock manila out of its own share servers, while a key reaches a
+    # new service VM through the Nova keypair manila creates from the public half (templates/credentials.yaml).
+    - id: manila-service-instance-ssh-key
+      generator: SSHKey
+      secret: openstack-credential-manila-service-instance-ssh-key
+      key: privateKey
+      publicKey: publicKey
+      path: endpoints.sharev2.auth.service_instance_ssh_keyFrom
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
 components:
@@ -679,6 +696,7 @@ components:
       - oslo-messaging-admin
       - memcache-manila
       - identity-user-manila
+      - manila-service-instance-ssh-key
     deps:
       - keystone
       - rabbitmq
@@ -846,6 +864,7 @@ components:
       - memcache-zaqar
       - identity-user-zaqar
       - identity-user-zaqar-test
+      - zaqar-signed-url-secret-key
     deps:
       - keystone
       - mariadb

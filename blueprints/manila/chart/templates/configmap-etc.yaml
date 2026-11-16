@@ -231,6 +231,15 @@ limitations under the License.
 ---
 {{- tuple $envAll "manila" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 {{- dict "envAll" $envAll "entries" (include "manila.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "manila" | include "helm-toolkit.utils.identity_dropin_strip" }}
+{{- /* The service-instance login (#228, 0.3.67): with the generated key, no password at all
+       (templates/_service_instance_ssh_key.tpl). */}}
+{{- if include "manila.ssh_key_from" $envAll }}
+{{- $generic := .Values.conf.manila.generic -}}
+{{- $_ := unset $generic "service_instance_password" -}}
+{{- $_ := set $generic "path_to_private_key" (printf "%s/%s" (include "manila.ssh_key_dir" $envAll) (include "manila.ssh_key_private_file" $envAll)) -}}
+{{- $_ := set $generic "path_to_public_key" (printf "%s/%s" (include "manila.ssh_key_dir" $envAll) (include "manila.ssh_key_public_file" $envAll)) -}}
+{{- if empty $generic.manila_service_keypair_name }}{{- $_ := set $generic "manila_service_keypair_name" "manila-service" -}}{{- end }}
+{{- end }}
 apiVersion: v1
 kind: Secret
 metadata:
