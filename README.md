@@ -156,24 +156,29 @@ kubectl create namespace openstack-system
 # barbican-db-manage parses its own arguments, not oslo.config's, so it rejects that flag. Stay on 0.3.64; the fix
 # ships in 0.3.67.
 #
-# What 0.3.64 has actually been run through, stated so you know what is NOT covered:
-#   - 0.3.64 freshly installed with these exact steps (External Secrets Operator included),
-#     profile: full-strict, on a 3-node GKE cluster (n2-standard-16, Kubernetes 1.36.4,
-#     core-provider 2.13.94): all 32 components and the umbrella Ready 32 min after the apply.
-#     No container restarted, and none in a 10-minute window started after the install was
-#     complete (611 containers); 253 pods, none Pending. Keystone accepts the generated admin
-#     password and rejects OpenStack-Helm's published default; so it does for the compute service
-#     users (nova, nova_neutron, nova_placement, nova_cinder, neutron, neutron_nova, placement),
-#     generated per install since 0.3.63 (#228). Every ks-user Job succeeded. Deleting the install
-#     took about 1.5 min;
-#   - a fresh 0.3.62 install upgraded straight to 0.3.64, twice, the second time recorded every 10 s
-#     (#228): 32 components Ready about 11 min after the upgrade started; afterwards every rotated
-#     service user has the lockout exemption, Keystone accepts the generated passwords and rejects the
-#     published ones, and the value each reader loads is its generated one. DURING that upgrade the
-#     composition controller briefly ran the old chart with the new values and applied the new
-#     Deployments before the pre-upgrade password Job: `nova` was locked for about 1 minute and the
-#     compute and network APIs were unavailable for about 3.5 minutes. A core-provider fix is in
-#     progress; until it ships, plan an upgrade that rotates service users for a short API outage;
+# What 0.3.67 has actually been run through, stated so you know what is NOT covered:
+#   - 0.3.67 freshly installed with these exact steps (External Secrets Operator 2.14.0 included),
+#     profile: full-strict, on a 3-node GKE cluster (n2-standard-16, core-provider 2.13.103): all 32
+#     components and the umbrella Ready 32 min after the apply; 250 pods, none Pending. One container
+#     restarted, mariadb-controller (twice), each time on an unhandled connection error while GKE's API
+#     server briefly refused connections; none in a 10-minute window started after the install was
+#     complete (612 containers). Keystone accepts every generated password and rejects OpenStack-Helm's
+#     published ones: the admin, and all 34 service and test users the profile creates (the other 17 the
+#     charts can create are absent, as their modes are off). Every ks-user Job succeeded. manila's
+#     service-instance SSH key was generated (an OpenSSH private key and an ssh-rsa public key) and
+#     manila-share can read it; blazar-manager and zaqar-server load their generated keys, and a zaqar
+#     signed URL verifies while a tampered one is refused. No published identity password remains in any
+#     rendered Secret or ConfigMap. Deleting the install took about 1.5 min;
+#   - a fresh 0.3.64 install upgraded straight to 0.3.67, instrumented (#228): 32 components Ready 27 min
+#     after the upgrade started. Every component's new values were written only at the new version, once
+#     its definition served it (no outgoing controller ever saw them). 13 failed logins in all, each by a
+#     reader in the seconds before it restarted with its new password; no user was locked out and none
+#     failed after its readers restarted. No workload changed while a pre-upgrade password Job ran. The
+#     same user, key and leak checks as above. Each component whose values change rolls out twice
+#     (core-provider migrates the instance first, #277). API availability during the upgrade was not
+#     measured (the recorder lost its stream); one component (gnocchi) waited 16 minutes for core-provider
+#     to recover an operation its controller lost to the same API-server blip (fixed in core-provider
+#     #541, not yet released);
 #   - a fresh 0.3.51 install upgraded straight to 0.3.53 (the rotating upgrade): the admin
 #     password moved off the published default, the admin user is exempt from failed-login lockout
 #     (#252), and openstack-keystone-operator-kog 0.4.1 picked up the new password without a
@@ -198,7 +203,7 @@ kubectl create namespace openstack-system
 # version: the 36-component profile: full, kind, a VNC console in a browser, and the
 # per-component path further down.
 
-BP_VERSION=0.3.64
+BP_VERSION=0.3.67
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 
@@ -816,9 +821,8 @@ rotated user, so a locked user authenticates again as soon as its pods hold the 
 
 ### Upgrading to the next release: the other 25 service users rotate
 
-> **Not in 0.3.65 or 0.3.66.** 0.3.65 shipped this and is broken: watcher's decision engine crash-loops and
-> ceilometer's upgrade fails. 0.3.66 fixed those and broke barbican's db-sync (measured on GKE; see the warnings in
-> the install block). Wait for 0.3.67.
+> **From 0.3.67.** 0.3.65 shipped this and is broken (watcher's decision engine, ceilometer's upgrade), and so is
+> 0.3.66 (barbican's db-sync); see the warnings in the install block. Upgrade from 0.3.64 straight to 0.3.67.
 
 The release after 0.3.64 generates the remaining service users' passwords the same way, one
 `openstack-credential-identity-user-<username>` each:
