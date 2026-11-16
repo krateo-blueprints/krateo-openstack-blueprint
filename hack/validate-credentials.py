@@ -963,6 +963,58 @@ def config_dir_defaults(chart, docs0):
                              "oslo.config aborts on a missing directory (guard it: $([ -d %s ] && echo --config-dir %s))"
                              % (chart, podname, cont["name"], d, d, d))
 
+
+# 20. No published default survives in a password-like option. Checks 1-19 follow each credential from where its
+# value sits in values (endpoints.*.auth) by planting a sentinel there; a literal written under conf instead is invisible
+# to that. blazar's conf.blazar.physical_host_plugin.blazar_password: password (the blazar user's published default)
+# stayed in blazar.conf with the blazar user generated, found by a live scan on GKE 2026-11-16 (r066).
+TIER2_SECTIONS = {"database", "api_database", "placement_database", "cell0_database", "oslo_messaging_rabbit",
+                  "oslo_messaging_notifications", "cache", "coordination"}
+PW_KEY = re.compile(r"(^|_)(password|passwd|secret|secret_key)$")
+LITERALS_CHECKED = []
+
+
+def published_secrets(values):
+    """Every non-empty string the chart's values hold under a password-like key: what OpenStack-Helm publishes."""
+    out = set()
+    def walk(v, key=""):
+        if isinstance(v, dict):
+            for k, x in v.items():
+                walk(x, str(k))
+        elif isinstance(v, list):
+            for x in v:
+                walk(x, key)
+        elif isinstance(v, str) and v and PW_KEY.search(key.lower()) and len(v) >= 6 and "{{" not in v:
+            out.add(v)
+    walk(values)
+    return out
+
+
+def no_published_literal(chart, published, docs):
+    """20. With every reference set, no ini option with a password-like name outside tier-2 sections (database,
+    messaging, cache: MariaDB/RabbitMQ service users, tier 2, #253/#231) holds a value the chart publishes."""
+    for d in docs:
+        if d.get("kind") not in ("Secret", "ConfigMap"):
+            continue
+        for k in (d.get("data") or {}):
+            text = object_text(d, k) or ""
+            section = None
+            for line in text.splitlines():
+                m = re.match(r"^\s*\[([^\]]+)\]\s*$", line)
+                if m:
+                    section = m.group(1).strip()
+                    continue
+                m = re.match(r"^\s*([\w.-]+)\s*=\s*(.*?)\s*$", line)
+                if not m or not PW_KEY.search(m.group(1).lower()):
+                    continue
+                LITERALS_CHECKED.append((chart, d["metadata"]["name"], k, section, m.group(1)))
+                if (section or "").lower() in TIER2_SECTIONS:
+                    continue
+                if m.group(2).strip("'\"") in published:
+                    fail("20: %s: %s/%s %s [%s] %s holds a password the chart publishes in its values; with the "
+                         "references set it must come from a generated root (a drop-in), not from a literal under conf"
+                         % (chart, d["kind"], d["metadata"]["name"], k, section, m.group(1)))
+
 def pod_template_refs(pod):
     """Secret names a pod spec references (volumes, projected sources, env, envFrom)."""
     refs = set()
@@ -1289,6 +1341,7 @@ def main():
             checked += 1
             docs = [d for d in yaml.safe_load_all(out) if d]
             config_dir_check(c["name"], docs)
+            no_published_literal(c["name"], published_secrets(yaml.safe_load(open(os.path.join(chart_dir, "values.yaml")))), docs)
             for cid, sentinel in sentinels.items():
                 if sentinel in out:
                     fail("%s: the %s password from values appears in the rendered text" % (c["name"], cid))
@@ -1538,6 +1591,8 @@ def main():
                      "renders it to IDUSER_VARIANTS" % (chart, u, key))
     if checked and not KS_USER_CHECKED:
         fail("17: no chart's ks-user Job was matched to a rotated service user; the check had no input")
+    if checked and not LITERALS_CHECKED:
+        fail("20: no password-like ini option was found in any rendered chart; the check had no input")
     if checked and not CONFIG_DIR_CHECKED:
         fail("19: no OpenStack program was found in any container that mounts a .conf.d; the check had no input")
     seen = {p for _, _, _, p in CONFIG_DIR_CHECKED}
