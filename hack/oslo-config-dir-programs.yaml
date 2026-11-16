@@ -1,0 +1,97 @@
+# Which OpenStack programs accept oslo.config's --config-dir. Read by hack/validate-credentials.py check 19.
+#
+# 0.3.66 passed --config-dir to every program whose name starts with an OpenStack project, on the belief that all of them
+# parse oslo.config arguments. barbican-db-manage does not (argparse), rejected the flag, and its db-sync Job crash-looped
+# (measured on GKE 2026-11-16, 0.3.64 -> 0.3.66). So the name proves nothing: every program a chart starts in a
+# container with a .conf.d must be listed here from a measurement, and an unlisted one fails the gate.
+#
+# Measured 2026-11-16 in each chart's 2026.1 image (quay.io/airshipit/<chart>:2026.1-ubuntu_noble; gnocchi:
+# quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble) with `<program> --config-dir /nonexistent --help`:
+#   accepts: oslo.config raised ConfigDirNotFoundError ("Failed to read config file directory") while parsing argv;
+#   rejects: the program's own parser refused the flag (quoted per entry).
+# A new program, or a new image series, is measured the same way before it is added.
+accepts:
+  - aodh-dbsync
+  - aodh-evaluator
+  - aodh-expirer
+  - aodh-listener
+  - aodh-notifier
+  - blazar-api
+  - blazar-db-manage
+  - blazar-manager
+  - ceilometer-agent-notification
+  - ceilometer-polling
+  - ceilometer-upgrade
+  - cinder-manage
+  - cinder-scheduler
+  - cinder-volume
+  - cloudkitty-dbsync
+  - cloudkitty-processor
+  - cloudkitty-storage-init
+  - cyborg-agent
+  - cyborg-conductor
+  - cyborg-dbsync
+  - designate-central
+  - designate-manage
+  - designate-mdns
+  - designate-producer
+  - designate-worker
+  - freezer-api
+  - freezer-manage
+  - glance-manage
+  - gnocchi-metricd
+  - gnocchi-statsd
+  - gnocchi-upgrade
+  - heat-engine
+  - heat-manage
+  - ironic-api
+  - ironic-conductor
+  - ironic-dbsync
+  - keystone-manage
+  - magnum-conductor
+  - magnum-db-manage
+  - manila-data
+  - manila-manage
+  - manila-scheduler
+  - manila-share
+  - masakari-api
+  - masakari-engine
+  - masakari-manage
+  - mistral-db-manage
+  - mistral-server
+  - neutron-db-manage
+  - neutron-dhcp-agent
+  - neutron-l3-agent
+  - neutron-metadata-agent
+  - neutron-netns-cleanup
+  - neutron-openvswitch-agent
+  - neutron-rpc-server
+  - nova-compute
+  - nova-conductor
+  - nova-manage
+  - nova-novncproxy
+  - nova-scheduler
+  - nova-serialproxy
+  - nova-spicehtml5proxy
+  - octavia-db-manage
+  - octavia-driver-agent
+  - octavia-health-manager
+  - octavia-housekeeping
+  - octavia-worker
+  - placement-manage
+  - tacker-conductor
+  - tacker-db-manage
+  - tacker-server
+  - trove-api
+  - trove-conductor
+  - trove-manage
+  - trove-taskmanager
+  - watcher-api
+  - watcher-applier
+  - watcher-db-manage
+  - watcher-decision-engine
+  - zaqar-server
+  - zaqar-sql-db-manage
+rejects:
+  - name: barbican-db-manage
+    measured: "argparse: error: argument {revision,upgrade,history,current,clean}: invalid choice: '/nonexistent'"

@@ -100,7 +100,10 @@ four things hold, and each is checked here:
      failure window the Job's whole 1-3 minute run).
   19. EVERY PARSE READS THE DROP-INS. In every container that mounts a .conf.d, every OpenStack program its scripts
      start passes --config-dir <that dir> (0.3.65: watcher's plugin loader re-parsed without a project and its
-     decision engine lost every drop-in). 19b: an unguarded --config-dir names a directory mounted at defaults.
+     decision engine lost every drop-in). Which programs accept the flag is measured, in
+     hack/oslo-config-dir-programs.yaml: an unlisted program fails, a listed rejecting one must not get the flag
+     (0.3.66 gave it to barbican-db-manage, an argparse program, and its db-sync crash-looped), and a stale entry
+     fails. 19b: an unguarded --config-dir names a directory mounted at defaults.
   16b. RELOCATED FILES. A file that carried a service user's password and that the references render drops from
      its Secret (glance's swift-store.conf) is rendered by an ExternalSecret reading that user's root, identical
      to the values-mode file with the sentinel, and mounted at the same path by every container that read it.
@@ -855,6 +858,11 @@ def identity_map_check(tmp):
 OSLO_PROJECTS = ("aodh", "barbican", "blazar", "ceilometer", "cinder", "cloudkitty", "cyborg", "designate", "freezer",
                  "glance", "gnocchi", "heat", "ironic", "keystone", "magnum", "manila", "masakari", "masakarimonitors",
                  "mistral", "neutron", "nova", "octavia", "placement", "tacker", "trove", "watcher", "zaqar")
+# Which of them accept --config-dir is MEASURED, not inferred from the name: hack/oslo-config-dir-programs.yaml (0.3.66
+# passed it to barbican-db-manage, an argparse program, and its db-sync crash-looped).
+_CDP = yaml.safe_load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "oslo-config-dir-programs.yaml")))
+CONFIG_DIR_ACCEPTS = set(_CDP.get("accepts") or [])
+CONFIG_DIR_REJECTS = {r["name"]: r.get("measured", "") for r in (_CDP.get("rejects") or [])}
 OSLO_PROGRAM = re.compile(r"(?:^\s*|[;&|(]\s*|\bexec\s+|\btimeout\s+\d+\s+)((?:%s)-[a-z0-9-]+)(?=\s|$)" % "|".join(OSLO_PROJECTS))
 CONFIG_DIR_CHECKED = []
 
@@ -904,6 +912,19 @@ def config_dir_check(chart, docs):
                     code = line.split("#", 1)[0] if not line.lstrip().startswith("#") else ""
                     for prog in OSLO_PROGRAM.findall(code):
                         CONFIG_DIR_CHECKED.append((chart, podname, cont["name"], prog))
+                        has_flag = re.search(r"--config-dir[ =]", code) is not None
+                        if prog in CONFIG_DIR_REJECTS:
+                            if has_flag:
+                                fail("19: %s: %s container %s passes --config-dir to %s, which rejects it (%s); "
+                                     "hack/oslo-config-dir-programs.yaml" % (chart, podname, cont["name"], prog,
+                                                                             CONFIG_DIR_REJECTS[prog]))
+                            continue
+                        if prog not in CONFIG_DIR_ACCEPTS:
+                            fail("19: %s: %s container %s starts %s, which hack/oslo-config-dir-programs.yaml does not "
+                                 "list; measure whether it accepts --config-dir (<program> --config-dir /nonexistent "
+                                 "--help in its image) and add it to accepts or rejects" % (chart, podname, cont["name"],
+                                                                                           prog))
+                            continue
                         # the flag may be guarded on the directory existing: $([ -d D ] && echo --config-dir D)
                         if not any(re.search(r"--config-dir[ =]%s/?(?=[\s)\"']|$)" % re.escape(d), code) for d in dirs):
                             fail("19: %s: %s container %s starts %s without --config-dir %s; oslo.config finds that "
@@ -1519,6 +1540,10 @@ def main():
         fail("17: no chart's ks-user Job was matched to a rotated service user; the check had no input")
     if checked and not CONFIG_DIR_CHECKED:
         fail("19: no OpenStack program was found in any container that mounts a .conf.d; the check had no input")
+    seen = {p for _, _, _, p in CONFIG_DIR_CHECKED}
+    for stale in sorted((CONFIG_DIR_ACCEPTS | set(CONFIG_DIR_REJECTS)) - seen):
+        fail("19: hack/oslo-config-dir-programs.yaml lists %s, which no chart starts in a container with a .conf.d; "
+             "remove it (a list that keeps entries nothing checks stops meaning anything)" % stale)
     if failures:
         for f in failures:
             print("FAIL: " + f)
