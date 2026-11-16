@@ -60,6 +60,14 @@ does not, and it multiplied the umbrella CRD's size by every version the CRD sti
 `hack/umbrella-crd-size` fails CI if the generated umbrella CRD, times 4 served versions, would
 exceed 1 MiB.
 
+Besides `componentValues`, the umbrella fills in a few values itself, merged **under** each entry, so an explicit
+`componentValues` value wins: the credential references (#228), the `tolerations` above, and, from 0.3.69,
+`ceilometer.conf.notification_vhosts` (#285). The last lists the RabbitMQ vhosts ceilometer's notification agent
+consumes: upstream's seven (ceilometer, cinder, glance, nova, keystone, neutron, heat), keeping only those a selected
+component's rabbit-init creates. glance and keystone run no rabbit-init, so they never appear. An install that switches
+a chart's rabbit-init on or off, or moves its vhost, through `componentValues` sets
+`componentValues.ceilometer.conf.notification_vhosts` itself.
+
 Each component exposes **every top-level key of its chart's `values.yaml`**, not a chosen subset:
 `conf`, `pod`, `manifests`, `endpoints`, `network`, `images`, `labels`, `bootstrap`, `extraObjects`,
 `jobs`, `secrets` and the rest. Declared fields under them are typed (`manifests.*` as booleans,

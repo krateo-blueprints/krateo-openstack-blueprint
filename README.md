@@ -950,6 +950,53 @@ denied does not count toward `max_connect_errors`), so no account is locked by i
 blueprint that logs in as a service's MariaDB user with the old password is refused from then on. It must
 read the new value from the matching root Secret. Never delete those Secrets.
 
+### Upgrading to 0.3.69 or later: each service's RabbitMQ password rotates
+
+From 0.3.69 every service's own RabbitMQ user gets a generated password:
+`openstack-credential-oslo-messaging-<user>`, one per RabbitMQ username, for 22 users (aodh, barbican, blazar,
+ceilometer, cinder, cloudkitty, cyborg, designate, glance, heat, ironic, keystone, magnum, manila, masakari, mistral,
+neutron, nova, octavia, tacker, trove, watcher). Each was OpenStack-Helm's published default (`password`), so any pod
+that reached RabbitMQ could log in to a service's vhost and read or inject its RPC messages. This is the last tier of
+#228. Each username is rendered by its own chart only (measured, `hack/mq-users.yaml`): the notification consumers
+read other services' vhosts as the RabbitMQ administrator, not as their users, so each root reaches one chart.
+
+On the upgrade that ships it:
+- no service's rendered config carries a RabbitMQ URL any more. `[DEFAULT] transport_url` (and
+  `[oslo_messaging_notifications] transport_url` in blazar, ceilometer and tacker) arrive as a drop-in,
+  `88-transport.conf` in the config's `.conf.d`, from an ExternalSecret `<service>-transport`, with every host's
+  password URL-quoted. It reaches only the programs that send or receive over RabbitMQ, measured per program from
+  their source (`hack/mq-readers.yaml`): the services and RPC agents do; the database Jobs, the bootstrap Jobs, the
+  cleanup CronJobs, neutron's netns-cleanup and OVN agents and octavia's health-manager, housekeeping and driver-agent
+  never connect and no longer hold the password. nova's Jobs keep it: nova-manage builds a transport, and the cell
+  mapping templates are formatted from it;
+- neutron's agent health probes now also read `neutron.conf.d` (`--config-dir`). They parse the config without a
+  project, so without it they would find no transport URL and report healthy without checking the agent's queue;
+- `<service>-rabbitmq-user` (`RABBITMQ_CONNECTION`, read by rabbit-init) becomes an ExternalSecret reading the same
+  root;
+- rabbit-init's `rabbitmqadmin declare user` is an HTTP PUT of the user, which creates it or replaces it, so it sets
+  the generated password on the existing user. Measured on the chart's `rabbitmq:3.13-management` image: run twice
+  with two passwords, the second is accepted and the first refused. No script change was needed;
+- a literal `conf.<service>.DEFAULT.transport_url` (or the notifications one) in values is refused together with the
+  reference: it would carry the password, and it would be replaced silently.
+
+glance and keystone also get a root, although neither runs rabbit-init (`manifests.job_rabbit_init: false`) and both
+ship the `noop` notification driver: their configs carried the published password in a URL for a user that does not
+exist, and a driver set through componentValues would use it.
+
+The rotation window has the same shape as 0.3.68's MariaDB one. rabbit-init is a post-upgrade hook, so a pod started
+with the new password is refused until its chart's rabbit-init has run, and retries. RabbitMQ authenticates only when
+a connection opens, so a pod still running with the old password keeps its open connections; a reconnect with the old
+password is refused until the pod is replaced. RabbitMQ has no failed-login lockout. Anything outside the blueprint that
+logs in as a service's RabbitMQ user must read the new value from the matching root Secret. Never delete those Secrets.
+
+ceilometer's notification agent now consumes only the vhosts that exist (#285). It had a fixed list of seven
+(ceilometer, cinder, glance, nova, keystone, neutron, heat), and oslo.messaging retries a missing vhost forever: on a
+full-strict install, where cinder is not selected and glance and keystone create no vhost, it consumed no
+notifications at all. The umbrella now passes ceilometer `conf.notification_vhosts`: the vhosts of that list that a
+selected component's rabbit-init creates (full-strict: ceilometer, nova, neutron, heat; full: cinder too). An explicit
+`componentValues.ceilometer.conf.notification_vhosts` still wins; set it yourself if you change a chart's rabbit-init
+or vhost through componentValues.
+
 ### Components follow the umbrella's version
 
 The orchestrator registers every component `CompositionDefinition` at its own chart version
