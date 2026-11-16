@@ -127,6 +127,7 @@ import glob
 import json
 import os
 import re
+import urllib.parse
 import shutil
 import subprocess
 import sys
@@ -1005,6 +1006,28 @@ TIER2_SECTIONS = {"database", "api_database", "placement_database", "cell0_datab
                   "oslo_messaging_notifications", "cache", "coordination"}
 PW_KEY = re.compile(r"(^|_)(password|passwd|secret|secret_key)$")
 LITERALS_CHECKED = []
+# 20b. A password inside a URL's userinfo has no password-like option name: ceilometer's [notification]
+# messaging_urls carried the RabbitMQ administrator's published password in seven rabbit:// URLs after that password
+# was generated (0.3.57), invisible to 20 (#281, found by rendering 2026-11-16). Every URL in rendered config and
+# Secrets is read, and the subject is the URL's USER, not the section it sits in: a URL logging in as an install-wide
+# administrator (MariaDB root, RabbitMQ admin), whose root is generated, must never carry the published value. URLs
+# of the per-service users (transport_url, [database] connection, DB_CONNECTION) are #228's remaining tier and are
+# exempt until their slice lands; a section-based exemption would have let #281 through ([notification] is not one).
+URL_USERINFO = re.compile(r"\b[a-z][a-z0-9+.-]*://([^:/@\s'\"]+):(\{\{.*?\}\}|[^@/\s'\"]+)@")
+URLS_CHECKED = []
+
+
+def admin_usernames(values):
+    """The install-wide administrators' usernames a chart's values name (MariaDB root, RabbitMQ admin)."""
+    ep = (values or {}).get("endpoints") or {}
+    out = set()
+    for fam, users in (("oslo_db", ("admin",)), ("oslo_messaging", ("admin", "user"))):
+        auth = ((ep.get(fam) or {}).get("auth") or {})
+        for u in users:
+            name = (auth.get(u) or {}).get("username") if isinstance(auth.get(u), dict) else None
+            if name:
+                out.add(name)
+    return out
 
 
 def published_secrets(values):
@@ -1023,20 +1046,38 @@ def published_secrets(values):
     return out
 
 
-def no_published_literal(chart, published, docs):
+def no_published_literal(chart, published, docs, admins=frozenset()):
     """20. With every reference set, no ini option with a password-like name outside tier-2 sections (database,
-    messaging, cache: MariaDB/RabbitMQ service users, tier 2, #253/#231) holds a value the chart publishes."""
+    messaging, cache: the per-service MariaDB/RabbitMQ users, #228's remaining tier) holds a value the chart
+    publishes. 20b. No URL logging in as an install-wide administrator (`admins`) carries a value the chart
+    publishes, in any section or Secret."""
     for d in docs:
-        if d.get("kind") not in ("Secret", "ConfigMap"):
+        if d.get("kind") not in ("Secret", "ConfigMap", "ExternalSecret"):
             continue
-        for k in (d.get("data") or {}):
-            text = object_text(d, k) or ""
+        if d.get("kind") == "ExternalSecret":
+            # The generated files' templates: an administrator URL here must take its password from the root.
+            texts = (((d.get("spec") or {}).get("target") or {}).get("template") or {}).get("data") or {}
+        else:
+            texts = {k: object_text(d, k) for k in (d.get("data") or {})}
+        for k, text in texts.items():
+            text = str(text or "")
             section = None
             for line in text.splitlines():
                 m = re.match(r"^\s*\[([^\]]+)\]\s*$", line)
                 if m:
                     section = m.group(1).strip()
                     continue
+                for um in URL_USERINFO.finditer(line):
+                    user, pw = urllib.parse.unquote(um.group(1)), urllib.parse.unquote(um.group(2))
+                    if user not in admins:
+                        continue
+                    URLS_CHECKED.append((chart, d["metadata"]["name"], k, section, user))
+                    if "{{" in pw:
+                        continue  # read from the generated root by the ExternalSecret template
+                    if pw in published:
+                        fail("20b: %s: %s/%s %s [%s] a URL logs in as %s with a password the chart publishes; with the "
+                             "references set it must be built from the generated root (a drop-in), not from a literal"
+                             % (chart, d["kind"], d["metadata"]["name"], k, section, user))
                 m = re.match(r"^\s*([\w.-]+)\s*=\s*(.*?)\s*$", line)
                 if not m or not PW_KEY.search(m.group(1).lower()):
                     continue
@@ -1507,7 +1548,8 @@ def main():
             checked += 1
             docs = [d for d in yaml.safe_load_all(out) if d]
             config_dir_check(c["name"], docs)
-            no_published_literal(c["name"], published_secrets(yaml.safe_load(open(os.path.join(chart_dir, "values.yaml")))), docs)
+            chart_values = yaml.safe_load(open(os.path.join(chart_dir, "values.yaml")))
+            no_published_literal(c["name"], published_secrets(chart_values), docs, admin_usernames(chart_values))
             for cid, sentinel in sentinels.items():
                 if sentinel in out:
                     fail("%s: the %s password from values appears in the rendered text" % (c["name"], cid))
@@ -1766,6 +1808,9 @@ def main():
     for cid, rule in RULES.items():
         if "keyfile" in rule and cid in items and not any(k[1] == cid for k in KEYFILE_CHECKED):
             fail("21: no render checked where %s's key files arrive; the check had no input" % cid)
+    if checked and not URLS_CHECKED:
+        fail("20b: no URL logging in as an install-wide administrator was found in any rendered chart; the check had "
+             "no input")
     if checked and not LITERALS_CHECKED:
         fail("20: no password-like ini option was found in any rendered chart; the check had no input")
     if checked and not CONFIG_DIR_CHECKED:
