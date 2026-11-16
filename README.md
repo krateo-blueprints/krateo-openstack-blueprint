@@ -156,29 +156,29 @@ kubectl create namespace openstack-system
 # barbican-db-manage parses its own arguments, not oslo.config's, so it rejects that flag. Stay on 0.3.64; the fix
 # ships in 0.3.67.
 #
-# What 0.3.67 has actually been run through, stated so you know what is NOT covered:
-#   - 0.3.67 freshly installed with these exact steps (External Secrets Operator 2.14.0 included),
-#     profile: full-strict, on a 3-node GKE cluster (n2-standard-16, core-provider 2.13.103): all 32
-#     components and the umbrella Ready 32 min after the apply; 250 pods, none Pending. One container
-#     restarted, mariadb-controller (twice), each time on an unhandled connection error while GKE's API
-#     server briefly refused connections; none in a 10-minute window started after the install was
-#     complete (612 containers). Keystone accepts every generated password and rejects OpenStack-Helm's
-#     published ones: the admin, and all 34 service and test users the profile creates (the other 17 the
-#     charts can create are absent, as their modes are off). Every ks-user Job succeeded. manila's
-#     service-instance SSH key was generated (an OpenSSH private key and an ssh-rsa public key) and
-#     manila-share can read it; blazar-manager and zaqar-server load their generated keys, and a zaqar
-#     signed URL verifies while a tampered one is refused. No published identity password remains in any
-#     rendered Secret or ConfigMap. Deleting the install took about 1.5 min;
-#   - a fresh 0.3.64 install upgraded straight to 0.3.67, instrumented (#228): 32 components Ready 27 min
-#     after the upgrade started. Every component's new values were written only at the new version, once
-#     its definition served it (no outgoing controller ever saw them). 13 failed logins in all, each by a
-#     reader in the seconds before it restarted with its new password; no user was locked out and none
-#     failed after its readers restarted. No workload changed while a pre-upgrade password Job ran. The
-#     same user, key and leak checks as above. Each component whose values change rolls out twice
-#     (core-provider migrates the instance first, #277). API availability during the upgrade was not
-#     measured (the recorder lost its stream); one component (gnocchi) waited 16 minutes for core-provider
-#     to recover an operation its controller lost to the same API-server blip (fixed in core-provider
-#     #541, not yet released);
+# What 0.3.68 has actually been run through, stated so you know what is NOT covered:
+#   - 0.3.68 freshly installed with these exact steps (External Secrets Operator 2.14.0 included),
+#     profile: full-strict, on a 3-node GKE cluster (n2-standard-16, core-provider 2.13.106): all 32
+#     components Ready 26 min after the apply, the umbrella 28 min; 254 pods, none Pending, and no
+#     container restarted, during the install or in a 10-minute window after it (612 containers).
+#     Keystone accepts every generated password and rejects OpenStack-Helm's published ones: the admin,
+#     and all 34 service and test users the profile creates (the other 17 the charts can create are
+#     absent, as their modes are off). MariaDB accepts each of the 25 per-service users the profile
+#     creates with its generated password and refuses the published one (ERROR 1045); its access-denied
+#     counter stayed at 0 through the whole install. nova's cell mappings hold URL templates, not
+#     passwords; neutron's agents (15 pods) run with no database password; keystone-api reads its
+#     database drop-in under Apache. Every ks-user and db-init Job succeeded. No published identity,
+#     MariaDB or RabbitMQ-administrator password remains in any rendered Secret or ConfigMap (the
+#     per-service RabbitMQ users are still published: 0.3.69);
+#   - a fresh 0.3.67 install upgraded straight to 0.3.68, instrumented (#228): 32 components Ready 21 min
+#     after the upgrade started. No failed Keystone login. Each per-service MariaDB user's password moves
+#     once, at this upgrade: 24 connections were refused in all, every one by a pod still holding the old
+#     password before it was replaced, the longest window gnocchi's (about 3 min, as it rolls out twice,
+#     #277); none after the last replacement. The same user, database and leak checks as above. A
+#     composition controller killed mid-upgrade (SIGKILL inside skyline's db-sync hook) had its operation
+#     recovered 4 s after it restarted (core-provider #541, 2.13.106). API availability WAS measured:
+#     keystone's token API failed for about 1-2 min twice, and placement, orchestration, metric and
+#     workflow 1-3 times each, as each API runs one replica and its rollout drops it (#286);
 #   - a fresh 0.3.51 install upgraded straight to 0.3.53 (the rotating upgrade): the admin
 #     password moved off the published default, the admin user is exempt from failed-login lockout
 #     (#252), and openstack-keystone-operator-kog 0.4.1 picked up the new password without a
@@ -198,12 +198,15 @@ kubectl create namespace openstack-system
 #     MariaDB and RabbitMQ data intact across the upgrade, a node move and a RabbitMQ outage,
 #     and a designate zone round-trip through PowerDNS (#179, #204).
 # Known, measured, not yet fixed:
-#   - a component can read Ready while a pod of it crash-loops (#231).
+#   - a component can read Ready while a pod of it crash-loops (#231);
+#   - ceilometer's notification agent consumes no service notifications in full-strict: it waits on
+#     RabbitMQ vhosts that do not exist there (cinder, glance, keystone) (#285);
+#   - every API runs one replica, so an upgrade or config change drops it for 1-2 min (#286).
 # cinder is not in full-strict because its only backend needs Ceph (#196). NOT verified at this
 # version: the 36-component profile: full, kind, a VNC console in a browser, and the
 # per-component path further down.
 
-BP_VERSION=0.3.67
+BP_VERSION=0.3.68
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 
