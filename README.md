@@ -151,6 +151,11 @@ kubectl create namespace openstack-system
 #     post-upgrade hook fails on every retry.
 # The fix ships in 0.3.66. Stay on 0.3.64 until then.
 #
+# DO NOT INSTALL OR UPGRADE TO 0.3.66 either. Measured on GKE, upgrading from 0.3.64: barbican's db-sync Job
+# crash-loops, so barbican never installs or upgrades. 0.3.66 passes --config-dir to every OpenStack program, and
+# barbican-db-manage parses its own arguments, not oslo.config's, so it rejects that flag. Stay on 0.3.64; the fix
+# ships in 0.3.67.
+#
 # What 0.3.64 has actually been run through, stated so you know what is NOT covered:
 #   - 0.3.64 freshly installed with these exact steps (External Secrets Operator included),
 #     profile: full-strict, on a 3-node GKE cluster (n2-standard-16, Kubernetes 1.36.4,
@@ -811,8 +816,9 @@ rotated user, so a locked user authenticates again as soon as its pods hold the 
 
 ### Upgrading to the next release: the other 25 service users rotate
 
-> **Not in 0.3.65.** 0.3.65 shipped this and is broken: watcher's decision engine crash-loops and
-> ceilometer's upgrade fails (measured on GKE, see the warning in the install block). Wait for 0.3.66.
+> **Not in 0.3.65 or 0.3.66.** 0.3.65 shipped this and is broken: watcher's decision engine crash-loops and
+> ceilometer's upgrade fails. 0.3.66 fixed those and broke barbican's db-sync (measured on GKE; see the warnings in
+> the install block). Wait for 0.3.67.
 
 The release after 0.3.64 generates the remaining service users' passwords the same way, one
 `openstack-credential-identity-user-<username>` each:
