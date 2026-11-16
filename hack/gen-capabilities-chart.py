@@ -39,7 +39,7 @@ def serviceContract_block(values_text: str) -> str:
     """The `serviceContract:` top-level block of the umbrella values.yaml, as text.
 
     It ends at the first later line that starts in column 0 (a key or a comment), with trailing
-    blank lines dropped. The comment banner above `contractEmitter:` belongs to that key.
+    blank lines dropped. The comment banner after the block (the contractEmitter removal note) is not part of it.
     """
     lines = values_text.splitlines()
     try:

@@ -105,8 +105,9 @@ native OpenStack roles), a capability catalog (each capability renders an aggreg
 ClusterRole, and ABAC capabilities additionally a ValidatingAdmissionPolicy and binding; from
 0.3.48 these come from the per-cluster chart `openstack-capabilities`, installed before any
 instance, which takes the same `serviceContract`), an SSO
-deep-link, and usage/health/tagging/ticketing declarations. The runtime side of the
-usage/health declaration is the **contract emitter** — CronJobs polling the OpenStack APIs
-and writing normalized rows to ClickHouse (see [contract-emitter](./contract-emitter.md)).
+deep-link, and usage/health/tagging/ticketing declarations. The chart only *declares* usage
+and health: the CMP's single emitter of both is [krateo-platformops/cmp-usage-collector](https://github.com/krateo-platformops/cmp-usage-collector), which reads each
+OpenStack from the parent with a read-only reader user. The chart's own contract emitter was
+removed in 0.3.68, because both running would double-count usage.
 The full field-by-field surface is in [configuration](./configuration.md); the schema is in
 [api](./api.md).

@@ -1,9 +1,9 @@
 ---
 type: Configuration
 title: krateo-openstack-blueprint — configuration
-description: The whole Openstack orchestrator value surface — profile, enabled, installDefinitions, ociRepo, componentValues (typed by each component's CRD), the serviceContract stanza, and the contractEmitter CronJobs.
+description: The whole Openstack orchestrator value surface — profile, enabled, installDefinitions, ociRepo, componentValues (typed by each component's CRD), and the serviceContract stanza.
 resource: oci://ghcr.io/krateo-blueprints/charts/openstack
-tags: [openstack, configuration, values, service-contract, contract-emitter]
+tags: [openstack, configuration, values, service-contract]
 timestamp: 2026-08-11T00:00:00Z
 ---
 
@@ -24,7 +24,7 @@ own, smaller schemas; the orchestrator's `componentValues` mirrors them.
 | `ociRepo` | string | `oci://ghcr.io/krateo-blueprints/charts` | Registry path holding the per-component blueprint charts. They are pulled at the orchestrator's own chart version. Up to 0.3.37 a `chartVersion` value chose it, and its schema default was frozen into every Composition at create time, so upgrades left the components behind (#179). A stale `chartVersion` in an existing Composition is accepted and ignored. |
 | `componentValues` | object \| null | `null` | Per-component Composition `spec` overrides (see below). |
 | `serviceContract` | object | chart default | Service integration descriptor, contract v1 (see below). |
-| `contractEmitter` | object | disabled | Runtime usage/health emission CronJobs (see below). |
+| `contractEmitter` | object | absent | Removed in 0.3.68 (see below). |
 
 ## `componentValues.<name>` — per-component overrides
 
@@ -355,22 +355,16 @@ only environment-specific fields (URLs, realm). All top-level keys are required:
 The full JSON schema (including the `capability` and `policyRule` definitions and the
 conditional `allOf`/`if`/`then` constraints) is documented in [api](./api.md).
 
-## `contractEmitter` (disabled by default)
+## `contractEmitter` (removed in 0.3.68)
 
-The runtime side of `serviceContract.usage`/`health`: CronJobs polling the OpenStack APIs on
-the declared intervals and writing normalized `UsageRecord` / health rows to ClickHouse over
-its HTTP interface. `additionalProperties: false`.
+The chart no longer emits usage or health. The CMP's single emitter of the `serviceContract`
+usage and health is [krateo-platformops/cmp-usage-collector](https://github.com/krateo-platformops/cmp-usage-collector): it reads each OpenStack from the parent with a
+read-only reader user, so the tenant cannot reach the reporting path. Both emitters running
+would double-count usage.
 
-| Field | Type | Purpose |
-| --- | --- | --- |
-| `enabled` | boolean (default `false`) | Turn the CronJobs on. |
-| `image` / `imagePullPolicy` | string | Emitter image + pull policy. |
-| `org` | string | Organization stamped on every emitted record (platform-injected). |
-| `openstack` | `{existingSecret, authUrl?, region?, interface?, tlsVerify?}` | OpenStack-Helm admin openrc secret (`OS_*` keys); `interface` is `internal`\|`public`\|`admin`. |
-| `clickhouse` | `{url, database, usageTable, healthTable, bootstrapHealthTable?, existingSecret?}` | ClickHouse HTTP target + table names; optional secret with `username`/`password`. |
-| `resources` | object | Container requests/limits. |
-
-See [contract-emitter](./contract-emitter.md) for the emission model and record shapes.
+`contractEmitter.enabled: false` is still accepted, so a Composition created before 0.3.68
+keeps validating. `enabled: true` or any other key is refused by the schema, and `enabled:
+true` also by the render, so a value that would do nothing never looks like it runs.
 
 ## Invariants
 

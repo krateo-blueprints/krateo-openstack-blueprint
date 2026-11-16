@@ -1,7 +1,7 @@
 ---
 type: API
 title: krateo-openstack-blueprint — API
-description: The CompositionDefinition CRD each blueprint registers, the per-component composition Kinds, and the Openstack orchestrator composition schema (profile/enabled/componentValues/serviceContract/contractEmitter).
+description: The CompositionDefinition CRD each blueprint registers, the per-component composition Kinds, and the Openstack orchestrator composition schema (profile/enabled/componentValues/serviceContract).
 resource: oci://ghcr.io/krateo-blueprints/charts/openstack
 tags: [openstack, api, compositiondefinition, crd, service-contract]
 timestamp: 2026-08-11T00:00:00Z
@@ -112,7 +112,7 @@ typed by `blueprints/openstack/chart/values.schema.json`:
 | `ociRepo` | string | `oci://ghcr.io/krateo-blueprints/charts` | Registry for the component charts. They are pulled at the orchestrator's own chart version; there is no `chartVersion` value (#179). |
 | `componentValues` | object\|null | `null` | Per-component `spec` overrides by component name, passed through and typed by each component's CRD. |
 | `serviceContract` | object | chart default | Contract v1 descriptor (below). |
-| `contractEmitter` | object | disabled | Runtime usage/health CronJobs. |
+| `contractEmitter` | object | absent | Removed in 0.3.68. Only `enabled: false` is accepted, so an older Composition keeps validating. |
 
 ## `serviceContract` schema (contract v1)
 
@@ -147,6 +147,5 @@ enum: `get`, `list`, `watch`, `create`, `update`, `patch`, `delete`, `deletecoll
 - `health.source.type = endpoint` ⇒ `source.endpoint` (HTTPS) required.
 
 The full field surface (including `usage.metrics[]`, `health`, `tagging`, `ticketing`) is
-tabulated in [configuration](./configuration.md#servicecontract-contract-v1); the runtime
-emitter that satisfies the `usage`/`health` declaration is documented in
-[contract-emitter](./contract-emitter.md).
+tabulated in [configuration](./configuration.md#servicecontract-contract-v1). The emitter
+that satisfies the `usage`/`health` declaration is [krateo-platformops/cmp-usage-collector](https://github.com/krateo-platformops/cmp-usage-collector), not this chart.

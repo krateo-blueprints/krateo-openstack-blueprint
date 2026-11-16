@@ -698,96 +698,16 @@
     },
     "contractEmitter": {
       "type": "object",
-      "title": "Contract emitter (runtime usage/health emission)",
-      "description": "Runtime side of serviceContract.usage/health: CronJobs polling the OpenStack APIs on the declared intervals and writing normalized UsageRecord / health rows to ClickHouse over its HTTP interface. Disabled by default.",
+      "title": "Removed in 0.3.68",
+      "description": "The contract emitter was removed in 0.3.68: the CMP's usage and health emitter is krateo-platformops/cmp-usage-collector. Only enabled: false is accepted, so a Composition created before 0.3.68 keeps validating.",
       "additionalProperties": false,
       "properties": {
         "enabled": {
           "type": "boolean",
-          "default": false
-        },
-        "image": {
-          "type": "string",
-          "minLength": 1
-        },
-        "imagePullPolicy": {
-          "type": "string",
           "enum": [
-            "Always",
-            "IfNotPresent",
-            "Never"
-          ]
-        },
-        "org": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Organization stamped on every emitted record (platform-injected)."
-        },
-        "openstack": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "existingSecret": {
-              "type": "string",
-              "minLength": 1,
-              "description": "OpenStack-Helm admin openrc secret (OS_* keys)."
-            },
-            "authUrl": {
-              "type": "string",
-              "description": "Overrides the secret's OS_AUTH_URL when set."
-            },
-            "region": {
-              "type": "string"
-            },
-            "interface": {
-              "type": "string",
-              "enum": [
-                "internal",
-                "public",
-                "admin"
-              ]
-            },
-            "tlsVerify": {
-              "type": "boolean"
-            }
-          }
-        },
-        "clickhouse": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "url": {
-              "type": "string",
-              "pattern": "^https?://"
-            },
-            "database": {
-              "type": "string",
-              "minLength": 1
-            },
-            "healthDatabase": {
-              "type": "string",
-              "description": "Database for health rows. Separate from `database` because showback owns the usage schema while this emitter creates the health table: bootstrapping into showback's database fails until showback has migrated. Defaults to `database` when unset."
-            },
-            "usageTable": {
-              "type": "string",
-              "minLength": 1
-            },
-            "healthTable": {
-              "type": "string",
-              "minLength": 1
-            },
-            "bootstrapHealthTable": {
-              "type": "boolean"
-            },
-            "existingSecret": {
-              "type": "string",
-              "description": "Optional secret with keys: username, password."
-            }
-          }
-        },
-        "resources": {
-          "type": "object",
-          "description": "Kubernetes resource requests/limits for the emitter container."
+            false
+          ],
+          "description": "Removed in 0.3.68; must be false or absent."
         }
       }
     }

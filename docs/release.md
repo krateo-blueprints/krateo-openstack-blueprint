@@ -51,17 +51,19 @@ those are the repo's own registrations and must point at a version that exists.
 1. **`componentValues` schema in sync** — runs `hack/gen-componentvalues-schema.py` and fails
    if `blueprints/openstack/chart/values.schema.json` changed (the umbrella schema must be
    regenerated from the component schemas and committed).
-2. **Lint, render, determinism + hook-free gate for every blueprint chart** — `helm lint`,
-   then two `helm template` renders that must be byte-identical (any `randAlphaNum`/`uuidv4`/
-   `now` reaching a manifest fails — the reconcile-churn class of bug), then a check that no
-   `helm.sh/hook` annotation survives (the Krateo composition-dynamic-controller SA cannot
-   get/delete hook Jobs, so hooked charts never converge). The orchestrator is additionally
-   rendered under `profile=full` and with `contractEmitter.enabled=true`.
-3. **Contract emitter** — `py_compile` of `contract-emitter.py`, then a mocked OpenStack e2e
-   (`tests/test_*.py`) asserting the usage-record row shape, the deterministic record_id, the
-   tag splitting and the health enum.
-4. **Service-contract SSO deep-link** — `tools/resolve-deeplink.sh` resolves the chart's
-   `sso.deepLink.urlTemplate` against sample org/tenant/namespace/project.
+2. **The `hack/validate-*.py` gates** — each states, in its docstring and in the step comment
+   in `lint.yaml`, the defect it was written for. The step list in `lint.yaml` is the source of
+   truth; this page does not repeat it. A helm template and lint of every chart also runs, as
+   information only: it surfaces warnings and never fails the build. Until 2026-11-16 this item
+   claimed a byte-identical determinism render and a hook-free check. Neither had run since the
+   2026-08-11 workflow rewrite, and the charts have used Helm hooks by design since then.
+3. **Removed values are refused** — `hack/validate-removed-values.sh` renders the orchestrator
+   with each removed value (from 0.3.68, `contractEmitter`) and asserts it is refused, not
+   ignored, while a Composition that still carries `contractEmitter.enabled: false` keeps
+   rendering.
+4. **Service-contract SSO deep-link** — `tools/resolve-deeplink.sh --from-chart` resolves the
+   chart's `serviceContract.sso.deepLink.urlTemplate` against sample org/tenant/namespace/project
+   and fails on any placeholder left unresolved.
 5. **`lint-docs`** — the shared Krateo documentation-standard linter (this bundle), added
    under `jobs:` in `lint.yaml`.
 

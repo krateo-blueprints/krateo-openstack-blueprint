@@ -1,0 +1,11 @@
+{{- /*
+Values this chart no longer implements. Each one is refused here, not ignored: a value that
+silently does nothing reads as a feature that runs.
+
+contractEmitter (removed in 0.3.68): the CMP's single emitter of the serviceContract usage and
+health is krateo-platformops/cmp-usage-collector. values.schema.json refuses enabled: true too;
+this guard holds when the schema is not applied (e.g. --skip-schema-validation).
+*/ -}}
+{{- if (.Values.contractEmitter | default dict).enabled }}
+{{- fail "contractEmitter was removed in 0.3.68: usage and health are emitted by krateo-platformops/cmp-usage-collector, which reads this OpenStack from the parent. Unset contractEmitter (or set enabled: false)." }}
+{{- end }}
