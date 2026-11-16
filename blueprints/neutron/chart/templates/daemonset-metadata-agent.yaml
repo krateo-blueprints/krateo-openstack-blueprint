@@ -19,6 +19,9 @@ exec:
     - /tmp/health-probe.py
     - --config-file
     - /etc/neutron/neutron.conf
+{{- with include "helm-toolkit.snippets.transport_dropin_probe_args" (tuple . (include "neutron.transport_dropin_entries" . | fromJsonArray) "/etc/neutron/neutron.conf.d") }}
+{{ . | indent 4 }}
+{{- end }}
     - --config-file
     - /etc/neutron/metadata_agent.ini
 {{- if .Values.pod.use_fqdn.neutron_agent }}
@@ -32,6 +35,9 @@ exec:
     - /tmp/health-probe.py
     - --config-file
     - /etc/neutron/neutron.conf
+{{- with include "helm-toolkit.snippets.transport_dropin_probe_args" (tuple . (include "neutron.transport_dropin_entries" . | fromJsonArray) "/etc/neutron/neutron.conf.d") }}
+{{ . | indent 4 }}
+{{- end }}
     - --config-file
     - /etc/neutron/metadata_agent.ini
     - --liveness-probe
@@ -50,6 +56,7 @@ exec:
 {{- $mounts_neutron_metadata_agent := .Values.pod.mounts.neutron_metadata_agent.neutron_metadata_agent }}
 {{- $mounts_neutron_metadata_agent_init := .Values.pod.mounts.neutron_metadata_agent.init_container }}
 {{- $etcSources := .Values.pod.etcSources.neutron_metadata_agent }}
+{{- with include "helm-toolkit.snippets.transport_dropin_etc_source" (tuple . (include "neutron.transport_dropin_entries" . | fromJsonArray) "neutron") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "neutron") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.secret_conf_dropin_etc_source" (dict "from" (include "helm-toolkit.utils.metadata_proxy_secret_ref" . | fromJson) "name" "neutron-metadata-proxy-secret") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if .Values.manifests.secret_ks_etc }}

@@ -1155,3 +1155,20 @@ krateo-openstack-node-reader
 {{- end -}}
 {{- toYaml $out -}}
 {{- end -}}
+
+{{- /* osh.notificationVhosts (list $ $sel): .Values.notificationVhosts.vhosts, in order, keeping only the vhosts a
+       component in $sel (the selected closure) creates -- its components[].rabbitmqVhost, the vhost its chart's
+       rabbit-init declares (measured from the rendered charts by hack/validate-credentials.py check 26). As a JSON list.
+       A consumer given a vhost nothing created retries it forever and never reaches the others (#285). */ -}}
+{{- define "osh.notificationVhosts" -}}
+{{- $top := index . 0 -}}{{- $sel := index . 1 -}}
+{{- $created := dict -}}
+{{- range $c := $top.Values.components -}}
+{{- if and $c.rabbitmqVhost (has $c.name $sel) -}}{{- $_ := set $created $c.rabbitmqVhost true -}}{{- end -}}
+{{- end -}}
+{{- $out := list -}}
+{{- range $v := (($top.Values.notificationVhosts | default dict).vhosts | default list) -}}
+{{- if hasKey $created $v -}}{{- $out = append $out $v -}}{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}

@@ -131,6 +131,7 @@ spec:
 {{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "ironic") | nindent 12 }}
 {{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "ironic.identity_dropin_entries" . | fromJsonArray) "ironic") | nindent 12 }}
 {{- include "helm-toolkit.snippets.db_dropin_mount" (tuple . (include "ironic.db_dropin_entries" . | fromJsonArray) "ironic") | nindent 12 }}
+{{- with include "helm-toolkit.snippets.transport_dropin_mount" (tuple . (include "ironic.transport_dropin_entries" . | fromJsonArray) "ironic") }}{{ . | nindent 12 }}{{- end }}
             - name: ironic-etc
               mountPath: /etc/ironic/ironic.conf
               subPath: ironic.conf
@@ -158,6 +159,7 @@ spec:
 {{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "ironic") | nindent 8 }}
 {{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "ironic.identity_dropin_entries" . | fromJsonArray) "ironic") | nindent 8 }}
 {{- include "helm-toolkit.snippets.db_dropin_volume" (tuple . (include "ironic.db_dropin_entries" . | fromJsonArray) "ironic") | nindent 8 }}
+{{- with include "helm-toolkit.snippets.transport_dropin_volume" (tuple . (include "ironic.transport_dropin_entries" . | fromJsonArray) "ironic") }}{{ . | nindent 8 }}{{- end }}
         - name: ironic-etc
           secret:
             secretName: ironic-etc

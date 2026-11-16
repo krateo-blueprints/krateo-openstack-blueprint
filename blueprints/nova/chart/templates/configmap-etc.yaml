@@ -72,6 +72,7 @@ limitations under the License.
 {{- end -}}
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "nova.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "nova" | include "helm-toolkit.utils.transport_dropin_refuse" }}
 {{- if empty .Values.conf.nova.DEFAULT.transport_url -}}
 {{- $_ := tuple "oslo_messaging" "internal" "nova" "amqp" . | include "helm-toolkit.endpoints.authenticated_transport_endpoint_uri_lookup" | set .Values.conf.nova.DEFAULT "transport_url" -}}
 {{- end -}}
@@ -218,6 +219,7 @@ limitations under the License.
 {{- dict "envAll" $envAll "from" (include "helm-toolkit.utils.metadata_proxy_secret_ref" $envAll | fromJson) "option" "metadata_proxy_shared_secret" "confKeys" (list "nova") | include "helm-toolkit.utils.secret_option_strip" }}
 {{- tuple $envAll "nova" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 {{- dict "envAll" $envAll "entries" (include "nova.db_dropin_entries" $envAll | fromJsonArray) "confKey" "nova" | include "helm-toolkit.utils.db_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "nova.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "nova" | include "helm-toolkit.utils.transport_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

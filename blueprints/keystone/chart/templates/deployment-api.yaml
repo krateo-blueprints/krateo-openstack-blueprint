@@ -169,6 +169,7 @@ subjects:
     namespace: {{ $envAll.Release.Namespace }}
 
 {{- $etcSources := .Values.pod.etcSources.keystone_api }}
+{{- with include "helm-toolkit.snippets.transport_dropin_etc_source" (tuple . (include "keystone.transport_dropin_entries" . | fromJsonArray) "keystone") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "keystone.db_dropin_entries" . | fromJsonArray) "keystone") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 ---
 apiVersion: apps/v1

@@ -88,6 +88,7 @@ limitations under the License.
 {{- end -}}
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "heat.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "heat" | include "helm-toolkit.utils.transport_dropin_refuse" }}
 {{- if empty .Values.conf.heat.DEFAULT.transport_url -}}
 {{- $_ := tuple "oslo_messaging" "internal" "heat" "amqp" . | include "helm-toolkit.endpoints.authenticated_transport_endpoint_uri_lookup" | set .Values.conf.heat.DEFAULT "transport_url" -}}
 {{- end -}}
@@ -150,6 +151,7 @@ limitations under the License.
 {{- tuple $envAll "heat" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 {{- dict "envAll" $envAll "entries" (include "heat.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "heat" | include "helm-toolkit.utils.identity_dropin_strip" }}
 {{- dict "envAll" $envAll "entries" (include "heat.db_dropin_entries" $envAll | fromJsonArray) "confKey" "heat" | include "helm-toolkit.utils.db_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "heat.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "heat" | include "helm-toolkit.utils.transport_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

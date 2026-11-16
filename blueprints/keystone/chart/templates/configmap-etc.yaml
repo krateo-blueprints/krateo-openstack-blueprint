@@ -31,6 +31,7 @@ limitations under the License.
 {{- end -}}
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "keystone.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "keystone" | include "helm-toolkit.utils.transport_dropin_refuse" }}
 {{- if empty .Values.conf.keystone.DEFAULT.transport_url -}}
 {{- $_ := tuple "oslo_messaging" "internal" "keystone" "amqp" . | include "helm-toolkit.endpoints.authenticated_transport_endpoint_uri_lookup" | set .Values.conf.keystone.DEFAULT "transport_url" -}}
 {{- end -}}
@@ -53,6 +54,7 @@ limitations under the License.
 {{- end -}}
 ---
 {{- dict "envAll" $envAll "entries" (include "keystone.db_dropin_entries" $envAll | fromJsonArray) "confKey" "keystone" | include "helm-toolkit.utils.db_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "keystone.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "keystone" | include "helm-toolkit.utils.transport_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

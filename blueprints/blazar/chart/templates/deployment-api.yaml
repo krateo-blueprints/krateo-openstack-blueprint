@@ -151,7 +151,7 @@ spec:
             sources:
               - secret:
                   name: blazar-ks-etc
-              {{- range $src := include "blazar.dropin_etc_sources" . | fromJsonArray }}
+              {{- range $src := include "blazar.reader_etc_sources" . | fromJsonArray }}
               - secret:
                   name: {{ $src.secret.name }}
               {{- end }}

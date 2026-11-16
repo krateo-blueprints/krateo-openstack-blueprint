@@ -1,0 +1,158 @@
+# The containers that use RabbitMQ, per chart with a per-service RabbitMQ user (#228, 0.3.69). Read by
+# hack/validate-credentials.py check 22m: a container that mounts a config which carried the user's transport URL receives
+# the drop-in <chart>-transport exactly when it is listed here, and every other one must NOT, so the RabbitMQ password
+# reaches no program that cannot use it. A listed container that no render shows reading the config fails (a list that
+# keeps entries nothing checks stops meaning anything). Main containers only: an init container shares its pod's
+# projected config volume, on the same node, and none of them starts an OpenStack program.
+#
+# The rule: a container is listed when its program sends or receives over RabbitMQ, or would once a setting an install
+# can change is set (a notification driver, barbican's [queue] enable); a program that never creates an RPC client or
+# server or a notifier that sends, whatever is set, is not, even when it parses the URL (oslo.messaging builds a
+# transport lazily and connects on the first send or listen: transport.py:_get_transport, impl_rabbit's ConnectionPool).
+# Measured 2026-11-16 from the programs' source at stable/2026.1 (each project's console_scripts entry point, followed
+# into main() and the subcommand):
+#   - one-shot programs that never connect (not listed): helm-toolkit's db-init.py and db-drop.py (MariaDB only), the
+#     bootstrap Jobs (the openstack client), aodh-dbsync, aodh-expirer, barbican-db-manage, blazar-db-manage,
+#     ceilometer-upgrade, cinder-manage db sync/purge, cloudkitty-dbsync, cloudkitty-storage-init, cyborg-dbsync,
+#     designate-manage database sync and service clean, glance-manage db_sync and db_load_metadefs, heat-manage
+#     db_sync/service clean/purge_deleted, ironic-dbsync, keystone-manage fernet/credential/domain_config_upload,
+#     magnum-db-manage, manila-manage, masakari-manage, mistral-db-manage, neutron-db-manage, neutron-ovn-db-sync-util,
+#     octavia-db-manage, tacker-db-manage, trove-manage, watcher-db-manage. (cyborg-dbsync, designate-manage service
+#     clean, ironic-dbsync and watcher-db-manage build a transport through rpc.init and never send on it);
+#   - one-shot programs that do: cinder-volume-usage-audit (rpc.init, sends volume.usage notifications), keystone-manage
+#     bootstrap (in keystone-db-sync: audit notifications as it creates the domain and project, when a driver is set),
+#     and every nova-manage (nova.config.parse_args runs rpc.init; and nova formats the cell mapping templates of
+#     db-sync, cell-setup and archive-deleted-rows from [DEFAULT] transport_url, check 24b);
+#   - long-running programs that never connect (not listed): neutron-netns-cleanup (no rpc.init), neutron-ovn-agent and
+#     neutron-ovn-metadata-agent (rpc.init, then no RPC client, server or notifier: OVSDB only), octavia-health-manager,
+#     octavia-housekeeping and octavia-driver-agent (rpc.init, then in-process failover and rotation flows, which send
+#     no notification);
+#   - every other long-running program is an RPC server or client (nova, neutron's server and RPC agents, cinder,
+#     heat, ...), or sends notifications under a setting (glance-api and keystone with a driver other than noop,
+#     aodh-api, barbican-api with [queue] enable). neutron's bgp-dragent, l2gw, ironic and ovn-vpn agents are RPC agents
+#     of the ML2/OVS kind (state reports over RPC); they are listed as they were served before 0.3.69.
+charts:
+  aodh:
+    readers:
+      - aodh-api
+      - aodh-evaluator
+      - aodh-listener
+      - aodh-notifier
+  barbican:
+    readers:
+      - barbican-api
+  blazar:
+    readers:
+      - blazar-api
+      - blazar-manager
+  ceilometer:
+    readers:
+      - ceilometer-central
+      - ceilometer-compute
+      - ceilometer-ipmi
+      - ceilometer-notification
+  cinder:
+    readers:
+      - cinder-api
+      - cinder-backup
+      - cinder-scheduler
+      - cinder-volume
+      - cinder-volume-usage-audit
+  cloudkitty:
+    readers:
+      - cloudkitty-api
+      - cloudkitty-processor
+  cyborg:
+    readers:
+      - cyborg
+      - cyborg-agent
+      - cyborg-conductor
+  designate:
+    readers:
+      - designate-api
+      - designate-central
+      - designate-mdns
+      - designate-producer
+      - designate-sink
+      - designate-worker
+  glance:
+    readers:
+      - glance-api
+  heat:
+    readers:
+      - heat-api
+      - heat-cfn
+      - heat-engine
+  ironic:
+    readers:
+      - ironic-api
+      - ironic-conductor
+  keystone:
+    readers:
+      - keystone-api
+      - keystone-db-sync
+  magnum:
+    readers:
+      - magnum-api
+      - magnum-conductor
+  manila:
+    readers:
+      - manila-api
+      - manila-data
+      - manila-scheduler
+      - manila-share
+  masakari:
+    readers:
+      - masakari-api
+      - masakari-engine
+  mistral:
+    readers:
+      - mistral-api
+      - mistral-engine
+      - mistral-event-engine
+      - mistral-executor
+  neutron:
+    readers:
+      - neutron-bgp-dragent
+      - neutron-dhcp-agent
+      - neutron-ironic-agent
+      - neutron-l2gw-agent
+      - neutron-l3-agent
+      - neutron-metadata-agent
+      - neutron-ovn-vpn-agent
+      - neutron-ovs-agent
+      - neutron-rpc-server
+      - neutron-server
+      - neutron-sriov-agent
+  nova:
+    readers:
+      - nova-api
+      - nova-archive-deleted-rows
+      - nova-cell-setup
+      - nova-compute
+      - nova-compute-ironic
+      - nova-conductor
+      - nova-db-sync
+      - nova-novncproxy
+      - nova-osapi
+      - nova-scheduler
+      - nova-serialproxy
+      - nova-spiceproxy
+  octavia:
+    readers:
+      - octavia-api
+      - octavia-worker
+  tacker:
+    readers:
+      - tacker-conductor
+      - tacker-server
+  trove:
+    readers:
+      - trove-api
+      - trove-conductor
+      - trove-taskmanager
+  watcher:
+    readers:
+      - watcher-api
+      - watcher-applier
+      - watcher-decision-engine

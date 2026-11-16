@@ -567,8 +567,106 @@ credentials:
       secret: openstack-credential-oslo-db-zaqar
       key: password
       path: endpoints.oslo_db.auth.zaqar.passwordFrom
+    # Per-service RabbitMQ users (0.3.69, #228): one item per RabbitMQ USERNAME, reaching only the chart(s) that render it
+    # (hack/mq-users.yaml: no username is rendered by two charts, measured). The chart builds every URL that logs in as
+    # that user from the root: its main config's transport URLs through the drop-in <chart>-transport, delivered only to
+    # the containers that build a transport from them (hack/mq-readers.yaml), and <chart>-rabbitmq-user
+    # (RABBITMQ_CONNECTION) as an ExternalSecret; rabbit-init's `declare user` sets the password on the existing user
+    # (an HTTP PUT, create or replace: measured on rabbitmq:3.13-management), so a published password is replaced.
+    - id: oslo-messaging-aodh
+      secret: openstack-credential-oslo-messaging-aodh
+      key: password
+      path: endpoints.oslo_messaging.auth.aodh.passwordFrom
+    - id: oslo-messaging-barbican
+      secret: openstack-credential-oslo-messaging-barbican
+      key: password
+      path: endpoints.oslo_messaging.auth.barbican.passwordFrom
+    - id: oslo-messaging-blazar
+      secret: openstack-credential-oslo-messaging-blazar
+      key: password
+      path: endpoints.oslo_messaging.auth.blazar.passwordFrom
+    - id: oslo-messaging-ceilometer
+      secret: openstack-credential-oslo-messaging-ceilometer
+      key: password
+      path: endpoints.oslo_messaging.auth.ceilometer.passwordFrom
+    - id: oslo-messaging-cinder
+      secret: openstack-credential-oslo-messaging-cinder
+      key: password
+      path: endpoints.oslo_messaging.auth.cinder.passwordFrom
+    - id: oslo-messaging-cloudkitty
+      secret: openstack-credential-oslo-messaging-cloudkitty
+      key: password
+      path: endpoints.oslo_messaging.auth.cloudkitty.passwordFrom
+    - id: oslo-messaging-cyborg
+      secret: openstack-credential-oslo-messaging-cyborg
+      key: password
+      path: endpoints.oslo_messaging.auth.cyborg.passwordFrom
+    - id: oslo-messaging-designate
+      secret: openstack-credential-oslo-messaging-designate
+      key: password
+      path: endpoints.oslo_messaging.auth.designate.passwordFrom
+    - id: oslo-messaging-glance
+      secret: openstack-credential-oslo-messaging-glance
+      key: password
+      path: endpoints.oslo_messaging.auth.glance.passwordFrom
+    - id: oslo-messaging-heat
+      secret: openstack-credential-oslo-messaging-heat
+      key: password
+      path: endpoints.oslo_messaging.auth.heat.passwordFrom
+    - id: oslo-messaging-ironic
+      secret: openstack-credential-oslo-messaging-ironic
+      key: password
+      path: endpoints.oslo_messaging.auth.ironic.passwordFrom
+    - id: oslo-messaging-keystone
+      secret: openstack-credential-oslo-messaging-keystone
+      key: password
+      path: endpoints.oslo_messaging.auth.keystone.passwordFrom
+    - id: oslo-messaging-magnum
+      secret: openstack-credential-oslo-messaging-magnum
+      key: password
+      path: endpoints.oslo_messaging.auth.magnum.passwordFrom
+    - id: oslo-messaging-manila
+      secret: openstack-credential-oslo-messaging-manila
+      key: password
+      path: endpoints.oslo_messaging.auth.manila.passwordFrom
+    - id: oslo-messaging-masakari
+      secret: openstack-credential-oslo-messaging-masakari
+      key: password
+      path: endpoints.oslo_messaging.auth.masakari.passwordFrom
+    - id: oslo-messaging-mistral
+      secret: openstack-credential-oslo-messaging-mistral
+      key: password
+      path: endpoints.oslo_messaging.auth.mistral.passwordFrom
+    - id: oslo-messaging-neutron
+      secret: openstack-credential-oslo-messaging-neutron
+      key: password
+      path: endpoints.oslo_messaging.auth.neutron.passwordFrom
+    - id: oslo-messaging-nova
+      secret: openstack-credential-oslo-messaging-nova
+      key: password
+      path: endpoints.oslo_messaging.auth.nova.passwordFrom
+    - id: oslo-messaging-octavia
+      secret: openstack-credential-oslo-messaging-octavia
+      key: password
+      path: endpoints.oslo_messaging.auth.octavia.passwordFrom
+    - id: oslo-messaging-tacker
+      secret: openstack-credential-oslo-messaging-tacker
+      key: password
+      path: endpoints.oslo_messaging.auth.tacker.passwordFrom
+    - id: oslo-messaging-trove
+      secret: openstack-credential-oslo-messaging-trove
+      key: password
+      path: endpoints.oslo_messaging.auth.trove.passwordFrom
+    - id: oslo-messaging-watcher
+      secret: openstack-credential-oslo-messaging-watcher
+      key: password
+      path: endpoints.oslo_messaging.auth.watcher.passwordFrom
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
+# `rabbitmqVhost`: the RabbitMQ vhost this component's chart creates at its defaults (its rabbit-init Job declares
+# endpoints.oslo_messaging.path); absent when the chart renders no rabbit-init (glance and keystone:
+# manifests.job_rabbit_init false, so no vhost exists for them). Measured from the rendered charts, not declared by
+# hand: hack/validate-credentials.py check 26 fails on any disagreement. notificationVhosts below reads it (#285).
 components:
   - name: mariadb
     kind: Mariadb
@@ -591,6 +689,7 @@ components:
       - oslo-messaging-admin
       - identity-user-keystone-test
       - oslo-db-keystone
+      - oslo-messaging-keystone
     deps:
       - mariadb
       - memcached
@@ -605,6 +704,7 @@ components:
       - identity-user-glance-test
       - identity-user-glance
       - oslo-db-glance
+      - oslo-messaging-glance
     deps:
       - keystone
     tier: identity
@@ -647,6 +747,7 @@ components:
     tier: compute
   - name: neutron
     kind: Neutron
+    rabbitmqVhost: neutron
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -660,6 +761,7 @@ components:
       - identity-user-neutron-placement
       - identity-user-neutron-test
       - oslo-db-neutron
+      - oslo-messaging-neutron
     deps:
       - keystone
       - rabbitmq
@@ -667,6 +769,7 @@ components:
     tier: compute
   - name: nova
     kind: Nova
+    rabbitmqVhost: nova
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -681,6 +784,7 @@ components:
       - identity-user-nova-service-user
       - identity-user-nova-test
       - oslo-db-nova
+      - oslo-messaging-nova
     deps:
       - keystone
       - placement
@@ -691,6 +795,7 @@ components:
     tier: compute
   - name: ironic
     kind: Ironic
+    rabbitmqVhost: ironic
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -699,6 +804,7 @@ components:
       - identity-user-glance
       - identity-user-ironic
       - oslo-db-ironic
+      - oslo-messaging-ironic
     deps:
       - keystone
       - mariadb
@@ -715,6 +821,7 @@ components:
     requiresProvisioning: true
   - name: cinder
     kind: Cinder
+    rabbitmqVhost: cinder
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -727,6 +834,7 @@ components:
       - identity-user-cinder-swift
       - identity-user-glance
       - oslo-db-cinder
+      - oslo-messaging-cinder
     deps:
       - keystone
       - rabbitmq
@@ -742,6 +850,7 @@ components:
     requiresProvisioning: true
   - name: heat
     kind: Heat
+    rabbitmqVhost: heat
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -752,6 +861,7 @@ components:
       - identity-user-heat-domain
       - identity-user-heat-trust
       - oslo-db-heat
+      - oslo-messaging-heat
     deps:
       - keystone
       - rabbitmq
@@ -759,6 +869,7 @@ components:
     tier: compute
   - name: barbican
     kind: Barbican
+    rabbitmqVhost: barbican
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -766,6 +877,7 @@ components:
       - memcache-barbican
       - identity-user-barbican
       - oslo-db-barbican
+      - oslo-messaging-barbican
     deps:
       - keystone
       - rabbitmq
@@ -781,6 +893,7 @@ components:
     tier: compute
   - name: designate
     kind: Designate
+    rabbitmqVhost: designate
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -789,6 +902,7 @@ components:
       - identity-user-designate-test
       - identity-user-designate
       - oslo-db-designate
+      - oslo-messaging-designate
     deps:
       - keystone
       - rabbitmq
@@ -797,6 +911,7 @@ components:
     tier: compute
   - name: octavia
     kind: Octavia
+    rabbitmqVhost: octavia
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -805,6 +920,7 @@ components:
       - identity-user-test
       - identity-user-octavia
       - oslo-db-octavia
+      - oslo-messaging-octavia
     deps:
       - keystone
       - rabbitmq
@@ -820,6 +936,7 @@ components:
 
   - name: magnum
     kind: Magnum
+    rabbitmqVhost: magnum
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -828,6 +945,7 @@ components:
       - identity-user-magnum
       - identity-user-magnum-domain
       - oslo-db-magnum
+      - oslo-messaging-magnum
     deps:
       - keystone
       - rabbitmq
@@ -841,6 +959,7 @@ components:
     tier: compute
   - name: manila
     kind: Manila
+    rabbitmqVhost: manila
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -849,6 +968,7 @@ components:
       - identity-user-manila
       - manila-service-instance-ssh-key
       - oslo-db-manila
+      - oslo-messaging-manila
     deps:
       - keystone
       - rabbitmq
@@ -856,6 +976,7 @@ components:
     tier: compute
   - name: mistral
     kind: Mistral
+    rabbitmqVhost: mistral
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -864,6 +985,7 @@ components:
       - identity-user-mistral-test
       - identity-user-mistral
       - oslo-db-mistral
+      - oslo-messaging-mistral
     deps:
       - keystone
       - rabbitmq
@@ -871,11 +993,13 @@ components:
     tier: compute
   - name: ceilometer
     kind: Ceilometer
+    rabbitmqVhost: ceilometer
     credentials:
       - identity-admin
       - oslo-messaging-admin
       - identity-user-ceilometer-test
       - identity-user-ceilometer
+      - oslo-messaging-ceilometer
     deps:
       - keystone
       - rabbitmq
@@ -888,6 +1012,7 @@ components:
     tier: compute
   - name: aodh
     kind: Aodh
+    rabbitmqVhost: aodh
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -895,6 +1020,7 @@ components:
       - memcache-aodh
       - identity-user-aodh
       - oslo-db-aodh
+      - oslo-messaging-aodh
     deps:
       - keystone
       - rabbitmq
@@ -902,6 +1028,7 @@ components:
     tier: compute
   - name: cloudkitty
     kind: Cloudkitty
+    rabbitmqVhost: cloudkitty
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -910,6 +1037,7 @@ components:
       - identity-user-test
       - identity-user-cloudkitty
       - oslo-db-cloudkitty
+      - oslo-messaging-cloudkitty
     deps:
       - keystone
       - rabbitmq
@@ -917,6 +1045,7 @@ components:
     tier: compute
   - name: masakari
     kind: Masakari
+    rabbitmqVhost: masakari
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -925,6 +1054,7 @@ components:
       - identity-user-neutron-test
       - identity-user-masakari
       - oslo-db-masakari
+      - oslo-messaging-masakari
     deps:
       - keystone
       - rabbitmq
@@ -932,6 +1062,7 @@ components:
     tier: compute
   - name: trove
     kind: Trove
+    rabbitmqVhost: trove
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -939,6 +1070,7 @@ components:
       - memcache-trove
       - identity-user-trove
       - oslo-db-trove
+      - oslo-messaging-trove
     deps:
       - keystone
       - rabbitmq
@@ -946,6 +1078,7 @@ components:
     tier: compute
   - name: watcher
     kind: Watcher
+    rabbitmqVhost: watcher
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -954,6 +1087,7 @@ components:
       - identity-user-test
       - identity-user-watcher
       - oslo-db-watcher
+      - oslo-messaging-watcher
     deps:
       - keystone
       - rabbitmq
@@ -961,6 +1095,7 @@ components:
     tier: compute
   - name: tacker
     kind: Tacker
+    rabbitmqVhost: tacker
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -968,6 +1103,7 @@ components:
       - memcache-tacker
       - identity-user-tacker
       - oslo-db-tacker
+      - oslo-messaging-tacker
     deps:
       - keystone
       - rabbitmq
@@ -979,6 +1115,7 @@ components:
     tier: compute
   - name: cyborg
     kind: Cyborg
+    rabbitmqVhost: cyborg
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -988,6 +1125,7 @@ components:
       - identity-user-placement
       - identity-user-cyborg
       - oslo-db-cyborg
+      - oslo-messaging-cyborg
     deps:
       - keystone
       - rabbitmq
@@ -999,6 +1137,7 @@ components:
     tier: compute
   - name: blazar
     kind: Blazar
+    rabbitmqVhost: blazar
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -1008,6 +1147,7 @@ components:
       - identity-user-blazar-service-user
       - identity-user-blazar-test
       - oslo-db-blazar
+      - oslo-messaging-blazar
     deps:
       - keystone
       - rabbitmq
@@ -1102,6 +1242,25 @@ components:
     ## in Init, on six nodes and then on two -- unchanged by node count because it is the
     ## StorageClass that is missing. Issue #141, and hack/provisioning-preconditions.yaml.
     requiresProvisioning: true
+
+# notificationVhosts (#285): the RabbitMQ vhosts `component`'s notification agent consumes, in the order of that chart's
+# conf.notification_vhosts default (upstream ceilometer's list; check 26 fails if the two differ). The umbrella passes the
+# component, as conf.notification_vhosts, only the vhosts some SELECTED component creates (components[].rabbitmqVhost):
+# oslo.messaging retries a missing vhost forever and never reaches the ones after it, so a fixed list consumed nothing
+# on a full-strict install (cinder is not selected, glance and keystone create no vhost; measured live on GKE,
+# 2026-11-16: 442 NOT_ALLOWED in 26 minutes, every one `vhost cinder not found`). Merged UNDER componentValues: an
+# explicit componentValues.<component>.conf.notification_vhosts wins, which an install that changes a chart's rabbit-init
+# or vhost through componentValues sets itself. Not part of the Openstack schema: a property of these charts.
+notificationVhosts:
+  component: ceilometer
+  vhosts:
+    - ceilometer
+    - cinder
+    - glance
+    - nova
+    - keystone
+    - neutron
+    - heat
 
 # dependencyRelaxations: the dependency edges whose creation gate is EXISTENCE instead of
 # READINESS. Every other edge waits for the dependency to report Ready=True, which is what

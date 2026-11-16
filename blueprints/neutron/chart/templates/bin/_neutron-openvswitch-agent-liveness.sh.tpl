@@ -22,6 +22,10 @@ python \
     /tmp/health-probe.py \
     --config-file \
     /etc/neutron/neutron.conf \
+{{- if include "helm-toolkit.utils.transport_dropin_active" (tuple . (include "neutron.transport_dropin_entries" . | fromJsonArray)) | fromJsonArray }}
+    --config-dir \
+    /etc/neutron/neutron.conf.d \
+{{- end }}
     --config-file \
     /etc/neutron/plugins/ml2/openvswitch_agent.ini \
     --agent-queue-name \

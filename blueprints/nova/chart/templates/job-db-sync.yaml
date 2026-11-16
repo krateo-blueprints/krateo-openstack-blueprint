@@ -25,7 +25,7 @@ env: []
 {{- if .Values.manifests.job_db_sync }}
 {{- $podEnvVars := include "nova.templates._job_db_sync.env_vars" (tuple .) | toString | fromYaml }}
 {{- $dbSyncJob := dict "envAll" . "serviceName" "nova" "podVolMounts" .Values.pod.mounts.nova_db_sync.nova_db_sync.volumeMounts "podVols" .Values.pod.mounts.nova_db_sync.nova_db_sync.volumes "podEnvVars" $podEnvVars.env -}}
-{{- $_ := set $dbSyncJob "etcSources" (include "nova.dropin_etc_sources" . | fromJsonArray) -}}
+{{- $_ := set $dbSyncJob "etcSources" (include "nova.db_sync_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.manifests.certificates -}}
 {{- $_ := set $dbSyncJob "dbAdminTlsSecret" .Values.endpoints.oslo_db.auth.admin.secret.tls.internal -}}
 {{- end -}}

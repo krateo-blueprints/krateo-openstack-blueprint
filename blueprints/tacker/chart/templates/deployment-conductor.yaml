@@ -87,6 +87,7 @@ spec:
 {{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "tacker") | nindent 10 }}
 {{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "tacker.identity_dropin_entries" . | fromJsonArray) "tacker") | nindent 10 }}
 {{- include "helm-toolkit.snippets.db_dropin_mount" (tuple . (include "tacker.db_dropin_entries" . | fromJsonArray) "tacker") | nindent 10 }}
+{{- with include "helm-toolkit.snippets.transport_dropin_mount" (tuple . (include "tacker.transport_dropin_entries" . | fromJsonArray) "tacker") }}{{ . | nindent 10 }}{{- end }}
           - name: tacker-etc
             mountPath: "/etc/tacker/tacker.conf"
             readOnly: yes
@@ -118,6 +119,7 @@ spec:
 {{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "tacker") | nindent 8 }}
 {{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "tacker.identity_dropin_entries" . | fromJsonArray) "tacker") | nindent 8 }}
 {{- include "helm-toolkit.snippets.db_dropin_volume" (tuple . (include "tacker.db_dropin_entries" . | fromJsonArray) "tacker") | nindent 8 }}
+{{- with include "helm-toolkit.snippets.transport_dropin_volume" (tuple . (include "tacker.transport_dropin_entries" . | fromJsonArray) "tacker") }}{{ . | nindent 8 }}{{- end }}
         - name: tacker-etc
           secret:
             defaultMode: 292

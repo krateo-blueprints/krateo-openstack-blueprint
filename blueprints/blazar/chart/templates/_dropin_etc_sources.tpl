@@ -11,3 +11,12 @@
 {{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "blazar.db_dropin_entries" . | fromJsonArray) "blazar") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- $out | toJson -}}
 {{- end -}}
+
+{{/* Krateo (#228, 0.3.69): the drop-ins of the containers that use RabbitMQ (blazar-api and blazar-manager,
+     hack/mq-readers.yaml): blazar.dropin_etc_sources plus blazar-transport, the RabbitMQ URLs. The Jobs keep
+     blazar.dropin_etc_sources: none of their programs connects to RabbitMQ. */}}
+{{- define "blazar.reader_etc_sources" -}}
+{{- $out := include "blazar.dropin_etc_sources" . | fromJsonArray -}}
+{{- with include "helm-toolkit.snippets.transport_dropin_etc_source" (tuple . (include "blazar.transport_dropin_entries" . | fromJsonArray) "blazar") }}{{- $out = append $out (fromJson .) }}{{- end }}
+{{- $out | toJson -}}
+{{- end -}}

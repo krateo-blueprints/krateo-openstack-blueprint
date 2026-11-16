@@ -85,6 +85,7 @@ httpGet:
 {{- $mounts_neutron_server := .Values.pod.mounts.neutron_server.neutron_server }}
 {{- $mounts_neutron_server_init := .Values.pod.mounts.neutron_server.init_container }}
 {{- $etcSources := .Values.pod.etcSources.neutron_server }}
+{{- with include "helm-toolkit.snippets.transport_dropin_etc_source" (tuple . (include "neutron.transport_dropin_entries" . | fromJsonArray) "neutron") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "neutron") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.secret_conf_dropin_etc_source" (dict "from" (include "helm-toolkit.utils.metadata_proxy_secret_ref" . | fromJson) "name" "neutron-metadata-proxy-secret") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "neutron.db_dropin_entries" . | fromJsonArray) "neutron") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}

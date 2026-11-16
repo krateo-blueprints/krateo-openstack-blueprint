@@ -94,7 +94,7 @@ spec:
               mountPath: /etc/blazar/policy.yaml
               subPath: policy.yaml
               readOnly: true
-            {{- if include "blazar.dropin_etc_sources" . | fromJsonArray }}
+            {{- if include "blazar.reader_etc_sources" . | fromJsonArray }}
             # Generated credentials as drop-ins (#228); oslo.config reads blazar.conf.d after blazar.conf. The
             # physical-host plugin, which calls Nova as the blazar user, runs here.
             - name: blazar-manager-conf-d
@@ -119,12 +119,12 @@ spec:
           secret:
             secretName: blazar-etc
             defaultMode: 0444
-        {{- if include "blazar.dropin_etc_sources" . | fromJsonArray }}
+        {{- if include "blazar.reader_etc_sources" . | fromJsonArray }}
         - name: blazar-manager-conf-d
           projected:
             defaultMode: 0444
             sources:
-              {{- range $src := include "blazar.dropin_etc_sources" . | fromJsonArray }}
+              {{- range $src := include "blazar.reader_etc_sources" . | fromJsonArray }}
               - secret:
                   name: {{ $src.secret.name }}
               {{- end }}

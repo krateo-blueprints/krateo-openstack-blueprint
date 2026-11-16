@@ -26,6 +26,7 @@ httpGet:
 {{- $mounts_barbican_api := .Values.pod.mounts.barbican_api.barbican_api }}
 {{- $mounts_barbican_api_init := .Values.pod.mounts.barbican_api.init_container }}
 {{- $etcSources := .Values.pod.etcSources.barbican_api }}
+{{- with include "helm-toolkit.snippets.transport_dropin_etc_source" (tuple . (include "barbican.transport_dropin_entries" . | fromJsonArray) "barbican") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "barbican") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "barbican.identity_dropin_entries" . | fromJsonArray) "barbican") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "barbican.db_dropin_entries" . | fromJsonArray) "barbican") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
