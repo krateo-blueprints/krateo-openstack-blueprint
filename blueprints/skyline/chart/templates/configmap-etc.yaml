@@ -51,8 +51,17 @@ limitations under the License.
 {{- if $from.secret -}}
 {{- $_ := set .Values.conf.skyline.openstack "system_user_password" "KRATEO_SKYLINE_SYSTEM_USER_PASSWORD" -}}
 {{- end -}}
+{{- /* Krateo (#228): the same for the skyline MariaDB user, whose password sits in default.database_url: with its
+       passwordFrom the URL is derived from endpoints.oslo_db and its password goes in as {{ .pw_db | urlquery }}. A
+       literal database_url carries a password, so it is refused. The derived URL is set on a copy of conf.skyline,
+       never on .Values: this template is rendered again for the pods' config hashes, and a second pass must find
+       database_url as the first did. */ -}}
+{{- $dbFrom := .Values.endpoints.oslo_db.auth.skyline.passwordFrom | default dict -}}
+{{- if and $dbFrom.secret (not (empty .Values.conf.skyline.default.database_url)) -}}
+{{- fail "conf.skyline.default.database_url is set while endpoints.oslo_db.auth.skyline.passwordFrom is: the URL carries the skyline MariaDB user's password, so it is built from the generated root (skyline-config). Remove it, or set the database through endpoints.oslo_db (#228)." -}}
+{{- end -}}
 
-{{- if empty .Values.conf.skyline.default.database_url -}}
+{{- if and (not $dbFrom.secret) (empty .Values.conf.skyline.default.database_url) -}}
 {{- $connection := tuple "oslo_db" "skyline" "skyline" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" -}}
 {{- if .Values.manifests.certificates -}}
 {{- $_ := (printf "%s?charset=utf8&ssl_ca=/etc/mysql/certs/ca.crt&ssl_key=/etc/mysql/certs/tls.key&ssl_cert=/etc/mysql/certs/tls.crt&ssl_verify_cert" $connection ) | set .Values.conf.skyline.default.database_url "connection" -}}
@@ -60,6 +69,13 @@ limitations under the License.
 {{- $_ := set .Values.conf.skyline.default "database_url" $connection -}}
 {{- end -}}
 {{- end -}}
+{{- $skylineConf := .Values.conf.skyline -}}
+{{- if $dbFrom.secret -}}
+{{- $connection := tuple "oslo_db" "skyline" "skyline" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" -}}
+{{- $skylineConf = deepCopy .Values.conf.skyline -}}
+{{- $_ := set $skylineConf.default "database_url" (include "helm-toolkit.utils.db_url_with_password" (tuple $connection .Values.endpoints.oslo_db.auth.skyline.username .Values.endpoints.oslo_db.auth.skyline.password "KRATEO_SKYLINE_DB_PASSWORD" "skyline database_url")) -}}
+{{- end -}}
+{{- $relocate := include "skyline.config_from_roots" . -}}
 
 ---
 apiVersion: v1
@@ -68,16 +84,26 @@ metadata:
   name: {{ $configMapName }}
 type: Opaque
 data:
-{{- if not $from.secret }}
+{{- if not $relocate }}
   skyline.yaml: {{ .Values.conf.skyline | toYaml | b64enc }}
 {{- end }}
   gunicorn.py: {{ .Values.conf.gunicorn | b64enc }}
-{{- if $from.secret }}
+{{- if $relocate }}
+{{- range $what, $ref := dict "endpoints.identity.auth.skyline" $from "endpoints.oslo_db.auth.skyline" $dbFrom }}
+{{- if $ref.secret }}
 {{- range $field := list "store" "secret" "key" }}
-{{- if not (index $from $field) }}
-{{- fail (printf "endpoints.identity.auth.skyline.passwordFrom needs %s (store, secret and key)" $field) }}
+{{- if not (index $ref $field) }}
+{{- fail (printf "%s.passwordFrom needs %s (store, secret and key)" $what $field) }}
 {{- end }}
 {{- end }}
+{{- end }}
+{{- end }}
+{{- if and $from.secret $dbFrom.secret (ne $from.store $dbFrom.store) }}
+{{- fail "skyline-config: both passwordFrom references must name the same SecretStore (one ExternalSecret reads them)" }}
+{{- end }}
+{{- $text := $skylineConf | toYaml }}
+{{- if $from.secret }}{{- $text = replace "KRATEO_SKYLINE_SYSTEM_USER_PASSWORD" "{{ .password | toJson }}" $text }}{{- end }}
+{{- if $dbFrom.secret }}{{- $text = replace "KRATEO_SKYLINE_DB_PASSWORD" "{{ .pw_db | urlquery }}" $text }}{{- end }}
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -90,7 +116,7 @@ spec:
   refreshInterval: 1h
   secretStoreRef:
     kind: SecretStore
-    name: {{ $from.store | quote }}
+    name: {{ (ternary $from $dbFrom (not (empty $from.secret))).store | quote }}
   target:
     name: skyline-config
     creationPolicy: Owner
@@ -98,12 +124,20 @@ spec:
       type: Opaque
       engineVersion: v2
       data:
-        skyline.yaml: {{ .Values.conf.skyline | toYaml | replace "KRATEO_SKYLINE_SYSTEM_USER_PASSWORD" "{{ .password | toJson }}" | quote }}
+        skyline.yaml: {{ $text | quote }}
   data:
+{{- if $from.secret }}
     - secretKey: password
       remoteRef:
         key: {{ $from.secret | quote }}
         property: {{ $from.key | quote }}
+{{- end }}
+{{- if $dbFrom.secret }}
+    - secretKey: pw_db
+      remoteRef:
+        key: {{ $dbFrom.secret | quote }}
+        property: {{ $dbFrom.key | quote }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

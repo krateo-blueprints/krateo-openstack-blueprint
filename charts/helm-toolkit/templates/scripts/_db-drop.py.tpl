@@ -23,6 +23,7 @@ limitations under the License.
 # from the key OPENSTACK_CONFIG_DB_KEY, in the section specified by
 # OPENSTACK_CONFIG_DB_SECTION.
 
+import glob
 import os
 import sys
 try:
@@ -78,7 +79,10 @@ if "OPENSTACK_CONFIG_FILE" in os.environ:
     try:
         config = ConfigParser.RawConfigParser(**PARSER_OPTS)
         logger.info("Using {0} as db config source".format(os_conf))
-        config.read(os_conf)
+        # Krateo blueprint change (#228): read the file the way oslo.config does, then every *.conf in
+        # <file>.d in sorted order, a later value winning. With a generated database password the connection
+        # URL is only in a drop-in there (helm-toolkit.manifests.db_dropin).
+        config.read([os_conf] + sorted(glob.glob(os.path.join(os_conf + ".d", "*.conf"))))
         logger.info("Trying to load db config from {0}:{1}".format(
             os_conf_section, os_conf_key))
         user_db_conn = config.get(os_conf_section, os_conf_key)

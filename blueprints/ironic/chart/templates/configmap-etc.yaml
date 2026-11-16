@@ -73,6 +73,7 @@ limitations under the License.
 
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "ironic.db_dropin_entries" $envAll | fromJsonArray) "confKey" "ironic" | include "helm-toolkit.utils.db_dropin_refuse" }}
 {{- if empty .Values.conf.ironic.database.connection -}}
 {{- $_ := tuple "oslo_db" "internal" "ironic" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup"| set .Values.conf.ironic.database "connection" -}}
 {{- end -}}
@@ -223,6 +224,7 @@ limitations under the License.
 ---
 {{- tuple $envAll "ironic" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 {{- dict "envAll" $envAll "entries" (include "ironic.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "ironic" | include "helm-toolkit.utils.identity_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "ironic.db_dropin_entries" $envAll | fromJsonArray) "confKey" "ironic" | include "helm-toolkit.utils.db_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

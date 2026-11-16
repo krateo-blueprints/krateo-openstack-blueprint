@@ -36,6 +36,7 @@ limitations under the License.
 {{- $_ := set .Values.conf.blazar.keystone_authtoken "memcache_secret_key" ( default ( randAlphaNum 64 ) .Values.endpoints.oslo_cache.auth.memcache_secret_key ) -}}
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "blazar.db_dropin_entries" $envAll | fromJsonArray) "confKey" "blazar" | include "helm-toolkit.utils.db_dropin_refuse" }}
 {{- if and (not (kindIs "invalid" .Values.conf.blazar.database.connection)) (empty .Values.conf.blazar.database.connection) -}}
 {{- $_ := tuple "oslo_db" "internal" "blazar" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup"| set .Values.conf.blazar.database "connection" -}}
 {{- end -}}
@@ -105,6 +106,7 @@ Openstack auth
 {{- end -}}
 ---
 {{- tuple $envAll "blazar" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
+{{- dict "envAll" $envAll "entries" (include "blazar.db_dropin_entries" $envAll | fromJsonArray) "confKey" "blazar" | include "helm-toolkit.utils.db_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

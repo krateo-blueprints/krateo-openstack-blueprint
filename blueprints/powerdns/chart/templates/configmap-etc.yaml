@@ -29,6 +29,12 @@
 {{- $dbPort := tuple "oslo_db" "internal" "mysql" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
 {{- $dbName := $envAll.Values.endpoints.oslo_db.path | trimPrefix "/" }}
 {{- $dbUser := $envAll.Values.endpoints.oslo_db.auth.powerdns.username }}
+{{- /* Krateo (#228): with the powerdns MariaDB user's passwordFrom the password reaches the server only through
+       powerdns-db-user (DB_PASSWORD, an ExternalSecret reading the root) and secrets.j2. A gmysql-password written into
+       conf.pdns would land in this ConfigMap and override it, so it is refused. */}}
+{{- if and (include "helm-toolkit.utils.db_from_root" (tuple $envAll "oslo_db" "powerdns")) (hasKey $envAll.Values.conf.pdns "gmysql-password") }}
+{{- fail "conf.pdns.gmysql-password is set while endpoints.oslo_db.auth.powerdns.passwordFrom is: the password is read from the generated root (powerdns-db-user DB_PASSWORD), never from values (#228)." }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap

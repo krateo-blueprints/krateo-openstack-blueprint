@@ -13,6 +13,18 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Per-service MariaDB users (0.3.68, #228).** All 28 services' own MariaDB users still logged in with
+  OpenStack-Helm's published password. Each MariaDB username now has a generated root,
+  `openstack-credential-oslo-db-<user>`, passed only to the chart that owns it. nova's three databases and octavia's
+  persistence database are one account each, so they get one root at several keys (`extraPaths`). The connection URLs
+  leave the base config for a drop-in, `87-db-connection.conf` (helm-toolkit `db_dropin`). `<svc>-db-user` and its
+  siblings become ExternalSecrets. Horizon reads its password from a file, and skyline's `skyline.yaml` carries both
+  roots. db-init now runs `ALTER USER ... IDENTIFIED BY` after `CREATE USER IF NOT EXISTS`, so a changed password
+  reaches an existing user; that is to be proposed upstream. Diego accepted the rotation window (2026-11-16); the
+  upgrade run measures it. Gates: check 20 no longer exempts the database sections, and 20b fails a mysql URL that logs
+  in as a per-service user with a published password. New checks: 15b (the map `hack/db-users.yaml`), 22 (drop-in
+  fidelity and delivery, least privilege included) and 23 (db-init and db-drop run against a stand-in SQLAlchemy).
+
 - **ceilometer's notification URLs (#281).** Since 0.3.57 the notification agent logged in to seven RabbitMQ vhosts
   as the administrator with the published password, which the server refuses. The URLs are now derived from
   `endpoints.oslo_messaging` and `conf.notification_vhosts`. With a generated admin root they reach only

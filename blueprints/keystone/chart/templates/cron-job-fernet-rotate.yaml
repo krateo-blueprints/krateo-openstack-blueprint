@@ -23,6 +23,7 @@ limitations under the License.
 {{ tuple $envAll "fernet_rotate" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 
 {{- $etcSources := .Values.pod.etcSources.keystone_fernet_rotate }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "keystone.db_dropin_entries" . | fromJsonArray) "keystone") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

@@ -6,5 +6,6 @@
 {{- $out := list -}}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "gnocchi") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "gnocchi.identity_dropin_entries" . | fromJsonArray) "gnocchi") }}{{- $out = append $out (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "gnocchi.db_dropin_entries" . | fromJsonArray) "gnocchi") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- $out | toJson -}}
 {{- end -}}

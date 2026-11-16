@@ -17,6 +17,7 @@ limitations under the License.
 {{- if .Values.manifests.configmap_etc }}
 {{- $envAll := . }}
 
+{{- dict "envAll" $envAll "entries" (include "placement.db_dropin_entries" $envAll | fromJsonArray) "confKey" "placement" | include "helm-toolkit.utils.db_dropin_refuse" }}
 {{- if and (not (kindIs "invalid" .Values.conf.placement.placement_database.connection)) (empty .Values.conf.placement.placement_database.connection) -}}
 {{- $connection := tuple "oslo_db" "internal" "placement" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" -}}
 {{- if .Values.manifests.certificates -}}
@@ -47,6 +48,7 @@ limitations under the License.
 {{- end -}}
 ---
 {{- tuple $envAll "placement" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
+{{- dict "envAll" $envAll "entries" (include "placement.db_dropin_entries" $envAll | fromJsonArray) "confKey" "placement" | include "helm-toolkit.utils.db_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

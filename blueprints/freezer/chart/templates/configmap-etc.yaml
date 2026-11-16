@@ -41,6 +41,7 @@ limitations under the License.
 {{- $_ := set .Values.conf.freezer.keystone_authtoken "password" .Values.endpoints.identity.auth.freezer.password -}}
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "freezer.db_dropin_entries" $envAll | fromJsonArray) "confKey" "freezer" | include "helm-toolkit.utils.db_dropin_refuse" }}
 {{- if and (not (kindIs "invalid" .Values.conf.freezer.database.connection)) (empty .Values.conf.freezer.database.connection) -}}
 {{- $_ := tuple "oslo_db" "internal" "freezer" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" | set .Values.conf.freezer.database "connection" -}}
 {{- end -}}
@@ -59,6 +60,7 @@ limitations under the License.
 {{- end -}}
 ---
 {{- dict "envAll" $envAll "entries" (include "freezer.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "freezer" | include "helm-toolkit.utils.identity_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "freezer.db_dropin_entries" $envAll | fromJsonArray) "confKey" "freezer" | include "helm-toolkit.utils.db_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

@@ -49,6 +49,7 @@ limitations under the License.
 {{- $_ := set .Values.conf.barbican.keystone_authtoken "memcache_secret_key" ( default ( randAlphaNum 64 ) .Values.endpoints.oslo_cache.auth.memcache_secret_key ) -}}
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "barbican.db_dropin_entries" $envAll | fromJsonArray) "confKey" "barbican" | include "helm-toolkit.utils.db_dropin_refuse" }}
 {{- if and (not (kindIs "invalid" .Values.conf.barbican.database.connection)) (empty .Values.conf.barbican.database.connection) -}}
 {{- $connection := tuple "oslo_db" "internal" "barbican" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" -}}
 {{- if .Values.tls.oslo_db -}}
@@ -95,6 +96,7 @@ limitations under the License.
 ---
 {{- tuple $envAll "barbican" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 {{- dict "envAll" $envAll "entries" (include "barbican.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "barbican" | include "helm-toolkit.utils.identity_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "barbican.db_dropin_entries" $envAll | fromJsonArray) "confKey" "barbican" | include "helm-toolkit.utils.db_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

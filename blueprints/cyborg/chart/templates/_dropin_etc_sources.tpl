@@ -8,5 +8,6 @@
 {{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "cyborg.identity_dropin_entries" . | fromJsonArray) "cyborg") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.secret_conf_dropin_etc_source" (dict "from" (.Values.endpoints.identity.auth.nova.passwordFrom | default dict) "name" "cyborg-identity-nova") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.secret_conf_dropin_etc_source" (dict "from" (.Values.endpoints.identity.auth.placement.passwordFrom | default dict) "name" "cyborg-identity-placement") }}{{- $out = append $out (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "cyborg.db_dropin_entries" . | fromJsonArray) "cyborg") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- $out | toJson -}}
 {{- end -}}

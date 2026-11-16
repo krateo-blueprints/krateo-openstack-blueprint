@@ -893,6 +893,47 @@ OpenStack-Helm's published password (`[physical_host_plugin] blazar_password`), 
 has been generated since 0.3.63. From 0.3.67 it reads the generated password from
 `91-physical-host-password.conf`.
 
+### Upgrading to 0.3.68 or later: each service's MariaDB password rotates
+
+From 0.3.68 every service's own MariaDB user gets a generated password:
+`openstack-credential-oslo-db-<user>`, one per MariaDB username, for 28 users (aodh, barbican, blazar,
+cinder, cloudkitty, cyborg, designate, freezer, glance, gnocchi, heat, horizon, ironic, keystone, magnum,
+manila, masakari, mistral, neutron, nova, octavia, placement, powerdns, skyline, tacker, trove, watcher,
+zaqar). Each user's password was OpenStack-Helm's published default (`password`), so any pod that reached
+MariaDB could log in as any service and read or change its database.
+
+One username is one MariaDB account (`'<user>'@'%'`), so it gets one root. nova's three databases
+(`[database]`, `[api_database]`, `[cell0_database]`) and octavia's taskflow persistence database log in as the
+same account, so the umbrella passes the same root at each of those keys (`extraPaths`). A chart refuses two
+different references for one username.
+
+On the upgrade that ships it:
+- no service's rendered config carries a database URL any more. The URLs (`[database] connection` and its
+  siblings, gnocchi's `[indexer] url`, designate's `[storage:sqlalchemy] connection`, masakari's
+  `[taskflow] connection`, octavia's `[task_flow] persistence_connection`, zaqar's management store `uri`)
+  arrive as a drop-in, `87-db-connection.conf` in the config's `.conf.d`, from an ExternalSecret
+  `<service>-db-connection`. The password in it is URL-quoted;
+- `<service>-db-user` and nova's and octavia's sibling Secrets (`DB_CONNECTION`) become ExternalSecrets
+  reading the same root. nova's db-sync updates its cell mappings from them on every run;
+- Horizon reads its database password from a file, `/etc/openstack-dashboard/krateo-db-password/password`,
+  the way it reads `SECRET_KEY`. skyline's `skyline.yaml` is rendered by `skyline-config` with both its
+  Keystone and its MariaDB password from their roots. powerdns reads its password from `powerdns-db-user`
+  only;
+- each chart's db-init now runs `ALTER USER '<user>'@'%' IDENTIFIED BY ...` after `CREATE USER IF NOT EXISTS`.
+  Without it the generated password never reached MariaDB: `CREATE USER IF NOT EXISTS` leaves an existing
+  user as it was. db-init and db-drop also read the config's `.conf.d`, where the URL now is;
+- a literal URL in values (`conf.<service>.database.connection` and the other options above, skyline's
+  `conf.skyline.default.database_url`, powerdns's `conf.pdns.gmysql-password`, a Horizon `local_settings`
+  template without the stock `'PASSWORD'` line) is refused together with the reference: it would carry a
+  password, and it would be replaced silently.
+
+The rotation has a short window. MariaDB has no dual password, and db-init is a post-upgrade hook, so a pod
+started with the new password can be refused until its chart's db-init has run `ALTER USER`. That happens
+once per install: the generated value is stable afterwards. MariaDB has no failed-login lockout (an access
+denied does not count toward `max_connect_errors`), so no account is locked by it. Anything outside the
+blueprint that logs in as a service's MariaDB user with the old password is refused from then on. It must
+read the new value from the matching root Secret. Never delete those Secrets.
+
 ### Components follow the umbrella's version
 
 The orchestrator registers every component `CompositionDefinition` at its own chart version

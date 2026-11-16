@@ -39,6 +39,7 @@ limitations under the License.
 {{- $_ := set .Values.conf.neutron.keystone_authtoken "memcache_secret_key" ( default ( randAlphaNum 64 ) .Values.endpoints.oslo_cache.auth.memcache_secret_key ) -}}
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "neutron.db_dropin_entries" $envAll | fromJsonArray) "confKey" "neutron" | include "helm-toolkit.utils.db_dropin_refuse" }}
 {{- if and (not (kindIs "invalid" $envAll.Values.conf.neutron.database.connection)) (empty $envAll.Values.conf.neutron.database.connection) -}}
 {{- $connection := tuple "oslo_db" "internal" "neutron" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" -}}
 {{- if .Values.manifests.certificates -}}
@@ -181,6 +182,7 @@ limitations under the License.
 ---
 {{- dict "envAll" $envAll "from" (include "helm-toolkit.utils.metadata_proxy_secret_ref" $envAll | fromJson) "option" "metadata_proxy_shared_secret" "confKeys" (list "metadata_agent" "ovn_agent" "ovn_metadata_agent") | include "helm-toolkit.utils.secret_option_strip" }}
 {{- tuple $envAll "neutron" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
+{{- dict "envAll" $envAll "entries" (include "neutron.db_dropin_entries" $envAll | fromJsonArray) "confKey" "neutron" | include "helm-toolkit.utils.db_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

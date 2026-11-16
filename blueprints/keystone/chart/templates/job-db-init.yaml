@@ -23,5 +23,6 @@ limitations under the License.
 {{- if .Values.pod.tolerations.keystone.enabled -}}
 {{- $_ := set $dbInitJob "tolerationsEnabled" true -}}
 {{- end -}}
+{{- $_ := set $dbInitJob "etcSources" (include "keystone.dropin_etc_sources" . | fromJsonArray) -}}
 {{ $dbInitJob | include "helm-toolkit.manifests.job_db_init_mysql" }}
 {{- end }}

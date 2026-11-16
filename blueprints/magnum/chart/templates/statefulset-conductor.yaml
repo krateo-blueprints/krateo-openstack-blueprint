@@ -96,6 +96,7 @@ spec:
               mountPath: /etc/magnum
 {{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "magnum") | nindent 12 }}
 {{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "magnum.identity_dropin_entries" . | fromJsonArray) "magnum") | nindent 12 }}
+{{- include "helm-toolkit.snippets.db_dropin_mount" (tuple . (include "magnum.db_dropin_entries" . | fromJsonArray) "magnum") | nindent 12 }}
             - name: magnum-etc
               mountPath: /etc/magnum/magnum.conf
               subPath: magnum.conf
@@ -136,6 +137,7 @@ spec:
             defaultMode: 0555
 {{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "magnum") | nindent 8 }}
 {{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "magnum.identity_dropin_entries" . | fromJsonArray) "magnum") | nindent 8 }}
+{{- include "helm-toolkit.snippets.db_dropin_volume" (tuple . (include "magnum.db_dropin_entries" . | fromJsonArray) "magnum") | nindent 8 }}
         - name: magnum-etc
           secret:
             secretName: magnum-etc

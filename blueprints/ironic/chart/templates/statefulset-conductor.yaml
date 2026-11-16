@@ -188,6 +188,7 @@ spec:
               mountPath: /var/cache/ironic
 {{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "ironic") | nindent 12 }}
 {{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "ironic.identity_dropin_entries" . | fromJsonArray) "ironic") | nindent 12 }}
+{{- include "helm-toolkit.snippets.db_dropin_mount" (tuple . (include "ironic.db_dropin_entries" . | fromJsonArray) "ironic") | nindent 12 }}
             - name: ironic-etc
               mountPath: /etc/ironic/ironic.conf
               subPath: ironic.conf
@@ -274,6 +275,7 @@ spec:
             defaultMode: 0555
 {{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "ironic") | nindent 8 }}
 {{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "ironic.identity_dropin_entries" . | fromJsonArray) "ironic") | nindent 8 }}
+{{- include "helm-toolkit.snippets.db_dropin_volume" (tuple . (include "ironic.db_dropin_entries" . | fromJsonArray) "ironic") | nindent 8 }}
         - name: ironic-etc
           secret:
             secretName: ironic-etc

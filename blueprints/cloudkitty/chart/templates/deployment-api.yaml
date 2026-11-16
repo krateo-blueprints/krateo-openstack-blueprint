@@ -35,6 +35,7 @@ httpGet:
 {{- $etcSources := .Values.pod.etcSources.cloudkitty_api }}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "cloudkitty") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "cloudkitty.identity_dropin_entries" . | fromJsonArray) "cloudkitty") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "cloudkitty.db_dropin_entries" . | fromJsonArray) "cloudkitty") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- if .Values.manifests.secret_ks_etc }}
 {{- $etcSources = append $etcSources (dict "secret" (dict "name" "cloudkitty-ks-etc")) }}
 {{- end }}

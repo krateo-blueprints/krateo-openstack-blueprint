@@ -17,6 +17,7 @@
 {{- $etcSources := .Values.pod.etcSources.designate_worker }}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "designate") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "designate.identity_dropin_entries" . | fromJsonArray) "designate") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
+{{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "designate.db_dropin_entries" . | fromJsonArray) "designate") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 
 {{- $serviceAccountName := "designate-worker" }}
 {{ tuple $envAll "worker" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}

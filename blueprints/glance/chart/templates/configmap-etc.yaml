@@ -55,6 +55,7 @@ limitations under the License.
 {{- $_ := set .Values.conf.glance.keystone_authtoken "memcache_secret_key" ( default ( randAlphaNum 64 ) .Values.endpoints.oslo_cache.auth.memcache_secret_key ) -}}
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "glance.db_dropin_entries" $envAll | fromJsonArray) "confKey" "glance" | include "helm-toolkit.utils.db_dropin_refuse" }}
 {{- if and (not (kindIs "invalid" .Values.conf.glance.database.connection)) (empty .Values.conf.glance.database.connection) -}}
 {{- $connection := tuple "oslo_db" "internal" "glance" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" -}}
 {{- if .Values.manifests.certificates -}}
@@ -142,6 +143,7 @@ limitations under the License.
 ---
 {{- tuple $envAll "glance" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 {{- dict "envAll" $envAll "entries" (include "glance.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "glance" | include "helm-toolkit.utils.identity_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "glance.db_dropin_entries" $envAll | fromJsonArray) "confKey" "glance" | include "helm-toolkit.utils.db_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:
