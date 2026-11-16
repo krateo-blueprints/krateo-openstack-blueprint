@@ -15,24 +15,11 @@ limitations under the License.
 {{- define "metadata.annotations.job.db_sync" }}
 {{- end }}
 
+{{- /* Krateo (#228): no URL reaches db-sync through the environment any more. It wrote TRANSPORT_URL, DB_CONNECTION
+       and DB_CONNECTION_CELL0 into nova_api.cell_mappings as literals; the mappings are templates now
+       (templates/_cell_mapping_templates.tpl), formatted by each process from its own config. */}}
 {{- define "nova.templates._job_db_sync.env_vars" -}}
-{{- $envAll := index . 0 }}
-env:
-  - name: TRANSPORT_URL
-    valueFrom:
-      secretKeyRef:
-        name: {{ $envAll.Values.secrets.oslo_messaging.nova }}
-        key: TRANSPORT_URL
-  - name: DB_CONNECTION
-    valueFrom:
-      secretKeyRef:
-        name: {{ $envAll.Values.secrets.oslo_db.nova }}
-        key: DB_CONNECTION
-  - name: DB_CONNECTION_CELL0
-    valueFrom:
-      secretKeyRef:
-        name: {{ $envAll.Values.secrets.oslo_db_cell0.nova }}
-        key: DB_CONNECTION
+env: []
 {{- end }}
 
 {{- if .Values.manifests.job_db_sync }}

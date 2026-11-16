@@ -126,11 +126,18 @@ four things hold, and each is checked here:
      the drop-in <chart>-db-connection (87-db-connection.conf), as exactly the values-mode URL with the password read from
      the user's root (URL-quoted); every container of a Deployment, StatefulSet, DaemonSet, Job or CronJob that mounts a
      file which carried it receives the drop-in in a .conf.d directory, and no container that reads none of those files
-     receives it. db-drop is rendered on too (it is off by default), so its readers are checked.
+     receives it. In a chart listed in hack/db-readers.yaml (neutron: its agents never use the database), only the
+     listed containers may receive it, and every other one must not. db-drop and the optional workloads are rendered on
+     too, so their readers are checked.
   23. DB-INIT SETS THE PASSWORD, AND READS THE DROP-IN. Every chart's rendered db-init.py is RUN against a stand-in
      SQLAlchemy with its config split like a referenced render (the connection only in <config>.d): it must CREATE USER IF
      NOT EXISTS and then ALTER USER ... IDENTIFIED BY with the drop-in's user and password (CREATE alone never changes an
      existing user's password, so a generated one never reached MariaDB), and db-drop.py must drop that user.
+  24. NOVA'S CELL MAPPINGS HOLD NO PASSWORD. db-sync writes every cell mapping URL as a template nova formats from each
+     process's own config (cell1 and cell0 database, cell1 transport), and the templates format to exactly the URLs
+     nova.conf names: a literal would store the password in nova_api, and a process that cached it before an update
+     kept it until it exited (CELL_CACHE). 24b: every container that loads cell mappings has the [database] connection
+     and [DEFAULT] transport_url the templates format from.
   18. READERS RESTART. Every Deployment, StatefulSet and DaemonSet that reads an ExternalSecret projecting an
      item's root has a pod template that differs between the render without that one item's reference and the
      render with it, every other reference set in both (0.3.63: ks-etc kept its name, nothing hashed it, and
@@ -431,6 +438,17 @@ DB_FILEREAD = {
 DB_RELOCATED = {"skyline"}
 DB_PROJECTION_ONLY = {"powerdns"}
 DB_DROPIN_CHECKED = []
+# Charts whose config is read by programs that never use the database: only the listed containers receive the URLs.
+DB_READERS = (yaml.safe_load(open(os.path.join(ROOT, "hack", "db-readers.yaml"))) or {}).get("charts") or {}
+DB_READERS_SEEN = set()
+
+
+# Modes whose workloads read a chart's config only there: neutron's OVN agents and its ovn-db-sync CronJob, a database
+# reader (hack/db-readers.yaml).
+DB_VARIANTS = {
+    "neutron": [{"network": {"backend": ["ovn"]},
+                 "manifests": {"daemonset_ovn_agent": True, "daemonset_ovn_metadata_agent": True, "cron_job_ovn_db_sync": True}}],
+}
 
 
 def db_keys(chart, u):
@@ -459,7 +477,8 @@ for _cid, _u in DBUSER_BY_ITEM.items():
         # masakarimonitors.conf, nova's computes nova-compute.conf, which omits the databases) must not.
         "variants": lambda chart: ([{"manifests": {"job_db_drop": True}}]
                                    if os.path.exists(os.path.join(BP, chart, "chart", "templates", "job-db-drop.yaml"))
-                                   else []) + [v for (ch, _), v in sorted(IDUSER_VARIANTS.items()) if ch == chart],
+                                   else []) + [v for (ch, _), v in sorted(IDUSER_VARIANTS.items()) if ch == chart]
+                                  + DB_VARIANTS.get(chart, []),
     }
     if any(c in DB_FILEREAD for c in DBUSERS[_u]):
         RULES[_cid]["fileread"] = lambda chart: DB_FILEREAD[chart]
@@ -1034,9 +1053,18 @@ def db_dropin_check(chart, cid, sentinel, docs_s, docs, label=""):
             fail("22%s: %s: drop-in %s %s is not the values-mode URL with the password from the root (%d placeholder(s); "
                  "same once filled: %s)" % (label, chart, drop, so, len(used), filled == val))
     readers = 0
+    users = (DB_READERS.get(chart) or {}).get("readers")
     for podname, cname, mounts, vols, reads in conf_readers(carriers, docs):
         gets = receives_in_confd(mounts, vols, drop)
+        if reads and users is not None and cname not in users:
+            # hack/db-readers.yaml: this chart's config is read by programs that never use the database
+            if gets:
+                fail("22%s: %s: %s container %s receives %s, but hack/db-readers.yaml does not list it as using the "
+                     "database: the password has no business there" % (label, chart, podname, cname, drop))
+            continue
         if reads:
+            if users is not None:
+                DB_READERS_SEEN.add((chart, cname))
             readers += 1
             if not gets:
                 fail("22%s: %s: %s container %s reads %s but does not receive %s in a .conf.d directory: it would have no "
@@ -1131,6 +1159,117 @@ def dbinit_check(chart, docs, tmp):
             fail("23: %s: db-drop.py did not drop the user named in the drop-in's URL (ran %s)" % (chart, norm))
         else:
             DBINIT_CHECKED.append((chart, name))
+
+
+CELLMAP_CHECKED = []
+# nova formats a templated cell mapping URL from the process's own config (CellMapping._format_url, nova stable/2026.1).
+CELL_CMD = re.compile(r"cell_v2\s+(map_cell0|create_cell|update_cell)\b(.*)")
+
+
+def nova_format_url(template, default):
+    """CellMapping._format_url: the template formatted from a local URL."""
+    u = urllib.parse.urlparse(default)
+    return template.format(username=u.username, password=u.password, hostname=u.hostname, port=u.port, scheme=u.scheme,
+                           query=u.query, fragment=u.fragment, path=u.path.lstrip("/"))
+
+
+def cell_mapping_check(docs_s, docs, sentinel, label=""):
+    """24. nova's db-sync writes only TEMPLATES into nova_api.cell_mappings: every cell_v2 map_cell0, create_cell and
+    update_cell passes --database_connection (and, but for cell0, --transport-url) as a quoted literal that holds
+    {password} and no shell variable, so no password is stored and no process caches a stale one (nova keeps each cell's
+    connections per process, keyed by cell UUID, until it exits). Formatted from the values-mode nova.conf, the
+    templates are exactly its [database] connection, [cell0_database] connection and [DEFAULT] transport_url. 24b:
+    every container that loads cell mappings (it mounts the API's nova.conf: computes mount nova-compute.conf and never
+    read the API database) has a [database] connection and a [DEFAULT] transport_url to format them from, from its base
+    config or a drop-in it receives."""
+    script = None
+    for d in docs:
+        if d.get("kind") == "ConfigMap" and "db-sync.sh" in (d.get("data") or {}) and d["metadata"]["name"] == "nova-bin":
+            script = d["data"]["db-sync.sh"]
+    if not script:
+        fail("24%s: nova: no db-sync.sh in nova-bin, so what it writes into the cell mappings cannot be checked" % label)
+        return
+    conf = None
+    for d in docs_s:
+        if d.get("kind") == "Secret" and d["metadata"]["name"] == "nova-etc":
+            conf = ini_options(object_text(d, "nova.conf"))
+    want = {"cell1": conf.get(("database", "connection")), "cell0": conf.get(("cell0_database", "connection")),
+            "transport": conf.get(("DEFAULT", "transport_url"))} if conf else {}
+    if not all(want.values()):
+        fail("24%s: nova: the values-mode nova.conf lacks %s" % (label, sorted(k for k, v in want.items() if not v)))
+        return
+    logical = re.sub(r"\\\n\s*", " ", script)
+    cmds = 0
+    for line in logical.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        m = CELL_CMD.search(line)
+        if not m:
+            continue
+        cmds += 1
+        verb, rest = m.group(1), m.group(2)
+        args = dict(re.findall(r"--(database_connection|transport-url)[ =]('[^']*'|\"[^\"]*\"|\S+)", rest))
+        cell0 = verb == "map_cell0" or "cell0" in rest
+        for opt in ("database_connection",) + (() if cell0 else ("transport-url",)):
+            v = args.get(opt)
+            if v is None:
+                fail("24%s: nova: db-sync's cell_v2 %s passes no --%s, so nova-manage writes the literal URL from its "
+                     "config, password included" % (label, verb, opt))
+                continue
+            if not v.startswith("'") or "$" in v or "{password}" not in v:
+                fail("24%s: nova: db-sync's cell_v2 %s --%s %s is not a quoted template holding {password}: the cell "
+                     "mapping would store a password" % (label, verb, opt, v[:60]))
+                continue
+            got = nova_format_url(v.strip("'"), want["transport"] if opt == "transport-url" else want["cell1"])
+            exp = want["transport"] if opt == "transport-url" else want["cell0" if cell0 else "cell1"]
+            if got != exp:
+                fail("24%s: nova: db-sync's cell_v2 %s --%s template does not format to the URL nova.conf names for %s"
+                     % (label, verb, opt, "cell0" if cell0 else "cell1"))
+        if cell0 and verb != "map_cell0" and args.get("transport-url", "").strip("'\"") != "none:///":
+            fail("24%s: nova: db-sync's cell0 update sets a transport URL other than none:///" % label)
+    if cmds == 0:
+        fail("24%s: nova: db-sync.sh runs no cell_v2 map_cell0/create_cell/update_cell; the check had no input" % label)
+    # 24b. every mapping loader can format the templates
+    loaders = 0
+    texts = {}
+    for d in docs:
+        if d.get("kind") in ("Secret", "ConfigMap"):
+            for k in (d.get("data") or {}):
+                texts[(d["metadata"]["name"], k)] = object_text(d, k)
+        elif d.get("kind") == "ExternalSecret":
+            tgt = ((d["spec"].get("target") or {}).get("name")) or d["metadata"]["name"]
+            for k, v in (((d["spec"].get("target") or {}).get("template") or {}).get("data") or {}).items():
+                texts[(tgt, k)] = v
+    for podname, pod in pod_specs(docs):
+        if podname.startswith("Pod/"):
+            continue
+        vols = {v["name"]: v for v in pod.get("volumes") or []}
+        for cont in pod.get("containers") or []:
+            base, dropins = None, []
+            for mnt in cont.get("volumeMounts") or []:
+                v = vols.get(mnt["name"]) or {}
+                if mnt["mountPath"] == "/etc/nova/nova.conf" and "secret" in v:
+                    base = (v["secret"]["secretName"], mnt.get("subPath") or "nova.conf")
+                elif mnt["mountPath"].rstrip("/") == "/etc/nova/nova.conf.d" or \
+                        os.path.dirname(mnt["mountPath"]) == "/etc/nova/nova.conf.d":
+                    srcs = [v["secret"]["secretName"]] if "secret" in v else \
+                           [(x.get("secret") or {}).get("name") for x in (v.get("projected") or {}).get("sources") or []]
+                    for s in srcs:
+                        dropins += [t for (n, k), t in sorted(texts.items()) if n == s and k.endswith(".conf")]
+            if base is None or base[1] == "nova-compute.conf":
+                continue
+            loaders += 1
+            eff = ini_options(texts.get(base) or "")
+            for t in dropins:
+                eff.update(ini_options(t))
+            for so in (("database", "connection"), ("DEFAULT", "transport_url")):
+                if not eff.get(so):
+                    fail("24b%s: nova: %s container %s loads cell mappings but has no [%s] %s to format their templates "
+                         "from" % (label, podname, cont["name"], so[0], so[1]))
+    if loaders == 0:
+        fail("24b%s: nova: no container loads cell mappings; the check had no input" % label)
+    else:
+        CELLMAP_CHECKED.append((label, cmds, loaders))
 
 
 def db_map_check(tmp):
@@ -2049,6 +2188,8 @@ def main():
                     relocated_files(c["name"], cid, sentinels[cid], dsx, docs, others_for(cid))
                     if db_dropin_for(c["name"]):
                         db_dropin_check(c["name"], cid, sentinels[cid], dsx, docs)
+                    if c["name"] == "nova":
+                        cell_mapping_check(dsx, docs, sentinels[cid])
                     elif c["name"] in DB_FILEREAD:
                         DB_DROPIN_CHECKED.append((c["name"], cid, "fileread (check 14)", 1))
                     elif c["name"] in DB_RELOCATED:
@@ -2114,8 +2255,11 @@ def main():
                         if rcs != 0:
                             fail("%s: does not render with %s and the %s sentinel: %s" % (c["name"], variant, cid, errs.strip()[:200]))
                         else:
-                            db_dropin_check(c["name"], cid, sentinels[cid], [d for d in yaml.safe_load_all(outs) if d], docsv,
+                            dsv = [d for d in yaml.safe_load_all(outs) if d]
+                            db_dropin_check(c["name"], cid, sentinels[cid], dsv, docsv,
                                             " (with %s)" % json.dumps(variant, sort_keys=True))
+                            if c["name"] == "nova":
+                                cell_mapping_check(dsv, docsv, sentinels[cid], " (with %s)" % json.dumps(variant, sort_keys=True))
                     if RULES[cid].get("db"):
                         dbinit_check(c["name"], docsv, tmp)
                     if RULES[cid].get("carriers"):
@@ -2220,6 +2364,15 @@ def main():
     for cid, rule in RULES.items():
         if rule.get("db") and cid in items and not any(x[1] == cid for x in DB_DROPIN_CHECKED):
             fail("22: no render checked where %s's database URLs arrive; the check had no input" % cid)
+    for chart, spec in sorted(DB_READERS.items()):
+        if not (spec or {}).get("readers"):
+            fail("22: hack/db-readers.yaml lists %s with no readers; the check had no input" % chart)
+        for cname in (spec or {}).get("readers") or []:
+            if checked and (chart, cname) not in DB_READERS_SEEN:
+                fail("22: hack/db-readers.yaml lists %s container %s, which no render shows reading the chart's config; "
+                     "remove it or render the mode that runs it" % (chart, cname))
+    if "oslo-db-nova" in items and checked and not CELLMAP_CHECKED:
+        fail("24: no render checked nova's cell mapping templates; the check had no input")
     if checked and not DBINIT_CHECKED:
         fail("23: no chart's db-init.py was run; the check had no input")
     if checked and not LITERALS_CHECKED:

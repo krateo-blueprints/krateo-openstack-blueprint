@@ -912,9 +912,19 @@ On the upgrade that ships it:
   siblings, gnocchi's `[indexer] url`, designate's `[storage:sqlalchemy] connection`, masakari's
   `[taskflow] connection`, octavia's `[task_flow] persistence_connection`, zaqar's management store `uri`)
   arrive as a drop-in, `87-db-connection.conf` in the config's `.conf.d`, from an ExternalSecret
-  `<service>-db-connection`. The password in it is URL-quoted;
+  `<service>-db-connection`. The password in it is URL-quoted. It reaches only the programs that use the database:
+  nova's computes read `nova-compute.conf`, which has no database, and neutron's agents (OVS, DHCP, L3, metadata,
+  OVN and the others) reach neutron-server over RPC, so they no longer hold the password at all. In neutron only
+  neutron-server, the RPC server, db-sync, db-init, db-drop and the OVN database sync receive it
+  (`hack/db-readers.yaml` records the measurement);
 - `<service>-db-user` and nova's and octavia's sibling Secrets (`DB_CONNECTION`) become ExternalSecrets
-  reading the same root. nova's db-sync updates its cell mappings from them on every run;
+  reading the same root;
+- nova's cell mappings (`nova_api.cell_mappings`) no longer store a password. db-sync writes each cell's database
+  and transport URL as a template, `{scheme}://{username}:{password}@{hostname}:{port}/{path}` (cell0: the same
+  server and user, database `nova_cell0`), which every nova process formats from its own `[database] connection`
+  and `[DEFAULT] transport_url`. With literal URLs, a nova pod that started before db-sync rewrote them kept the old
+  password until it exited: nova caches each cell's connections per process. Existing mappings are rewritten on the
+  upgrade;
 - Horizon reads its database password from a file, `/etc/openstack-dashboard/krateo-db-password/password`,
   the way it reads `SECRET_KEY`. skyline's `skyline.yaml` is rendered by `skyline-config` with both its
   Keystone and its MariaDB password from their roots. powerdns reads its password from `powerdns-db-user`
@@ -928,8 +938,11 @@ On the upgrade that ships it:
   password, and it would be replaced silently.
 
 The rotation has a short window. MariaDB has no dual password, and db-init is a post-upgrade hook, so a pod
-started with the new password can be refused until its chart's db-init has run `ALTER USER`. That happens
-once per install: the generated value is stable afterwards. MariaDB has no failed-login lockout (an access
+started with the new password can be refused until its chart's db-init has run `ALTER USER`, and a pod still
+running with the old one is refused from then until it is replaced. That window is bounded by the rollout: no
+reader keeps a password anywhere else (nova's cell mappings are templates of each pod's own config), so once every
+pod runs the new configuration, nothing logs in with the old password. It happens on the upgrade that moves a user
+to its root, and not again: the generated value is stable afterwards. MariaDB has no failed-login lockout (an access
 denied does not count toward `max_connect_errors`), so no account is locked by it. Anything outside the
 blueprint that logs in as a service's MariaDB user with the old password is refused from then on. It must
 read the new value from the matching root Secret. Never delete those Secrets.

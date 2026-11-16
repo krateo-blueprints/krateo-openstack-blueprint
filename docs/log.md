@@ -24,6 +24,10 @@ Curated history; release notes live in GitHub Releases.
   upgrade run measures it. Gates: check 20 no longer exempts the database sections, and 20b fails a mysql URL that logs
   in as a per-service user with a published password. New checks: 15b (the map `hack/db-users.yaml`), 22 (drop-in
   fidelity and delivery, least privilege included) and 23 (db-init and db-drop run against a stand-in SQLAlchemy).
+  nova's cell mappings now store URL templates that each process formats from its own config, so `nova_api` holds no
+  password: nova caches each cell's connections per process (CELL_CACHE), and a pod that started before db-sync
+  rewrote a literal URL kept the old password until it exited (check 24). neutron's agents no longer receive the
+  database URL at all; only the servers and database tools do (`hack/db-readers.yaml`, check 22).
 
 - **ceilometer's notification URLs (#281).** Since 0.3.57 the notification agent logged in to seven RabbitMQ vhosts
   as the administrator with the published password, which the server refuses. The URLs are now derived from
