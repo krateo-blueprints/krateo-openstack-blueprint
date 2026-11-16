@@ -14,5 +14,6 @@ limitations under the License.
 
 {{- if and .Values.manifests.job_bootstrap .Values.bootstrap.enabled }}
 {{- $bootstrapJob := dict "envAll" . "serviceName" "cloudkitty" "keystoneUser" .Values.bootstrap.ks_user "logConfigFile" .Values.conf.cloudkitty.DEFAULT.log_config_append -}}
+{{- $_ := set $bootstrapJob "etcSources" (include "cloudkitty.dropin_etc_sources" . | fromJsonArray) -}}
 {{ $bootstrapJob | include "helm-toolkit.manifests.job_bootstrap" }}
 {{- end }}

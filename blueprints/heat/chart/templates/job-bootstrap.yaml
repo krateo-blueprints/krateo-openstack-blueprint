@@ -17,6 +17,7 @@ limitations under the License.
 
 {{- if and .Values.manifests.job_bootstrap .Values.bootstrap.enabled }}
 {{- $bootstrapJob := dict "envAll" . "serviceName" "heat" "keystoneUser" .Values.bootstrap.ks_user "logConfigFile" .Values.conf.heat.DEFAULT.log_config_append -}}
+{{- $_ := set $bootstrapJob "etcSources" (include "heat.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if or .Values.manifests.certificates .Values.tls.identity -}}
 {{- $_ := set $bootstrapJob "tlsSecret" .Values.secrets.tls.orchestration.api.internal -}}
 {{- end -}}

@@ -16,6 +16,7 @@ limitations under the License.
 
 {{- if .Values.manifests.job_db_init }}
 {{- $dbInitJob := dict "envAll" . "serviceName" "aodh" -}}
+{{- $_ := set $dbInitJob "etcSources" (include "aodh.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.pod.tolerations.aodh.enabled -}}
 {{- $_ := set $dbInitJob "tolerationsEnabled" true -}}
 {{- end -}}

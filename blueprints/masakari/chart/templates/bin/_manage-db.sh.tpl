@@ -16,4 +16,4 @@ limitations under the License.
 
 exec -ex
 
-masakari-manage db sync
+masakari-manage $([ -d /etc/masakari/masakari.conf.d ] && echo --config-dir /etc/masakari/masakari.conf.d) db sync

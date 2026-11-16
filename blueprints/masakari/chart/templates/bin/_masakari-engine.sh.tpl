@@ -19,7 +19,7 @@ set -ex
 COMMAND="${@:-start}"
 
 function start () {
-   exec masakari-engine --config-file /etc/masakari/masakari.conf
+   exec masakari-engine --config-file /etc/masakari/masakari.conf $([ -d /etc/masakari/masakari.conf.d ] && echo --config-dir /etc/masakari/masakari.conf.d)
 }
 
 function stop () {

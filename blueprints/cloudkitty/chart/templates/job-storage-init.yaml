@@ -61,6 +61,12 @@ spec:
             - name: cloudkitty-etc
               mountPath: /etc/cloudkitty/logging.conf
               subPath: logging.conf
+{{- /* Krateo (#228): every container that mounts cloudkitty.conf receives the chart's drop-ins. */}}
+{{- if include "cloudkitty.dropin_etc_sources" $envAll | fromJsonArray }}
+            - name: cloudkitty-conf-dir
+              mountPath: /etc/cloudkitty/cloudkitty.conf.d
+              readOnly: true
+{{- end }}
       volumes:
         - name: pod-tmp
           emptyDir: {}
@@ -74,4 +80,10 @@ spec:
           configMap:
             name: cloudkitty-bin
             defaultMode: 0555
+{{- with include "cloudkitty.dropin_etc_sources" $envAll | fromJsonArray }}
+        - name: cloudkitty-conf-dir
+          projected:
+            sources:
+{{ toYaml . | indent 14 }}
+{{- end }}
 {{- end }}

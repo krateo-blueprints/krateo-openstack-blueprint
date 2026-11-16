@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-cloudkitty-storage-init
+cloudkitty-storage-init $([ -d /etc/cloudkitty/cloudkitty.conf.d ] && echo --config-dir /etc/cloudkitty/cloudkitty.conf.d)

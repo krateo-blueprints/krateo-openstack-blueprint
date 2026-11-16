@@ -16,7 +16,7 @@ limitations under the License.
 
 set -ex
 
-exec nova-manage db archive_deleted_rows \
+exec nova-manage $([ -d /etc/nova/nova.conf.d ] && echo --config-dir /etc/nova/nova.conf.d) db archive_deleted_rows \
 {{- if .Values.conf.archive_deleted_rows.until_completion }}
    --until-complete \
 {{- end}}

@@ -33,6 +33,10 @@ limitations under the License.
 {{- $podEnvVars := index . "podEnvVars" | default false -}}
 {{- $dbToSync := index . "dbToSync" | default ( dict "configFile" (printf "/etc/%s/%s.conf" $serviceName $serviceName ) "configDir" (printf "/etc/%s/%s.conf.d" $serviceName $serviceName ) "logConfigFile" (printf "/etc/%s/logging.conf" $serviceName ) "image" ( index $envAll.Values.images.tags ( printf "%s_db_sync" $serviceName )) ) -}}
 {{- $etcSources := index (index $envAll.Values.pod "etcSources" | default dict) $jobNameRef | default list -}}
+{{- /* Krateo (#228): the chart's drop-in sources (memcache key, service-user identity), appended to the values ones.
+       A db-sync program can authenticate (ceilometer-upgrade talks to gnocchi), and 0.3.65's ceilometer-db-sync,
+       given none, mounted an empty conf.d and failed its post-upgrade hook on every retry. */ -}}
+{{- $etcSources = concat $etcSources (index . "etcSources" | default list) -}}
 {{- $secretBin := index . "secretBin" -}}
 {{- $backoffLimit := index . "backoffLimit" | default "1000" -}}
 {{- $activeDeadlineSeconds := index . "activeDeadlineSeconds" -}}

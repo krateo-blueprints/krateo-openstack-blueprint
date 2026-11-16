@@ -14,6 +14,7 @@ limitations under the License.
 
 {{- if .Values.manifests.job_db_sync }}
 {{- $dbSyncJob := dict "envAll" . "serviceName" "ceilometer" "podVolMounts" .Values.pod.mounts.ceilometer_db_sync.ceilometer_db_sync.volumeMounts "podVols" .Values.pod.mounts.ceilometer_db_sync.ceilometer_db_sync.volumes -}}
+{{- $_ := set $dbSyncJob "etcSources" (include "ceilometer.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.pod.tolerations.ceilometer.enabled -}}
 {{- $_ := set $dbSyncJob "tolerationsEnabled" true -}}
 {{- end -}}

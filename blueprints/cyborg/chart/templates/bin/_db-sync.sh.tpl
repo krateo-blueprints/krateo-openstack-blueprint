@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-cyborg-dbsync --config-file /etc/cyborg/cyborg.conf upgrade
+cyborg-dbsync --config-file /etc/cyborg/cyborg.conf $([ -d /etc/cyborg/cyborg.conf.d ] && echo --config-dir /etc/cyborg/cyborg.conf.d) upgrade

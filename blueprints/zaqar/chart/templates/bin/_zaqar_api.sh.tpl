@@ -19,7 +19,7 @@ COMMAND="${@:-start}"
 
 function start () {
   exec zaqar-server \
-        --config-file /etc/zaqar/zaqar.conf
+        --config-file /etc/zaqar/zaqar.conf $([ -d /etc/zaqar/zaqar.conf.d ] && echo --config-dir /etc/zaqar/zaqar.conf.d)
 }
 
 function stop () {

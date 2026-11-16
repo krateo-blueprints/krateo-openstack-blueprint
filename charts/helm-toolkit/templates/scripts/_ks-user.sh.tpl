@@ -71,20 +71,13 @@ USER_ID=$(openstack user create --or-show --enable -f value -c id \
     --description="${USER_DESC}" \
     "${SERVICE_OS_USERNAME}");
 
-{{ if and (kindIs "map" .) (index . "krateoRotate") -}}
-# Krateo (#228): a machine user must never be locked out. While its password rotates, a reader still holding
-# the previous value fails authentication; with Keystone's failed-login lockout five such failures locked
-# nova, neutron and placement for 30 minutes (measured, 0.3.63). Set BEFORE the password changes. Only in
-# the pre-upgrade Job's inline copy (job_ks_user passes krateoRotate), so <svc>-bin keeps upstream's script.
-openstack user set --ignore-lockout-failure-attempts "${USER_ID}"
-
-{{ end -}}
+{{ if not (and (kindIs "map" .) (index . "krateoRotate")) -}}
 # Manage user password (we do this in a seperate step to ensure the password is updated if required)
 set +x
 echo "Setting user password via: openstack user set --password=xxxxxxx ${USER_ID}"
 openstack user set --password="${SERVICE_OS_PASSWORD}" "${USER_ID}"
 set -x
-
+{{ end }}
 function ks_assign_user_role () {
   if [[ "$SERVICE_OS_ROLE" == "admin" ]]
   then
@@ -113,4 +106,21 @@ done
 export USER_ROLE_ID=$(openstack role create --or-show -f value -c id \
     "${MEMBER_OS_ROLE}");
 ks_assign_user_role
+{{- if and (kindIs "map" .) (index . "krateoRotate") }}
+
+# Krateo (#228): only in the pre-upgrade Job's inline copy (job_ks_user passes krateoRotate), so <svc>-bin keeps
+# upstream's script byte for byte.
+# A machine user must never be locked out. While its password rotates, a reader still holding the previous value
+# fails authentication; with Keystone's failed-login lockout five such failures locked nova, neutron and placement
+# for 30 minutes (measured, 0.3.63). So the exemption is set BEFORE the password changes.
+openstack user set --ignore-lockout-failure-attempts "${USER_ID}"
+
+# The password changes LAST, after the project, user and every role exist. Every reader still holding the previous
+# value fails from this moment until it restarts, which happens only after this Job completes; setting it first
+# made that window the Job's whole run, 1 to 3 minutes per user (measured, 0.3.65: about 221 failed logins).
+set +x
+echo "Setting user password via: openstack user set --password=xxxxxxx ${USER_ID}"
+openstack user set --password="${SERVICE_OS_PASSWORD}" "${USER_ID}"
+set -x
+{{- end }}
 {{- end }}

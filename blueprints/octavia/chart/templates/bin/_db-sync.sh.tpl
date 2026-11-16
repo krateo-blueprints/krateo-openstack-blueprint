@@ -18,6 +18,6 @@ limitations under the License.
 
 set -ex
 
-octavia-db-manage upgrade head
+octavia-db-manage $([ -d /etc/octavia/octavia.conf.d ] && echo --config-dir /etc/octavia/octavia.conf.d) upgrade head
 
-octavia-db-manage upgrade_persistence
+octavia-db-manage $([ -d /etc/octavia/octavia.conf.d ] && echo --config-dir /etc/octavia/octavia.conf.d) upgrade_persistence

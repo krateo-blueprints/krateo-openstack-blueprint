@@ -375,7 +375,7 @@ data:
   current: {{ include "osh.version" (list $) | quote }}
   annotation: {{ include "osh.originVersionAnnotation" $ | quote }}
   pin: {{ include "osh.pinVersion" (list (include "osh.version" (list $)) ORIGIN "KIND" $crds) | quote }}
-  emit: {{ include "osh.apiVersionAt" (list (include "osh.emitVersion" (list $ "KIND" "NAME" $crds (include "osh.exists" (list $ "KIND" "NAME" $crds))))) | quote }}
+  emit: {{ include "osh.apiVersionAt" (list (include "osh.emitVersion" (list $ "KIND" "NAME" $crds (include "osh.exists" (list $ "KIND" "NAME" $crds)) (include "osh.migrationApprovedFor" (list $ (include "osh.definition" (list $ "NAME") | fromJson)))))) | quote }}
 """
 
 

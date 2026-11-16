@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-exec cinder-manage db sync
+exec cinder-manage $([ -d /etc/cinder/cinder.conf.d ] && echo --config-dir /etc/cinder/cinder.conf.d) db sync

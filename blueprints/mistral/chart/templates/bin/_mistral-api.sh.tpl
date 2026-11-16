@@ -20,7 +20,7 @@ COMMAND="${@:-start}"
 function start () {
   exec mistral-server \
         --server api \
-        --config-file /etc/mistral/mistral.conf
+        --config-file /etc/mistral/mistral.conf $([ -d /etc/mistral/mistral.conf.d ] && echo --config-dir /etc/mistral/mistral.conf.d)
 }
 
 function stop () {

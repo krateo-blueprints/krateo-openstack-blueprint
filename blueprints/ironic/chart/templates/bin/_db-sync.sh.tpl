@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-ironic-dbsync upgrade
+ironic-dbsync $([ -d /etc/ironic/ironic.conf.d ] && echo --config-dir /etc/ironic/ironic.conf.d) upgrade

@@ -16,7 +16,7 @@ limitations under the License.
 
 set -ex
 
-barbican-db-manage upgrade
+barbican-db-manage $([ -d /etc/barbican/barbican.conf.d ] && echo --config-dir /etc/barbican/barbican.conf.d) upgrade
 
 {{- $kek := (index (index .Values.conf.barbican "simple_crypto_plugin" | default dict) "kek") | default "" }}
 {{- $old_kek := index .Values.conf.simple_crypto_kek_rewrap "old_kek" | default ""}}

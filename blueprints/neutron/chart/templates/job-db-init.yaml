@@ -17,6 +17,7 @@ limitations under the License.
 
 {{- if .Values.manifests.job_db_init }}
 {{- $dbInitJob := dict "envAll" . "serviceName" "neutron" -}}
+{{- $_ := set $dbInitJob "etcSources" (include "neutron.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.manifests.certificates -}}
 {{- $_ := set $dbInitJob "dbAdminTlsSecret" .Values.endpoints.oslo_db.auth.admin.secret.tls.internal -}}
 {{- end -}}

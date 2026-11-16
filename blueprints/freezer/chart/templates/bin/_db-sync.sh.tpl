@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-freezer-manage --config-file /etc/freezer/freezer.conf db sync
+freezer-manage --config-file /etc/freezer/freezer.conf $([ -d /etc/freezer/freezer.conf.d ] && echo --config-dir /etc/freezer/freezer.conf.d) db sync

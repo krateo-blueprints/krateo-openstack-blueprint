@@ -38,6 +38,10 @@ limitations under the License.
 {{- $activeDeadlineSeconds := index . "activeDeadlineSeconds" -}}
 {{- $serviceNamePretty := $serviceName | replace "_" "-" -}}
 {{- $dbAdminTlsSecret := index . "dbAdminTlsSecret" | default "" -}}
+{{- /* Krateo (#228): the chart's drop-in sources (memcache key, service-user identity) projected into the main config's
+       conf.d. Every container that mounts a main config receives its drop-ins: 0.3.65's ceilometer-db-sync, given
+       none, read ceilometer.conf without its password. Nothing renders when the chart passes none. */ -}}
+{{- $etcSources := index . "etcSources" | default list -}}
 
 {{- $serviceAccountName := printf "%s-%s" $serviceNamePretty "db-init" }}
 {{ tuple $envAll "db_init" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
@@ -134,6 +138,11 @@ spec:
               mountPath: {{ $dbToInit.logConfigFile | quote }}
               subPath: {{ base $dbToInit.logConfigFile | quote }}
               readOnly: true
+{{- if $etcSources }}
+            - name: db-init-conf-dir
+              mountPath: {{ printf "%s.d" $dbToInit.configFile | quote }}
+              readOnly: true
+{{- end }}
 {{- end }}
 {{- if $envAll.Values.manifests.certificates }}
 {{- dict "enabled" $envAll.Values.manifests.certificates "name" $dbAdminTlsSecret "path" "/etc/mysql/certs" | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
@@ -166,6 +175,12 @@ spec:
           secret:
             secretName: {{ $configMapEtc | quote }}
             defaultMode: 0444
+{{- if $etcSources }}
+        - name: db-init-conf-dir
+          projected:
+            sources:
+{{ toYaml $etcSources | indent 14 }}
+{{- end }}
 {{- end -}}
 {{- end -}}
 {{- end -}}

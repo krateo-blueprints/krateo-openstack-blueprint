@@ -39,7 +39,21 @@ WAIVERS = os.path.join(ROOT, "hack", "config-file-ref-waivers.yaml")
 
 # `--flag /path` or `--flag=/path`, with the value optionally quoted.
 FLAG_RE = re.compile(
-    r"--(?:config-file|config-dir|log-config-append)[=\s]+[\"']?(/[^\s\"'\\]+)")
+    r"--(?:config-file|config-dir|log-config-append)[=\s]+[\"']?(/[^\s\"'\\)]+)")
+# A flag passed only when its path exists, `$([ -d /p ] && echo --config-dir /p)` (#228, 0.3.66: a chart that mounts
+# its drop-ins file by file has no conf.d at defaults, and oslo.config aborts on a --config-dir that does not exist).
+# Such a reference is optional by construction: the script never names a path that is not there.
+GUARDED_RE = re.compile(r"\[\s+-[df]\s+(/[^\s\]]+?)/?\s+\]\s*&&\s*echo\s+--(?:config-file|config-dir)[=\s]+(\S+?)/?(?=[\s)\"']|$)")
+
+
+GUARDED = set()
+
+
+def flag_refs(text):
+    """Paths named by a config flag, minus those guarded by an existence test on the same path (counted)."""
+    guarded = {a.rstrip("/") for a, b in GUARDED_RE.findall(text) if a.rstrip("/") == b.rstrip("/")}
+    GUARDED.update(guarded)
+    return {r for r in FLAG_RE.findall(text) if r.rstrip("/") not in guarded}
 # uwsgi ini line: `wsgi-file = /path`
 WSGI_RE = re.compile(r"^\s*wsgi-file\s*=\s*(\S+)\s*$", re.M)
 
@@ -219,7 +233,7 @@ def main():
             files, opaque = delivered(spec, container, cms)
             refs = set()
             for text in script_for(container, cms):
-                refs.update(FLAG_RE.findall(text))
+                refs.update(flag_refs(text))
             # A uwsgi wsgi-file belongs to the container that mounts that ini, not to every
             # container in the chart: attributing designate's api entry point to
             # designate-central would be a finding against a pod that never reads it.
@@ -257,7 +271,8 @@ def main():
             print("  " + p)
         return 1
     print(f"OK: {checked} config-file references across {len(charts)} charts are all "
-          "delivered by a mount or waived")
+          f"delivered by a mount or waived; {len(GUARDED)} distinct path(s) passed only when they exist "
+          "(`[ -d P ] && echo --config-dir P`) were not required")
     return 0
 
 

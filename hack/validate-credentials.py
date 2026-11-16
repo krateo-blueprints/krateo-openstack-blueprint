@@ -95,7 +95,12 @@ four things hold, and each is checked here:
      mounts the Secret at that directory; the ExternalSecret holds exactly that file.
   17. SERVICE USERS ROTATE BEFORE THEIR READERS. For every rotated service user, the ks-user Job that creates
      it is post-install,pre-upgrade, reads the password from the umbrella's root (a pre-upgrade hook runs
-     before the projection is applied), and its script exempts the user from lockout BEFORE setting it.
+     before the projection is applied), and its script exempts the user from lockout BEFORE setting it and
+     sets the password LAST, after every other openstack command (0.3.65: setting it first made the readers'
+     failure window the Job's whole 1-3 minute run).
+  19. EVERY PARSE READS THE DROP-INS. In every container that mounts a .conf.d, every OpenStack program its scripts
+     start passes --config-dir <that dir> (0.3.65: watcher's plugin loader re-parsed without a project and its
+     decision engine lost every drop-in). 19b: an unguarded --config-dir names a directory mounted at defaults.
   16b. RELOCATED FILES. A file that carried a service user's password and that the references render drops from
      its Secret (glance's swift-store.conf) is rendered by an ExternalSecret reading that user's root, identical
      to the values-mode file with the sentinel, and mounted at the same path by every container that read it.
@@ -642,7 +647,11 @@ def dropin_delivery(chart, cid, sentinel, docs_s, docs):
             fail("%s: drop-in %s reads pw_%s from %s, not %s's root" % (chart, drop, key, data.get("pw_%s" % key), cid))
     readers = 0
     for podname, pod in pod_specs(docs):
-        if podname.split("/")[0] not in ("Deployment", "StatefulSet", "DaemonSet"):
+        # Every workload kind, Jobs and CronJobs included: unlike the memcache key (keystonemiddleware, servers only),
+        # a service password is used by one-shot programs too. 0.3.65's ceilometer-db-sync (ceilometer-upgrade talks
+        # to gnocchi) read ceilometer.conf without the drop-in and failed its post-upgrade hook on every retry.
+        # Helm test Pods are left out: they run on demand, not in an install or an upgrade.
+        if podname.split("/")[0] not in ("Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"):
             continue
         vols = {v["name"]: v for v in pod.get("volumes") or []}
         for cont in pod.get("containers") or []:
@@ -672,7 +681,7 @@ def dropin_delivery(chart, cid, sentinel, docs_s, docs):
                 fail("%s: %s container %s reads %s but does not receive %s where it reads drop-ins"
                      % (chart, podname, cont["name"], sorted(reads), drop))
     if readers == 0:
-        fail("%s: no long-running container reads a file that carried %s" % (chart, cid))
+        fail("%s: no container reads a file that carried %s" % (chart, cid))
 
 
 def fileread_check(chart, cid, docs):
@@ -841,6 +850,98 @@ def identity_map_check(tmp):
             fail("identity map: %s key %s is user %s, the map says %s" % (pair[0], pair[1], rendered[pair], mapped[pair]))
 
 
+# 19. Programs named after these projects read oslo.config. swift's servers read paste-deploy files, not oslo.config,
+# so swift- is not here. Horizon and skyline run no such binary.
+OSLO_PROJECTS = ("aodh", "barbican", "blazar", "ceilometer", "cinder", "cloudkitty", "cyborg", "designate", "freezer",
+                 "glance", "gnocchi", "heat", "ironic", "keystone", "magnum", "manila", "masakari", "masakarimonitors",
+                 "mistral", "neutron", "nova", "octavia", "placement", "tacker", "trove", "watcher", "zaqar")
+OSLO_PROGRAM = re.compile(r"(?:^\s*|[;&|(]\s*|\bexec\s+|\btimeout\s+\d+\s+)((?:%s)-[a-z0-9-]+)(?=\s|$)" % "|".join(OSLO_PROJECTS))
+CONFIG_DIR_CHECKED = []
+
+
+def container_scripts(pod, cont, docs):
+    """The shell text a container runs: its inline `bash -c` script and every mounted script its command names."""
+    vols = {v["name"]: v for v in pod.get("volumes") or []}
+    cmd = (cont.get("command") or []) + (cont.get("args") or [])
+    texts = []
+    if len(cmd) >= 3 and cmd[0].endswith("sh") and cmd[1] == "-c":
+        texts.append(cmd[2])
+    words = set(re.findall(r"/[\w./-]+", " ".join(cmd)))
+    for m in cont.get("volumeMounts") or []:
+        if m["mountPath"] in words and m.get("subPath"):
+            v = vols.get(m["name"]) or {}
+            kind, name = (("ConfigMap", (v.get("configMap") or {}).get("name")) if "configMap" in v else
+                          ("Secret", (v.get("secret") or {}).get("secretName")) if "secret" in v else (None, None))
+            for d in docs:
+                if d.get("kind") == kind and d["metadata"]["name"] == name:
+                    t = object_text(d, m["subPath"])
+                    if t:
+                        texts.append(t)
+    return texts
+
+
+def config_dir_check(chart, docs):
+    """19. EVERY PARSE READS THE DROP-INS. In every container that mounts a .conf.d, every OpenStack program its
+    scripts start passes --config-dir <that dir>. oslo.config finds <project>.conf.d by itself only on a parse that
+    names the project; watcher's plugin loader re-parses with neither project nor dirs, and on 0.3.65 its decision
+    engine lost every drop-in value (\"password is a required attribute\"). An argv flag survives such a re-parse,
+    since it reuses sys.argv. WSGI apps (uwsgi, Apache) take no argv; they are out of scope here."""
+    for podname, pod in pod_specs(docs):
+        if podname.startswith("Pod/"):
+            continue  # helm test pods run on demand
+        for cont in (pod.get("initContainers") or []) + (pod.get("containers") or []):
+            dirs = set()
+            for m in cont.get("volumeMounts") or []:
+                path = m["mountPath"].rstrip("/")
+                d = os.path.dirname(path) if m.get("subPath") else path
+                if d.endswith(".conf.d"):
+                    dirs.add(d)
+            if not dirs:
+                continue
+            for text in container_scripts(pod, cont, docs):
+                logical = re.sub(r"\\\n\s*", " ", text)
+                for line in logical.splitlines():
+                    code = line.split("#", 1)[0] if not line.lstrip().startswith("#") else ""
+                    for prog in OSLO_PROGRAM.findall(code):
+                        CONFIG_DIR_CHECKED.append((chart, podname, cont["name"], prog))
+                        # the flag may be guarded on the directory existing: $([ -d D ] && echo --config-dir D)
+                        if not any(re.search(r"--config-dir[ =]%s/?(?=[\s)\"']|$)" % re.escape(d), code) for d in dirs):
+                            fail("19: %s: %s container %s starts %s without --config-dir %s; oslo.config finds that "
+                                 "directory only on a parse that names the project, and a re-parse without it (watcher's "
+                                 "plugin loader, 0.3.65) loses every drop-in" % (chart, podname, cont["name"], prog,
+                                                                                 " or ".join(sorted(dirs))))
+
+
+
+def config_dir_defaults(chart, docs0):
+    """19b. A --config-dir that is not guarded by `[ -d <dir> ]` names a directory the container mounts, in the render
+    at defaults too: oslo.config aborts on a --config-dir that does not exist, and a chart whose drop-ins are mounted
+    file by file has no such directory until a drop-in is active."""
+    for podname, pod in pod_specs(docs0):
+        if podname.startswith("Pod/"):
+            continue
+        for cont in (pod.get("initContainers") or []) + (pod.get("containers") or []):
+            mounted = set()
+            for m in cont.get("volumeMounts") or []:
+                path = m["mountPath"].rstrip("/")
+                mounted.add(path)
+                if m.get("subPath"):
+                    mounted.add(os.path.dirname(path))
+            for text in container_scripts(pod, cont, docs0):
+                logical = re.sub(r"\\\n\s*", " ", text)
+                for line in logical.splitlines():
+                    if line.lstrip().startswith("#"):
+                        continue
+                    for cm in re.finditer(r"--config-dir[ =](\S+?)/?(?=[\s)\"']|$)", line):
+                        d = cm.group(1)
+                        if "$" in d or d in mounted:
+                            continue
+                        if re.search(r"\[\s+-d\s+%s/?\s+\]" % re.escape(d), line[:cm.start()]):
+                            continue
+                        fail("19b: %s: at defaults %s container %s passes --config-dir %s, which it does not mount; "
+                             "oslo.config aborts on a missing directory (guard it: $([ -d %s ] && echo --config-dir %s))"
+                             % (chart, podname, cont["name"], d, d, d))
+
 def pod_template_refs(pod):
     """Secret names a pod spec references (volumes, projected sources, env, envFrom)."""
     refs = set()
@@ -961,11 +1062,24 @@ def ks_user_rotation(chart, cid, cv, root, docs):
                          "are the previous revision's" % (chart, job, ienv["DEPENDENCY_JOBS"]))
             cmd = c.get("command") or []
             script = cmd[-1] if len(cmd) == 3 and cmd[:2] == ["/bin/bash", "-c"] else ""
+            # the command itself (a line that runs it), not the echo that announces it with a masked value
             ex = script.find("--ignore-lockout-failure-attempts")
-            setpw = script.find('openstack user set --password=')
+            runs = [m.start() for m in re.finditer(r"(?m)^[ \t]*openstack user set --password=", script)]
+            setpw = runs[-1] if runs else -1
             if not (0 <= ex < setpw):
                 fail("%s: Job %s's inline script must exempt user %s from lockout (--ignore-lockout-failure-attempts) "
                      "before it sets the password" % (chart, job, u))
+            # The password changes LAST: every reader still holding the previous value fails from that moment until it
+            # restarts, which is after this Job completes. Any openstack command after it (role assignments took 1 to
+            # 3 minutes per user) widens that window for nothing (measured on 0.3.65: about 221 failed logins).
+            if setpw >= 0:
+                after = [l.strip() for l in script[setpw:].splitlines()[1:]
+                         if l.strip() and not l.strip().startswith("#")]
+                later = [l for l in after if re.search(r"(^|[\s$(])openstack\s", l)]
+                if later:
+                    fail("%s: Job %s's inline script runs %d openstack command(s) after it sets user %s's password "
+                         "(first: %r); the password must change last, so readers fail only until they restart"
+                         % (chart, job, len(later), u, later[0][:80]))
     if found:
         KS_USER_CHECKED.append((chart, u))
 
@@ -1153,6 +1267,7 @@ def main():
                 continue
             checked += 1
             docs = [d for d in yaml.safe_load_all(out) if d]
+            config_dir_check(c["name"], docs)
             for cid, sentinel in sentinels.items():
                 if sentinel in out:
                     fail("%s: the %s password from values appears in the rendered text" % (c["name"], cid))
@@ -1241,6 +1356,7 @@ def main():
             rc0, out0, _ = helm_template(w, release, enabled)
             if rc0 == 0:
                 docs0 = [d for d in yaml.safe_load_all(out0) if d]
+                config_dir_defaults(c["name"], docs0)
                 dangling = (pod_secret_refs(docs) & provided(docs0)) - provided(docs)
                 for n in sorted(dangling):
                     fail("%s: with its credential references a pod still references Secret %s, which is no "
@@ -1401,6 +1517,8 @@ def main():
                      "renders it to IDUSER_VARIANTS" % (chart, u, key))
     if checked and not KS_USER_CHECKED:
         fail("17: no chart's ks-user Job was matched to a rotated service user; the check had no input")
+    if checked and not CONFIG_DIR_CHECKED:
+        fail("19: no OpenStack program was found in any container that mounts a .conf.d; the check had no input")
     if failures:
         for f in failures:
             print("FAIL: " + f)
@@ -1408,8 +1526,9 @@ def main():
     print("OK: %d credential item(s); %d chart(s) rendered with references carry no admin password from values; "
           "umbrella references, closure, roots, the admin lockout exemption and teardown with the release consistent; "
           "%d service-user ks-user Job(s) rotate pre-upgrade from the root with the exemption first; %d (workload, item) "
-          "reader pair(s) restart when that item's reference is applied" % (len(items), checked, len(KS_USER_CHECKED),
-                                                                           len(READERS_CHECKED)))
+          "reader pair(s) restart when that item's reference is applied; %d program start(s) in a container with a "
+          "conf.d pass --config-dir" % (len(items), checked, len(KS_USER_CHECKED), len(READERS_CHECKED),
+                                        len(CONFIG_DIR_CHECKED)))
 
 
 main()

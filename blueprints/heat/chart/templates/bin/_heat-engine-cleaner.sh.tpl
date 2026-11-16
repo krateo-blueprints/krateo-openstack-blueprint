@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-heat-manage service clean
+heat-manage $([ -d /etc/heat/heat.conf.d ] && echo --config-dir /etc/heat/heat.conf.d) service clean

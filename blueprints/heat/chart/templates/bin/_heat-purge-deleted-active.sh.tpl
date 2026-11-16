@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-heat-manage purge_deleted -g minutes "$1"
+heat-manage $([ -d /etc/heat/heat.conf.d ] && echo --config-dir /etc/heat/heat.conf.d) purge_deleted -g minutes "$1"

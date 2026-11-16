@@ -17,6 +17,7 @@ limitations under the License.
 
 {{- if and .Values.manifests.job_bootstrap .Values.bootstrap.enabled }}
 {{- $bootstrapJob := dict "envAll" . "serviceName" "manila" "keystoneUser" .Values.bootstrap.ks_user "logConfigFile" .Values.conf.manila.DEFAULT.log_config_append "jobAnnotations" (include "metadata.annotations.job.bootstrap" . | fromYaml) -}}
+{{- $_ := set $bootstrapJob "etcSources" (include "manila.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.pod.tolerations.manila.enabled -}}
 {{- $_ := set $bootstrapJob "tolerationsEnabled" true -}}
 {{- end -}}

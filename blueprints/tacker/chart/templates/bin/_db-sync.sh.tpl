@@ -15,4 +15,4 @@ limitations under the License.
 
 set -ex
 
-tacker-db-manage --config-file /etc/tacker/tacker.conf upgrade head
+tacker-db-manage --config-file /etc/tacker/tacker.conf $([ -d /etc/tacker/tacker.conf.d ] && echo --config-dir /etc/tacker/tacker.conf.d) upgrade head

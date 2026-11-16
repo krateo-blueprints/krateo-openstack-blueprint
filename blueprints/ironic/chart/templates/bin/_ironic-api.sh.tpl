@@ -25,7 +25,7 @@ OPTIONS="${OPTIONS} --config-file /tmp/pod-shared/cleaning-network.conf"
 
 function start () {
   exec ironic-api \
-        --config-file /etc/ironic/ironic.conf \
+        --config-file /etc/ironic/ironic.conf $([ -d /etc/ironic/ironic.conf.d ] && echo --config-dir /etc/ironic/ironic.conf.d) \
         ${OPTIONS}
 }
 

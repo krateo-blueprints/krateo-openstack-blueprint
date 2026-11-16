@@ -22,6 +22,7 @@ limitations under the License.
 {{- $dbCell := dict "adminSecret" .Values.secrets.oslo_db.admin "configFile" (printf "/etc/%s/%s.conf" $serviceName $serviceName ) "logConfigFile" (printf "/etc/%s/logging.conf" $serviceName ) "configDbSection" "cell0_database" "configDbKey" "connection" -}}
 {{- $dbsToInit := list $dbSvc $dbApi $dbCell }}
 {{- $dbInitJob := dict "envAll" . "serviceName" $serviceName "dbsToInit" $dbsToInit -}}
+{{- $_ := set $dbInitJob "etcSources" (include "nova.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.manifests.certificates -}}
 {{- $_ := set $dbInitJob "dbAdminTlsSecret" .Values.endpoints.oslo_db.auth.admin.secret.tls.internal -}}
 {{- end -}}

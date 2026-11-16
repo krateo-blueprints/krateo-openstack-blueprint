@@ -17,6 +17,7 @@ limitations under the License.
 
 {{- if and .Values.manifests.job_bootstrap .Values.bootstrap.enabled }}
 {{- $bootstrapJob := dict "envAll" . "serviceName" "neutron" "keystoneUser" .Values.bootstrap.ks_user "logConfigFile" .Values.conf.neutron.DEFAULT.log_config_append  -}}
+{{- $_ := set $bootstrapJob "etcSources" (include "neutron.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if or .Values.manifests.certificates .Values.tls.identity -}}
 {{- $_ := set $bootstrapJob "tlsSecret" .Values.secrets.tls.network.server.internal -}}
 {{- end -}}

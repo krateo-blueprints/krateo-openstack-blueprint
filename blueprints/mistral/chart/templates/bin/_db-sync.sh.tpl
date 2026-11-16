@@ -16,5 +16,5 @@ limitations under the License.
 
 set -ex
 
-mistral-db-manage --config-file /etc/mistral/mistral.conf upgrade head
-mistral-db-manage --config-file /etc/mistral/mistral.conf populate
+mistral-db-manage --config-file /etc/mistral/mistral.conf $([ -d /etc/mistral/mistral.conf.d ] && echo --config-dir /etc/mistral/mistral.conf.d) upgrade head
+mistral-db-manage --config-file /etc/mistral/mistral.conf $([ -d /etc/mistral/mistral.conf.d ] && echo --config-dir /etc/mistral/mistral.conf.d) populate

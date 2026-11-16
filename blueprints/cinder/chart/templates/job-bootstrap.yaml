@@ -17,6 +17,7 @@ limitations under the License.
 
 {{- if and .Values.manifests.job_bootstrap .Values.bootstrap.enabled }}
 {{- $bootstrapJob := dict "envAll" . "serviceName" "cinder" "keystoneUser" .Values.bootstrap.ks_user "logConfigFile" .Values.conf.cinder.DEFAULT.log_config_append "jobAnnotations" (include "metadata.annotations.job.bootstrap" . | fromYaml) -}}
+{{- $_ := set $bootstrapJob "etcSources" (include "cinder.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if or .Values.manifests.certificates .Values.tls.identity -}}
 {{- $_ := set $bootstrapJob "tlsSecret" .Values.secrets.tls.volumev3.api.internal -}}
 {{- end -}}

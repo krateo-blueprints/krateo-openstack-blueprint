@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-nova-manage cell_v2 discover_hosts --verbose
+nova-manage $([ -d /etc/nova/nova.conf.d ] && echo --config-dir /etc/nova/nova.conf.d) cell_v2 discover_hosts --verbose

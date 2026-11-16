@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-magnum-db-manage upgrade
+magnum-db-manage $([ -d /etc/magnum/magnum.conf.d ] && echo --config-dir /etc/magnum/magnum.conf.d) upgrade

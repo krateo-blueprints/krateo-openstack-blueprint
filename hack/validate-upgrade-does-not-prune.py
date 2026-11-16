@@ -327,15 +327,22 @@ helpers = HELPERS.read_text()
 # old defect's text. An absence-check passes for every way of writing the defect that its
 # author did not anticipate, which is the same shape as a guard that excludes the case it
 # guards.
+# The component's CompositionDefinition is read ONCE (osh.definition) and the approval derived from
+# it ONCE, in compositions.yaml, because the two-phase values decision needs the same answer
+# (hack/validate-two-phase-values.py). Until then osh.emitVersion asked osh.migrationApprovedFor,
+# which did the GET itself; the approval now arrives as osh.emitVersion's sixth argument.
 EXPECTED_GATE = '{{- $exists := include "osh.exists" (list $ $c.kind $c.name $crds) }}\n' \
-                '{{- $emitVer := include "osh.emitVersion" (list $ $c.kind $c.name $crds $exists) }}\n' \
+                '{{- $cd := include "osh.definition" (list $ $c.name) | fromJson }}\n' \
+                '{{- $approved := include "osh.migrationApprovedFor" (list $ $cd) }}\n' \
+                '{{- $emitVer := include "osh.emitVersion" (list $ $c.kind $c.name $crds $exists $approved) }}\n' \
                 '{{- $crd := include "osh.crdExists" (list $c.kind $emitVer $crds) }}'
 EXPECTED_DOCUMENT = 'apiVersion: {{ include "osh.apiVersionAt" (list $emitVer) }}'
 EXPECTED_EMIT = ('{{- $exists := index . 4 -}}',
-                 '{{- $approved := include "osh.migrationApprovedFor" (list $top $name) -}}',
+                 '{{- $approved := index . 5 -}}',
                  '{{- $origin := include "osh.effectiveOrigin" (list (include "osh.originVersion" (list $top $kind $name $crds)) $approved) -}}',
                  '{{- include "osh.resolveVersion" (list $current $origin $exists $kind $crds) -}}')
-EXPECTED_POLICY_READ = ('lookup "core.krateo.io/v1alpha1" "CompositionDefinition" $top.Release.Namespace $name',
+EXPECTED_DEFINITION_READ = ('lookup "core.krateo.io/v1alpha1" "CompositionDefinition" $top.Release.Namespace $name',)
+EXPECTED_POLICY_READ = ('{{- $cd := index . 1 | default dict -}}',
                         '(($cd.spec).upgradePolicy)',
                         '"krateo.io/upgrade-to-version"',
                         'include "osh.migrationApproved" (list $policy $upgradeTo (include "osh.version" (list $top)))')
@@ -379,6 +386,17 @@ else:
             problems.append(f"osh.migrationApprovedFor no longer contains `{frag}`: the policy must come "
                             "from the component's live CompositionDefinition in the release namespace "
                             "and be compared with the current version, as core-provider's engine does.")
+if '{{- define "osh.definition" -}}' not in helpers:
+    problems.append("osh.definition is missing: nothing GETs the component's CompositionDefinition, so "
+                    "its upgradePolicy is never read and the origin pin holds even while the engine "
+                    "migrates the component (#233).")
+else:
+    def_def = helpers[helpers.index('{{- define "osh.definition" -}}'):]
+    def_def = def_def[:def_def.index("{{- end -}}")]
+    for frag in EXPECTED_DEFINITION_READ:
+        if frag not in def_def:
+            problems.append(f"osh.definition no longer contains `{frag}`: the policy must come from the "
+                            "component's live CompositionDefinition, by name, in the release namespace.")
 
 # osh.originVersion must read the stamp through a SERVED version. This is the half the probe
 # genuinely cannot see -- the read needs `lookup`, which is disabled offline -- so it is

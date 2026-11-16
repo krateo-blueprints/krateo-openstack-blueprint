@@ -14,6 +14,7 @@ limitations under the License.
 
 {{- if and .Values.manifests.job_bootstrap .Values.bootstrap.enabled }}
 {{- $bootstrapJob := dict "envAll" . "serviceName" "freezer" "keystoneUser" .Values.bootstrap.ks_user -}}
+{{- $_ := set $bootstrapJob "etcSources" (include "freezer.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.pod.tolerations.freezer.enabled -}}
 {{- $_ := set $bootstrapJob "tolerationsEnabled" true -}}
 {{- end -}}

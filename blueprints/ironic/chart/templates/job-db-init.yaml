@@ -17,6 +17,7 @@ limitations under the License.
 
 {{- if .Values.manifests.job_db_init }}
 {{- $dbInitJob := dict "envAll" . "serviceName" "ironic" "jobAnnotations" -}}
+{{- $_ := set $dbInitJob "etcSources" (include "ironic.dropin_etc_sources" . | fromJsonArray) -}}
 {{- if .Values.helm3_hook }}
 {{- $_ := set $dbInitJob "jobAnnotations" (include "metadata.annotations.job.db_init" . | fromYaml) }}
 {{- end }}

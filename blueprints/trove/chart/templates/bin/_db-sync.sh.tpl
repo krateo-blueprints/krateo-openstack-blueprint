@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 
-trove-manage --config-file /etc/trove/trove.conf db_sync
+trove-manage --config-file /etc/trove/trove.conf $([ -d /etc/trove/trove.conf.d ] && echo --config-dir /etc/trove/trove.conf.d) db_sync
