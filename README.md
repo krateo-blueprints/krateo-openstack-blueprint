@@ -872,9 +872,14 @@ From 0.3.67 two more secrets are generated per install:
   so a generated password would lock manila out. manila-share mounts the key pair at
   `/etc/manila/service-instance-ssh/`. `[generic]` points `path_to_private_key` and
   `path_to_public_key` there. manila imports the public key as the Nova keypair `manila-service`, and
-  each new service VM gets it through cloud-init. The image's password login is no longer used. Share
-  servers created before the upgrade were booted without this key, and manila no longer has the
-  password, so it cannot log in to them. This has not been tested on a live upgrade.
+  each new service VM gets it through cloud-init. The image's password login is no longer used.
+
+  **Replace share servers created before the upgrade.** They were booted without this key, so manila
+  can no longer log in to manage them. They also still accept the published `manila`/`manila` login
+  from anything that reaches the service network, which no setting on manila's side can change.
+  Migrate their shares to new share servers, which boot with the key (`openstack share migration
+  start`, or recreate the shares), then delete the old servers. An install with no generic-driver
+  shares has nothing to do.
 
 The ESO generators now include `SSHKey`, so the orchestrator also requires the
 `sshkeys.generators.external-secrets.io` CRD. ESO 2.14.0, the version installed above, ships it.
