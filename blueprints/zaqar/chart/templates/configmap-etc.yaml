@@ -54,6 +54,9 @@ dependencies.static.api's wait on the redis Service resolve from. See #131.
 {{- end -}}
 ---
 {{- tuple $envAll "zaqar" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
+{{- /* With the reference (#228) the signed-URL key arrives as the drop-in zaqar-signed-url-secret-key; the published
+       one renders nowhere. */}}
+{{- dict "envAll" $envAll "from" (include "zaqar.signed_url_key_ref" $envAll | fromJson) "option" "secret_key" "confKey" "zaqar" "sections" (list "signed_url") | include "helm-toolkit.utils.secret_option_strip_sections" }}
 apiVersion: v1
 kind: Secret
 metadata:

@@ -812,6 +812,9 @@ conf:
       service_instance_flavor_id: 100
       service_image_name: manila-service-image
       service_instance_user: manila
+      # The stock manila-service-image's built-in password. With endpoints.sharev2.auth.service_instance_ssh_keyFrom
+      # (the umbrella sets it) it is removed and manila logs in with a generated key pair instead
+      # (templates/_service_instance_ssh_key.tpl, #228).
       service_instance_password: manila
       # # Module path to the Virtual Interface (VIF) driver class. This option
       # # is used only by drivers operating in

@@ -647,7 +647,8 @@ conf:
     physical_host_plugin:
       aggregate_freepool_name: freepool
       blazar_username: blazar
-      blazar_password: password
+      # blazar_password: the blazar user's (endpoints.identity.auth.blazar), filled in by templates/configmap-etc.yaml;
+      # with passwordFrom it arrives as a drop-in (#228). Setting it here overrides it in values mode only.
       blazar_project_name: service
       blazar_user_domain_name: service
       blazar_project_domain_name: service

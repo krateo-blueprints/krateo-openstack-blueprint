@@ -1115,7 +1115,8 @@ krateo-openstack-node-reader
        YAML dict to merge into its spec. For each id in $c.credentials, the item of
        .Values.credentials.items with that id contributes {store, secret, key} at the item's dotted
        `path` (e.g. endpoints.identity.auth.admin.passwordFrom), or at the item's `pathFor.<component>`
-       when it names this component (a chart holding the same credential under another key). A
+       when it names this component (a chart holding the same credential under another key). An SSHKey
+       item's reference also carries publicKey, the root's key holding the public half. A
        value is never passed: the chart
        projects it from the root Secret through the store. An id no item defines fails the render,
        because a silently missing reference leaves that component on the published default. */ -}}
@@ -1133,6 +1134,7 @@ krateo-openstack-node-reader
 {{- fail (printf "component %s lists credential %q, which is retired: no chart reads it any more" $c.name $id) -}}
 {{- end -}}
 {{- $ref := dict "store" $creds.store "secret" $item.secret "key" $item.key -}}
+{{- if $item.publicKey -}}{{- $_ := set $ref "publicKey" $item.publicKey -}}{{- end -}}
 {{- $path := $item.path -}}
 {{- if hasKey ($item.pathFor | default dict) $c.name -}}{{- $path = index $item.pathFor $c.name -}}{{- end -}}
 {{- $parts := splitList "." $path -}}

@@ -858,6 +858,32 @@ Three checks keep this true:
 - check 18 fails unless every reader's pod template changes when that one user's reference is
   applied.
 
+### Upgrading to 0.3.67 or later: zaqar's signed-URL key and manila's service-instance key
+
+From 0.3.67 two more secrets are generated per install:
+- `openstack-credential-zaqar-signed-url-secret-key`. zaqar signs pre-signed queue URLs with it
+  (`[signed_url] secret_key`). The chart published `SOMELONGSECRETKEY`. zaqar reads the generated key
+  from a drop-in, `82-signed-url.conf`, in `/etc/zaqar/zaqar.conf.d/`. URLs signed before the upgrade
+  stop verifying.
+- `openstack-credential-manila-service-instance-ssh-key`, an SSH key pair from ESO's `SSHKey`
+  generator. manila's generic driver now logs in to its service VMs (the share servers) with this
+  key. It no longer uses `service_instance_password` (published: `manila`). It is not a generated
+  password because the stock manila-service-image has user `manila` with password `manila` built in,
+  so a generated password would lock manila out. manila-share mounts the key pair at
+  `/etc/manila/service-instance-ssh/`. `[generic]` points `path_to_private_key` and
+  `path_to_public_key` there. manila imports the public key as the Nova keypair `manila-service`, and
+  each new service VM gets it through cloud-init. The image's password login is no longer used. Share
+  servers created before the upgrade were booted without this key, and manila no longer has the
+  password, so it cannot log in to them. This has not been tested on a live upgrade.
+
+The ESO generators now include `SSHKey`, so the orchestrator also requires the
+`sshkeys.generators.external-secrets.io` CRD. ESO 2.14.0, the version installed above, ships it.
+
+blazar's physical-host plugin calls Nova as the `blazar` user. Up to 0.3.66 it still sent
+OpenStack-Helm's published password (`[physical_host_plugin] blazar_password`), even though that user
+has been generated since 0.3.63. From 0.3.67 it reads the generated password from
+`91-physical-host-password.conf`.
+
 ### Components follow the umbrella's version
 
 The orchestrator registers every component `CompositionDefinition` at its own chart version

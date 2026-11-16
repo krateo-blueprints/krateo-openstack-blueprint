@@ -91,8 +91,9 @@ spec:
               mountPath: /etc/blazar/policy.yaml
               subPath: policy.yaml
               readOnly: true
-            {{- if or .Values.endpoints.identity.auth.admin.passwordFrom (include "helm-toolkit.utils.memcache_secret_key_from" .) }}
-            # Generated credentials as drop-ins (#228); oslo.config reads blazar.conf.d after blazar.conf.
+            {{- if include "blazar.dropin_etc_sources" . | fromJsonArray }}
+            # Generated credentials as drop-ins (#228); oslo.config reads blazar.conf.d after blazar.conf. The
+            # physical-host plugin, which calls Nova as the blazar user, runs here.
             - name: blazar-manager-conf-d
               mountPath: /etc/blazar/blazar.conf.d/
               readOnly: true
@@ -115,18 +116,14 @@ spec:
           secret:
             secretName: blazar-etc
             defaultMode: 0444
-        {{- if or .Values.endpoints.identity.auth.admin.passwordFrom (include "helm-toolkit.utils.memcache_secret_key_from" .) }}
+        {{- if include "blazar.dropin_etc_sources" . | fromJsonArray }}
         - name: blazar-manager-conf-d
           projected:
             defaultMode: 0444
             sources:
-              {{- if .Values.endpoints.identity.auth.admin.passwordFrom }}
+              {{- range $src := include "blazar.dropin_etc_sources" . | fromJsonArray }}
               - secret:
-                  name: blazar-admin-password-etc
-              {{- end }}
-              {{- if include "helm-toolkit.utils.memcache_secret_key_from" . }}
-              - secret:
-                  name: blazar-memcache-secret-key
+                  name: {{ $src.secret.name }}
               {{- end }}
         {{- end }}
 {{- if $mounts.volumes }}

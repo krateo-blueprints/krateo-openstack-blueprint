@@ -91,6 +91,18 @@ Openstack auth
 {{- if and (empty .Values.conf.blazar.DEFAULT.os_admin_password) (not .Values.endpoints.identity.auth.admin.passwordFrom) -}}
 {{- $_ := set .Values.conf.blazar.DEFAULT "os_admin_password" .Values.endpoints.identity.auth.admin.password -}}
 {{- end -}}
+{{- /* The physical-host plugin calls Nova as the blazar user ([physical_host_plugin] blazar_username, blazar).
+       Upstream shipped its password as a literal under conf (password), so it stayed the published default however
+       the blazar user's password was set; with that user generated (#228) the literal was still in blazar.conf,
+       found by a live scan on GKE 2026-11-16 (r066, check 20 of hack/validate-credentials.py). It now follows the
+       user: endpoints.identity.auth.blazar.password in values mode (the same text at defaults), and with
+       passwordFrom the drop-in blazar-physical-host-password-etc (secret-physical-host-password-etc.yaml), never
+       this file. */ -}}
+{{- if .Values.endpoints.identity.auth.blazar.passwordFrom -}}
+{{- $_ := unset .Values.conf.blazar.physical_host_plugin "blazar_password" -}}
+{{- else if empty .Values.conf.blazar.physical_host_plugin.blazar_password -}}
+{{- $_ := set .Values.conf.blazar.physical_host_plugin "blazar_password" .Values.endpoints.identity.auth.blazar.password -}}
+{{- end -}}
 ---
 {{- tuple $envAll "blazar" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 apiVersion: v1
