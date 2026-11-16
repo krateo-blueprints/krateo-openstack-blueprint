@@ -118,12 +118,10 @@ spec:
 Identity (works natively, no emulation):
 
 ```sh
+# The admin openrc is the keystone-keystone-admin Secret, generated per install (#228); envFrom
+# reads it without writing the password into the Pod object.
 kubectl -n openstack run osclient --restart=Never --image=quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy \
-  --env OS_AUTH_URL=http://keystone-api.openstack.svc.cluster.local:5000/v3 \
-  --env OS_USERNAME=admin --env OS_PASSWORD=password --env OS_PROJECT_NAME=admin \
-  --env OS_USER_DOMAIN_NAME=Default --env OS_PROJECT_DOMAIN_NAME=Default \
-  --env OS_IDENTITY_API_VERSION=3 --env OS_REGION_NAME=RegionOne --env OS_INTERFACE=internal \
-  --command -- sleep 1d
+  --overrides='{"spec":{"containers":[{"name":"osclient","image":"quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy","stdin":true,"tty":true,"command":["sleep","1d"],"envFrom":[{"secretRef":{"name":"keystone-keystone-admin"}}]}]}}'
 kubectl exec -n openstack osclient -- openstack token issue
 ```
 
@@ -142,7 +140,7 @@ registration on GKE is being finalised.
 
 ## The dashboard (Horizon)
 
-Once Horizon is up, log in as `admin` / `password`, domain `Default`:
+Once Horizon is up, log in as `admin`, domain `Default`, with the install's generated password, `kubectl -n openstack get secret openstack-credential-identity-admin -o jsonpath='{.data.password}' | base64 -d`:
 
 | Login | Identity → Projects (logged in as admin) |
 | ----- | ---------------------------------------- |

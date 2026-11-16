@@ -42,16 +42,14 @@ The orchestrator emits each component `Composition` only once its dependencies r
 
 ```sh
 kubectl -n openstack get compositions.composition.krateo.io
+# The admin openrc is the keystone-keystone-admin Secret, generated per install (#228); envFrom
+# reads it without writing the password into the Pod object.
 kubectl -n openstack run osclient --rm -it --restart=Never \
   --image=quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy \
-  --env OS_AUTH_URL=http://keystone-api.openstack.svc.cluster.local:5000/v3 \
-  --env OS_USERNAME=admin --env OS_PASSWORD=password --env OS_PROJECT_NAME=admin \
-  --env OS_USER_DOMAIN_NAME=Default --env OS_PROJECT_DOMAIN_NAME=Default \
-  --env OS_IDENTITY_API_VERSION=3 --env OS_REGION_NAME=RegionOne --env OS_INTERFACE=internal \
-  --command -- openstack token issue
+  --overrides='{"spec":{"containers":[{"name":"osclient","image":"quay.io/airshipit/openstack-client:2025.1-ubuntu_jammy","stdin":true,"tty":true,"command":["openstack","token","issue"],"envFrom":[{"secretRef":{"name":"keystone-keystone-admin"}}]}]}}'
 ```
 
-Horizon logs in as `admin` / `password` (domain `Default`) on its NodePort (`31000`).
+Horizon logs in as `admin` with the install's generated password (domain `Default`): `kubectl -n openstack get secret openstack-credential-identity-admin -o jsonpath='{.data.password}' | base64 -d` on its NodePort (`31000`).
 
 ## Next steps
 
