@@ -28,8 +28,11 @@ anything else is refused here rather than mapped to the wrong server.
 {{- $main := tuple "oslo_db" "internal" "nova" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" -}}
 {{- $cell0 := tuple "oslo_db_cell0" "internal" "nova" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" -}}
 {{- $cell0Db := .Values.endpoints.oslo_db_cell0.path | trimPrefix "/" -}}
-{{- if ne (regexReplaceAll "/[^/]*$" $main "") (regexReplaceAll "/[^/]*$" $cell0 "") }}
-{{- fail "endpoints.oslo_db_cell0 names another server, port, scheme, user or password than endpoints.oslo_db: nova's cell0 mapping is a template formatted from [database] connection, so cell0 must be on the same server as the same MariaDB user (#228)" }}
+{{- /* the URLs without their database and without the password: a password is the account's, and one account has
+       one (the umbrella passes one root to all of nova's keys) */ -}}
+{{- $strip := "://([^:/@]*):[^@]*@" -}}
+{{- if ne (regexReplaceAll "/[^/]*$" (regexReplaceAll $strip $main "://${1}@") "") (regexReplaceAll "/[^/]*$" (regexReplaceAll $strip $cell0 "://${1}@") "") }}
+{{- fail "endpoints.oslo_db_cell0 names another server, port, scheme or user than endpoints.oslo_db: nova's cell0 mapping is a template formatted from [database] connection, so cell0 must be on the same server as the same MariaDB user (#228)" }}
 {{- end }}
 {{- dict "cell1" (tuple "{path}" . | include "nova.cell_mapping_db_template") "cell0" (tuple $cell0Db . | include "nova.cell_mapping_db_template") "transport" "{scheme}://{username}:{password}@{hostname}:{port}/{path}" | toJson -}}
 {{- end -}}

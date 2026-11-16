@@ -2186,10 +2186,10 @@ def main():
                         continue
                     dsx = [d for d in yaml.safe_load_all(outx) if d]
                     relocated_files(c["name"], cid, sentinels[cid], dsx, docs, others_for(cid))
-                    if db_dropin_for(c["name"]):
-                        db_dropin_check(c["name"], cid, sentinels[cid], dsx, docs)
                     if c["name"] == "nova":
                         cell_mapping_check(dsx, docs, sentinels[cid])
+                    if db_dropin_for(c["name"]):
+                        db_dropin_check(c["name"], cid, sentinels[cid], dsx, docs)
                     elif c["name"] in DB_FILEREAD:
                         DB_DROPIN_CHECKED.append((c["name"], cid, "fileread (check 14)", 1))
                     elif c["name"] in DB_RELOCATED:
