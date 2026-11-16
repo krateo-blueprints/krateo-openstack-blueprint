@@ -13,6 +13,14 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **ceilometer's notification URLs (#281).** Since 0.3.57 the notification agent logged in to seven RabbitMQ vhosts
+  as the administrator with the published password, which the server refuses. The URLs are now derived from
+  `endpoints.oslo_messaging` and `conf.notification_vhosts`. With a generated admin root they reach only
+  ceilometer-notification, through a drop-in. Check 20b (`hack/validate-credentials.py`) fails any URL that logs in as
+  an install-wide administrator with a published password. It also found nova's `nova-db-api-admin` and
+  `nova-db-cell0-admin` and octavia's `octavia-persistence-db-admin`, Secrets nothing read that carried the
+  published MariaDB root password; they are no longer rendered.
+
 - **Contract emitter removed (0.3.68).** The CMP's single emitter of the `serviceContract`
   usage and health is `krateo-platformops/cmp-usage-collector`, which reads each OpenStack
   from the parent (Diego, 2026-11-16). An emitter in this chart would double-count usage next

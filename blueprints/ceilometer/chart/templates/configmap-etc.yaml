@@ -27,8 +27,14 @@ limitations under the License.
 {{- $_ := tuple "oslo_messaging" "internal" "ceilometer" "amqp" . | include "helm-toolkit.endpoints.authenticated_transport_endpoint_uri_lookup" | set .Values.conf.ceilometer.oslo_messaging_notifications "transport_url" -}}
 {{- end -}}
 
-{{- if empty .Values.conf.ceilometer.notification.messaging_urls -}}
-{{- $_ := tuple "oslo_messaging" "internal" "ceilometer" "amqp" . | include "helm-toolkit.endpoints.authenticated_transport_endpoint_uri_lookup" | set .Values.conf.ceilometer.notification "messaging_urls" -}}
+{{- /* #281: messaging_urls is derived, never taken from a literal while the admin password is generated. */ -}}
+{{- if include "ceilometer.notification_urls_from_root" . -}}
+{{- if not (empty .Values.conf.ceilometer.notification.messaging_urls) -}}
+{{- fail "conf.ceilometer.notification.messaging_urls is set while endpoints.oslo_messaging.auth.admin.passwordFrom is: the URLs carry the RabbitMQ admin password, so they are built from the generated root (drop-in ceilometer-notification-urls). Set conf.notification_vhosts instead (#281)." -}}
+{{- end -}}
+{{- $_ := unset .Values.conf.ceilometer.notification "messaging_urls" -}}
+{{- else if empty .Values.conf.ceilometer.notification.messaging_urls -}}
+{{- $_ := set .Values.conf.ceilometer.notification "messaging_urls" (dict "type" "multistring" "values" (include "ceilometer.notification_messaging_urls" (tuple . (.Values.endpoints.oslo_messaging.auth.admin.password | urlquery)) | fromJsonArray)) -}}
 {{- end -}}
 
 {{- if empty .Values.conf.ceilometer.service_credentials.auth_url -}}

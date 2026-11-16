@@ -62,6 +62,16 @@ images:
 ipmi_device: /dev/ipmi0
 
 conf:
+  # Krateo blueprint addition (#281): the vhosts whose notifications the notification agent consumes, one
+  # [notification] messaging_urls each (upstream's literal list, same order).
+  notification_vhosts:
+    - ceilometer
+    - cinder
+    - glance
+    - nova
+    - keystone
+    - neutron
+    - heat
   ceilometer:
     DEFAULT:
       transport_url: null
@@ -69,16 +79,13 @@ conf:
       auth_type: password
       interface: internal
     notification:
-      messaging_urls:
-        type: multistring
-        values:
-          - rabbit://rabbitmq:password@rabbitmq.openstack.svc.cluster.local:5672/ceilometer
-          - rabbit://rabbitmq:password@rabbitmq.openstack.svc.cluster.local:5672/cinder
-          - rabbit://rabbitmq:password@rabbitmq.openstack.svc.cluster.local:5672/glance
-          - rabbit://rabbitmq:password@rabbitmq.openstack.svc.cluster.local:5672/nova
-          - rabbit://rabbitmq:password@rabbitmq.openstack.svc.cluster.local:5672/keystone
-          - rabbit://rabbitmq:password@rabbitmq.openstack.svc.cluster.local:5672/neutron
-          - rabbit://rabbitmq:password@rabbitmq.openstack.svc.cluster.local:5672/heat
+      # Krateo blueprint change (#281): derived, never a literal. Upstream shipped seven literal URLs logging in as
+      # the RabbitMQ administrator with its published password; with that password generated (0.3.57) they were
+      # refused. The URLs are built from endpoints.oslo_messaging (host, port, the admin user) and
+      # conf.notification_vhosts: in ceilometer.conf when the admin has no passwordFrom, otherwise only in the
+      # ceilometer-notification-urls drop-in (templates/secret-notification-urls.yaml), read by the notification
+      # agent alone. A literal here together with a passwordFrom is refused.
+      messaging_urls: null
     oslo_messaging_notifications:
       driver: messagingv2
       topics:
