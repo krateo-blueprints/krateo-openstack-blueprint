@@ -516,12 +516,13 @@ MQUSERS = ((yaml.safe_load(open(_MQF)) or {}).get("users") or {}) if os.path.isf
 MQUSER_BY_ITEM = {"oslo-messaging-" + u.replace("_", "-"): u for u in MQUSERS}
 # The URL drop-in's name and file (helm-toolkit.manifests.transport_dropin, templates/_transport_dropin_entries.tpl).
 MQ_DROPIN_FILE = "88-transport.conf"
-# Which containers build an oslo.messaging transport from a chart's config, measured per program: only they receive the
+# Which containers send or receive over RabbitMQ (or would under a setting), measured per program: only they receive the
 # drop-in, and every other container that mounts that config must not (check 22m).
 _MQR = os.path.join(ROOT, "hack", "mq-readers.yaml")
 MQ_READERS = ((yaml.safe_load(open(_MQR)) or {}).get("charts") or {}) if os.path.isfile(_MQR) else {}
 MQ_READERS_SEEN = set()
 MQ_DROPIN_CHECKED = []
+MQ_PROBES_CHECKED = []
 # The keys of endpoints.oslo_messaging.auth that are not a per-service user: the administrator (auth.admin, and the
 # rabbitmq chart's own auth.user), the retired guest and the Erlang cookie.
 MQ_NOT_SERVICE = ("admin", "user", "guest", "erlang_cookie")
@@ -1580,8 +1581,8 @@ def mq_dropin_check(chart, cid, sentinel, docs_s, docs, label=""):
     """22m. A per-service RabbitMQ user's URLs, with its root: every ini option of a config that carried the user's password
     in values mode (sentinel render docs_s) is gone from that config and is in the drop-in <chart>-transport
     (88-transport.conf), as exactly the values-mode URL with every password read from this user's root (URL-quoted); a
-    container that mounts a carrier receives the drop-in in a .conf.d exactly when hack/mq-readers.yaml lists it as building
-    a transport from that config, and no container reading none of the carriers receives it; and every exec probe of a
+    container that mounts a carrier receives the drop-in in a .conf.d exactly when hack/mq-readers.yaml lists it as using
+    RabbitMQ, and no container reading none of the carriers receives it; and every exec probe of a
     receiving container that parses a carrier with --config-file also passes --config-dir <that .conf.d> (neutron's
     health-probe.py parses with no project, so it never reads a .conf.d by itself, and without transport_url it reports
     success without checking the agent's queue)."""
@@ -1640,7 +1641,7 @@ def mq_dropin_check(chart, cid, sentinel, docs_s, docs, label=""):
                  "same once filled: %s)" % (label, chart, drop, so, len(used), filled == val))
     spec = MQ_READERS.get(chart)
     if spec is None or not (spec or {}).get("readers"):
-        fail("22m%s: %s: hack/mq-readers.yaml does not list which of %s's containers build a transport from its config, so "
+        fail("22m%s: %s: hack/mq-readers.yaml does not list which of %s's containers use RabbitMQ, so "
              "who must receive %s cannot be checked" % (label, chart, chart, drop))
         return
     users = set(spec["readers"])
@@ -1649,15 +1650,15 @@ def mq_dropin_check(chart, cid, sentinel, docs_s, docs, label=""):
         gets = receives_in_confd(mounts, vols, drop)
         if reads and cname not in users:
             if gets:
-                fail("22m%s: %s: %s container %s receives %s, but hack/mq-readers.yaml does not list it as building a "
-                     "transport from %s: the RabbitMQ password has no business there" % (label, chart, podname, cname, drop,
+                fail("22m%s: %s: %s container %s receives %s, but hack/mq-readers.yaml does not list it as using RabbitMQ "
+                     "(it reads %s): the RabbitMQ password has no business there" % (label, chart, podname, cname, drop,
                                                                                          sorted(reads)))
             continue
         if reads:
             MQ_READERS_SEEN.add((chart, cname))
             readers += 1
             if not gets:
-                fail("22m%s: %s: %s container %s reads %s and builds a transport from it (hack/mq-readers.yaml) but does not "
+                fail("22m%s: %s: %s container %s reads %s and uses RabbitMQ (hack/mq-readers.yaml) but does not "
                      "receive %s in a .conf.d directory: it would have no transport URL" % (label, chart, podname, cname,
                                                                                            sorted(reads), drop))
                 continue
@@ -1674,10 +1675,11 @@ def mq_dropin_check(chart, cid, sentinel, docs_s, docs, label=""):
             pod = [p for n, p in pod_specs(docs) if n == podname][0]
             cont = [c for c in pod.get("containers") or [] if c["name"] == cname][0]
             for probe, text in probe_texts(pod, cont, docs):
-                files = set(re.findall(r"--config-file[ =](\S+)", text))
+                files = set(re.findall(r"--config-file(?:=|\s+)(\S+)", text))
                 if not files & carrier_paths:
                     continue
-                if not any(re.search(r"--config-dir[ =]%s/?(?=\s|$)" % re.escape(dd), text) for dd in dirs):
+                MQ_PROBES_CHECKED.append((chart, podname, cname, probe))
+                if not any(re.search(r"--config-dir(?:=|\s+)%s/?(?=\s|$)" % re.escape(dd), text) for dd in dirs):
                     fail("22m%s: %s: %s container %s's %s parses %s with --config-file but passes no --config-dir %s: "
                          "it never reads the drop-in, so it has no transport URL and checks nothing" % (
                              label, chart, podname, cname, probe, sorted(files & carrier_paths), " or ".join(sorted(dirs))))
@@ -1851,7 +1853,7 @@ def notification_vhosts_check(tmp, components):
         creator.setdefault(vh, set()).add(n)
     comp = open(os.path.join(UMBRELLA, "templates", "compositions.yaml")).read()
     start = comp.find("{{- $ov := ")
-    mark = comp.find("osh.notificationVhosts", start)
+    mark = comp.find("include \"osh.notificationVhosts\"", start)
     if mark < 0:
         # no such block: the spec ends after the tolerations merge, and the consumer renders its chart default
         mark = comp.find('"tolerations"', start)
@@ -3045,6 +3047,8 @@ def main():
             if checked and (chart, cname) not in MQ_READERS_SEEN:
                 fail("22m: hack/mq-readers.yaml lists %s container %s, which no render shows reading the chart's config; "
                      "remove it or render the mode that runs it" % (chart, cname))
+    if checked and not MQ_PROBES_CHECKED:
+        fail("22m: no exec probe parsing a config that carried a transport URL was found; the probe check had no input")
     if checked and not RABBIT_INIT_CHECKED:
         fail("23m: no chart's rabbit-init.sh was run; the check had no input")
     if not [x for x in VHOST_CASES_CHECKED if x[1]]:
@@ -3072,10 +3076,10 @@ def main():
           "conf.d pass --config-dir; %d per-service MariaDB user URL(s) carry no published password; %d database URL "
           "delivery check(s); %d db-init/db-drop run(s) set and drop the drop-in's user; %d per-service RabbitMQ URL(s) "
           "carry no published password; %d transport URL delivery check(s); %d rabbit-init run(s) set the root's "
-          "password; %d notification-vhost case(s)"
+          "password; %d exec probe(s) that parse a carrier read the drop-in; %d notification-vhost case(s)"
           % (len(items), checked, len(KS_USER_CHECKED), len(READERS_CHECKED), len(CONFIG_DIR_CHECKED),
              len(DB_URLS_CHECKED), len(DB_DROPIN_CHECKED), len(DBINIT_CHECKED), len(MQ_URLS_CHECKED),
-             len(MQ_DROPIN_CHECKED), len(RABBIT_INIT_CHECKED), len(VHOST_CASES_CHECKED)))
+             len(MQ_DROPIN_CHECKED), len(RABBIT_INIT_CHECKED), len(MQ_PROBES_CHECKED), len(VHOST_CASES_CHECKED)))
     for label, listed in VHOST_CASES_CHECKED:
         print("  26: %s: ceilometer consumes %s" % (label, ", ".join(listed) if listed else "(not selected)"))
 

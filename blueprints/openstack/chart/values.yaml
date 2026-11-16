@@ -570,7 +570,7 @@ credentials:
     # Per-service RabbitMQ users (0.3.69, #228): one item per RabbitMQ USERNAME, reaching only the chart(s) that render it
     # (hack/mq-users.yaml: no username is rendered by two charts, measured). The chart builds every URL that logs in as
     # that user from the root: its main config's transport URLs through the drop-in <chart>-transport, delivered only to
-    # the containers that build a transport from them (hack/mq-readers.yaml), and <chart>-rabbitmq-user
+    # the containers that use RabbitMQ (hack/mq-readers.yaml), and <chart>-rabbitmq-user
     # (RABBITMQ_CONNECTION) as an ExternalSecret; rabbit-init's `declare user` sets the password on the existing user
     # (an HTTP PUT, create or replace: measured on rabbitmq:3.13-management), so a published password is replaced.
     - id: oslo-messaging-aodh

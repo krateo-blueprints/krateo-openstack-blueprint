@@ -16,7 +16,7 @@ passwordFrom reference:
   - helm-toolkit.manifests.transport_dropin renders ExternalSecret <service>-transport, one file 88-transport.conf:
     each section once, each option = the URL exactly as the chart builds it, with every password segment read from
     the user's root and URL-quoted;
-  - only the containers whose programs build an oslo.messaging transport from that config receive it
+  - only the containers whose programs send or receive over RabbitMQ receive it
     (hack/mq-readers.yaml): helm-toolkit.snippets.transport_dropin_etc_source (pod.etcSources) or the mount/volume
     snippets. It is a separate Secret from <service>-db-connection because the two reach different containers (the
     agents use RabbitMQ and never the database; db-init and db-drop use the database and never RabbitMQ).
