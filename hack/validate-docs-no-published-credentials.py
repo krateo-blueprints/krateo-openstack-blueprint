@@ -49,8 +49,8 @@ PATTERNS = [
     re.compile(r"""\bOS_PASSWORD=['"]?([^\s'"\\]+)"""),
     re.compile(r"""--(?:os-)?password[= ]['"]?([^\s'"\\]+)"""),
     re.compile(r"""\bas `[^`]+` */ *`([^`]+)`"""),
-    # a YAML key in a snippet (clouds.yaml, values): `password: <value>`, `os_password: <value>`
-    re.compile(r"""^\s*(?:os_)?password:\s*['"]?([^\s'"#]+)['"]?\s*(?:#.*)?$"""),
+    # a YAML key in a snippet (clouds.yaml, values): `password: <value>`, `os_password: <value>`, also as a list item
+    re.compile(r"""^\s*(?:-\s*)?(?:os_)?password:\s*['"]?([^\s'"#]+)['"]?\s*(?:#.*)?$"""),
 ]
 failures = []
 for f in files:
