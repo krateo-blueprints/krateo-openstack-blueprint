@@ -12,6 +12,7 @@ passes one as a credential:
   - OS_PASSWORD=<value>                         (an openrc or `kubectl run --env`)
   - --password <value> / --os-password <value>  (a CLI argument)
   - as `<user>` / `<value>`                     (a login instruction)
+  - password: <value> / os_password: <value>    (a YAML key in a clouds.yaml or values snippet)
 A key-name list such as `username`/`password` is not a credential and is not matched. No file or no published password
 read is a failure: an empty scan is not a pass. usage: validate-docs-no-published-credentials.py <repo>
 """
@@ -48,6 +49,8 @@ PATTERNS = [
     re.compile(r"""\bOS_PASSWORD=['"]?([^\s'"\\]+)"""),
     re.compile(r"""--(?:os-)?password[= ]['"]?([^\s'"\\]+)"""),
     re.compile(r"""\bas `[^`]+` */ *`([^`]+)`"""),
+    # a YAML key in a snippet (clouds.yaml, values): `password: <value>`, `os_password: <value>`
+    re.compile(r"""^\s*(?:os_)?password:\s*['"]?([^\s'"#]+)['"]?\s*(?:#.*)?$"""),
 ]
 failures = []
 for f in files:
