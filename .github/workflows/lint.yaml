@@ -239,6 +239,10 @@ jobs:
       # URL containing parentheses: both off by default, both rendered, neither noticed. Every rendered script parses.
       - name: Every shell script a chart renders parses (bash -n)
         run: python3 hack/validate-bin-scripts.py .
+      # The README, usage/quickstart docs and an example still said "log in as `admin` / `password`" and passed
+      # OS_PASSWORD=password after both had been generated per install for months (#228).
+      - name: No document passes a published OpenStack-Helm password
+        run: python3 hack/validate-docs-no-published-credentials.py .
       # A default cluster's StorageClass is ReadWriteOnce: no default claim may ask for
       # ReadWriteMany, and pods sharing a ReadWriteOnce claim must be co-located (#201).
       - name: Every default claim can be bound, and shared ReadWriteOnce claims are co-located

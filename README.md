@@ -1195,7 +1195,7 @@ Index: [docs/examples.md](docs/examples.md).
   narrative write-up.
 - [docs/llms.txt](docs/llms.txt) — the version-pinned LLM doc index.
 
-The dashboard (Horizon) logs in as `admin` / `password` (domain `Default`):
+The dashboard (Horizon) logs in as `admin` with the install's generated password (domain `Default`): `kubectl -n openstack get secret openstack-credential-identity-admin -o jsonpath='{.data.password}' | base64 -d`:
 
 | Login | Identity → Projects (admin) |
 | ----- | --------------------------- |
