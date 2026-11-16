@@ -528,6 +528,16 @@ endpoints:
         default: 24220
 
 pod:
+  tolerations:
+    magnum:
+      enabled: false
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
   user:
     magnum:
       uid: 42424

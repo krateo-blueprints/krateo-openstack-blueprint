@@ -30,6 +30,9 @@ spec:
 {{ tuple $envAll "designate" "bootstrap" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
     spec:
       restartPolicy: OnFailure
+{{- if $envAll.Values.pod.tolerations.designate.enabled }}
+{{ tuple $envAll "designate" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.job.node_selector_key }}: {{ .Values.labels.job.node_selector_value }}
       initContainers:

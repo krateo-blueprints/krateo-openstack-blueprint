@@ -623,6 +623,16 @@ endpoints:
         sentinel: 26379
 
 pod:
+  tolerations:
+    octavia:
+      enabled: false
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
   probes:
     api:
       octavia-api:

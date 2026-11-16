@@ -17,5 +17,8 @@ limitations under the License.
 
 {{- if .Values.manifests.job_rabbit_init }}
 {{- $rmqUserJob := dict "envAll" . "serviceName" "designate" "jobAnnotations" (include "metadata.annotations.job.rabbit_init" . | fromYaml) -}}
+{{- if .Values.pod.tolerations.designate.enabled -}}
+{{- $_ := set $rmqUserJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $rmqUserJob | include "helm-toolkit.manifests.job_rabbit_init" }}
 {{- end }}

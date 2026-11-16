@@ -512,6 +512,16 @@ conf:
       datefmt: "%Y-%m-%d %H:%M:%S"
 
 pod:
+  tolerations:
+    mistral:
+      enabled: false
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
   user:
     mistral:
       uid: 1000

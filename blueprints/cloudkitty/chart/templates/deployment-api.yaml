@@ -73,6 +73,9 @@ spec:
 {{ dict "envAll" $envAll "application" "cloudkitty" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       affinity:
 {{ tuple $envAll "cloudkitty" "api" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+{{- if $envAll.Values.pod.tolerations.cloudkitty.enabled }}
+{{ tuple $envAll "cloudkitty" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.cloudkitty.node_selector_key }}: {{ .Values.labels.cloudkitty.node_selector_value }}
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.cloudkitty_api.timeout | default "30" }}

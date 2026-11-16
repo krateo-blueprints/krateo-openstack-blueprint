@@ -25,5 +25,8 @@ limitations under the License.
 {{- $dbInitJob := dict "envAll" . "serviceName" $serviceName "dbsToInit" $dbsToInit -}}
 {{- $_ := set $dbInitJob "etcSources" (include "octavia.dropin_etc_sources" . | fromJsonArray) -}}
 {{- $_ := set $dbInitJob "jobAnnotations" (include "metadata.annotations.job.db_init" . | fromYaml) }}
+{{- if .Values.pod.tolerations.octavia.enabled -}}
+{{- $_ := set $dbInitJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $dbInitJob | include "helm-toolkit.manifests.job_db_init_mysql" }}
 {{- end }}

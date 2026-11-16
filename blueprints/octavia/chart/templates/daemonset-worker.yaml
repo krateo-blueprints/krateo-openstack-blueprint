@@ -62,6 +62,9 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       hostNetwork: true
     #   hostPID: true
+{{- if $envAll.Values.pod.tolerations.octavia.enabled }}
+{{ tuple $envAll "octavia" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.worker.node_selector_key }}: {{ .Values.labels.worker.node_selector_value }}
       initContainers:

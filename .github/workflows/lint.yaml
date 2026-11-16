@@ -373,6 +373,13 @@ jobs:
       - name: Every install's credentials are its own
         run: python3 hack/validate-credentials.py .
 
+      # The umbrella's `tolerations` (0.3.68): a trusted-tenant vcluster taints every child node, and a pod without the
+      # toleration schedules nowhere (every DaemonSet desires 0 pods). Each component receives the list as
+      # pod.tolerations.<component>, and every Deployment, StatefulSet, DaemonSet, Job and CronJob of every chart, at
+      # defaults and with every workload manifest on, must carry exactly that list.
+      - name: Every pod carries the umbrella's tolerations
+        run: python3 hack/validate-tolerations.py .
+
       # The umbrella is not Ready while a selected component does not exist yet (#257): the chart emits
       # ConfigMap openstack-install-pending exactly while it holds a selected component back, and the
       # CompositionDefinition's statusDataTemplate projects Ready=False/Creating from its presence --

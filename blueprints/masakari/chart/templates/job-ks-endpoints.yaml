@@ -18,5 +18,8 @@ limitations under the License.
 {{- if .Values.manifests.job_ks_endpoints }}
 {{- $ksServiceJob := dict "envAll" . "serviceName" "masakari" "serviceTypes" ( tuple "instance-ha" ) -}}
 {{- $_ := set $ksServiceJob "jobAnnotations" (include "metadata.annotations.job.ks_endpoints" . | fromYaml ) }}
+{{- if .Values.pod.tolerations.masakari.enabled -}}
+{{- $_ := set $ksServiceJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $ksServiceJob | include "helm-toolkit.manifests.job_ks_endpoints" }}
 {{- end }}

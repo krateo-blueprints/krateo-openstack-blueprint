@@ -16,6 +16,19 @@ profile: identity
 # rabbitmq, mariadb and memcached. Leave empty (null) to use `profile`.
 enabled:
 
+# tolerations: one list of Kubernetes tolerations applied to EVERY pod the blueprint renders, in every component
+# (Deployments, StatefulSets, DaemonSets, Jobs and CronJobs, helm-toolkit's Jobs included). Passed to each component
+# as OpenStack-Helm's pod.tolerations.<component> {enabled: true, tolerations: <this list>}, merged UNDER that
+# component's componentValues, so an explicit componentValues entry wins. Empty (the default) changes nothing.
+# Needed on tainted nodes: a trusted-tenant vcluster copies the pool taint (krateo.io/trusted-tenant=<ns>:NoSchedule)
+# onto its nodes, and without a matching toleration every DaemonSet desires 0 pods. e.g.
+#   tolerations:
+#     - key: krateo.io/trusted-tenant
+#       operator: Equal
+#       value: my-namespace
+#       effect: NoSchedule
+tolerations:
+
 # componentValues: per-component spec passed through to that component's Composition, keyed by
 # component name. Each value is exactly that component's own spec (its curated schema),
 # so you can configure any component through the umbrella instead of dropping to a

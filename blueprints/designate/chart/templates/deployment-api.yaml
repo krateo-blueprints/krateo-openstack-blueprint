@@ -52,6 +52,9 @@ spec:
 {{ dict "envAll" $envAll "application" "designate" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       affinity:
 {{ tuple $envAll "designate" "api" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+{{- if $envAll.Values.pod.tolerations.designate.enabled }}
+{{ tuple $envAll "designate" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.api.node_selector_key }}: {{ .Values.labels.api.node_selector_value }}
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.api.timeout | default "30" }}

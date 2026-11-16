@@ -18,5 +18,8 @@ limitations under the License.
 {{- if .Values.manifests.job_ks_user }}
 {{- $ksUserJob := dict "envAll" . "serviceName" "cloudkitty" -}}
 {{- $_ := set $ksUserJob "jobAnnotations" (include "metadata.annotations.job.ks_user" . | fromYaml ) }}
+{{- if .Values.pod.tolerations.cloudkitty.enabled -}}
+{{- $_ := set $ksUserJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $ksUserJob | include "helm-toolkit.manifests.job_ks_user" }}
 {{- end }}

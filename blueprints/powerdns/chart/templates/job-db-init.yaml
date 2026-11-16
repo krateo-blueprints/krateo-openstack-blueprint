@@ -20,5 +20,8 @@
        comes from the DB_CONNECTION that secret-db.yaml renders for the powerdns user (#179). */}}
 {{- $dbToInit := dict "inputType" "secret" "adminSecret" .Values.secrets.oslo_db.admin "userSecret" .Values.secrets.oslo_db.powerdns -}}
 {{- $dbInitJob := dict "envAll" . "serviceName" "powerdns" "dbToInit" $dbToInit "jobAnnotations" (include "metadata.annotations.job.db_init" . | fromYaml) -}}
+{{- if .Values.pod.tolerations.powerdns.enabled -}}
+{{- $_ := set $dbInitJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $dbInitJob | include "helm-toolkit.manifests.job_db_init_mysql" }}
 {{- end }}

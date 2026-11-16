@@ -21,5 +21,8 @@ limitations under the License.
 {{- $dbsToDrop := list $dbSvc $dbPersist }}
 {{- $dbDropJob := dict "envAll" . "serviceName" $serviceName "dbsToDrop" $dbsToDrop -}}
 {{- $_ := set $dbDropJob "etcSources" (include "octavia.dropin_etc_sources" . | fromJsonArray) -}}
+{{- if .Values.pod.tolerations.octavia.enabled -}}
+{{- $_ := set $dbDropJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $dbDropJob | include "helm-toolkit.manifests.job_db_drop_mysql" }}
 {{- end }}

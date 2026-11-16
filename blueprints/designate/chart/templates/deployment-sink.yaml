@@ -51,6 +51,9 @@ spec:
       serviceAccountName: {{ $serviceAccountName }}
       affinity:
 {{ tuple $envAll "designate" "sink" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+{{- if $envAll.Values.pod.tolerations.designate.enabled }}
+{{ tuple $envAll "designate" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.sink.node_selector_key }}: {{ .Values.labels.sink.node_selector_value }}
       initContainers:

@@ -47,6 +47,9 @@ spec:
     spec:
       serviceAccountName: {{ $serviceAccountName }}
 {{ dict "envAll" $envAll "application" "skyline" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
+{{- if $envAll.Values.pod.tolerations.skyline.enabled }}
+{{ tuple $envAll "skyline" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.skyline.node_selector_key }}: {{ .Values.labels.skyline.node_selector_value }}
       initContainers:

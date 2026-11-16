@@ -46,6 +46,9 @@ spec:
 {{ tuple "cyborg_agent" . | include "helm-toolkit.snippets.custom_pod_annotations" | indent 8 }}
     spec:
       serviceAccountName: {{ $serviceAccountName }}
+{{- if $envAll.Values.pod.tolerations.cyborg.enabled }}
+{{ tuple $envAll "cyborg" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.agent.node_selector_key }}: {{ .Values.labels.agent.node_selector_value }}
       hostNetwork: true

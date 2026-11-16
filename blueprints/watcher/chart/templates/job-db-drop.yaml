@@ -15,5 +15,8 @@ limitations under the License.
 {{- if .Values.manifests.job_db_drop }}
 {{- $dbDropJob := dict "envAll" . "serviceName" "watcher" -}}
 {{- $_ := set $dbDropJob "etcSources" (include "watcher.dropin_etc_sources" . | fromJsonArray) -}}
+{{- if .Values.pod.tolerations.watcher.enabled -}}
+{{- $_ := set $dbDropJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $dbDropJob | include "helm-toolkit.manifests.job_db_drop_mysql" }}
 {{- end }}

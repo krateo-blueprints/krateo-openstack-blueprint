@@ -151,6 +151,9 @@ spec:
       serviceAccountName: {{ $serviceAccountName }}
       affinity:
 {{ tuple $envAll "redis" "server" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+{{- if $envAll.Values.pod.tolerations.redis.enabled }}
+{{ tuple $envAll "redis" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.redis.node_selector_key }}: {{ .Values.labels.redis.node_selector_value | quote }}
       initContainers:

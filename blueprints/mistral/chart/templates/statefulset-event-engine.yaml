@@ -47,6 +47,9 @@ spec:
       serviceAccountName: {{ $serviceAccountName }}
       affinity:
 {{ tuple $envAll "mistral" "event-engine" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+{{- if $envAll.Values.pod.tolerations.mistral.enabled }}
+{{ tuple $envAll "mistral" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.event_engine.node_selector_key }}: {{ .Values.labels.event_engine.node_selector_value }}
       initContainers:

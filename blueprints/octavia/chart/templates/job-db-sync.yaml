@@ -20,5 +20,8 @@ limitations under the License.
 {{- if .Values.manifests.job_db_sync }}
 {{- $dbSyncJob := dict "envAll" . "serviceName" "octavia" "jobAnnotations" (include "metadata.annotations.job.db_sync" . | fromYaml) -}}
 {{- $_ := set $dbSyncJob "etcSources" (include "octavia.dropin_etc_sources" . | fromJsonArray) -}}
+{{- if .Values.pod.tolerations.octavia.enabled -}}
+{{- $_ := set $dbSyncJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $dbSyncJob | include "helm-toolkit.manifests.job_db_sync" }}
 {{- end }}

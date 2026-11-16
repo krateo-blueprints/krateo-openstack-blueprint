@@ -13,6 +13,13 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Umbrella `tolerations` (0.3.68).** One list on the Openstack resource reaches every pod of every component, as
+  OpenStack-Helm's `pod.tolerations.<component>`. A trusted-tenant vcluster copies the pool taint
+  `krateo.io/trusted-tenant=<ns>:NoSchedule` onto its nodes, so without it every DaemonSet desired 0 pods. Nine charts
+  had no `pod.tolerations` block (cyborg, designate, magnum, masakari, mistral, octavia, powerdns, redis, watcher), and
+  workloads and helm-toolkit Jobs in others never applied it. `hack/validate-tolerations.py` renders every chart with
+  every workload manifest on and requires exactly the list on every pod template.
+
 - **Per-service MariaDB users (0.3.68, #228).** All 28 services' own MariaDB users still logged in with
   OpenStack-Helm's published password. Each MariaDB username now has a generated root,
   `openstack-credential-oslo-db-<user>`, passed only to the chart that owns it. nova's three databases and octavia's

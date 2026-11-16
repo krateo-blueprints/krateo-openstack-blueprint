@@ -13,5 +13,8 @@ limitations under the License.
 */}}
 {{- if .Values.manifests.job_rabbit_init }}
 {{- $rmqUserJob := dict "envAll" . "serviceName" "cyborg" -}}
+{{- if .Values.pod.tolerations.cyborg.enabled -}}
+{{- $_ := set $rmqUserJob "tolerationsEnabled" true -}}
+{{- end -}}
 {{ $rmqUserJob | include "helm-toolkit.manifests.job_rabbit_init" }}
 {{- end }}

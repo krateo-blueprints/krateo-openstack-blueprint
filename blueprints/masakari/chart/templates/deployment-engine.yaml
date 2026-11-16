@@ -50,6 +50,9 @@ spec:
 {{ dict "envAll" $envAll "application" "masakari-engine" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       affinity:
 {{ tuple $envAll "masakari" "engine" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+{{- if $envAll.Values.pod.tolerations.masakari.enabled }}
+{{ tuple $envAll "masakari" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
       nodeSelector:
         {{ .Values.labels.masakari.node_selector_key }}: {{ .Values.labels.masakari.node_selector_value }}
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.masakari_engine.timeout | default "30" }}

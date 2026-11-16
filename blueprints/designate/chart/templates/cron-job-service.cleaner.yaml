@@ -47,6 +47,9 @@ spec:
 {{ tuple "designate_service_cleaner" . | include "helm-toolkit.snippets.kubernetes_pod_runtime_class" | indent 6 }}
           serviceAccountName: {{ $serviceAccountName }}
           restartPolicy: OnFailure
+{{- if $envAll.Values.pod.tolerations.designate.enabled }}
+{{ tuple $envAll "designate" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 10 }}
+{{- end }}
           nodeSelector:
             {{ .Values.labels.service_cleaner.node_selector_key }}: {{ .Values.labels.service_cleaner.node_selector_value }}
           initContainers:
