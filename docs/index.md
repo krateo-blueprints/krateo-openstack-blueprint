@@ -30,7 +30,7 @@ ordered, readiness-gated rollout that avoids the all-at-once race.
 - [usage](./usage.md) — install the orchestrator or the per-component blueprints, pick a
   profile or an explicit component set, access OpenStack and Horizon.
 - [configuration](./configuration.md) — the whole `Openstack` value surface: `profile`,
-  `enabled`, `componentValues`, `serviceContract`, `contractEmitter`.
+  `enabled`, `componentValues`, `serviceContract`.
 - [api](./api.md) — the `CompositionDefinition` CRD, the per-component composition Kinds,
   and the `Openstack` composition schema.
 - [examples](./examples.md) — the runnable manifests under `examples/`.
@@ -48,7 +48,7 @@ ordered, readiness-gated rollout that avoids the all-at-once race.
   registration.
 - `blueprints/openstack/` — the orchestrator umbrella (Kind `Openstack`). Its chart does
   **not** bundle the OpenStack charts; it sequences the per-component blueprints. Carries
-  the `serviceContract` surface and the optional `contractEmitter` CronJobs.
+  the `serviceContract` surface.
 - `examples/` — one-Composition-per-component identity/compute manifests plus the single
   `Openstack` orchestrator manifest.
 - `kagent/` — the `openstack-blueprint-expert` kagent SME (Agent CR + ModelConfig) that
@@ -61,8 +61,6 @@ ordered, readiness-gated rollout that avoids the all-at-once race.
 
 - [quickstart](./quickstart.md) — deploy the umbrella, reconfigure a component via
   `spec.componentValues`, then optionally install the kagent SME.
-- [contract-emitter](./contract-emitter.md) — the runtime usage/health emission
-  (CronJobs → ClickHouse) that backs the `serviceContract` declaration.
 - [kolla-ansible-audit-and-helm-plan](./kolla-ansible-audit-and-helm-plan.md) — the
   upstream audit that grounds the distribution-layer design.
 - [medium-openstack-as-a-service](./medium-openstack-as-a-service.md) — the narrative

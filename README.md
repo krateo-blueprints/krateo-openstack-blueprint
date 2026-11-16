@@ -1159,7 +1159,8 @@ declared fields was pruned by the Composition CRD with only a client-side warnin
 component created before that, a newly exposed key can still be dropped: see "Any
 `spec.componentValues.<name>` property this blueprint adds after a component's origin version"
 below. The
-orchestrator also carries a `serviceContract` v1 stanza and an optional `contractEmitter`.
+orchestrator also carries a `serviceContract` v1 stanza. Usage and health are emitted by
+[krateo-platformops/cmp-usage-collector](https://github.com/krateo-platformops/cmp-usage-collector), not by this chart (its emitter was removed in 0.3.68).
 The whole surface is documented in [docs/configuration.md](docs/configuration.md), and the
 CRD/schema in [docs/api.md](docs/api.md).
 
@@ -1188,7 +1189,6 @@ Index: [docs/examples.md](docs/examples.md).
 - [docs/release.md](docs/release.md) — how a tag publishes every chart to GHCR.
 - [docs/log.md](docs/log.md) — curated history.
 - [docs/quickstart.md](docs/quickstart.md) — deploy the umbrella + install the kagent SME.
-- [docs/contract-emitter.md](docs/contract-emitter.md) — runtime usage/health emission.
 - [docs/kolla-ansible-audit-and-helm-plan.md](docs/kolla-ansible-audit-and-helm-plan.md) —
   the upstream audit grounding the distribution-layer design.
 - [docs/medium-openstack-as-a-service.md](docs/medium-openstack-as-a-service.md) — the
@@ -1207,11 +1207,10 @@ The dashboard (Horizon) logs in as `admin` with the install's generated password
 GHCR on a semver tag (`git tag 0.1.0 && git push origin 0.1.0` →
 `oci://ghcr.io/krateo-blueprints/charts/<component>:0.1.0`).
 
-`.github/workflows/lint.yaml` runs on every PR: it checks the umbrella `componentValues`
-schema is in sync (`hack/gen-componentvalues-schema.py`), runs `helm lint` + a **determinism**
-(two byte-identical renders) and **hook-free** gate on every chart, compiles and conformance-
-tests the contract emitter, resolves the service-contract SSO deep-link, and runs the shared
-`lint-docs` documentation-standard job. See [docs/release.md](docs/release.md).
+`.github/workflows/lint.yaml` runs on every PR: the `hack/validate-*.py` gates (each states the
+defect it was written for), the umbrella `componentValues` schema-in-sync check
+(`hack/gen-componentvalues-schema.py`), the service-contract SSO deep-link resolution, the
+removed-values refusal, and the shared `lint-docs` documentation-standard job. See [docs/release.md](docs/release.md).
 
 ## License
 

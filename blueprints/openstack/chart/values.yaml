@@ -1291,64 +1291,11 @@ serviceContract:
     subcategory: provisioning
 
 # ---------------------------------------------------------------------------
-# Contract emitter: the runtime side of serviceContract.usage/health.
-# Two CronJobs (templates/contract-emitter.yaml) poll the OpenStack APIs on
-# the declared intervals and write normalized UsageRecord / health rows to
-# ClickHouse over its HTTP interface (files/contract-emitter.py, stdlib-only).
-# Disabled by default so the chart stays installable without a ClickHouse
-# data plane; the management platform enables it and points it at its own.
+# contractEmitter was removed in 0.3.68. The CMP's single emitter of the
+# serviceContract usage and health is krateo-platformops/cmp-usage-collector,
+# which reads each OpenStack from the parent with a read-only reader user; an
+# emitter in this chart would double-count usage next to it. Only
+# `contractEmitter.enabled: false` is still accepted, so a Composition created
+# before 0.3.68 keeps validating; `true` is refused by the schema and the
+# render.
 # ---------------------------------------------------------------------------
-contractEmitter:
-  enabled: false
-  image: python:3.12-alpine
-  imagePullPolicy: IfNotPresent
-  # org stamped on every emitted record (platform-injected per installation).
-  org: default
-  openstack:
-    # OpenStack-Helm admin openrc secret (OS_AUTH_URL, OS_USERNAME, OS_PASSWORD,
-    # OS_PROJECT_NAME, OS_USER_DOMAIN_NAME, OS_PROJECT_DOMAIN_NAME, ...),
-    # created by the keystone component (secrets.identity.admin).
-    existingSecret: keystone-keystone-admin
-    # authUrl overrides the secret's OS_AUTH_URL when set (leave empty to use it).
-    authUrl: ""
-    # region filters catalog endpoints when set (defaults to the secret's).
-    region: ""
-    # interface: which catalog endpoints to use and probe (internal|public|admin).
-    interface: internal
-    tlsVerify: true
-  clickhouse:
-    # The address the platform actually ships, measured on a real install -- the previous
-    # default (clickhouse.krateo-system.svc.cluster.local) resolves to nothing, so usage and
-    # health rows went nowhere and said so only in the CronJob's log.
-    #
-    # This is a HEADLESS Service: it has no cluster IP and its DNS returns the pod A records.
-    # urllib resolves through getaddrinfo and connects to one of them, so no cluster IP is
-    # needed. With more than one ClickHouse pod, consecutive requests may land on different
-    # pods; that is safe here because record_id is deterministic and the target table is a
-    # ReplacingMergeTree, so a row written twice replaces rather than duplicates.
-    url: http://krateo-clickstack-clickhouse-clickhouse-headless.krateo-system.svc:8123
-    # showback owns the usage_records schema and documents `showback` as the canonical
-    # database. This emitter already reproduces showback's deterministicID byte-for-byte, so
-    # pointing anywhere else was inconsistent with the row ids it writes. `krateo` did not
-    # exist on a real install; the platform's ClickHouse ships `default`.
-    database: showback
-    # Health rows live in their own database, and not by accident. showback owns the usage
-    # schema and migrates it; this emitter owns the health table and creates it. Pointing
-    # both at showback's database would make bootstrap issue CREATE TABLE inside a database
-    # that does not exist until showback has run -- breaking the half this emitter owns in
-    # order to fix the half it does not. `default` ships with the platform's ClickHouse.
-    healthDatabase: default
-    # usage_records is owned by the platform's rating engine DDL (UsageRecord shape).
-    usageTable: usage_records
-    healthTable: health_records
-    # create the health table if missing (idempotent CREATE TABLE IF NOT EXISTS).
-    bootstrapHealthTable: true
-    # optional secret with keys: username, password.
-    existingSecret: ""
-  resources:
-    requests:
-      cpu: 10m
-      memory: 32Mi
-    limits:
-      cpu: 100m
-      memory: 128Mi

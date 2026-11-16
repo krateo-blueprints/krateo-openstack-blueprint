@@ -243,6 +243,18 @@ jobs:
       # OS_PASSWORD=password after both had been generated per install for months (#228).
       - name: No document passes a published OpenStack-Helm password
         run: python3 hack/validate-docs-no-published-credentials.py .
+      # The umbrella's contract emitter was removed in 0.3.68 (usage and health come from
+      # cmp-usage-collector). A removed value must be refused, not silently ignored.
+      - name: Removed values are refused, never ignored
+        run: bash hack/validate-removed-values.sh .
+      # The README and docs/release.md said CI resolved the deep-link; the step was lost in the
+      # 2026-08-11 workflow rewrite and had not run since.
+      - name: The service-contract SSO deep-link resolves
+        run: |
+          set -euo pipefail
+          for ctx in "--project demo" "--org acme --tenant t1 --namespace ns1 --project demo"; do
+            bash tools/resolve-deeplink.sh --from-chart $ctx
+          done
       # A default cluster's StorageClass is ReadWriteOnce: no default claim may ask for
       # ReadWriteMany, and pods sharing a ReadWriteOnce claim must be co-located (#201).
       - name: Every default claim can be bound, and shared ReadWriteOnce claims are co-located
