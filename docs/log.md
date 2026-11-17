@@ -13,6 +13,33 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Public endpoints over HTTPS through the Gateway API (#311, phase 1).**
+  - **Umbrella `publicEndpoints`:** off by default, and off renders byte-identical. When on, the umbrella renders:
+    - one Gateway (`gatewayClassName`, default `agentgateway`, which Krateo's `features.ingress` installs);
+    - an HTTPRoute per public endpoint of every selected component;
+    - an HTTP-to-HTTPS redirect;
+    - a cert-manager Certificate from `tls.issuerRef`;
+    - an ingress NetworkPolicy set: deny by default, allow the namespace, `nodeCIDRs`, the Gateway proxy, and
+      `allowNamespaces`.
+  - **The components:**
+    - Each public catalog URL becomes `https://<service>.<baseDomain>`, with proxy-header parsing set.
+    - The charts' inert Ingress switches go off (upstream removed those templates in 6ec1132485).
+    - Horizon becomes ClusterIP with Secure cookies.
+    - Routes set HSTS, and overwrite X-Forwarded-Proto with `https`.
+    - Never routed: metadata, RabbitMQ, MariaDB, memcached.
+  - **Refused on a live cluster** without the Gateway API or cert-manager CRDs, and on a missing input.
+  - **The new gate:** `hack/validate-public-endpoints.py` checks:
+    - off equals before;
+    - the routes against what each chart registers;
+    - the deny list, HSTS and redirect, and the policy's exact peers;
+    - the refusals;
+    - every routed chart rendered with the values the umbrella gives it (backend Service, catalog URL, no Ingress,
+      proxy headers, Horizon);
+    - the tables against the charts.
+
+    It also runs ten mutations, each of which must be reported as the defect it plants.
+  - **Not yet verified on a cluster.** The live checks are in the README.
+
 - **Start ordering, and re-running hooks (0.3.72, #297, #298, #299).**
   - **#298:** ceilometer-notification now waits for the rabbit-init Job of every vhost it consumes, as the umbrella
     computes it, overrides included (`conf.notification_vhost_jobs`). Check 26b asserts the jobs equal the vhost list.

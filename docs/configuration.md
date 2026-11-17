@@ -25,8 +25,33 @@ own, smaller schemas; the orchestrator's `componentValues` mirrors them.
 | `tolerations` | array of toleration \| null | `null` | Kubernetes tolerations applied to **every pod** of every component: Deployments, StatefulSets, DaemonSets, Jobs and CronJobs, helm-toolkit's Jobs included. Each component receives them as OpenStack-Helm's `pod.tolerations.<component>` `{enabled: true, tolerations: <list>}`; an explicit `componentValues` entry wins. Needed on tainted nodes (see below). |
 | `componentValues` | object \| null | `null` | Per-component Composition `spec` overrides (see below). |
 | `rerunHooks` | object \| null | `null` | A token per component name (non-empty string; an unknown name is rejected). Setting or changing `rerunHooks.<component>` passes it to that component alone, as its `krateo.rerunHooksToken`, which every component schema declares and no template renders. Its values change, so core-provider runs a helm upgrade and every hook runs again. Use the current time. The recovery for `Ready=False/HooksMayNotHaveRun` (README, #297). |
+| `publicEndpoints` | object | `enabled: false` | The APIs, Horizon and the noVNC console over HTTPS from outside the cluster, through one Gateway API Gateway with an HTTPRoute per public endpoint of a selected component, a cert-manager Certificate and an ingress NetworkPolicy (see below, #311). Off changes nothing. |
 | `serviceContract` | object | chart default | Service integration descriptor, contract v1 (see below). |
 | `contractEmitter` | object | absent | Removed in 0.3.68 (see below). |
+
+## `publicEndpoints` — the APIs and Horizon over HTTPS (#311)
+
+Needs a Gateway API implementation and cert-manager (Krateo: `features.ingress`); on a live cluster the render is
+refused while their CRDs are absent. The README's "Public endpoints" section has the example and the live checks.
+
+| Field | Type | Default | Purpose |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `false` | Render the Gateway, the routes, the Certificate and the NetworkPolicy, and move each selected component's public endpoint to its hostname. |
+| `baseDomain` | string | `""` | Every public hostname is `<service>.<baseDomain>`, e.g. `keystone.cloud.example.com`. Required when enabled. |
+| `gatewayClassName` | string | `agentgateway` | The GatewayClass of the Gateway API implementation. |
+| `gateway.name` | string | `openstack-gateway` | The Gateway; its certificate Secret is `<name>-tls`, each route `<name>-<service>`. |
+| `gateway.addresses` | array of string \| null | `null` | Reserved IP addresses for the Gateway. |
+| `tls.issuerRef.{group,kind,name}` | strings | `cert-manager.io`, `ClusterIssuer`, `""` | The cert-manager issuer of the Gateway's certificate. `name` is required when enabled. |
+| `hsts.maxAge` | integer | `31536000` | `Strict-Transport-Security` max-age on every HTTPS response (no `includeSubDomains`, no `preload`). |
+| `networkPolicy.enabled` | boolean | `true` | Deny ingress to the install namespace by default; allow the namespace itself, `nodeCIDRs`, the Gateway's proxy pods (to the routed ports), the internet to the proxy pods only, and `allowNamespaces`. |
+| `networkPolicy.nodeCIDRs` | array of string \| null | `null` | The CIDRs of the nodes' own addresses. Required with the policy on: the host-network data-plane pods reach RabbitMQ and the APIs from them. |
+| `networkPolicy.allowNamespaces` | array of string \| null | `null` | Namespaces whose pods may reach the install namespace, e.g. the OpenStack KOG operators'. |
+| `proxyNamespace` | string | `""` | Where the implementation runs the Gateway's proxy pods (label `gateway.networking.k8s.io/gateway-name`). Empty: the install namespace. |
+
+What each component receives is the table `publicEndpointRoutes` (endpoint, hostname, backend Service) and
+`publicEndpointComponents` (Ingress switches turned off, `proxyHeaders`, endpoints referenced from other charts,
+Horizon's settings) in the orchestrator's `values.yaml`, merged under `componentValues`, so an explicit
+`componentValues` entry wins. `hack/validate-public-endpoints.py` checks both tables against the charts.
 
 ## `tolerations` — tainted nodes
 

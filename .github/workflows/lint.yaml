@@ -395,6 +395,12 @@ jobs:
       - name: Hooks can be re-run by a value
         run: python3 hack/validate-rerun-hooks.py .
 
+      # publicEndpoints (#311): every public endpoint of the selected components gets an HTTPS route and nothing else
+      # does; HSTS, the redirect, the NetworkPolicy's exact peers, the refusals, off == before, and each routed chart
+      # rendered with the values the umbrella gives it. Mutations prove each check reports its defect.
+      - name: Public endpoints expose exactly the public endpoints, over HTTPS
+        run: python3 hack/validate-public-endpoints.py .
+
       # glance's image store: 10Gi by default, a smaller live claim expanded, a claim never asked to shrink (#295).
       - name: glance's image store size
         run: python3 hack/validate-glance-store.py .

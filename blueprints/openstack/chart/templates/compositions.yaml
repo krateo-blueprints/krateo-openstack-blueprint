@@ -173,6 +173,13 @@
 {{- $nv := dict "conf" (dict "notification_vhosts" (include "osh.notificationVhosts" (list $ $sel) | fromJsonArray) "notification_vhost_jobs" (include "osh.notificationVhostJobs" (list $ $sel) | fromJsonArray)) }}
 {{- $ov = mergeOverwrite $nv (deepCopy $ov) }}
 {{- end }}
+{{- /* Public endpoints (#311): with publicEndpoints on, the component's public endpoint moves to its Gateway hostname
+       over HTTPS, its inert Ingress switches go off, and Horizon becomes ClusterIP with Secure cookies
+       (osh.publicEndpointValues). Off it returns nothing and nothing is merged, so the spec is unchanged. Merged UNDER
+       componentValues: an explicit entry wins. hack/validate-public-endpoints.py renders this for every component. */ -}}
+{{- with include "osh.publicEndpointValues" (list $ $c.name $sel) }}
+{{- $ov = mergeOverwrite (fromJson .) (deepCopy $ov) }}
+{{- end }}
 {{- /* Re-run hooks (#297): rerunHooks.<component> reaches that component alone, as krateo.rerunHooksToken. Its values
        change, so core-provider runs a helm upgrade and every hook runs again. Merged UNDER componentValues: an explicit
        entry wins. hack/validate-rerun-hooks.py renders this span with and without a token. */ -}}
