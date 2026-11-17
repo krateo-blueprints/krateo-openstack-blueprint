@@ -34,7 +34,7 @@
               "title": "Barbican API replicas",
               "minimum": 1,
               "maximum": 5,
-              "default": 1
+              "default": 2
             }
           },
           "x-kubernetes-preserve-unknown-fields": true

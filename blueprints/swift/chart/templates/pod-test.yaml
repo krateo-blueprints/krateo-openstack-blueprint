@@ -29,6 +29,7 @@ spec:
     - name: swift-test
       image: {{ .Values.images.tags.test }}
       imagePullPolicy: {{ .Values.images.pull_policy }}
+{{ tuple $envAll $envAll.Values.pod.resources.jobs.tests | include "helm-toolkit.snippets.kubernetes_resources" | indent 6 }}
       command:
         - /bin/bash
         - -c

@@ -41,6 +41,7 @@ spec:
     matchLabels:
 {{ tuple $envAll "tacker" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
   replicas: {{ .Values.pod.replicas.server }}
+{{ tuple $envAll | include "helm-toolkit.snippets.kubernetes_upgrades_deployment" | indent 2 }}
   template:
     metadata:
       labels:
@@ -64,6 +65,7 @@ spec:
 {{ dict "envAll" $envAll "component" "server" "container" "default" "type" "liveness" "probeTemplate" (include "tackerServerHttpProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | indent 10 }}
           image: {{ .Values.images.tags.tacker_server }}
           imagePullPolicy: {{ .Values.images.pull_policy }}
+{{ tuple $envAll $envAll.Values.pod.resources.server | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           command:
             - /bin/bash
             - -c

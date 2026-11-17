@@ -428,6 +428,10 @@ pod:
             timeoutSeconds: 15
   affinity:
     anti:
+      # Spread over zones too, when nodes carry this label (helm-toolkit, #286).
+      zone:
+        topologyKey: topology.kubernetes.io/zone
+        weight: 5
       type:
         default: preferredDuringSchedulingIgnoredDuringExecution
       topologyKey:
@@ -435,7 +439,7 @@ pod:
       weight:
         default: 10
   replicas:
-    masakari_api: 1
+    masakari_api: 2
     masakari_engine: 1
   lifecycle:
     upgrades:
@@ -443,8 +447,8 @@ pod:
         revision_history: 3
         pod_replacement_strategy: RollingUpdate
         rolling_update:
-          max_unavailable: 1
-          max_surge: 3
+          max_unavailable: 0
+          max_surge: 1
       daemonsets:
         pod_replacement_strategy: RollingUpdate
         compute:
@@ -453,7 +457,7 @@ pod:
           max_unavailable: 1
     disruption_budget:
       masakari_api:
-        min_available: 0
+        min_available: 1
       masakari_engine:
         min_available: 0
     termination_grace_period:
@@ -508,100 +512,99 @@ pod:
       masakari_db_sync:
         volumeMounts:
         volumes:
+  # Sized (#283): every container requests cpu and memory and has a memory limit, so no pod is BestEffort, a
+  # ResourceQuota admits it, and capacity is visible to the scheduler. No CPU limit by default: throttling an API worker
+  # shows up as latency and probe timeouts. The figures are OpenStack-Helm's own per-container ones unless named below;
+  # no per-container usage has been measured yet (README, "Cluster size"). Override any of them, or set enabled: false,
+  # with componentValues.masakari.pod.resources.
+  # kubernetes_entrypoint sizes the dependency-wait init container every pod runs (helm-toolkit).
   resources:
-    enabled: false
+    enabled: true
     masakari_api:
       requests:
-        memory: "128Mi"
-        cpu: "100m"
+        memory: 128Mi
+        cpu: 100m
       limits:
-        memory: "1024Mi"
-        cpu: "2000m"
+        memory: 1024Mi
     masakari_engine:
       requests:
-        memory: "128Mi"
-        cpu: "100m"
+        memory: 128Mi
+        cpu: 100m
       limits:
-        memory: "1024Mi"
-        cpu: "2000m"
+        memory: 1024Mi
     masakari_host_monitor:
       requests:
-        memory: "128Mi"
-        cpu: "100m"
+        memory: 128Mi
+        cpu: 100m
       limits:
-        memory: "1024Mi"
-        cpu: "2000m"
+        memory: 1024Mi
     masakari_instance_monitor:
       requests:
-        memory: "128Mi"
-        cpu: "100m"
+        memory: 128Mi
+        cpu: 100m
       limits:
-        memory: "1024Mi"
-        cpu: "2000m"
+        memory: 1024Mi
     masakari_process_monitor:
       requests:
-        memory: "128Mi"
-        cpu: "100m"
+        memory: 128Mi
+        cpu: 100m
       limits:
-        memory: "1024Mi"
-        cpu: "2000m"
+        memory: 1024Mi
     masakari_introspective_instance_monitor:
       requests:
-        memory: "128Mi"
-        cpu: "100m"
+        memory: 128Mi
+        cpu: 100m
       limits:
-        memory: "1024Mi"
-        cpu: "2000m"
+        memory: 1024Mi
     jobs:
       rabbit_init:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
+          memory: 128Mi
+          cpu: 100m
         limits:
-          memory: "1024Mi"
-          cpu: "2000m"
+          memory: 1024Mi
       db_init:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
+          memory: 128Mi
+          cpu: 100m
         limits:
-          memory: "1024Mi"
-          cpu: "2000m"
+          memory: 1024Mi
       db_sync:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
+          memory: 128Mi
+          cpu: 100m
         limits:
-          memory: "1024Mi"
-          cpu: "2000m"
+          memory: 1024Mi
       db_drop:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
+          memory: 128Mi
+          cpu: 100m
         limits:
-          memory: "1024Mi"
-          cpu: "2000m"
+          memory: 1024Mi
       ks_endpoints:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
+          memory: 128Mi
+          cpu: 100m
         limits:
-          memory: "1024Mi"
-          cpu: "2000m"
+          memory: 1024Mi
       ks_service:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
+          memory: 128Mi
+          cpu: 100m
         limits:
-          memory: "1024Mi"
-          cpu: "2000m"
+          memory: 1024Mi
       ks_user:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
+          memory: 128Mi
+          cpu: 100m
         limits:
-          memory: "1024Mi"
-          cpu: "2000m"
+          memory: 1024Mi
+    kubernetes_entrypoint:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
 conf:
   paste:
     composite:masakari_api:

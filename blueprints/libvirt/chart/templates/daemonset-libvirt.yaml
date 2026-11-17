@@ -95,6 +95,7 @@ spec:
 {{- end }}
         - name: init-dynamic-options
 {{ tuple $envAll "libvirt" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.libvirt | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "libvirt" "container" "init_dynamic_options" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           terminationMessagePath: /var/log/termination-log
           command:
@@ -112,6 +113,7 @@ spec:
         {{- /* Krateo (#303): with virt_type kvm, refuse to start on a node without /dev/kvm (after the modules are loaded). */}}
         - name: libvirt-kvm-check
 {{ tuple $envAll "libvirt" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.libvirt | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           terminationMessagePath: /var/log/termination-log
           command:
             - /tmp/kvm-check.sh

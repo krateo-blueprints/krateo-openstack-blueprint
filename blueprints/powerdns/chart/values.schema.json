@@ -34,7 +34,7 @@
               "title": "PowerDNS replicas",
               "description": "Authoritative servers. All replicas read the same gmysql database, so they serve identical zone data.",
               "minimum": 1,
-              "default": 1
+              "default": 2
             }
           },
           "x-kubernetes-preserve-unknown-fields": true
@@ -98,6 +98,9 @@
           "type": "boolean"
         },
         "service": {
+          "type": "boolean"
+        },
+        "pdb": {
           "type": "boolean"
         }
       },

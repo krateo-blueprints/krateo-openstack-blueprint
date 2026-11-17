@@ -34,7 +34,7 @@
               "title": "Designate api replicas",
               "minimum": 1,
               "maximum": 5,
-              "default": 1
+              "default": 2
             },
             "central": {
               "type": "integer",
@@ -48,7 +48,7 @@
               "title": "Designate mdns replicas",
               "minimum": 1,
               "maximum": 5,
-              "default": 1
+              "default": 2
             },
             "producer": {
               "type": "integer",

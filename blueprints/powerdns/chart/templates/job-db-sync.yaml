@@ -56,6 +56,7 @@ spec:
                next container to apply a stale copy the chart had been carrying. */}}
         - name: powerdns-schema-copy
 {{ tuple $envAll "powerdns" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.jobs.db_sync | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           command:
             - /bin/sh
             - -c

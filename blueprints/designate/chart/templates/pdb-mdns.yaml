@@ -10,6 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 {{- if .Values.manifests.pdb_mdns }}
+{{- /* The selector carried `app: designate-mdns`, a label no designate pod has, so this budget selected nothing
+       (found by hack/validate-api-availability.py, #286). It now selects the pods by their helm-toolkit labels. */ -}}
 
 {{- $envAll := . }}
 ---
@@ -18,8 +20,8 @@ kind: PodDisruptionBudget
 metadata:
   name: designate-mdns
 spec:
-  minAvailable: {{ .Values.pod.lifecycle.disruption_budget.mdns.min_available }}
+  minAvailable: {{ tuple .Values.pod.lifecycle.disruption_budget.mdns.min_available .Values.pod.replicas.mdns | include "helm-toolkit.utils.pdb_min_available" }}
   selector:
     matchLabels:
-      app: designate-mdns
+{{ tuple $envAll "designate" "mdns" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
 {{- end }}

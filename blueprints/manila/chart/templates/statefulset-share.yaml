@@ -74,6 +74,7 @@ spec:
 {{ tuple $envAll "share" $mounts_manila_share_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
         - name: manila-share-init
 {{ tuple $envAll "manila_share" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.share | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "manila" "container" "manila_share" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           env: []
           command:

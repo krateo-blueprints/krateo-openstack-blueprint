@@ -16,8 +16,9 @@ abstract: |
   openstack-kog-endpoints; nova patches nova_url of openstack-kog-endpoints and nothing else. A merge patch keeps the
   keys it does not name, so neither writer clobbers the other's. hack/validate-kog-credentials.py runs both programs.
 values: |
-  The chart's labels.job, images.tags.ks_user and dependencies.static.<depsKey>. The template that includes it applies
-  pod.tolerations.<application> itself, as every Job template does (hack/validate-tolerations.py check 3).
+  The chart's labels.job, images.tags.ks_user, dependencies.static.<depsKey> and pod.resources.jobs.<depsKey> (#283).
+  The template that includes it applies pod.tolerations.<application> itself, as every Job template does
+  (hack/validate-tolerations.py check 3).
 usage: |
   {{ dict "envAll" $envAll "application" "nova" "mode" "nova" "depsKey" "kog_endpoints" "serviceAccount" "nova-kog-endpoints" "ksUserSecret" .Values.secrets.identity.admin "useCA" false | include "helm-toolkit.snippets.kog_endpoints_pod" }}
 */}}
@@ -37,6 +38,7 @@ initContainers:
 # attempt logs in once; it tries at most 4 times and writes only what keystone answered, to a memory emptyDir.
 - name: mint
 {{ tuple $envAll "ks_user" | include "helm-toolkit.snippets.image" | indent 2 }}
+{{ tuple $envAll (index $envAll.Values.pod.resources.jobs .depsKey) | include "helm-toolkit.snippets.kubernetes_resources" | indent 2 }}
   env:
     - name: KOG_MODE
       value: {{ .mode | quote }}
@@ -107,6 +109,7 @@ containers:
 # The writer: holds what the mint step wrote, never the password, and merge-patches only its own keys.
 - name: write
 {{ tuple $envAll "ks_user" | include "helm-toolkit.snippets.image" | indent 2 }}
+{{ tuple $envAll (index $envAll.Values.pod.resources.jobs .depsKey) | include "helm-toolkit.snippets.kubernetes_resources" | indent 2 }}
   env:
     - name: KOG_MODE
       value: {{ .mode | quote }}

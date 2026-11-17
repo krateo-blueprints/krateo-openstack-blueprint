@@ -1,0 +1,27 @@
+# Workloads a chart renders only behind a feature switch that is off by default (#283, #286).
+#
+# hack/validate-pod-resources.py and hack/validate-api-availability.py render each chart at its defaults and with
+# every workload manifest on. Neither turns on a feature switch such as kog_credentials.enabled, so a Job or init
+# container behind one is checked only if it is declared here: chart -> label -> the values that turn the feature on,
+# as the umbrella passes them. Both gates fail when one of these does not render, or renders nothing new.
+keystone:
+  kog_credentials on:
+    kog_credentials:
+      enabled: true
+    endpoints:
+      identity:
+        auth:
+          admin:
+            passwordFrom:
+              store: gate-store
+              secret: gate-identity-admin
+              key: password
+nova:
+  kog_credentials on:
+    kog_credentials:
+      enabled: true
+libvirt:
+  virt_type kvm:
+    conf:
+      libvirt:
+        virt_type: kvm

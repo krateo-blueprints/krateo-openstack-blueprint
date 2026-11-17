@@ -34,7 +34,7 @@
               "title": "Cinder API replicas",
               "minimum": 1,
               "maximum": 5,
-              "default": 1
+              "default": 2
             },
             "scheduler": {
               "type": "integer",

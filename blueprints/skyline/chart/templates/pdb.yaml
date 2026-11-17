@@ -12,16 +12,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- if .Values.manifests.pdb_api }}
+{{/* Added for #286: this workload runs more than one replica by default, so a node drain or upgrade must keep
+     one serving. minAvailable is clamped below the replica count (helm-toolkit.utils.pdb_min_available), so an
+     override to one replica never blocks a drain. Asserted by hack/validate-api-availability.py. */}}
+
+{{- if .Values.manifests.pdb }}
 {{- $envAll := . }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: masakari-api
+  name: skyline
 spec:
-  minAvailable: {{ .Values.pod.lifecycle.disruption_budget.masakari_api.min_available }}
+  minAvailable: {{ tuple .Values.pod.lifecycle.disruption_budget.skyline.min_available .Values.pod.replicas.skyline | include "helm-toolkit.utils.pdb_min_available" }}
   selector:
     matchLabels:
-{{ tuple $envAll "masakari" "masakari_api" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
+{{ tuple $envAll "skyline" "skyline" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
 {{- end }}

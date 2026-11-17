@@ -47,6 +47,8 @@ spec:
     spec:
       serviceAccountName: {{ $serviceAccountName }}
 {{ dict "envAll" $envAll "application" "skyline" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
+      affinity:
+{{ tuple $envAll "skyline" "skyline" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
 {{- if $envAll.Values.pod.tolerations.skyline.enabled }}
 {{ tuple $envAll "skyline" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
 {{- end }}
@@ -56,6 +58,7 @@ spec:
 {{ tuple $envAll "skyline" $mounts_skyline_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
         - name: api-init
 {{ tuple $envAll "skyline" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.skyline | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           command:
             - /bin/sh
             - -c
@@ -80,6 +83,7 @@ spec:
 {{ if $mounts_skyline_init.volumeMounts }}{{ toYaml $mounts_skyline_init.volumeMounts | indent 12 }}{{ end }}
       containers:
         - name: nginx
+{{ tuple $envAll $envAll.Values.pod.resources.nginx | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           command:
             - /bin/sh
             - -c
@@ -111,6 +115,7 @@ spec:
               mountPath: /var/lib/skyline
         - name: skyline
 {{ tuple $envAll "skyline" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.skyline | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "skyline" "container" "skyline" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
             - /tmp/skyline-apiserver.sh
