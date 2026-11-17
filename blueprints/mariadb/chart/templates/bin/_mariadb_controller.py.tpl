@@ -12,6 +12,8 @@ MARIADB_CONTROLLER_CHECK_PODS_DELAY: The delay between check pod attempts.
 MARIADB_CONTROLLER_PYKUBE_REQUEST_TIMEOUT: The timeout for kubernetes http session
 MARIADB_CONTROLLER_PODS_NAMESPACE: The namespace to look for mariadb pods.
 MARIADB_MASTER_SERVICE_NAME: The name of master service for mariadb.
+MARIADB_CONTROLLER_HEARTBEAT: A file touched after every completed pass of the
+  loop; the readiness probe requires it to be recent (#231).
 
 Changelog:
 0.1.0: Initial varsion
@@ -37,6 +39,9 @@ MARIADB_CONTROLLER_PODS_NAMESPACE = os.getenv(
 )
 MARIADB_MASTER_SERVICE_NAME = os.getenv(
     "MARIADB_MASTER_SERVICE_NAME", "mariadb"
+)
+MARIADB_CONTROLLER_HEARTBEAT = os.getenv(
+    "MARIADB_CONTROLLER_HEARTBEAT", "/tmp/mariadb-controller-heartbeat"
 )
 
 log_level = "DEBUG" if MARIADB_CONTROLLER_DEBUG == "1" else "INFO"
@@ -105,6 +110,11 @@ def main():
             if is_ready(pod):
                 link_master_service(pod)
                 break
+        # A pass completed: the API answered and the master Service is linked, or no pod is
+        # ready to link. Either is the controller working; a pass that hangs or raises leaves
+        # the file to age, and the readiness probe reports it.
+        with open(MARIADB_CONTROLLER_HEARTBEAT, "w") as f:
+            f.write(str(time.time()))
         LOG.debug(f"Sleeping for {MARIADB_CONTROLLER_CHECK_PODS_DELAY}")
         time.sleep(MARIADB_CONTROLLER_CHECK_PODS_DELAY)
 

@@ -86,6 +86,7 @@ spec:
         {{- end }}
       containers:
         - name: neutron-rpc-server
+{{ dict "envAll" $envAll "component" "rpc_server" "container" "rpc_server" "args" (list "--process" "neutron-rpc-server" "--exchange" "neutron" "--rpc-topic" "q-plugin") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "neutron_rpc_server" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.rpc_server | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "neutron_rpc_server" "container" "neutron_rpc_server" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
@@ -107,6 +108,10 @@ spec:
             - name: q-api
               containerPort: {{ tuple "network" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
           volumeMounts:
+            - name: neutron-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: pod-tmp
               mountPath: /tmp
             - name: oslo-lock-path

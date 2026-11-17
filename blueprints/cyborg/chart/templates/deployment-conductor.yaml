@@ -59,6 +59,7 @@ spec:
 {{ tuple $envAll "conductor" $mounts_cyborg_conductor_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: cyborg-conductor
+{{ dict "envAll" $envAll "component" "conductor" "container" "default" "args" (list "--process" "cyborg-conductor" "--exchange" "cyborg" "--rpc-topic" "cyborg-conductor") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "cyborg_conductor" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.conductor | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "cyborg" "container" "cyborg_conductor" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
@@ -71,6 +72,10 @@ spec:
           command:
             - /tmp/cyborg-conductor.sh
           volumeMounts:
+            - name: cyborg-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: pod-tmp
               mountPath: /tmp
             - name: oslo-lock-path

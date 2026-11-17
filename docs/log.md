@@ -13,6 +13,86 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Provider-agnostic KVM guidance.** libvirt's `/dev/kvm` refusal no longer names a cloud provider. It says what to
+  enable on any node: VT-x/AMD-V with the kvm module on bare metal, nested virtualization on cloud VMs, or
+  `compute.virtType: qemu`. `hack/validate-virt-type.py` now asserts those terms, and that no provider is named. The
+  README's "Running guests on KVM" leads with the generic requirement (nodes exposing `/dev/kvm`, labelled
+  `openstack-compute-node=enabled`). Bare metal, GKE (measured), AWS and Azure follow as examples.
+
+- **Image inventory and CVE scan (#316).**
+  - **Inventory:** 58 distinct images across the 38 published charts (quay.io 49, docker.io 8, ghcr.io 1). Every
+    chart is rendered at its defaults and with every off-by-default manifest on, and each chart's `images.tags` is
+    added. All 58 are pullable anonymously as measured on 2026-11-17, gnocchi's Kolla images included (#115).
+    `hack/gen-image-inventory.py` generates `hack/images.yaml` and [images.md](images.md). Offline, in `lint.yaml`,
+    it fails when a chart's images differ from the files, and when an image's registry namespace has no publisher
+    in `hack/image-sources.yaml`.
+  - **Registry re-check:** `--resolve` asks each registry again, without credentials. It fails when an image is no
+    longer pullable (v1 manifest, no linux/amd64, 401 or 404) and reports a moved digest without failing.
+  - **CVE scan:** `.github/workflows/image-scan.yaml` scans every pullable image with Trivy 0.76.1, pinned by a
+    digest in the workflow. It runs on a push that changes the inventory, weekly, and on each release tag. It took
+    2.6 minutes of wall time for all 58. It isn't run on every pull request because only an image change or a new
+    upstream CVE changes its result. A CRITICAL finding fails unless `hack/image-cve-allowlist.yaml` has an entry for
+    that CVE, image and package that hasn't expired (at most 120 days ahead). The judging rules run offline per pull
+    request (`--self-test`).
+  - **First scan:** 177 CRITICAL findings in 43 of the 58 images. PyJWT 2.11.0 is in 29 images (25 airshipit
+    OpenStack service images and the 4 Kolla gnocchi images), and `nginx:1.13.3` (Debian 9, run by ironic at defaults) has 54. All are allowlisted as a measured baseline that
+    expires on 2027-02-15 ([supply-chain.md](supply-chain.md)).
+  - **Pinning, open for Diego** ([supply-chain.md](supply-chain.md)): 35 images use release-series tags, and each
+    airshipit one was pushed 27 to 32 times in 30 days. Proposed: dated tags with the digest recorded and verified
+    in CI. Mirror the four Kolla gnocchi images, which have no immutable tag. Not `@sha256:` in the charts (#72).
+- **KVM guests and KOG credentials (0.3.73, #303).** These are the blueprint's half of the data-plane release stage.
+  - **`compute.virtType: kvm`:** sets nova `virt_type=kvm` and `cpu_mode=host-model` and libvirt's `virt_type`. libvirt
+    then refuses, in an init container, to start on a node without `/dev/kvm`; the message names GKE's
+    `--enable-nested-virtualization`. qemu, the default, renders as before.
+  - **`kogCredentials.enabled`:** has keystone render, from the generated admin root and in the release's namespace,
+    `openstack-kog-clouds` (an ExternalSecret clouds.yaml for the KOG auth proxies), `openstack-kog-token` (nova-kog's
+    admin token) and `openstack-kog-endpoints` (nova's internal URL with the admin project id, keystone's internal URL
+    and the region, as keystone answered them; no secret). keystone's post-install,post-upgrade hook Job and a CronJob
+    (every 6 h) write the token, `keystone_url` and `region_name`. nova's own hook Job writes `nova_url` once nova
+    registered its endpoint. Both run one shared program (`helm-toolkit.snippets.kog_endpoints_pod`), at most 4 tries
+    per run, and merge-patch only their own keys. A failed mint fails that chart's release. Only the mint step holds
+    the password, and each writer may patch only its own objects.
+    Cross-namespace is not supported yet. The README gives each KOG's setting for these names, read from the KOG
+    charts.
+  - **New gates:** `hack/validate-virt-type.py` and `hack/validate-kog-credentials.py`.
+
+- **Every long-running container has a readiness probe (#231, #151).** On a 0.3.47 cold install,
+  watcher-decision-engine exited 1 seven seconds after every start, had no probe, and counted as Ready
+  in each window, so its composition and the umbrella went Ready=True. 32 of 76 long-running containers
+  had no readiness probe.
+  - **RPC workers** (conductors, schedulers, engines, managers, agents: 30 containers in 16 charts) run
+    `worker-health-probe.py`, one script in helm-toolkit (`helm-toolkit.scripts.health_probe`). It is
+    OpenStack-Helm's nova and neutron `health-probe.py` made generic. It finds the program in /proc,
+    limited to its own container's processes, and reads the program's own `--config-file` and
+    `--config-dir` arguments. It requires an ESTABLISHED RabbitMQ connection, then sends an RPC call to
+    the program's own `topic.server` queue, which only a consuming server answers. Each topic, exchange
+    and server name was read from the stable/2026.1 source, including the cases that aren't
+    `CONF.host`: cinder and manila `host@backend`, mistral, trove and blazar `0.0.0.0`, cloudkitty and
+    ironic `getfqdn()`, magnum's random id (topic only). The RPC charts set `rpc_ping_enabled`, so a
+    server answers the probe at DEBUG rather than logging an ERROR every minute.
+  - **Other workers:**
+    - Notification listeners (aodh listener and notifier, ceilometer-notification,
+      ironic-neutron-agent) require their RabbitMQ consumer connection.
+    - octavia-health-manager, octavia-driver-agent and ironic's tftp sidecar require their listening
+      socket, attributed by inode.
+    - mariadb-controller writes a heartbeat after every pass.
+    - skyline's nginx is probed through its proxy.
+    - nova-compute-ironic uses nova's own probe.
+    - tacker-server gets an HTTP probe on its versions document.
+  - **Readiness only for RPC workers** (#146): an RPC failure can't tell a wedged process from a
+    broker outage, and a liveness probe on it restarts every replica at once and repairs nothing.
+    tacker-server is the one new liveness probe. It asks `/`, which needs no dependency, and has a
+    startup probe because its start script installs packages first.
+  - **Exceptions:** 12 containers have no signal a probe can test (pollers, periodic loops, masakari's
+    monitors, designate-sink with no handlers). Each is listed with its reason in
+    `hack/readiness-probe-exceptions.yaml`.
+  - **New gates:** `hack/validate-readiness-probes.py` renders every chart at its defaults and with
+    every workload on (CI, 2026-11-17: 114 long-running containers in 37 charts; 53 without a readiness
+    probe on main, 12 on this change, all listed). It fails when a container has no probe and no exception, when an exception is
+    unneeded, when a probe is `true`, or when a probe's /tmp script isn't mounted (this caught
+    tacker-conductor's). `hack/validate-health-probe.py` runs the rendered script against
+    oslo.messaging's real RPC server and dispatcher, and against real processes and sockets in /proc.
+
 - **Start ordering, and re-running hooks (0.3.72, #297, #298, #299).**
   - **#298:** ceilometer-notification now waits for the rabbit-init Job of every vhost it consumes, as the umbrella
     computes it, overrides included (`conf.notification_vhost_jobs`). Check 26b asserts the jobs equal the vhost list.

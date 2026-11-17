@@ -264,6 +264,12 @@ jobs:
       # agent there resolves the wrong FQDN (#200).
       - name: No Service selects a hostNetwork pod
         run: python3 hack/validate-hostnetwork-services.py .
+      # #316: image-scan.yaml scans the images hack/images.yaml lists, so an image a chart can run and the inventory
+      # omits would never be scanned. Offline: the registry half is re-measured by image-scan.yaml, not here.
+      - name: Every image a chart can run is in the generated inventory, with a named publisher
+        run: python3 hack/gen-image-inventory.py .
+      - name: The image scan judges CRITICAL findings and exceptions as specified
+        run: python3 hack/check-image-cves.py --self-test
 
   capability-roles:
     # Gating. A capability aggregates into a predefined role via a
@@ -394,6 +400,16 @@ jobs:
       # install hook is also an upgrade hook (#297).
       - name: Hooks can be re-run by a value
         run: python3 hack/validate-rerun-hooks.py .
+
+      # compute.virtType: qemu changes nothing; kvm sets nova and libvirt, and libvirt refuses a node without /dev/kvm,
+      # the refusal script run here (#303).
+      - name: KVM guests and the /dev/kvm refusal
+        run: python3 hack/validate-virt-type.py .
+
+      # KOG credentials from the generated admin root: the clouds file, the token Jobs (password only in the mint step,
+      # at most 4 tries), and no other reader (#303).
+      - name: KOG credentials from the admin root
+        run: python3 hack/validate-kog-credentials.py .
 
       # openstack-monitoring (#312): every alert has a runbook, a scrape-down companion and a metric name cited at its
       # image's tag; the exporter credentials reach only their readers; the umbrella's `monitoring` value is the one
@@ -745,6 +761,28 @@ jobs:
       # "upstream's default is fine" when there is no default.
       - name: Every service:<name> config section must set workers >= 1
         run: python3 hack/validate-service-workers.py .
+
+      # Gating. A container with no readinessProbe is Ready the moment it starts. On a 0.3.47
+      # cold install watcher-decision-engine exited 1 seven seconds after every start, had no
+      # probe, and counted as Ready in each window: its composition and the umbrella went
+      # Ready=True while the decision engine had never worked once. 32 of 76 long-running
+      # containers had no readiness probe (#231, #151). This renders every chart at its defaults
+      # and with every workload on, and fails a container of any long-running kind without one,
+      # unless hack/readiness-probe-exceptions.yaml gives the reason; an entry nothing needs
+      # fails too, as does a probe of `true` or one whose /tmp script is not mounted.
+      - name: Every long-running container has a readiness probe
+        run: python3 hack/validate-readiness-probes.py .
+
+      # The presence gate above cannot tell a probe that works from one that always fails (every
+      # worker it guards stays out of Ready) or always passes (#231 again). This runs the worker
+      # probe's rendered text against oslo.messaging's real RPC server and dispatcher and against
+      # real processes and sockets in /proc. Pinned to stable/2026.1's upper-constraints, the
+      # versions in the images. Fails when a test is skipped or none ran.
+      - name: Install the worker readiness probe's test dependencies
+        run: pip install "oslo.messaging==17.3.2" "oslo.config==10.3.0" "kombu==5.6.2"
+
+      - name: The worker readiness probe answers ready only for a serving RPC server
+        run: python3 hack/validate-health-probe.py .
 
   capabilities-first-release:
     # Gating. The per-cluster chart `openstack-capabilities` was written for 0.3.47, slipped to
