@@ -23,8 +23,8 @@ four things hold, and each is checked here:
      MariaDB root DB_CONNECTION Secret (templates/secret-db.yaml) and to mariadb itself;
      oslo-messaging-admin to exactly the charts rendering a RabbitMQ admin connection Secret
      (templates/secret-rabbitmq.yaml) and to rabbitmq itself, whose administrator it is (at
-     auth.user); oslo-messaging-guest and oslo-messaging-erlang-cookie to rabbitmq alone; oslo-db-sst,
-     oslo-db-audit and oslo-db-exporter to mariadb alone.
+     auth.user); oslo-messaging-guest and oslo-messaging-erlang-cookie to rabbitmq alone; oslo-db-sst and
+     oslo-db-audit to mariadb alone; oslo-db-exporter to mariadb and openstack-monitoring (#312).
   3. NO VALUE FROM VALUES. Each listed chart is rendered with its references AND with the admin
      password in values replaced by a unique sentinel. The sentinel must appear NOWHERE: not in any
      rendered text (configs, scripts) and not in any Secret's data once base64-decoded. A substring
@@ -308,13 +308,18 @@ RULES = {
         "password_path": lambda chart: "endpoints.oslo_db.auth.audit.password",
         "projections": lambda chart, cv: ["mariadb-dbaudit-generated"],
     },
+    # The mysqld-exporter user: MariaDB creates it (the sidecar's 'exporter'@'127.0.0.1', and with krateo.exporterUser
+    # the standalone exporter's 'exporter'@'%', #312), and openstack-monitoring's standalone exporter logs in as it.
     "oslo-db-exporter": {
-        "what": "is MariaDB itself (the mysqld-exporter user)",
-        "consumes": lambda d, has: d == "mariadb",
+        "what": "is MariaDB itself, or openstack-monitoring's standalone mysqld-exporter (the mysqld-exporter user)",
+        "consumes": lambda d, has: d in ("mariadb", "openstack-monitoring"),
         "password_path": lambda chart: "endpoints.oslo_db.auth.exporter.password",
-        "projections": lambda chart, cv: ["mysql-exporter-generated"],
-        # Created only with monitoring on: render it on, or the sentinel would pass vacuously.
-        "enable": lambda chart: {"monitoring": {"prometheus": {"enabled": True}}},
+        "projections": lambda chart, cv: (["mysql-exporter-generated", "mariadb-exporter-user"] if chart == "mariadb"
+                                          else [cv["secrets"]["mysqld_exporter_cnf"]]),
+        # Created only with monitoring on (and the standalone user with krateo.exporterUser): render both on, or the
+        # sentinel would pass vacuously.
+        "enable": lambda chart: ({"monitoring": {"prometheus": {"enabled": True}}, "krateo": {"exporterUser": True}}
+                                 if chart == "mariadb" else {}),
     },
 }
 
