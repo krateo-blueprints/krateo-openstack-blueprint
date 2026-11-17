@@ -21,6 +21,8 @@ kind: ConfigMap
 metadata:
   name: cinder-bin
 data:
+  worker-health-probe.py: |
+{{- include "helm-toolkit.scripts.health_probe" . | indent 4 }}
 {{- if .Values.conf.enable_iscsi }}
   iscsiadm: |
 {{ tuple "bin/_iscsiadm.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}

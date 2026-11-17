@@ -1,0 +1,19 @@
+# Gating. Three shipped crashes shared one shape: the chart told a process to read a file
+# and nothing in the chart ever put that file there. cyborg passed
+# `--log-config-append /tmp/logging-cyborg.conf` with no conf.logging, no key in its
+# secret and no mount, so all three of its services died at startup on every cluster --
+# 520 restarts in 38 hours where it was found. designate and magnum named a uwsgi
+# `wsgi-file` the 2026.1 images do not ship, so uwsgi answered "no python application
+# found" forever while the master held the socket open and the pod stayed Running.
+#
+# The gate resolves each mountPath back to its volume rather than trusting the path: an
+# emptyDir supplies a directory and no contents, and the first version of this check
+# called /tmp/logging-cyborg.conf delivered -- because /tmp IS mounted -- and printed OK
+# for the exact bug it was written for. A file under a runtime-populated directory counts
+# only when another script in the same pod writes it, which is what separates
+# openstack-helm's /tmp/pod-shared idiom from a file nobody creates.
+name: "Every config file a start script names must be delivered to the container"
+job: capability-roles
+order: 430
+run: |
+  python3 hack/validate-config-file-refs.py .

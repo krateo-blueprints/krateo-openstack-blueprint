@@ -1,0 +1,8 @@
+name: "State moved by the migration script must survive the upgrade"
+job: migrate-to-pvc
+order: 10
+# Set by this job's runner step in lint.yaml, from a GitHub expression the runner cannot evaluate.
+workflow-env:
+  - MATRIX_COMPONENT
+run: |
+  hack/smoke-migrate-to-pvc.sh $MATRIX_COMPONENT .

@@ -71,11 +71,16 @@ spec:
 {{ tuple $envAll "notification" $mounts_ceilometer_notification_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: ceilometer-notification
+{{ dict "envAll" $envAll "component" "notification" "container" "default" "args" (list "--process" "ceilometer-agent-notification" "--broker") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "ceilometer_notification" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.notification | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           command:
             - /tmp/ceilometer-notification.sh
           volumeMounts:
+            - name: ceilometer-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: pod-tmp
               mountPath: /tmp
             - name: oslo-lock-path

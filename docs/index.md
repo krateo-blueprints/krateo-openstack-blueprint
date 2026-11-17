@@ -65,3 +65,7 @@ ordered, readiness-gated rollout that avoids the all-at-once race.
   upstream audit that grounds the distribution-layer design.
 - [medium-openstack-as-a-service](./medium-openstack-as-a-service.md) — the narrative
   write-up, including the two determinism fixes required for the Krateo CDC path.
+- [images](./images.md) — every container image a chart can run, its publisher and whether it pulls
+  anonymously (generated).
+- [supply-chain](./supply-chain.md) — how images are inventoried and CVE-scanned, and the open
+  pinning decision.

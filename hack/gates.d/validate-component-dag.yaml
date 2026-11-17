@@ -1,0 +1,10 @@
+# A dep naming a component that does not exist is never Ready, so the dependent is never
+# emitted and nothing reports an error -- and an install stopped partway looks identical
+# to a healthy install in its first minutes. Same for a cycle, and for a kind that
+# core-provider does not serve. Also renders all 35 charts; 30 are compute-tier and have
+# never been installed anywhere, since libvirt needs /dev/kvm and ovs needs kernel modules.
+name: "Component DAG must be closed, acyclic and renderable"
+job: capability-roles
+order: 250
+run: |
+  python3 hack/validate-component-dag.py .

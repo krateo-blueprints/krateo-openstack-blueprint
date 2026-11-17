@@ -1,0 +1,9 @@
+# Also: the capability roles and guards come from the per-cluster chart and never from the
+# umbrella, which an Openstack instance installs, so they exist before the first instance;
+# the umbrella's handoff from a 0.3.47 install renders only what its own release owns; and
+# the per-cluster chart's inputs are the umbrella's, regenerated.
+name: "Every capability must aggregate to a predefined role, from the per-cluster chart"
+job: capability-roles
+order: 10
+run: |
+  python3 hack/validate-capability-roles.py .

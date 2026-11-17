@@ -1,0 +1,7 @@
+# The docs pointed OIDC users at keystone-oidc:2025.1 while every other keystone image is 2026.1,
+# so keystone-api ran two releases behind its own db-sync schema (#229).
+name: "Every keystone-oidc image named is the series of the chart's keystone images"
+job: job-hooks
+order: 110
+run: |
+  python3 hack/validate-keystone-oidc-image-series.py .

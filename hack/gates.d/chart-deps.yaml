@@ -1,0 +1,12 @@
+name: "Every chart's declared dependencies must resolve"
+job: chart-deps
+order: 10
+run: |
+  set -euo pipefail
+  # --skip-refresh: the only dependency is a local path, so no remote index is involved.
+  while IFS= read -r -d '' cf; do
+    dir=$(dirname "$cf")
+    echo "::group::${dir}"
+    helm dependency update "$dir" --skip-refresh
+    echo "::endgroup::"
+  done < <(find . -type f -name Chart.yaml -not -path '*/charts/*' -not -path './.git/*' -print0)

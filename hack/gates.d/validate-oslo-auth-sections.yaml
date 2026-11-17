@@ -1,0 +1,7 @@
+# watcher's [watcher_clients_auth] named no auth plugin and no keystone URL, so the decision
+# engine exited 1 at start-up; the section is judged merged as each pod mounts it (#203).
+name: "Every keystoneauth section a pod reads names its plugin and endpoint"
+job: job-hooks
+order: 30
+run: |
+  python3 hack/validate-oslo-auth-sections.py .
