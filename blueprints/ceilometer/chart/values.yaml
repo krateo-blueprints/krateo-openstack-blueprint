@@ -684,11 +684,14 @@ conf:
           fields: payload.observer.id
         observer_typeURI:
           fields: payload.observer.typeURI
+  # Krateo blueprint divergence (#294): publish only to gnocchi. Upstream also listed notifier://, which sends each event
+  # back onto ceilometer's own vhost as topic `event` (queue event.sample), and nothing in this blueprint consumes it
+  # (its consumers, the collector and panko, are retired): the queue grew without bound (GKE 2026-11-17, 954 -> 1062
+  # messages in 10 minutes). hack/validate-ceilometer-publishers.py requires every publisher to have a consumer.
   event_pipeline:
     sinks:
       - name: event_sink
         publishers:
-          - notifier://
           - gnocchi://
     sources:
       - events:
@@ -1233,11 +1236,12 @@ conf:
         interval: 600
         meters:
           - "*"
+  # Krateo blueprint divergence (#294): publish only to gnocchi, as event_pipeline above. notifier:// sent every sample
+  # to topic `metering` on ceilometer's vhost (queue metering.sample), which nothing consumes.
   pipeline:
     sinks:
       - name: meter_sink
         publishers:
-          - notifier://
           - gnocchi://
     sources:
       - meters:

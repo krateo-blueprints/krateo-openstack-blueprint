@@ -399,6 +399,11 @@ jobs:
       - name: glance's image store size
         run: python3 hack/validate-glance-store.py .
 
+      # ceilometer publishes only where something consumes (#294): its notifier:// publishers filled metering.sample and
+      # event.sample, which nothing reads. Every rendered publisher needs a consumer in ceilometer's deps closure.
+      - name: Every ceilometer publisher has a consumer
+        run: python3 hack/validate-ceilometer-publishers.py .
+
       # The umbrella is not Ready while a selected component does not exist yet (#257): the chart emits
       # ConfigMap openstack-install-pending exactly while it holds a selected component back, and the
       # CompositionDefinition's statusDataTemplate projects Ready=False/Creating from its presence --
