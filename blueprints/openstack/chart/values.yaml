@@ -663,10 +663,13 @@ credentials:
       path: endpoints.oslo_messaging.auth.watcher.passwordFrom
 # The component DAG. `deps` are component names whose Compositions must be Ready
 # before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
-# `rabbitmqVhost`: the RabbitMQ vhost this component's chart creates at its defaults (its rabbit-init Job declares
-# endpoints.oslo_messaging.path); absent when the chart renders no rabbit-init (glance and keystone:
-# manifests.job_rabbit_init false, so no vhost exists for them). Measured from the rendered charts, not declared by
-# hand: hack/validate-credentials.py check 26 fails on any disagreement. notificationVhosts below reads it (#285).
+# `rabbitmqVhost`: the RabbitMQ vhost this component's chart's rabbit-init Job declares (its endpoints.oslo_messaging.path
+# at the chart's defaults); `rabbitmqInit: false` when the chart ships that Job switched off (manifests.job_rabbit_init:
+# glance and keystone), so at defaults no vhost exists for it; `rabbitmqSecret: false` when it ships the Secret that Job
+# reads switched off (manifests.secret_rabbitmq: keystone), so the Job alone never starts. Absent for a chart with no
+# RabbitMQ user. Measured from the rendered charts, not declared by hand: hack/validate-credentials.py check 26 fails on
+# any disagreement.
+# notificationVhosts below reads both, overridden by the component's own componentValues (#285).
 components:
   - name: mariadb
     kind: Mariadb
@@ -683,6 +686,9 @@ components:
     tier: identity
   - name: keystone
     kind: Keystone
+    rabbitmqVhost: keystone
+    rabbitmqInit: false
+    rabbitmqSecret: false
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -696,6 +702,8 @@ components:
     tier: identity
   - name: glance
     kind: Glance
+    rabbitmqVhost: glance
+    rabbitmqInit: false
     credentials:
       - identity-admin
       - oslo-db-admin
@@ -1245,12 +1253,15 @@ components:
 
 # notificationVhosts (#285): the RabbitMQ vhosts `component`'s notification agent consumes, in the order of that chart's
 # conf.notification_vhosts default (upstream ceilometer's list; check 26 fails if the two differ). The umbrella passes the
-# component, as conf.notification_vhosts, only the vhosts some SELECTED component creates (components[].rabbitmqVhost):
-# oslo.messaging retries a missing vhost forever and never reaches the ones after it, so a fixed list consumed nothing
-# on a full-strict install (cinder is not selected, glance and keystone create no vhost; measured live on GKE,
-# 2026-11-16: 442 NOT_ALLOWED in 26 minutes, every one `vhost cinder not found`). Merged UNDER componentValues: an
-# explicit componentValues.<component>.conf.notification_vhosts wins, which an install that changes a chart's rabbit-init
-# or vhost through componentValues sets itself. Not part of the Openstack schema: a property of these charts.
+# component, as conf.notification_vhosts, only the vhosts a SELECTED component creates: each entry names a component's
+# default vhost (components[].rabbitmqVhost), kept when that component's rabbit-init runs (rabbitmqInit and
+# rabbitmqSecret, or its componentValues manifests.job_rabbit_init and manifests.secret_rabbitmq) and passed under the
+# name it creates (its componentValues
+# endpoints.oslo_messaging.path, when set). oslo.messaging retries a missing vhost forever and never reaches the ones
+# after it, so a fixed list consumed nothing on a full-strict install (cinder is not selected, glance and keystone create
+# no vhost; measured live on GKE, 2026-11-16: 442 NOT_ALLOWED in 26 minutes, every one `vhost cinder not found`). Merged
+# UNDER componentValues: an explicit componentValues.<component>.conf.notification_vhosts wins. Not part of the
+# Openstack schema: a property of these charts.
 notificationVhosts:
   component: ceilometer
   vhosts:

@@ -1156,19 +1156,36 @@ krateo-openstack-node-reader
 {{- toYaml $out -}}
 {{- end -}}
 
-{{- /* osh.notificationVhosts (list $ $sel): .Values.notificationVhosts.vhosts, in order, keeping only the vhosts a
-       component in $sel (the selected closure) creates -- its components[].rabbitmqVhost, the vhost its chart's
-       rabbit-init declares (measured from the rendered charts by hack/validate-credentials.py check 26). As a JSON list.
-       A consumer given a vhost nothing created retries it forever and never reaches the others (#285). */ -}}
+{{- /* osh.notificationVhosts (list $ $sel): .Values.notificationVhosts.vhosts, in order, mapped to what the selected
+       closure $sel actually creates. Each entry names a component's default vhost (components[].rabbitmqVhost). It is kept
+       when that component is selected and its rabbit-init runs: the Job is on (its componentValues
+       manifests.job_rabbit_init when set, else its chart default, rabbitmqInit, true unless false) and so is the Secret
+       the Job reads (manifests.secret_rabbitmq, else rabbitmqSecret: keystone ships it off, and its Job then never
+       starts). It is passed under the vhost that rabbit-init declares:
+       its componentValues endpoints.oslo_messaging.path without the leading slash when set, else the default. As a JSON
+       list. A consumer given a vhost nothing created retries it forever and never reaches the others (#285); measured by
+       hack/validate-credentials.py check 26, overrides included. */ -}}
 {{- define "osh.notificationVhosts" -}}
 {{- $top := index . 0 -}}{{- $sel := index . 1 -}}
+{{- $cvs := $top.Values.componentValues | default dict -}}
 {{- $created := dict -}}
 {{- range $c := $top.Values.components -}}
-{{- if and $c.rabbitmqVhost (has $c.name $sel) -}}{{- $_ := set $created $c.rabbitmqVhost true -}}{{- end -}}
+{{- if and $c.rabbitmqVhost (has $c.name $sel) -}}
+{{- $cv := index $cvs $c.name | default dict -}}
+{{- $man := $cv.manifests | default dict -}}
+{{- $init := ne (toString $c.rabbitmqInit) "false" -}}
+{{- if hasKey $man "job_rabbit_init" -}}{{- $init = eq (toString (index $man "job_rabbit_init")) "true" -}}{{- end -}}
+{{- $secret := ne (toString $c.rabbitmqSecret) "false" -}}
+{{- if hasKey $man "secret_rabbitmq" -}}{{- $secret = eq (toString (index $man "secret_rabbitmq")) "true" -}}{{- end -}}
+{{- $vhost := $c.rabbitmqVhost -}}
+{{- $path := ((($cv.endpoints | default dict).oslo_messaging | default dict).path) | default "" | toString -}}
+{{- if $path -}}{{- $vhost = trimPrefix "/" $path | default "/" -}}{{- end -}}
+{{- if and $init $secret -}}{{- $_ := set $created $c.rabbitmqVhost $vhost -}}{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- $out := list -}}
 {{- range $v := (($top.Values.notificationVhosts | default dict).vhosts | default list) -}}
-{{- if hasKey $created $v -}}{{- $out = append $out $v -}}{{- end -}}
+{{- if hasKey $created $v -}}{{- $out = append $out (index $created $v) -}}{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
 {{- end -}}

@@ -993,9 +993,11 @@ ceilometer's notification agent now consumes only the vhosts that exist (#285). 
 (ceilometer, cinder, glance, nova, keystone, neutron, heat), and oslo.messaging retries a missing vhost forever: on a
 full-strict install, where cinder is not selected and glance and keystone create no vhost, it consumed no
 notifications at all. The umbrella now passes ceilometer `conf.notification_vhosts`: the vhosts of that list that a
-selected component's rabbit-init creates (full-strict: ceilometer, nova, neutron, heat; full: cinder too). An explicit
-`componentValues.ceilometer.conf.notification_vhosts` still wins; set it yourself if you change a chart's rabbit-init
-or vhost through componentValues.
+selected component's rabbit-init creates (full-strict: ceilometer, nova, neutron, heat; full: cinder too). It follows
+each component's own `componentValues`: `manifests.job_rabbit_init: false` drops that component's vhost, `true` adds
+glance's (keystone's needs `manifests.secret_rabbitmq: true` as well: its chart ships the Secret its rabbit-init
+reads switched off), and an `endpoints.oslo_messaging.path` override is consumed under its new name. An explicit
+`componentValues.ceilometer.conf.notification_vhosts` still wins.
 
 ### Components follow the umbrella's version
 

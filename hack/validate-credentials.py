@@ -160,10 +160,12 @@ four things hold, and each is checked here:
      the root's password (an HTTP PUT, create or replace: measured on the chart's rabbitmq:3.13-management image to set a
      new password on an existing user), then declare the vhost and the user's permissions.
   26. NOTIFICATION VHOSTS THAT EXIST (#285). components[].rabbitmqVhost is exactly the vhost each chart's rabbit-init
-     declares (measured from renders); notificationVhosts.vhosts is ceilometer's own conf.notification_vhosts default; and
-     for the identity, full and full-strict profiles and sample explicit selections, the vhosts ceilometer renders in
-     [notification] messaging_urls, given the spec compositions.yaml builds, are exactly those of that list a selected
-     component creates.
+     declares, and rabbitmqInit: false exactly where the chart ships that Job off (measured from renders);
+     notificationVhosts.vhosts is ceilometer's own conf.notification_vhosts default; and for the identity, full and
+     full-strict profiles, sample explicit selections, and componentValues that switch a component's rabbit-init off or on
+     or rename its vhost, the vhosts ceilometer renders in [notification] messaging_urls, given the spec compositions.yaml
+     builds, are exactly those of that list the selected closure creates, under the names it creates them (each chart
+     rendered with its componentValues).
   18. READERS RESTART. Every Deployment, StatefulSet and DaemonSet that reads an ExternalSecret projecting an
      item's root has a pod template that differs between the render without that one item's reference and the
      render with it, every other reference set in both (0.3.63: ks-etc kept its name, nothing hashed it, and
@@ -1792,65 +1794,88 @@ def rabbit_init_check(chart, cid, docs, tmp, label=""):
 VHOST_CASES_CHECKED = []
 
 
-def rabbit_init_vhosts(tmp):
-    """{chart: the vhost its rabbit-init Job declares at defaults}: the path of the RABBITMQ_CONNECTION its Job reads."""
-    out = {}
-    for d in sorted(os.listdir(BP)):
-        if d == "openstack" or not os.path.isfile(os.path.join(BP, d, "chart", "values.yaml")):
-            continue
-        w = stage(os.path.join(BP, d, "chart"), tmp, "vhost-" + d)
-        rc, o, e = helm_template(w, d + "-gate1234")
-        if rc != 0:
-            fail("26: %s: does not render at defaults: %s" % (d, e.strip()[:200]))
-            continue
+_VHOST_CACHE = {}
+
+
+def rabbit_init_vhost(tmp, chart, values=None):
+    """What chart's rabbit-init renders with `values`: {"job": a rabbit-init Job renders, "secret": the Secret its
+    RABBITMQ_USER_CONNECTION reads renders too, "vhost": that connection's path, the vhost it declares, or None}. A Job
+    whose Secret is not rendered never starts (keystone ships secret_rabbitmq off), so it creates no vhost."""
+    key = (chart, json.dumps(values or {}, sort_keys=True))
+    if key in _VHOST_CACHE:
+        return _VHOST_CACHE[key]
+    w = stage(os.path.join(BP, chart, "chart"), tmp, "vhost-%s-%d" % (chart, len(_VHOST_CACHE)))
+    rc, o, e = helm_template(w, chart + "-gate1234", values or {})
+    out = {"job": False, "secret": False, "vhost": None}
+    if rc != 0:
+        fail("26: %s: does not render with %s: %s" % (chart, values or "its defaults", e.strip()[:200]))
+    else:
         docs = [x for x in yaml.safe_load_all(o) if x]
         secrets = {x["metadata"]["name"]: x for x in docs if x.get("kind") == "Secret"}
         for j in docs:
             if j.get("kind") != "Job" or not j["metadata"]["name"].endswith("rabbit-init"):
                 continue
+            out["job"] = True
             for c in j["spec"]["template"]["spec"].get("containers") or []:
-                for e in c.get("env") or []:
-                    if e["name"] != "RABBITMQ_USER_CONNECTION":
+                for ev in c.get("env") or []:
+                    if ev["name"] != "RABBITMQ_USER_CONNECTION":
                         continue
-                    n = ((e.get("valueFrom") or {}).get("secretKeyRef") or {}).get("name")
+                    n = ((ev.get("valueFrom") or {}).get("secretKeyRef") or {}).get("name")
                     url = object_text(secrets[n], "RABBITMQ_CONNECTION") if n in secrets else None
                     if not url:
-                        fail("26: %s: rabbit-init reads %s, which the chart does not render" % (d, n))
-                        continue
+                        continue  # the Job's Secret is not rendered: it never starts
+                    out["secret"] = True
                     vh = urllib.parse.unquote(urllib.parse.urlsplit(url).path.lstrip("/")) or "/"
-                    if d in out and out[d] != vh:
-                        fail("26: %s: two rabbit-init Jobs declare vhosts %s and %s" % (d, out[d], vh))
-                    out[d] = vh
+                    if out["vhost"] is not None and out["vhost"] != vh:
+                        fail("26: %s: two rabbit-init Jobs declare vhosts %s and %s" % (chart, out["vhost"], vh))
+                    out["vhost"] = vh
+    _VHOST_CACHE[key] = out
     return out
 
 
 def notification_vhosts_check(tmp, components):
-    """26. The umbrella's components[].rabbitmqVhost is exactly the vhost each chart's rabbit-init declares at defaults
-    (measured from the renders, both ways); notificationVhosts.vhosts is the consumer chart's own conf.notification_vhosts
-    default, in order; and for each profile and a sample of explicit selections, the list the consumer RENDERS (its
-    [notification] messaging_urls, in its config or its drop-in, given the spec compositions.yaml builds) holds exactly
-    the vhosts of notificationVhosts.vhosts that a component of the selected closure creates: none that nothing created
-    (oslo.messaging would retry it forever and never reach the others), and none left out."""
+    """26. The umbrella's components[].rabbitmqVhost is exactly the vhost each chart's rabbit-init declares (rendered with
+    the Job and its Secret on), rabbitmqInit: false exactly when the chart ships that Job off and rabbitmqSecret: false
+    exactly when it ships the Job's Secret off (keystone), all measured, both ways; notificationVhosts.vhosts is the consumer chart's own conf.notification_vhosts default, in order; and for
+    each profile, a sample of explicit selections, and componentValues that switch a component's rabbit-init or its
+    Secret off or on or rename its vhost (endpoints.oslo_messaging.path), the list the consumer RENDERS (its [notification]
+    messaging_urls, in its config or its drop-in, given the spec compositions.yaml builds) holds exactly what the
+    selected closure creates, each component's chart rendered with that component's componentValues: for every entry of
+    notificationVhosts.vhosts whose component is selected and creates a vhost, the vhost it creates, under the name it
+    creates it; none that nothing created (oslo.messaging would retry it forever and never reach the others), and none
+    left out."""
     uv = yaml.safe_load(open(os.path.join(UMBRELLA, "values.yaml")))
     nv = uv.get("notificationVhosts") or {}
     consumer = nv.get("component") or "ceilometer"
-    measured = rabbit_init_vhosts(tmp)
-    names = {c["name"] for c in components}
-    declared = {c["name"]: c.get("rabbitmqVhost") for c in components if c.get("rabbitmqVhost")}
-    for n in sorted(names):
-        if measured.get(n) != declared.get(n):
+    on, dflt = {}, {}
+    for c in components:
+        n = c["name"]
+        full = rabbit_init_vhost(tmp, n, {"manifests": {"job_rabbit_init": True, "secret_rabbitmq": True}})
+        job_on = rabbit_init_vhost(tmp, n, {"manifests": {"job_rabbit_init": True}})
+        at_defaults = rabbit_init_vhost(tmp, n)
+        on[n] = full["vhost"]
+        dflt[n] = at_defaults["vhost"]
+        if c.get("rabbitmqVhost") != on[n]:
             fail("26: umbrella: component %s declares rabbitmqVhost %s, its chart's rabbit-init declares %s" % (
-                n, declared.get(n), measured.get(n)))
-    if not measured:
+                n, c.get("rabbitmqVhost"), on[n]))
+        if on[n] is None:
+            for k in ("rabbitmqInit", "rabbitmqSecret"):
+                if k in c:
+                    fail("26: umbrella: component %s declares %s, but its chart has no rabbit-init" % (n, k))
+            continue
+        for k, got, what in (("rabbitmqInit", at_defaults["job"], "a rabbit-init Job"),
+                             ("rabbitmqSecret", job_on["secret"], "the rabbit-init Job's Secret")):
+            declared = str(c.get(k, True)).lower() == "true"
+            if declared != got:
+                fail("26: umbrella: component %s declares %s %s, its chart renders %s %s at its defaults" % (
+                    n, k, str(declared).lower(), what, "" if got else "off"))
+    if not any(on.values()):
         fail("26: no chart renders a rabbit-init Job; the vhost map had no input")
     cdef = ((yaml.safe_load(open(os.path.join(BP, consumer, "chart", "values.yaml"))) or {}).get("conf") or {}).get(
         "notification_vhosts")
     if nv.get("vhosts") != cdef:
         fail("26: umbrella: notificationVhosts.vhosts is %s, %s's conf.notification_vhosts default is %s: the two must be "
              "the same list" % (nv.get("vhosts"), consumer, cdef))
-    creator = {}
-    for n, vh in measured.items():
-        creator.setdefault(vh, set()).add(n)
     comp = open(os.path.join(UMBRELLA, "templates", "compositions.yaml")).read()
     start = comp.find("{{- $ov := ")
     mark = comp.find("include \"osh.notificationVhosts\"", start)
@@ -1863,11 +1888,22 @@ def notification_vhosts_check(tmp, components):
              "notification vhosts merge)")
         return
     span = comp[start:end + len("{{- end }}")]
+    fs = "full-strict"
     cases = [("profile identity", {"profile": "identity"}), ("profile full", {"profile": "full"}),
-             ("profile full-strict", {"profile": "full-strict"}),
+             ("profile full-strict", {"profile": fs}),
              ("enabled [ceilometer]", {"enabled": ["ceilometer"]}),
              ("enabled [ceilometer, cinder, glance]", {"enabled": ["ceilometer", "cinder", "glance"]}),
-             ("enabled [ceilometer, nova]", {"enabled": ["ceilometer", "nova"]})]
+             ("enabled [ceilometer, nova]", {"enabled": ["ceilometer", "nova"]}),
+             ("full-strict, nova's rabbit-init off", {"profile": fs, "componentValues": {
+                 "nova": {"manifests": {"job_rabbit_init": False}}}}),
+             ("full-strict, glance's rabbit-init on", {"profile": fs, "componentValues": {
+                 "glance": {"manifests": {"job_rabbit_init": True}}}}),
+             ("full-strict, heat's vhost renamed /orchestration", {"profile": fs, "componentValues": {
+                 "heat": {"endpoints": {"oslo_messaging": {"path": "/orchestration"}}}}}),
+             ("full-strict, keystone's rabbit-init on, its Secret off", {"profile": fs, "componentValues": {
+                 "keystone": {"manifests": {"job_rabbit_init": True}}}}),
+             ("full-strict, keystone's rabbit-init and Secret on", {"profile": fs, "componentValues": {
+                 "keystone": {"manifests": {"job_rabbit_init": True, "secret_rabbitmq": True}}}})]
     for n, (label, vals) in enumerate(cases):
         u = stage(UMBRELLA, tmp, "umbrella-vh-%d" % n)
         with open(os.path.join(u, "templates", "zz-gate-vhosts-probe.yaml"), "w") as f:
@@ -1891,6 +1927,16 @@ def notification_vhosts_check(tmp, components):
         if consumer not in sel:
             VHOST_CASES_CHECKED.append((label, None))
             continue
+        # what the selected closure creates, each chart rendered with its own componentValues: default vhost -> created
+        cvs = vals.get("componentValues") or {}
+        created = {}
+        for c in components:
+            if c["name"] not in sel or on.get(c["name"]) is None:
+                continue
+            eff = rabbit_init_vhost(tmp, c["name"], cvs[c["name"]])["vhost"] if c["name"] in cvs else dflt[c["name"]]
+            if eff is not None:
+                created[on[c["name"]]] = eff
+        made = set(created.values())
         w = stage(os.path.join(BP, consumer, "chart"), tmp, "vh-%s-%d" % (consumer, n))
         rcc, oc, ec = helm_template(w, consumer + "-gate1234", spec or {})
         if rcc != 0:
@@ -1914,20 +1960,18 @@ def notification_vhosts_check(tmp, components):
                     elif section == "notification" and re.match(r"messaging_urls\s*=", s):
                         url = s.split("=", 1)[1].strip()
                         listed.append(urllib.parse.unquote(url.rsplit("/", 1)[-1]))
-        want = [v for v in (nv.get("vhosts") or []) if creator.get(v, set()) & sel]
+        want = [created[v] for v in (nv.get("vhosts") or []) if v in created]
         if not listed:
             fail("26: %s: %s renders no [notification] messaging_urls" % (label, consumer))
             continue
         for v in listed:
-            if not (creator.get(v, set()) & sel):
-                fail("26: %s: %s consumes vhost %s, which no selected component creates (%s); oslo.messaging retries it "
-                     "forever and never reaches the others" % (label, consumer, v,
-                                                              "created by %s" % sorted(creator[v]) if v in creator
-                                                              else "no chart creates it"))
-        if sorted(set(listed)) != sorted(set(want)):
-            missing = sorted(set(want) - set(listed))
-            if missing:
-                fail("26: %s: %s does not consume %s, which selected components create" % (label, consumer, missing))
+            if v not in made:
+                fail("26: %s: %s consumes vhost %s, which no selected component creates (the selected closure creates "
+                     "%s); oslo.messaging retries it forever and never reaches the others" % (label, consumer, v,
+                                                                                               sorted(made)))
+        missing = sorted(set(want) - set(listed))
+        if missing:
+            fail("26: %s: %s does not consume %s, which selected components create" % (label, consumer, missing))
         VHOST_CASES_CHECKED.append((label, tuple(listed)))
 
 
@@ -3053,6 +3097,8 @@ def main():
         fail("23m: no chart's rabbit-init.sh was run; the check had no input")
     if not [x for x in VHOST_CASES_CHECKED if x[1]]:
         fail("26: no case rendered the notification consumer's vhost list; the check had no input")
+    if len([x for x in VHOST_CASES_CHECKED if x[1] and x[0].startswith("full-strict, ")]) != 5:
+        fail("26: the componentValues override cases did not all render the consumer's vhost list; the check had no input")
     if "oslo-db-nova" in items and checked and not CELLMAP_CHECKED:
         fail("24: no render checked nova's cell mapping templates; the check had no input")
     if checked and not DBINIT_CHECKED:

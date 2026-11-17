@@ -23,8 +23,9 @@ Curated history; release notes live in GitHub Releases.
   config without a project and, with no transport URL, report healthy unchecked. `<svc>-rabbitmq-user` becomes an
   ExternalSecret. rabbit-init needed no change: `rabbitmqadmin declare user` is an HTTP PUT that replaces an existing
   user's password (measured on `rabbitmq:3.13-management`). #285: the umbrella passes ceilometer only the notification
-  vhosts a selected component creates (`components[].rabbitmqVhost`, measured from the renders), instead of upstream's
-  fixed seven. Gates: 20 no longer exempts the messaging sections, 20b covers per-service RabbitMQ URLs at every host,
+  vhosts a selected component creates (`components[].rabbitmqVhost` and `rabbitmqInit`, measured from the renders),
+  under the names it creates them, following each component's componentValues (`manifests.job_rabbit_init`,
+  `endpoints.oslo_messaging.path`; Diego, 2026-11-17), instead of upstream's fixed seven. Gates: 20 no longer exempts the messaging sections, 20b covers per-service RabbitMQ URLs at every host,
   and new checks 15c (map and one root per username), 22m (drop-in fidelity, delivery to exactly the readers, probes),
   23m (rabbit-init run against a stand-in rabbitmqadmin) and 26 (ceilometer's vhosts per profile). Check 24b no longer
   counts db-init, db-drop and the bootstrap Job as cell-mapping loaders: they run no nova code.
