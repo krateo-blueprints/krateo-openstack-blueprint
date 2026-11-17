@@ -666,6 +666,13 @@ jobs:
       - name: cinder renders only with the backend storage.backend names
         run: python3 hack/validate-storage-backend.py .
 
+      # #308: with a ceph storage.backend the install consumes Ceph through COPIES of the keys Ceph mints (a Rook
+      # CephClient, or the Ceph admin), never through client.admin. Check 27: the provided roots -- copied, refreshed,
+      # torn down with the release, read through a store limited to exactly the source Secrets -- and nothing at all
+      # for an install without Ceph.
+      - name: Ceph is consumed through copies of the keys it mints, never client.admin
+        run: python3 hack/validate-ceph-consumer.py .
+
       # A hostPath is state that stays on one node. mariadb defaulted to /tmp/mysql-data, so a
       # node restart on kind, where /tmp is tmpfs, emptied every OpenStack database, and the pod
       # crash-looped on a missing grastate.dat. Nothing was misconfigured: the chart defaults

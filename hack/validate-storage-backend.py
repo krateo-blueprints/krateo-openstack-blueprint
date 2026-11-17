@@ -108,6 +108,14 @@ def env_values(docs, name):
     return out
 
 
+def storage_values(backend):
+    """storage values that render with `backend`: ceph-external names its source Secrets or is refused (#308)."""
+    v = {"backend": backend}
+    if backend == "ceph-external":
+        v["ceph"] = {"keys": {k: {"secret": "gate-" + k, "key": "key"} for k in ("cinder", "glance", "monHost")}}
+    return v
+
+
 def dig(d, path):
     for k in path.split("."):
         if not isinstance(d, dict) or k not in d:
@@ -146,7 +154,7 @@ def main():
                 '# SBSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n')
             specs = {}
             for b in backends:
-                rc, out, err = helm_template(u, "openstack-gate", {"profile": "full", "storage": {"backend": b}})
+                rc, out, err = helm_template(u, "openstack-gate", {"profile": "full", "storage": storage_values(b)})
                 if rc != 0:
                     fail("1: the umbrella probe does not render with storage.backend %s: %s" % (b, err.strip()[:300]))
                     continue

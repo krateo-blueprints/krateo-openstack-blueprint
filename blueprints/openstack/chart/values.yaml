@@ -30,6 +30,49 @@ enabled:
 # Typed by values.schema.json, which hack/gen-componentvalues-schema.py generates.
 storage:
   backend: none
+  # ceph (#308): how the install consumes a Ceph cluster when storage.backend is ceph-rook or ceph-external. One consumer
+  # path for both: each client key and the monitor addresses are COPIED by External Secrets Operator from where Ceph
+  # keeps them into this namespace's roots (credentials.items with `source: provided`), and the charts project the roots.
+  # No client.admin key is read or rendered anywhere. Nothing here names a cloud provider.
+  ceph:
+    # sourceNamespace: where the Secrets holding the client keys and mon_host live. Empty: this release's namespace.
+    # For ceph-rook, the namespace of Rook's CephCluster. Read through the SecretStore <credentials.store>-ceph, whose
+    # Role is rendered here only when that is this namespace; another namespace's owner grants it.
+    sourceNamespace: ""
+    # clients: the Ceph user each consumer authenticates as (client.<name>). For ceph-rook, the CephClient name. The
+    # caps are set where the user is created (a Rook CephClient, or the Ceph admin), never here.
+    clients:
+      cinder: cinder
+      glance: glance
+    # rook: where Rook keeps them (ceph-rook). A CephClient's key is in Secret rook-ceph-client-<name>, under userKey,
+    # and the monitors in Secret rook-ceph-config, under mon_host (Rook's pkg/operator/ceph/client/controller.go and
+    # config/store.go, read 2026-11-17).
+    rook:
+      clientSecretPrefix: rook-ceph-client-
+      clientKey: userKey
+      monHostSecret: rook-ceph-config
+      monHostKey: mon_host
+    # keys: the operator-named Secrets (ceph-external). Every secret must be set with ceph-external, or the umbrella
+    # refuses, naming the empty one.
+    keys:
+      cinder:
+        secret: ""
+        key: key
+      glance:
+        secret: ""
+        key: key
+      monHost:
+        secret: ""
+        key: mon_host
+    # pools: the RBD pools, created where the users are (a Rook CephBlockPool, or the Ceph admin).
+    pools:
+      volumes: cinder.volumes
+      images: glance.images
+    # libvirtSecretUUID: the libvirt secret every hypervisor defines for client.<clients.cinder>, named by cinder's
+    # connection info for each attached volume. One value, passed to cinder, libvirt and nova.
+    libvirtSecretUUID: 457eb676-33da-42ec-9a8c-9293d545c337
+    # glanceStore: pvc keeps images on glance's volume; rbd stores them in the images pool (#308 P1: opt-in).
+    glanceStore: pvc
 
 # tolerations: one list of Kubernetes tolerations applied to EVERY pod the blueprint renders, in every component
 # (Deployments, StatefulSets, DaemonSets, Jobs and CronJobs, helm-toolkit's Jobs included). Passed to each component
@@ -468,6 +511,27 @@ credentials:
       key: privateKey
       publicKey: publicKey
       path: endpoints.sharev2.auth.service_instance_ssh_keyFrom
+    # Ceph client keys and monitor addresses (#308): `source: provided` items. Ceph mints the keys (a Rook CephClient,
+    # or the Ceph admin), so the root is a COPY of the Secret Ceph's side keeps (storage.ceph), refreshed, not a value
+    # generated here, and it exists only while storage.backend is a ceph backend. `ceph` names which source.
+    - id: ceph-client-cinder
+      source: provided
+      ceph: cinder
+      secret: openstack-credential-ceph-client-cinder
+      key: key
+      path: krateo.ceph.keyringFrom
+    - id: ceph-client-glance
+      source: provided
+      ceph: glance
+      secret: openstack-credential-ceph-client-glance
+      key: key
+      path: krateo.ceph.keyringFrom
+    - id: ceph-mon-host
+      source: provided
+      ceph: monHost
+      secret: openstack-credential-ceph-mon-host
+      key: mon_host
+      path: krateo.ceph.monHostFrom
     # Per-service MariaDB users (0.3.68, #228): one item per MariaDB USERNAME, reaching only the chart that owns it.
     # The chart builds every URL that logs in as that user from the root: its main config's connection URLs
     # through the drop-in <chart>-db-connection, <chart>-db-user (DB_CONNECTION) and its siblings as ExternalSecrets,

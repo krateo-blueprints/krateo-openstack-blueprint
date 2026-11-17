@@ -807,6 +807,46 @@ true
 {{- $out | join " " -}}
 {{- end -}}
 
+{{/* "true" when storage.backend is a Ceph backend (ceph-rook, ceph-external): the `source: provided` credential items
+     are copied and passed, and the charts consume Ceph through them (#308). */}}
+{{- define "osh.cephActive" -}}
+{{- $top := index . 0 -}}
+{{- if hasPrefix "ceph-" (include "osh.storageBackend" (list $top)) -}}true{{- end -}}
+{{- end -}}
+
+{{/* The namespace the provided items are copied from: storage.ceph.sourceNamespace, or this release's. */}}
+{{- define "osh.cephSourceNamespace" -}}
+{{- $top := index . 0 -}}
+{{- ((($top.Values.storage | default dict).ceph | default dict).sourceNamespace | default $top.Release.Namespace) -}}
+{{- end -}}
+
+{{/* (list $ $item): where a `source: provided` item is copied from, as JSON {"secret", "key"}. ceph-rook follows Rook's
+     conventions (storage.ceph.rook: a CephClient's Secret and key, the monitors' Secret and key); ceph-external reads the
+     operator-named storage.ceph.keys.<ceph>, and refuses an empty secret rather than copy from nothing. */}}
+{{- define "osh.cephSource" -}}
+{{- $top := index . 0 -}}{{- $i := index . 1 -}}
+{{- $ceph := (($top.Values.storage | default dict).ceph | default dict) -}}
+{{- $backend := include "osh.storageBackend" (list $top) -}}
+{{- if eq $backend "ceph-rook" -}}
+  {{- $rook := $ceph.rook | default dict -}}
+  {{- if eq $i.ceph "monHost" -}}
+    {{- dict "secret" $rook.monHostSecret "key" $rook.monHostKey | toJson -}}
+  {{- else -}}
+    {{- $client := index ($ceph.clients | default dict) $i.ceph -}}
+    {{- if not $client -}}{{- fail (printf "\n\nstorage.ceph.clients.%s is empty: credential %s copies that Ceph user's key.\n" $i.ceph $i.id) -}}{{- end -}}
+    {{- dict "secret" (printf "%s%s" $rook.clientSecretPrefix $client) "key" $rook.clientKey | toJson -}}
+  {{- end -}}
+{{- else if eq $backend "ceph-external" -}}
+  {{- $k := index ($ceph.keys | default dict) $i.ceph | default dict -}}
+  {{- if or (not $k.secret) (not $k.key) -}}
+    {{- fail (printf "\n\nstorage.backend is ceph-external and storage.ceph.keys.%s.secret (or .key) is empty.\n\nWith ceph-external the Ceph admin creates the users and places their keys and the monitor addresses in Secrets; name each one under storage.ceph.keys (in storage.ceph.sourceNamespace) so credential %s can be copied from it (#308).\n" $i.ceph $i.id) -}}
+  {{- end -}}
+  {{- dict "secret" $k.secret "key" $k.key | toJson -}}
+{{- else -}}
+  {{- fail (printf "osh.cephSource called with storage.backend %s, which is not a ceph backend" $backend) -}}
+{{- end -}}
+{{- end -}}
+
 {{/* storage.backend, `none` when unset. */}}
 {{- define "osh.storageBackend" -}}
 {{- $top := index . 0 -}}
@@ -1180,6 +1220,9 @@ krateo-openstack-node-reader
 {{- if $item.retired -}}
 {{- fail (printf "component %s lists credential %q, which is retired: no chart reads it any more" $c.name $id) -}}
 {{- end -}}
+{{- /* A `source: provided` item (#308) has a root only while storage.backend is a ceph backend: otherwise there is
+       nothing to copy, and the component gets no reference, exactly as before the item existed. */ -}}
+{{- if or (ne ($item.source | default "") "provided") (eq (include "osh.cephActive" (list $top)) "true") -}}
 {{- $ref := dict "store" $creds.store "secret" $item.secret "key" $item.key -}}
 {{- if $item.publicKey -}}{{- $_ := set $ref "publicKey" $item.publicKey -}}{{- end -}}
 {{- $path := $item.path -}}
@@ -1195,6 +1238,7 @@ krateo-openstack-node-reader
 {{- else -}}
 {{- if not (hasKey $node $p) -}}{{- $_ := set $node $p (dict) -}}{{- end -}}
 {{- $node = index $node $p -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
