@@ -1004,7 +1004,7 @@ glance's (keystone's needs `manifests.secret_rabbitmq: true` as well: its chart 
 reads switched off), and an `endpoints.oslo_messaging.path` override is consumed under its new name. An explicit
 `componentValues.ceilometer.conf.notification_vhosts` still wins.
 
-### Upgrading to 0.3.71 or later: glance's image store grows to 10 GiB, and bootstrap uploads each image once
+### Upgrading to 0.3.71 or later: bootstrap uploads each image once, and new image stores get 10 GiB
 
 Measured on GKE (0.3.68 → 0.3.70, #295): manila's bootstrap ran while glance-api was rolling. Its `image show || create`
 read "glance unreachable" as "image missing" and uploaded a second 952 MB `manila-service-image`. glance accepts two
@@ -1022,31 +1022,39 @@ glance, manila and nova never became Ready.
   unreachable, no image, one image, two images.
 
 **The store.**
-- `glance-images` now requests 10Gi by default (`componentValues.glance.volume.size`, still overridable).
-- The chart owns the claim (helm renders it, and `keep_pvc` keeps it on uninstall). On upgrade it reads the live claim
-  and asks for `volume.size`, except that it never asks for less than the claim already has, because a claim cannot
-  shrink.
-- So an install created at 2Gi has its claim raised to 10Gi. The API server allows that only when the claim's
-  StorageClass sets `allowVolumeExpansion: true`.
-- The chart cannot check this itself: StorageClasses are cluster-scoped, and a lookup the render identity is refused
-  would fail every render.
+- A new install's `glance-images` claim requests 10Gi (`volume.defaultSize`); it was 2Gi.
+- An existing claim keeps its size on every upgrade. The chart owns the claim (helm renders it, and `keep_pvc` keeps it
+  on uninstall). It reads the live claim and renders that claim's own request, so no upgrade patches a claim you didn't
+  ask to change. A StorageClass that can't expand, such as kind's local-path, therefore can't make an upgrade fail.
+  An install created at 2Gi stays at 2Gi until you grow it.
 
-**Before upgrading, check your class:**
+**To grow an existing store**, first check that its StorageClass allows expansion:
 
 ```sh
 kubectl -n openstack get pvc glance-images -o jsonpath='{.spec.storageClassName}{"\n"}'
 kubectl get storageclass <that class> -o jsonpath='{.allowVolumeExpansion}{"\n"}'   # must print true
 ```
 
-- If it prints `true`, the claim is expanded in place.
-- If it doesn't, the API server refuses the change ("only dynamically provisioned pvc can be resized and the
-  storageclass that provisions the pvc must support resize") and glance's upgrade fails. To keep the claim's current
-  size, set `componentValues.glance.volume.size: 2Gi` before upgrading.
+Then set `componentValues.glance.volume.size`, for example `10Gi`.
+- The claim is raised to that size, never below its current request, because a claim cannot shrink.
+- The value is the user's alone (empty by default), so the chart can tell a request from a default.
+- If the class doesn't allow expansion, the API server refuses the patch ("only dynamically provisioned pvc can be
+  resized and the storageclass that provisions the pvc must support resize") and glance's upgrade fails. Unset the value
+  to recover.
 - kind's default class, `standard` (`rancher.io/local-path`), sets no `allowVolumeExpansion`. That was read from its
-  manifest in `kindest/node:v1.36.4`, so a kind install upgrading from an earlier release needs that override. local-path
-  doesn't enforce the size anyway.
-- On GKE the class must allow expansion. This README hasn't verified it on a live cluster; the 0.3.71 GKE upgrade
-  measures it.
+  manifest in `kindest/node:v1.36.4`. local-path doesn't enforce the size anyway.
+- The chart can't read the StorageClass itself: StorageClasses are cluster-scoped, and a lookup the render identity is
+  refused would fail every render.
+
+`hack/validate-glance-store.py` renders each case against a stand-in live claim:
+
+| Case | Claim requests |
+|---|---|
+| new | 10Gi |
+| live 2Gi | 2Gi |
+| live 2Gi, `size: 10Gi` | 10Gi |
+| live 20Gi, `size: 10Gi` | 20Gi |
+| a size that isn't a quantity | refused |
 
 ### Components follow the umbrella's version
 

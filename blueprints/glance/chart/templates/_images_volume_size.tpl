@@ -1,14 +1,18 @@
 {{/*
 Krateo blueprint addition (#295): the storage request of glance-images.
 
-volume.size, unless the live claim already requests more: a PersistentVolumeClaim cannot shrink (the API server refuses
-it, and the release would be left failed), so a live claim larger than volume.size keeps its size. A live claim smaller
-than volume.size is raised to it, which the API server accepts only when the claim's StorageClass sets
-allowVolumeExpansion: true (README, "glance's image store"). This chart cannot read the StorageClass: it is
-cluster-scoped, and a lookup the render identity is refused is a template error that would fail every render. It reads
-only the claim itself, in its own namespace, which helm reads anyway to upgrade it.
+  - No live claim (a fresh install): volume.size when set, else volume.defaultSize (10Gi; upstream's 2Gi held one
+    duplicate 952 MB manila image and then stalled an upgrade).
+  - A live claim, volume.size unset: the live claim's request, exactly. An upgrade never patches a claim nobody asked to
+    change, so a StorageClass without allowVolumeExpansion (kind's local-path) cannot make it fail (Diego, 2026-11-17).
+  - A live claim, volume.size set: volume.size, never less than the live claim's request (a claim cannot shrink; the
+    API server refuses that and the release would be left failed). Raising it needs the claim's StorageClass to set
+    allowVolumeExpansion: true, else the API server refuses the patch (README, "Upgrading to 0.3.71 or later").
 
-Offline (helm template) no claim exists and volume.size is rendered.
+volume.size is the user's (empty by default) and volume.defaultSize the fresh-install default, so "set by the user" is
+the value being non-empty, not a guess from its value. Both are schema-validated quantities. The chart reads only the
+claim itself, in its own namespace, which helm reads anyway to upgrade it; it cannot read the StorageClass
+(cluster-scoped: a refused lookup would fail every render). Offline (helm template) no claim exists.
 */}}
 
 {{/* A Kubernetes quantity (2Gi, 10G, 512Mi, 1.5Ti, 2147483648) as bytes, a float. Fails on a form it does not know. */}}
@@ -28,13 +32,18 @@ Offline (helm template) no claim exists and volume.size is rendered.
 {{- end -}}
 
 {{- define "glance.images_volume_size" -}}
-{{- $want := .Values.volume.size -}}
+{{- $user := .Values.volume.size | default "" | toString | trim -}}
+{{- if $user -}}{{- $_ := include "glance.quantity_bytes" $user -}}{{- end -}}
 {{- $live := lookup "v1" "PersistentVolumeClaim" .Release.Namespace "glance-images" -}}
 {{- $requests := (((($live).spec | default dict).resources | default dict).requests | default dict) -}}
-{{- $liveSize := index $requests "storage" | default "" -}}
-{{- if and $liveSize (gt (include "glance.quantity_bytes" $liveSize | float64) (include "glance.quantity_bytes" $want | float64)) -}}
+{{- $liveSize := index $requests "storage" | default "" | toString -}}
+{{- if not $liveSize -}}
+{{- $user | default .Values.volume.defaultSize -}}
+{{- else if not $user -}}
+{{- $liveSize -}}
+{{- else if gt (include "glance.quantity_bytes" $liveSize | float64) (include "glance.quantity_bytes" $user | float64) -}}
 {{- $liveSize -}}
 {{- else -}}
-{{- $want -}}
+{{- $user -}}
 {{- end -}}
 {{- end -}}

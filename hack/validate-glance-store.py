@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
-"""glance's image store is large enough by default, grows on upgrade, and never asks a claim to shrink (issue #295).
+"""glance's image store: 10Gi for a new claim, an existing claim's size kept unless the user asks (issue #295).
 
     hack/validate-glance-store.py [repo-root]
 
 On 2 GiB, one duplicate upload of manila's 952 MB service image filled glance-images (GKE 2026-11-17), glance-api went
-unready on #163's free-space floor, and the upgrade stalled. The default is 10Gi from 0.3.71.
+unready on #163's free-space floor, and the upgrade stalled. From 0.3.71 a new claim requests volume.defaultSize (10Gi).
+An existing claim keeps its size on upgrade (Diego, 2026-11-17): no upgrade patches a claim nobody asked to change, so a
+StorageClass without allowVolumeExpansion (kind's local-path) cannot make one fail. Setting volume.size (empty by
+default, so "set" is a fact rather than a guess from the value) resizes it, never below the live claim: a claim cannot
+shrink.
 
-The chart reads the live glance-images claim (its own, in its namespace) and renders volume.size unless the live claim
-already requests more: a PersistentVolumeClaim cannot shrink, the API server refuses that, and the release would be left
-failed. Offline there is no live claim, so the one lookup is replaced by stand-in claims and what the chart renders is
+The chart reads the live glance-images claim with one lookup, replaced here by stand-in claims, and what it renders is
 checked, case by case:
 
-  - no live claim                          -> volume.size (10Gi at defaults)
-  - a live 2Gi claim (installs before 0.3.71) -> 10Gi: the claim is expanded
-  - a live claim equal in another unit (10240Mi) -> volume.size
-  - a live 20Gi claim                      -> 20Gi: never shrunk
-  - volume.size 5Gi and a live 2Gi claim   -> 5Gi: the value stays overridable
-  - a live claim whose size is not a quantity -> refused, naming it
+  - no live claim                              -> 10Gi (volume.defaultSize)
+  - no live claim, volume.size 5Gi             -> 5Gi
+  - a live 2Gi claim, no volume.size           -> 2Gi: kept
+  - a live 2Gi claim, volume.size 10Gi         -> 10Gi: expanded, as asked
+  - a live 20Gi claim, volume.size 10Gi        -> 20Gi: never shrunk
+  - a live 10240Mi claim, volume.size 10Gi     -> 10Gi (equal)
+  - volume.size `lots`                         -> refused (by the schema, or the chart), naming it
 
 Fails when helm or PyYAML is missing, and when the chart no longer looks the claim up exactly once.
 """
@@ -76,16 +79,19 @@ def render(w, values):
 
 
 def main():
-    default = ((yaml.safe_load(open(os.path.join(CHART, "values.yaml"))) or {}).get("volume") or {}).get("size")
-    if default != DEFAULT:
-        failures.append("glance's volume.size is %s, want %s: on 2Gi one duplicate 952 MB manila image filled the store "
-                        "(#295)" % (default, DEFAULT))
+    vol = (yaml.safe_load(open(os.path.join(CHART, "values.yaml"))) or {}).get("volume") or {}
+    if vol.get("defaultSize") != DEFAULT or vol.get("size") not in ("", None):
+        failures.append("glance's volume.defaultSize is %r and volume.size %r, want %r and empty: a new claim gets 10Gi "
+                        "(on 2Gi one duplicate 952 MB manila image filled the store, #295), and volume.size is the "
+                        "user's, so an upgrade tells a request from a default" % (vol.get("defaultSize"), vol.get("size"),
+                                                                                   DEFAULT))
     cases = [("no live claim", None, {}, DEFAULT),
-             ("a live 2Gi claim", "2Gi", {}, DEFAULT),
-             ("a live 10240Mi claim", "10240Mi", {}, DEFAULT),
-             ("a live 20Gi claim", "20Gi", {}, "20Gi"),
-             ("volume.size 5Gi and a live 2Gi claim", "2Gi", {"volume": {"size": "5Gi"}}, "5Gi"),
-             ("a live claim of size 'lots'", "lots", {}, "refused")]
+             ("no live claim, volume.size 5Gi", None, {"volume": {"size": "5Gi"}}, "5Gi"),
+             ("a live 2Gi claim, no volume.size", "2Gi", {}, "2Gi"),
+             ("a live 2Gi claim, volume.size 10Gi", "2Gi", {"volume": {"size": "10Gi"}}, "10Gi"),
+             ("a live 20Gi claim, volume.size 10Gi", "20Gi", {"volume": {"size": "10Gi"}}, "20Gi"),
+             ("a live 10240Mi claim, volume.size 10Gi", "10240Mi", {"volume": {"size": "10Gi"}}, "10Gi"),
+             ("volume.size 'lots'", "2Gi", {"volume": {"size": "lots"}}, "refused")]
     checked = 0
     with tempfile.TemporaryDirectory() as tmp:
         for n, (label, live, values, want) in enumerate(cases):
@@ -117,8 +123,8 @@ def main():
         for f in failures:
             print("FAIL: " + f)
         sys.exit(1)
-    print("OK: glance-images: %d case(s): %s by default, expanded from a smaller live claim, never shrunk, overridable"
-          % (checked, DEFAULT))
+    print("OK: glance-images: %d case(s): %s for a new claim, an existing claim kept unless volume.size asks, raised to "
+          "it, never shrunk" % (checked, DEFAULT))
 
 
 main()

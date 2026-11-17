@@ -21,8 +21,9 @@ Curated history; release notes live in GitHub Releases.
   - **Bootstrap fix:** glance's, manila's and ironic's bootstrap, and ironic's cleaning-network Job, now count by name
     (helm-toolkit `openstack_count`). A failed lookup fails the Job, and nothing is created when one or more already
     exist.
-  - **Store:** `glance-images` defaults to 10Gi. The chart reads the live claim, expands a smaller one (the StorageClass
-    must allow expansion; kind's `standard` doesn't) and never asks a claim to shrink.
+  - **Store:** a new `glance-images` claim requests 10Gi (`volume.defaultSize`). An existing claim keeps its size on
+    upgrade (Diego, 2026-11-17), so no upgrade patches a claim nobody asked to change, and kind's local-path class (no
+    `allowVolumeExpansion`) can't fail one. `volume.size`, empty by default, grows the claim and never shrinks it.
   - **New gates:** `hack/validate-bootstrap-idempotent.py` (no create after a failed lookup unless the API refuses
     duplicates; image bootstraps run against a stand-in) and `hack/validate-glance-store.py` (the size each live claim
     gets).
