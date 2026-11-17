@@ -156,6 +156,11 @@ kubectl create namespace openstack-system
 # barbican-db-manage parses its own arguments, not oslo.config's, so it rejects that flag. Stay on 0.3.64; the fix
 # ships in 0.3.67.
 #
+# DO NOT INSTALL OR UPGRADE TO 0.3.69 (#291). Measured on GKE, upgrading from 0.3.68: designate never
+# becomes Ready. designate-worker's init container runs designate-manage without designate.conf.d, so it never
+# reads the RabbitMQ connection 0.3.69 moved there and retries localhost forever. Stay on 0.3.68; the fix
+# ships in 0.3.70.
+#
 # What 0.3.68 has actually been run through, stated so you know what is NOT covered:
 #   - 0.3.68 freshly installed with these exact steps (External Secrets Operator 2.14.0 included),
 #     profile: full-strict, on a 3-node GKE cluster (n2-standard-16, core-provider 2.13.106): all 32
