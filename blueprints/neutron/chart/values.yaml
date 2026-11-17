@@ -156,6 +156,9 @@ conf:
     enabled: false
   neutron:
     DEFAULT:
+      # The worker readiness probe's RPC call gets NoSuchMethod, logged at DEBUG, rather than
+      # UnsupportedVersion, logged at ERROR on every probe (oslo.messaging ping endpoint, #231).
+      rpc_ping_enabled: true
       allow_automatic_l3agent_failover: true
       allow_overlapping_ips: true
       api_workers: 1
@@ -2243,9 +2246,14 @@ pod:
           enabled: true
           params:
             initialDelaySeconds: 60
+        # worker-health-probe.py's RPC ping to bgp_dragent.<host> (#231).
         readiness:
-          enabled: false
-          params: null
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
     dhcp_agent:
       dhcp_agent:
         liveness:
@@ -2359,17 +2367,32 @@ pod:
     rpc_retries: 2
     rpc_server:
       rpc_server:
+        # Upstream's entry; the template renders no liveness probe for rpc-server (#146: an RPC check
+        # restarts every replica during a RabbitMQ outage and repairs nothing).
         liveness:
           enabled: true
           params:
             initialDelaySeconds: 60
             periodSeconds: 15
             timeoutSeconds: 10
+        # worker-health-probe.py's RPC ping to q-plugin.<host> (#231). timeoutSeconds stays above
+        # the script's own 45 s deadline.
         readiness:
           enabled: true
           params:
-            periodSeconds: 15
-            timeoutSeconds: 10
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
+    ironic_agent:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
     rpc_timeout: 60
     server:
       server:

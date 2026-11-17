@@ -16,6 +16,8 @@ limitations under the License.
 ---
 apiVersion: v1
 data:
+  worker-health-probe.py: |
+{{- include "helm-toolkit.scripts.health_probe" . | indent 4 }}
   tacker-server.sh: |
 {{ tuple "bin/_tacker_server.sh.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
   tacker-conductor.sh: |

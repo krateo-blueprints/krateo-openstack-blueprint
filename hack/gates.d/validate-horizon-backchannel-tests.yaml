@@ -1,0 +1,12 @@
+name: "The back-channel logout receiver's unit tests pass"
+job: capability-roles
+order: 70
+# The validator (a Keycloak 26.4-shaped logout token and every rejection) and the logout
+# path through Django with Keystone and the forward mocked, including a refused forward
+# answering non-200. Fails when no test ran or any was skipped. Versions are pinned so a run
+# is reproducible.
+# Was its own step, "Install the back-channel logout receiver's test dependencies", just before this gate.
+setup: |
+  pip install "Django==5.2.19" "cryptography==46.0.5"
+run: |
+  python3 hack/validate-horizon-backchannel-tests.py .

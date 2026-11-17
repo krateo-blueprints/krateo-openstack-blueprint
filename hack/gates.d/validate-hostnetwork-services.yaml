@@ -1,0 +1,8 @@
+# A Service selecting a hostNetwork pod makes that node's IP a Service endpoint, and cluster
+# DNS then answers the node's own reverse lookup with the Service name, so every host-network
+# agent there resolves the wrong FQDN (#200).
+name: "No Service selects a hostNetwork pod"
+job: job-hooks
+order: 180
+run: |
+  python3 hack/validate-hostnetwork-services.py .

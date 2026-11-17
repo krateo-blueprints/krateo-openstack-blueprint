@@ -1,0 +1,7 @@
+# The root logger on NullHandler hid that very error; a logger that also propagates to a
+# printing root prints every record twice (#203).
+name: "The root logger prints, and nothing is printed twice"
+job: job-hooks
+order: 80
+run: |
+  python3 hack/validate-root-logger.py .

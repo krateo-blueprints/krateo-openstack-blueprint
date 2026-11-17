@@ -60,6 +60,7 @@ spec:
 {{ tuple $envAll "manager" $mounts_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: blazar-manager
+{{ dict "envAll" $envAll "component" "manager" "container" "default" "args" (list "--process" "blazar-manager" "--exchange" "openstack" "--rpc-topic" "blazar.manager" "--rpc-server-default" "0.0.0.0") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "blazar_manager" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.manager | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "blazar" "container" "blazar_manager" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
@@ -70,6 +71,10 @@ spec:
 {{- include "helm-toolkit.snippets.keystone_openrc_env_vars" $env | indent 12 }}
 {{- end }}
           volumeMounts:
+            - name: blazar-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: pod-tmp
               mountPath: /tmp
             - name: oslo-lock-path

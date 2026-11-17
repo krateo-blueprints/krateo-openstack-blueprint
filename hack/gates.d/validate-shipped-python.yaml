@@ -1,0 +1,9 @@
+# Compiles the RENDERED scripts, not the templates: the templates contain Go directives
+# and no textual substitution parses them in every context. A SyntaxWarning today is an
+# error in a later Python, and these run inside containers at install time where nobody
+# reads warnings -- the keystone fernet init container was emitting one.
+name: "Shipped python must compile without warnings"
+job: capability-roles
+order: 240
+run: |
+  python3 hack/validate-shipped-python.py .

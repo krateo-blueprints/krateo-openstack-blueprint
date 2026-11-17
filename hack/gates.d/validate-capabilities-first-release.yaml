@@ -1,0 +1,5 @@
+name: "Every version claim about the per-cluster capabilities chart names its real first release"
+job: capabilities-first-release
+order: 10
+run: |
+  python3 hack/validate-capabilities-first-release.py .

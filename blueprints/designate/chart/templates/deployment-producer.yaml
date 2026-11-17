@@ -61,6 +61,7 @@ spec:
 {{ tuple $envAll "producer" $mounts_designate_producer_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: designate-producer
+{{ dict "envAll" $envAll "component" "producer" "container" "default" "args" (list "--process" "designate-producer" "--exchange" "designate" "--rpc-topic" "producer") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "designate_producer" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.producer | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "designate" "container" "designate_producer" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
@@ -68,6 +69,10 @@ spec:
             - bash
             - /tmp/designate-producer.sh
           volumeMounts:
+            - name: designate-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: oslo-lock-path
               mountPath: {{ .Values.conf.designate.oslo_concurrency.lock_path }}
             - name: designate-bin

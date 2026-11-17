@@ -1,0 +1,12 @@
+# Gating. designate registers `workers` in each [service:*] section with NO default and
+# passes it straight to oslo_service, which lets None past both of its guards and hands
+# it to cotyledon: ValueError: 'workers' must be an int >= 1, not: None. The chart set it
+# for service:api only, so five of six designate services crashed on every startup --
+# 447-452 restarts each over 38 hours -- since the chart first shipped. The gate also
+# fails a workload deployed with no section at all, which is the worse case: it reads as
+# "upstream's default is fine" when there is no default.
+name: "Every service:<name> config section must set workers >= 1"
+job: capability-roles
+order: 450
+run: |
+  python3 hack/validate-service-workers.py .
