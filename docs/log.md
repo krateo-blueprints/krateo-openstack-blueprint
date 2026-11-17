@@ -13,6 +13,21 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **One file per log entry and per gate.** Every pull request edited the top of `docs/log.md` and the step list
+  of `.github/workflows/lint.yaml` in the same places, so branches in flight collided on both (Diego, 2026-11-17).
+  - **Log:** each entry is now `docs/log.d/<yyyy-mm-dd>-<nn>-<slug>.md` with OKF front matter, and
+    `hack/render-log.py` writes `docs/log.md`, which stays checked in. The 14 existing entries were split out in their
+    order, dated from the commit that added each. The rendered file differs from the old one only by two blank lines
+    between entries. `hack/render-log.py --check` fails when `docs/log.md` is stale.
+  - **Gates:** the 76 check steps became `hack/gates.d/<gate>.yaml`, one file each, with name, job, order, the exact
+    command and its comment. Each of the 11 jobs keeps its tools and runs its gates through one step,
+    `hack/run-gates.py --job <job>`. The two GitHub expressions (the job-hooks base commit, the migrate-to-pvc
+    matrix) come in through the runner step's `env`. The commands CI runs, listed per job before and after, are the
+    same and in the same order. The only additions are the two new gates. `hack/validate-gates-registered.py` fails
+    when a `hack/validate-*` script is in no gate file, or a gate file names a script that is missing.
+  - [release.md](release.md) says how to add both. `docs/log.md` and the check steps of `lint.yaml` are never
+    edited by hand.
+
 - **Provider-agnostic KVM guidance.** libvirt's `/dev/kvm` refusal no longer names a cloud provider. It says what to
   enable on any node: VT-x/AMD-V with the kvm module on bare metal, nested virtualization on cloud VMs, or
   `compute.virtType: qemu`. `hack/validate-virt-type.py` now asserts those terms, and that no provider is named. The
@@ -40,6 +55,7 @@ Curated history; release notes live in GitHub Releases.
   - **Pinning, open for Diego** ([supply-chain.md](supply-chain.md)): 35 images use release-series tags, and each
     airshipit one was pushed 27 to 32 times in 30 days. Proposed: dated tags with the digest recorded and verified
     in CI. Mirror the four Kolla gnocchi images, which have no immutable tag. Not `@sha256:` in the charts (#72).
+
 - **KVM guests and KOG credentials (0.3.73, #303).** These are the blueprint's half of the data-plane release stage.
   - **`compute.virtType: kvm`:** sets nova `virt_type=kvm` and `cpu_mode=host-model` and libvirt's `virt_type`. libvirt
     then refuses, in an init container, to start on a node without `/dev/kvm`; the message names GKE's
@@ -189,6 +205,7 @@ Curated history; release notes live in GitHub Releases.
 - **Docs standard adopted.** Added the OKF documentation bundle (this `docs/` set +
   `docs/llms.txt` + `examples/identity-profile/README.md`), rewrote `README.md` to the
   six-section shape, and wired the shared `lint-docs` job into `.github/workflows/lint.yaml`.
+
 - **Dead-org sweep.** Eliminated the legacy dead-org references in favour of
   `krateo-blueprints` (part of the krateo-platformops/installer standardization).
 

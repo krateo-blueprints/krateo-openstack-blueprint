@@ -1,0 +1,5 @@
+name: "YAML this repo authors uses block style"
+job: capability-roles
+order: 380
+run: |
+  python3 hack/validate-yaml-block-style.py .

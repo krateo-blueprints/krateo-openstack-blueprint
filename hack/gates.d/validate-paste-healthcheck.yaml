@@ -1,0 +1,11 @@
+# Gating. `oslo_middleware:Healthcheck.factory` -- the paste FILTER entry point -- raises
+# NotImplementedError unconditionally in the shipped library, so a chart declaring
+# filter:healthcheck cannot build its WSGI application at all. magnum did, and its api
+# sat Running and 0/1 with uwsgi reporting "no python application found" and its listen
+# queue filling with probe traffic. Eleven sibling charts and the image's own
+# api-paste.ini already use app:healthcheck + Healthcheck.app_factory.
+name: "oslo_middleware Healthcheck must be a paste app, not a filter"
+job: capability-roles
+order: 440
+run: |
+  python3 hack/validate-paste-healthcheck.py .

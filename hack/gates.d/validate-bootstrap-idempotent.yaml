@@ -1,0 +1,7 @@
+# A bootstrap never creates a duplicate (#295): no rendered script creates a resource whose API accepts a
+# duplicate name after a failed lookup, and every image bootstrap is run against a stand-in openstack.
+name: "Bootstrap uploads each image once"
+job: capability-roles
+order: 100
+run: |
+  python3 hack/validate-bootstrap-idempotent.py .

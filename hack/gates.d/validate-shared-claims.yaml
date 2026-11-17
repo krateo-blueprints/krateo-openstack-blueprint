@@ -1,0 +1,7 @@
+# A default cluster's StorageClass is ReadWriteOnce: no default claim may ask for
+# ReadWriteMany, and pods sharing a ReadWriteOnce claim must be co-located (#201).
+name: "Every default claim can be bound, and shared ReadWriteOnce claims are co-located"
+job: job-hooks
+order: 170
+run: |
+  python3 hack/validate-shared-claims.py .

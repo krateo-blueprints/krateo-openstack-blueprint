@@ -1,0 +1,7 @@
+# docs/log.md is generated from docs/log.d, one file per change, so branches in flight stop colliding at its top.
+# It stays checked in because people read it on GitHub; it must be what docs/log.d renders.
+name: "docs/log.md is the render of docs/log.d"
+job: capability-roles
+order: 470
+run: |
+  python3 hack/render-log.py . --check
