@@ -268,8 +268,20 @@
     "volume": {
       "type": "object",
       "title": "volume",
-      "description": "Deep-merged into the chart's `volume` values.",
-      "x-kubernetes-preserve-unknown-fields": true
+      "description": "Deep-merged into the chart's `volume` values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
+      "x-kubernetes-preserve-unknown-fields": true,
+      "properties": {
+        "defaultSize": {
+          "type": "string",
+          "pattern": "^[0-9]+([.][0-9]+)?(Ki|Mi|Gi|Ti|Pi|k|M|G|T|P)?$",
+          "description": "Storage a NEW glance-images claim requests (default 10Gi). An existing claim keeps its size on upgrade (#295)."
+        },
+        "size": {
+          "type": "string",
+          "pattern": "^$|^[0-9]+([.][0-9]+)?(Ki|Mi|Gi|Ti|Pi|k|M|G|T|P)?$",
+          "description": "Set to resize the image store: a fresh install requests it, an existing claim is raised to it (never lowered), which needs its StorageClass to allow volume expansion. Empty: not set (#295)."
+        }
+      }
     }
   }
 }
