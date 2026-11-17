@@ -1,0 +1,5 @@
+name: "The rendered powerdns pods must actually serve"
+job: powerdns-runs
+order: 10
+run: |
+  python3 hack/smoke-powerdns.py .

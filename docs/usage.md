@@ -73,7 +73,8 @@ every component must share the namespace. The `CompositionDefinition`s themselve
 Horizon logs in as `admin` with the install's generated password (domain `Default`): `kubectl -n openstack get secret openstack-credential-identity-admin -o jsonpath='{.data.password}' | base64 -d`; the Identity panels are
 populated by Keystone. By default Horizon is exposed on a NodePort (`31000`); set
 `componentValues.horizon.network.dashboard.service.type` to `LoadBalancer` for an external
-IP on GKE/EKS/AKS (see [configuration](./configuration.md)).
+IP wherever the cluster implements LoadBalancer Services (a cloud provider's load balancer, or MetalLB on bare metal;
+see [configuration](./configuration.md)).
 
 ## Accessing OpenStack (CLI)
 

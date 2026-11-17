@@ -1,0 +1,7 @@
+# README applied the Composition before core-provider served its kind (ServiceUnavailable on a
+# fresh cluster). Every documented apply waits for the kind at its BP_VERSION, by API-server poll.
+name: "Every documented Composition apply waits until its kind is served at that version"
+job: job-hooks
+order: 50
+run: |
+  python3 hack/validate-docs-wait-for-served-kind.py .

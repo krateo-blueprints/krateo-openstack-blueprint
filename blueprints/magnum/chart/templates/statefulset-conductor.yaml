@@ -80,6 +80,7 @@ spec:
               mountPath: /tmp/pod-shared
       containers:
         - name: magnum-conductor
+{{ dict "envAll" $envAll "component" "conductor" "container" "default" "args" (list "--process" "magnum-conductor" "--exchange" "magnum" "--rpc-topic" "magnum-conductor" "--rpc-any-server") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "magnum_conductor" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.conductor | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           securityContext:
@@ -87,6 +88,10 @@ spec:
           command:
             - /tmp/magnum-conductor.sh
           volumeMounts:
+            - name: magnum-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: pod-tmp
               mountPath: /tmp
             - name: oslo-lock-path

@@ -66,6 +66,7 @@ spec:
 {{ tuple $envAll "data" $mounts_manila_data_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: manila-data
+{{ dict "envAll" $envAll "component" "data" "container" "default" "args" (list "--process" "manila-data" "--exchange" "openstack" "--rpc-topic" "manila-data") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "manila_data" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.data | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "manila" "container" "manila_data" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
@@ -77,6 +78,10 @@ spec:
               value: "/etc/manila/certs/ca.crt"
 {{- end }}
           volumeMounts:
+            - name: manila-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: pod-tmp
               mountPath: /tmp
             - name: oslo-lock-path

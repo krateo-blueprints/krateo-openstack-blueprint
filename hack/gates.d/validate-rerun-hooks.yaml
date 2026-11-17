@@ -1,0 +1,7 @@
+# rerunHooks.<component> moves that component alone, every component schema declares the token, and every
+# install hook is also an upgrade hook (#297).
+name: "Hooks can be re-run by a value"
+job: capability-roles
+order: 120
+run: |
+  python3 hack/validate-rerun-hooks.py .
