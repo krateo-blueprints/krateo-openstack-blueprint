@@ -247,6 +247,10 @@ jobs:
       # cmp-usage-collector). A removed value must be refused, not silently ignored.
       - name: Removed values are refused, never ignored
         run: bash hack/validate-removed-values.sh .
+      # trove's db-purge CronJob ran `trove-manage db_purge`, which 2026.1 does not have (#289), and a failing CronJob
+      # tells nobody. Every OpenStack program a CronJob starts must get a command measured in its source.
+      - name: Every CronJob runs a command its program has
+        run: python3 hack/validate-cron-commands.py .
       # The README and docs/release.md said CI resolved the deep-link; the step was lost in the
       # 2026-08-11 workflow rewrite and had not run since.
       - name: The service-contract SSO deep-link resolves

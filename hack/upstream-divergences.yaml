@@ -466,3 +466,20 @@ divergences:
           traverses a worker, and / is in cyborg's acl_public_routes so it needs no token.
           hack/validate-uwsgi-probe-traverses-worker.py enforces this for all 16 uwsgi-served
           containers; this entry keeps it true for cyborg across a re-vendor.
+
+  - component: trove
+    issue: 289
+    reason: >-
+      Upstream renders a trove-db-purge CronJob, on by default, that runs `trove-manage db_purge`. trove-manage on
+      stable/2026.1 has no db_purge and trove has no database purge command, so every scheduled run fails at argument
+      parsing.
+    assertions:
+      - file: values.yaml
+        absent: "cron_job_db_purge: true"
+        why: >-
+          Restoring the switch renders a CronJob that can only fail. templates/removed-values.yaml refuses it, so a
+          re-vendor that brings it back fails the render; this names the reason.
+      - file: templates/configmap-bin.yaml
+        absent: db-purge.sh
+        why: >-
+          The script ran the missing command. hack/validate-cron-commands.py fails on any CronJob that runs it.
