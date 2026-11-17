@@ -1042,7 +1042,7 @@ def relocated_files(chart, cid, sentinel, docs_s, docs, others=None):
 
 def openstack_programs(pod, cont, docs):
     """The OpenStack programs a container's scripts start: from a shell line (OSLO_PROGRAM), or as the first element of a
-    Python argv literal (keystone's fernet-manage.py runs subprocess.call(['keystone-manage', ...]))."""
+    Python subprocess/exec argv (keystone's fernet-manage.py runs subprocess.call(['keystone-manage', ...]))."""
     progs = set()
     for text in container_scripts(pod, cont, docs):
         logical = re.sub(r"\\\n\s*", " ", text)
@@ -2020,7 +2020,7 @@ _CDP = yaml.safe_load(open(os.path.join(os.path.dirname(os.path.abspath(__file__
 CONFIG_DIR_ACCEPTS = set(_CDP.get("accepts") or [])
 CONFIG_DIR_REJECTS = {r["name"]: r.get("measured", "") for r in (_CDP.get("rejects") or [])}
 OSLO_PROGRAM = re.compile(r"(?:^\s*|[;&|(]\s*|\bexec\s+|\btimeout\s+\d+\s+)((?:%s)-[a-z0-9-]+)(?=\s|$)" % "|".join(OSLO_PROJECTS))
-PY_PROGRAM = re.compile(r"""[\[(,]\s*['"]((?:%s)-[a-z0-9-]+)['"]""" % "|".join(OSLO_PROJECTS))
+PY_PROGRAM = re.compile(r"""(?:subprocess\.(?:call|run|check_call|check_output|Popen)|os\.exec\w+)\(\s*\[\s*['"]((?:%s)-[a-z0-9-]+)['"]""" % "|".join(OSLO_PROJECTS))
 CONFIG_DIR_CHECKED = []
 INIT_CONFD_CHECKED = []
 
