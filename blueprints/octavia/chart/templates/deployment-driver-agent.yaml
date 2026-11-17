@@ -75,6 +75,7 @@ spec:
 {{ tuple $envAll "driver_agent" $mounts_octavia_driver_agent_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: octavia-driver-agent
+{{ dict "envAll" $envAll "component" "driver_agent" "container" "default" "args" (list "--process" "octavia-driver-agent" "--listen" "unix:/var/run/octavia/get.sock") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "octavia_driver_agent" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.driver_agent | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "octavia_driver_agent" "container" "octavia_driver_agent" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
@@ -88,6 +89,10 @@ spec:
                   - /tmp/octavia-driver-agent.sh
                   - stop
           volumeMounts:
+            - name: octavia-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: pod-tmp
               mountPath: /tmp
             - name: oslo-lock-path

@@ -329,6 +329,9 @@ conf:
   policy: {}
   heat:
     DEFAULT:
+      # The worker readiness probe's RPC call gets NoSuchMethod, logged at DEBUG, rather than
+      # UnsupportedVersion, logged at ERROR on every probe (oslo.messaging ping endpoint, #231).
+      rpc_ping_enabled: true
       log_config_append: /etc/heat/logging.conf
       num_engine_workers: 1
       trusts_delegated_roles: ""
@@ -956,6 +959,16 @@ endpoints:
         default: 80
 
 pod:
+  probes:
+    engine:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
   security_context:
     heat:
       pod:

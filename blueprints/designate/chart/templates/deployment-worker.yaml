@@ -104,6 +104,7 @@ spec:
 {{ if $mounts_designate_worker.volumeMounts }}{{ toYaml $mounts_designate_worker.volumeMounts | indent 12 }}{{ end }}
       containers:
         - name: designate-worker
+{{ dict "envAll" $envAll "component" "worker" "container" "default" "args" (list "--process" "designate-worker" "--exchange" "designate" "--rpc-topic" "worker") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "designate_worker" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.worker | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "designate" "container" "designate_worker" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
@@ -111,6 +112,10 @@ spec:
             - bash
             - /tmp/designate-worker.sh
           volumeMounts:
+            - name: designate-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: oslo-lock-path
               mountPath: {{ .Values.conf.designate.oslo_concurrency.lock_path }}
             - name: designate-bin

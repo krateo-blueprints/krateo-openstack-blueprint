@@ -81,6 +81,7 @@ spec:
       shareProcessNamespace: true
       containers:
         - name: neutron-bgp-dragent
+{{ dict "envAll" $envAll "component" "bgp_dragent" "container" "bgp_dragent" "args" (list "--process" "neutron-bgp-dragent" "--exchange" "neutron" "--rpc-topic" "bgp_dragent") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "neutron_bgp_dragent" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.agent.bgp_dragent | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "neutron_bgp_dragent" "container" "neutron_bgp_dragent" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
@@ -88,6 +89,10 @@ spec:
           command:
             - /tmp/neutron-bgp-dragent.sh
           volumeMounts:
+            - name: neutron-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: pod-tmp
               mountPath: /tmp
             - name: oslo-lock-path
