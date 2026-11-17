@@ -13,6 +13,12 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Provider-agnostic KVM guidance.** libvirt's `/dev/kvm` refusal no longer names a cloud provider. It says what to
+  enable on any node: VT-x/AMD-V with the kvm module on bare metal, nested virtualization on cloud VMs, or
+  `compute.virtType: qemu`. `hack/validate-virt-type.py` now asserts those terms, and that no provider is named. The
+  README's "Running guests on KVM" leads with the generic requirement (nodes exposing `/dev/kvm`, labelled
+  `openstack-compute-node=enabled`). Bare metal, GKE (measured), AWS and Azure follow as examples.
+
 - **Image inventory and CVE scan (#316).**
   - **Inventory:** 58 distinct images across the 38 published charts (quay.io 49, docker.io 8, ghcr.io 1). Every
     chart is rendered at its defaults and with every off-by-default manifest on, and each chart's `images.tags` is
