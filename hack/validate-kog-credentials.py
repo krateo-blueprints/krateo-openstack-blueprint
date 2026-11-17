@@ -236,8 +236,8 @@ def run_mint(program, tmp, label):
                      "resolve" % (label, name))
             continue
         if r.returncode != 0:
-            fail("4m%s: %s: the mint program exits %d: %s" % (label, name, r.returncode, (r.stderr or r.stdout)
-                                                                     .strip()[-200:]))
+            last = ((r.stderr or r.stdout).strip().splitlines() or [""])[-1]
+            fail("4m%s: %s: the mint program exits %d: %s" % (label, name, r.returncode, last[:200]))
             continue
         tok = open(os.path.join(d, "token")).read() if os.path.exists(os.path.join(d, "token")) else None
         raw = open(os.path.join(d, "endpoints.json")).read() if os.path.exists(os.path.join(d, "endpoints.json")) \
