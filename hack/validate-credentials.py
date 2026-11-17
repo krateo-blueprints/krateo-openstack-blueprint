@@ -1455,6 +1455,9 @@ def one_account_check(tmp):
         fail("25: hack/db-users.yaml names no MariaDB user under two keys of one chart; the check had no input")
 
 
+MARIADB_OWN_USERS = ("admin", "sst", "audit", "exporter")
+
+
 def db_map_check(tmp):
     """15b. hack/db-users.yaml is exactly what the charts render: every chart is rendered with a sentinel per per-service
     endpoints.oslo_db*.auth key (MariaDB's own users and the PostgreSQL family are not per-service MariaDB users), and the
@@ -1470,7 +1473,9 @@ def db_map_check(tmp):
             if not fam.startswith("oslo_db") or fam == "oslo_db_postgresql" or not isinstance(e, dict):
                 continue
             for k, a in (e.get("auth") or {}).items():
-                if k != "admin" and isinstance(a, dict) and "password" in a:
+                # MariaDB's own users are tier 1, one root each (oslo-db-<user>), not per-service: the map's header says
+                # so. openstack-monitoring renders `exporter` (#312), the first chart besides mariadb to hold one.
+                if k not in MARIADB_OWN_USERS and isinstance(a, dict) and "password" in a:
                     keys["%s.%s" % (fam, k)] = a.get("username")
         if not keys:
             continue
@@ -2714,7 +2719,10 @@ def main():
                     '# CREDSPEC {{ $c.name }} {{ $ov | toJson }}\n'
                     '{{- end }}\n')
         override = {"endpoints": {"identity": {"auth": {"admin": {"passwordFrom": {"store": "gate-explicit-store"}}}}}}
-        rc, out, err = helm_template(u, "openstack-gate", {"componentValues": {"keystone": override}})
+        # monitoring on: a `monitoring: true` item's root (identity-user-openstack-exporter, #312) renders only then, and
+        # every root must be checked. hack/validate-openstack-monitoring.py checks that it is absent with monitoring off.
+        rc, out, err = helm_template(u, "openstack-gate", {"componentValues": {"keystone": override},
+                                                           "monitoring": {"enabled": True}})
         if rc != 0:
             print("FAILED MEASUREMENT: the umbrella does not render: %s" % err.strip()[:400])
             sys.exit(2)

@@ -216,8 +216,7 @@ secrets:
     openstack_exporter: openstack-monitoring-keystone-user
   oci_image_registry:
     openstack_monitoring: openstack-monitoring-oci-image-registry-key
-  # clouds.yaml for openstack-exporter, and the .my.cnf for mysqld-exporter.
-  openstack_exporter_clouds: openstack-monitoring-exporter-clouds
+  # The openstack_exporter openrc above also carries openstack-exporter's clouds.yaml. This one is mysqld-exporter's .my.cnf.
   mysqld_exporter_cnf: openstack-monitoring-mysqld-exporter
 
 manifests:

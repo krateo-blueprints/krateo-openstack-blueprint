@@ -26,8 +26,8 @@ alert-provider CRs. Everything below is checked on what the charts RENDER, not o
         companion or scrape job exists for rabbitmq, and openstack-exporter disables the absent services; with
         alerts.enabled false no Metric or Alert renders.
   2. READERS (the chart, and mariadb with krateo.exporterUser, in values mode and with the umbrella's references):
-     a. each credential Secret is referenced by exactly its readers' pods: the clouds.yaml by openstack-exporter, the
-        .my.cnf by mysqld-exporter, the admin openrc and the exporter user's root by the ks-user Job, mariadb's
+     a. each credential Secret is referenced by exactly its readers' pods: the exporter user's openrc (which carries its
+        clouds.yaml) by openstack-exporter, the .my.cnf by mysqld-exporter, the admin openrc and the exporter user's root by the ks-user Job, mariadb's
         mariadb-exporter-user by its Job; the collector references no Secret;
      b. with references, a sentinel password in values appears nowhere, and every ExternalSecret reads a root through
         the store;
@@ -85,17 +85,18 @@ ROOTS = {
     "exporter": "openstack-credential-oslo-db-exporter",
 }
 # 2a: credential Secret -> the workloads that must (and alone may) reference it.
+# The exporter user's openrc Secret also carries its clouds.yaml: openstack-exporter mounts that key alone. With values
+# the ks-user Job reads the openrc keys; with the root it reads the root directly.
 READERS_REFS = {
-    "openstack-monitoring-exporter-clouds": {"Deployment/openstack-exporter"},
+    "openstack-monitoring-keystone-user": {"Deployment/openstack-exporter"},
     "openstack-monitoring-mysqld-exporter": {"Deployment/openstack-mysqld-exporter"},
     "openstack-monitoring-keystone-admin": {"Job/openstack-monitoring-ks-user"},
     ROOTS["openstack_exporter"]: {"Job/openstack-monitoring-ks-user"},
 }
 READERS_VALUES = {
-    "openstack-monitoring-exporter-clouds": {"Deployment/openstack-exporter"},
+    "openstack-monitoring-keystone-user": {"Deployment/openstack-exporter", "Job/openstack-monitoring-ks-user"},
     "openstack-monitoring-mysqld-exporter": {"Deployment/openstack-mysqld-exporter"},
     "openstack-monitoring-keystone-admin": {"Job/openstack-monitoring-ks-user"},
-    "openstack-monitoring-keystone-user": {"Job/openstack-monitoring-ks-user"},
 }
 # 2e: umbrella credential item -> the components that alone may list it.
 LISTERS = {
@@ -627,7 +628,7 @@ def mutations(r):
         ("the collector mounts the exporter's clouds.yaml", part_readers,
          lambda: sub(P(osm, "templates", "deployment-collector.yaml"),
                      "        - name: config\n          configMap:",
-                     "        - name: stolen\n          secret:\n            secretName: openstack-monitoring-exporter-clouds\n"
+                     "        - name: stolen\n          secret:\n            secretName: openstack-monitoring-keystone-user\n"
                      "        - name: config\n          configMap:")),
         ("keystone lists the exporter's credential", part_readers,
          lambda: sub(P(umb, "values.yaml"), "      - identity-user-keystone-test\n",

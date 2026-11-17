@@ -1,6 +1,6 @@
 {{- /* openstack-exporter 1.7.0 in legacy mode: one cloud, /metrics on openstack_exporter.port. Every scrape calls each
        enabled service's API as the openstack-exporter user; services whose component is not selected are disabled.
-       It reads its clouds.yaml and nothing else, and restarts when that Secret's template changes. */ -}}
+       It reads the clouds.yaml key of its user's openrc Secret and nothing else, and restarts when that template changes. */ -}}
 {{- if .Values.manifests.deployment_openstack_exporter }}
 {{- $envAll := . }}
 {{- $serviceAccountName := "openstack-monitoring-openstack-exporter" }}
@@ -25,7 +25,7 @@ spec:
 {{ tuple $envAll "openstack-monitoring" "openstack-exporter" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
       annotations:
 {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
-        secret-clouds-hash: {{ tuple "secret-openstack-exporter-clouds.yaml" . | include "helm-toolkit.utils.hash" }}
+        secret-keystone-hash: {{ tuple "secret-keystone.yaml" . | include "helm-toolkit.utils.hash" }}
     spec:
 {{ dict "envAll" $envAll "application" "openstack_exporter" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       serviceAccountName: {{ $serviceAccountName }}
@@ -76,6 +76,9 @@ spec:
           emptyDir: {}
         - name: clouds
           secret:
-            secretName: {{ .Values.secrets.openstack_exporter_clouds }}
+            secretName: {{ .Values.secrets.identity.openstack_exporter }}
             defaultMode: 0440
+            items:
+              - key: clouds.yaml
+                path: clouds.yaml
 {{- end }}
