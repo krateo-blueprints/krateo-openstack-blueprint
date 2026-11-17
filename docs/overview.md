@@ -71,7 +71,8 @@ you deploy exactly what you ask for plus what it needs and nothing else.
   vSwitch kernel module (e.g. Ubuntu GKE nodes): OVS datapath (`br-int`/`br-tun`), Neutron
   (ML2/OVS, VXLAN), Nova control services, and libvirt with **QEMU** software virtualization
   (no `/dev/kvm` needed). A CirrOS VM boots to `ACTIVE`. Compute is **not** possible on
-  kind/Apple-Silicon (no `/dev/kvm`, arm64-only) — use GKE. Two determinism fixes were
+  kind/Apple-Silicon (no `/dev/kvm`, arm64-only): use an amd64 cluster whose nodes load the OVS kernel module (Ubuntu
+  GKE nodes are one example). Two determinism fixes were
   required for the Krateo CDC path (see [medium-openstack-as-a-service](./medium-openstack-as-a-service.md)).
 - **Bare-metal plane (`ironic`) — production-grade blueprint, composition-driven**: real
   driver stack (`ipmi`/`redfish`, iPXE/PXE/TFTP/HTTP boot), conductor on `hostNetwork`,

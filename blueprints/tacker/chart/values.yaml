@@ -111,6 +111,36 @@ dependencies:
           service: identity
 
 pod:
+  probes:
+    server:
+      default:
+        startup:
+          enabled: true
+          params:
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 60
+        readiness:
+          enabled: true
+          params:
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+        liveness:
+          enabled: true
+          params:
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+    conductor:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
   security_context:
     server:
       pod:
@@ -417,6 +447,9 @@ endpoints:
 conf:
   tacker:
     DEFAULT:
+      # The worker readiness probe's RPC call gets NoSuchMethod, logged at DEBUG, rather than
+      # UnsupportedVersion, logged at ERROR on every probe (oslo.messaging ping endpoint, #231).
+      rpc_ping_enabled: true
       log_config_append: /etc/tacker/logging.conf
       debug: false
       log_dir: /var/log/openstackhelm/tacker

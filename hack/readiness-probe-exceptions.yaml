@@ -1,0 +1,108 @@
+# Long-running containers that render without a readinessProbe, and why each cannot have one that
+# tests real health. Read by hack/validate-readiness-probes.py (#231, #151).
+#
+# A container with no readiness probe is Ready the moment it starts, crash-looping or not, and so
+# is the component that owns it, and so is the umbrella. That is the defect #231 measured, so an
+# entry here is a known blind spot, not a pass: each one says what the program does, why no probe
+# can see whether it does it, and what would change that. The gate fails an entry that matches no
+# probe-less container (a stale entry is how an allowlist turns into a second copy of the defect)
+# and an entry without a reason.
+#
+# A probe that "reflects real health" asks the program something only a working program answers
+# (an RPC ping to its own server queue, an HTTP endpoint, a listening socket it binds once ready,
+# a heartbeat its loop writes) or checks the one connection it cannot work without (a listener's
+# RabbitMQ consumer). What is listed here has none of those. A process-alive check is not offered
+# instead: the program is the container's main process, so "it is running" is `true` with a delay.
+#
+# Facts about the programs were read from their stable/2026.1 source on 2026-11-17.
+#
+# Entry: chart, workload (Kind/name as rendered), container, reason.
+exceptions:
+  - chart: aodh
+    workload: Deployment/aodh-evaluator
+    container: aodh-evaluator
+    reason: >-
+      A periodic evaluator and tooz partition member with no RPC server, no listener and no
+      endpoint (aodh/evaluator/__init__.py). It reaches RabbitMQ only to publish an alarm, through a
+      pooled Notifier connection that is opened on the first send and expires when idle
+      (oslo.messaging conn_pool_ttl), so an idle evaluator holds no connection a probe could
+      require. Would change with a heartbeat aodh does not have.
+  - chart: ceilometer
+    workload: Deployment/ceilometer-central
+    container: ceilometer-central
+    reason: >-
+      ceilometer-polling: a periodic poller that publishes samples per cycle through pooled
+      Notifier connections (no persistent connection) and serves nothing. Its optional heartbeat
+      socket ([polling] heartbeat_socket_dir) is served by a separate process and reports a
+      pollster's time only when that pollster had resources this cycle, so it stays empty on an
+      idle cloud and keeps answering if the poller hangs; it cannot tell either from health.
+  - chart: ceilometer
+    workload: DaemonSet/ceilometer-compute
+    container: ceilometer-compute
+    reason: >-
+      ceilometer-polling, compute namespace: same as ceilometer-central. On a compute node with no
+      instances the heartbeat socket is empty indefinitely (ceilometer/polling/manager.py returns
+      before the heartbeat when a pollster has no resources).
+  - chart: ceilometer
+    workload: DaemonSet/ceilometer-ipmi
+    container: ceilometer-ipmi
+    reason: >-
+      ceilometer-polling, ipmi namespace: same as ceilometer-central; the IPMI pollsters run
+      ipmitool per cycle and hold nothing open between cycles.
+  - chart: designate
+    workload: Deployment/designate-sink
+    container: designate-sink
+    reason: >-
+      Off by default (manifests.deployment_sink). With the default
+      [service:sink] enabled_notification_handlers = [] it starts no listener and holds no
+      connection at all (designate/sink/service.py), so a broker check would keep it unready
+      forever while it does exactly what it is configured to do. An install that enables handlers
+      should give it the --broker probe the other listeners have.
+  - chart: ironic
+    workload: StatefulSet/ironic-conductor
+    container: ironic-conductor-http
+    reason: >-
+      nginx serving iPXE files on the provisioning interface's address (listen OSH_PXE_IP:8080,
+      found at start) on hostNetwork. The kubelet's httpGet and tcpSocket go to the pod IP, which is
+      not the address it listens on, and its image (nginx:1.13.3) has no Python or HTTP client for
+      an exec probe that could attribute the socket to nginx. Its tftp sibling, in the ironic image,
+      is probed by its listening socket.
+  - chart: masakari
+    workload: DaemonSet/masakari-host-monitor
+    container: masakari-host-monitor
+    reason: >-
+      Off by default. masakari-hostmonitor polls pacemaker/corosync in a loop and calls the
+      masakari API only when it detects a failure (masakarimonitors/hostmonitor); it has no
+      endpoint, no socket and no persistent connection.
+  - chart: masakari
+    workload: DaemonSet/masakari-instance-monitor
+    container: masakari-instance-monitor
+    reason: >-
+      Off by default. masakari-instancemonitor holds a libvirt event connection, but as a client of
+      a unix socket, whose peer path /proc/net/unix does not show, so no probe can tell its
+      connection from any other; it has no endpoint of its own.
+  - chart: masakari
+    workload: DaemonSet/masakari-introspective-instance-monitor
+    container: masakari-introspective-instance-monitor
+    reason: >-
+      Off by default. Same as masakari-instance-monitor (a read-only libvirt client, no endpoint).
+  - chart: masakari
+    workload: DaemonSet/masakari-process-monitor
+    container: masakari-process-monitor
+    reason: >-
+      Off by default. masakari-processmonitor is a check loop over host processes that calls the
+      masakari API only on a failure; no endpoint, socket or persistent connection.
+  - chart: neutron
+    workload: DaemonSet/neutron-netns-cleanup-cron-default
+    container: neutron-netns-cleanup-cron
+    reason: >-
+      A shell loop that runs the one-shot neutron-netns-cleanup and sleeps. Nothing long-running
+      serves anything: each run's failure is its own exit status in the log, and the container's
+      main process is the loop, so a process check would be `true`.
+  - chart: octavia
+    workload: Deployment/octavia-housekeeping
+    container: octavia-housekeeping
+    reason: >-
+      Periodic database cleanup and certificate rotation threads (octavia/cmd/house_keeping.py)
+      with no RPC server, no listener, no socket and no heartbeat; its only connections are pooled
+      database ones that idle out.

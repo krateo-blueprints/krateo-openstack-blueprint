@@ -76,6 +76,8 @@ return: |
       "metadefs-load" "-8"
       "storage-init" "-8"
       "bootstrap" "-7"
+      "kog-endpoints" "-6"
+      "kog-token" "-6"
 -}}
 {{- if not (hasKey $weights $role) -}}
 {{- fail (printf "helm-toolkit.snippets.job_upgrade_hook: no hook weight for Job role %q; add it to the table in _job_upgrade_hook.tpl in the band of its dependency depth, and run hack/validate-job-hooks.py" $role) -}}

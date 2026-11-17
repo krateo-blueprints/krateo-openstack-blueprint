@@ -1,0 +1,5 @@
+name: "Every chart's defaults must satisfy its own schema"
+job: values-schema
+order: 10
+run: |
+  python3 hack/validate-values-schema.py .
