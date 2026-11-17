@@ -1315,6 +1315,73 @@ kubectl -n openstack get compositiondefinitions \
   -o custom-columns='NAME:.metadata.name,API:.status.apiVersion,READY:.status.conditions[?(@.type=="Ready")].status'
 ```
 
+### Running guests on KVM
+
+By default (`compute.virtType: qemu`) nova runs guests in QEMU software emulation. That works on any node, slowly. With
+hardware virtualization on the compute nodes, set:
+
+```yaml
+compute:
+  virtType: kvm
+```
+
+- **What kvm sets:**
+  - nova gets `[libvirt] virt_type = kvm` and `cpu_mode = host-model`;
+  - libvirt gets `virt_type = "kvm"`.
+- **The refusal:** libvirt's DaemonSet gains an init container, `libvirt-kvm-check`, that refuses to start on a node
+  without `/dev/kvm`. The message names GKE's `--enable-nested-virtualization`. The check runs in libvirt, because
+  libvirtd's qemu processes are what open `/dev/kvm` when a guest starts. Without the device every boot would otherwise
+  fail later, inside nova, far from the cause.
+- **qemu changes nothing:** every chart renders as it always has. `hack/validate-virt-type.py` checks all of this and
+  runs the refusal script.
+
+On GKE, run compute on its own node pool created with nested virtualization. Measured 2026-11-17:
+- N2 Ubuntu nodes in such a pool show `vmx` in `/proc/cpuinfo`, `/dev/kvm`, and a working `KVM_CREATE_VM`;
+- a pool without the flag shows none of these.
+
+```sh
+gcloud container node-pools create compute-kvm --cluster <cluster> --region <region> \
+  --machine-type n2-standard-8 --image-type UBUNTU_CONTAINERD --enable-nested-virtualization \
+  --node-labels=openstack-compute-node=enabled,openvswitch=enabled,nested-virtualization=enabled
+```
+
+**How compute pods land there.** nova-compute, libvirt, ceilometer-compute and cyborg-agent schedule only on nodes
+labelled `openstack-compute-node=enabled`, and neutron's OVS agent and openvswitch on `openvswitch=enabled`. The
+umbrella's `nodeLabelPreconditions` and `hack/validate-node-label-preconditions.py` own this. So:
+- give those labels to the KVM pool only;
+- leave `openstack-compute-node` off the control pool;
+- if you taint the KVM pool, add the matching toleration to the umbrella's `tolerations`, which reaches every pod.
+
+`nested-virtualization=enabled` is informational; nothing selects on it.
+
+### Driving this OpenStack with Krateo KOG operators
+
+The KOG operators (keystone-, neutron-, glance- and nova-kog) need credentials. Never copy the admin password by hand
+(#228). Opt in, and keystone renders them from the install's own generated admin root:
+
+```yaml
+kogCredentials:
+  enabled: true
+  namespace: kog-system   # where the KOGs run; empty: the Openstack release's namespace
+```
+
+| Secret (in `namespace`) | Consumed by | What it is |
+|---|---|---|
+| `openstack-kog-clouds` (key `clouds.yaml`) | the auth proxies of keystone-, neutron- and glance-kog | rendered by an ExternalSecret from the identity-admin root. Cloud `openstack`: keystone's internal endpoint, the admin user and project, interface `internal`, the region. |
+| `openstack-kog-token` (key `token`) | nova-kog (apiKey auth, no proxy) | an admin token. Keystone tokens here last 12 hours (`token.expiration: 43200`), so a CronJob, `keystone-kog-token`, re-mints it every 6 hours. A post-install,post-upgrade hook Job mints it when keystone installs or upgrades, so it exists before any KOG starts. |
+
+How the token is minted:
+- Each run tries at most 4 times; keystone locks a user after 5 failures.
+- Only the mint step holds the admin password. The container that writes the token may patch `openstack-kog-token`
+  and nothing else.
+- In another namespace, a SecretStore of its own reads only the admin root.
+- `hack/validate-kog-credentials.py` checks the clouds file, the token Jobs, and that nothing else in the blueprint
+  reads either Secret.
+
+**Install oasgen-provider 0.80.0 from OCI**, with its chart and CRDs in step, once per cluster, before the KOGs. Some KOG
+READMEs show an unpinned install from `charts.krateo.io`, which serves 0.10.0; don't use it. nova-kog's owner measured
+all 6 nova Kinds reconciling on 0.80.0.
+
 ### A component reads Ready=False/HooksMayNotHaveRun
 
 core-provider (#563, fixed in 2.13.108 by #569) can leave a component's first install `deployed` with its post-install

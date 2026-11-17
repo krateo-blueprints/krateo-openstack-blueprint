@@ -461,6 +461,30 @@
           "description": "Rendered nowhere. The umbrella sets it from rerunHooks.<component>; changing it makes core-provider run a helm upgrade, which re-runs every hook (#297)."
         }
       }
+    },
+    "kog_credentials": {
+      "type": "object",
+      "title": "Credentials for Krateo KOG operators",
+      "description": "openstack-kog-clouds (a clouds.yaml) and openstack-kog-token (an admin token re-minted on schedule), from the install's generated admin root (#303). Set by the umbrella's kogCredentials.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Where the KOGs read them; empty: this release's namespace."
+        },
+        "cloud_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "schedule": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CronJob schedule of the token re-mint."
+        }
+      }
     }
   }
 }
