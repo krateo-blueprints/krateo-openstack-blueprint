@@ -25,6 +25,7 @@ own, smaller schemas; the orchestrator's `componentValues` mirrors them.
 | `tolerations` | array of toleration \| null | `null` | Kubernetes tolerations applied to **every pod** of every component: Deployments, StatefulSets, DaemonSets, Jobs and CronJobs, helm-toolkit's Jobs included. Each component receives them as OpenStack-Helm's `pod.tolerations.<component>` `{enabled: true, tolerations: <list>}`; an explicit `componentValues` entry wins. Needed on tainted nodes (see below). |
 | `componentValues` | object \| null | `null` | Per-component Composition `spec` overrides (see below). |
 | `rerunHooks` | object \| null | `null` | A token per component name (non-empty string; an unknown name is rejected). Setting or changing `rerunHooks.<component>` passes it to that component alone, as its `krateo.rerunHooksToken`, which every component schema declares and no template renders. Its values change, so core-provider runs a helm upgrade and every hook runs again. Use the current time. The recovery for `Ready=False/HooksMayNotHaveRun` (README, #297). |
+| `monitoring` | object | `enabled` unset | The openstack-monitoring component (#312). `enabled`: unset = on exactly where the cluster serves alert-provider's `observability.krateo.io/v1alpha1` Alert and Metric; `true` / `false` decide. `otlpEndpoint`: where its collector sends OTLP (default the Krateo node agent's node-local Service). `alertsNamespace`: where its Alert CRs go (default `krateo-system`, where alert-provider opens Incidents). Off, the render is byte-identical; listing `openstack-monitoring` in `enabled` is refused. See below. |
 | `serviceContract` | object | chart default | Service integration descriptor, contract v1 (see below). |
 | `contractEmitter` | object | absent | Removed in 0.3.68 (see below). |
 
@@ -375,6 +376,44 @@ If you skip this, the render fails with one of these messages. Helm prefixes eac
   protocol's own group has none, so two places would decide which identity provider a token came
   from. Set conf.keystone.openid.remote_id_attribute instead and remove this one. See
   docs/configuration.md, section "Upgrading an install that already uses OIDC".`
+
+## `monitoring` — metrics and alerts (#312)
+
+```yaml
+spec:
+  monitoring:
+    enabled: true
+```
+
+On, the umbrella makes these changes:
+- It adds the `openstack-monitoring` component after keystone and mariadb.
+- It adds its credential root, `openstack-credential-identity-user-openstack-exporter`.
+- It sets `krateo.exporterUser` on mariadb. That adds a Job creating the exporter's MariaDB user for any host, with
+  PROCESS, BINLOG MONITOR and SLAVE MONITOR only. The StatefulSet is unchanged, so the database does not restart.
+
+The component runs:
+- openstack-exporter 1.7.0;
+- a standalone mysqld-exporter v0.21.0;
+- one OpenTelemetry collector, which scrapes both exporters, and RabbitMQ's `/metrics/detailed` when rabbitmq is
+  selected, and exports OTLP to `otlpEndpoint`.
+
+Its alert-provider `Alert` CRs:
+- go to `alertsNamespace`;
+- are rendered only for selected components;
+- are defined in `blueprints/openstack-monitoring/chart/files/alerts.yaml`;
+- each link a runbook under `docs/runbooks/` and have a scrape-down companion.
+
+Values the umbrella sets on the component (an explicit `componentValues.openstack-monitoring` entry wins):
+
+| Component value | Set to |
+| --- | --- |
+| `openstack.components` | the umbrella's selection |
+| `collector.otlpEndpoint` | `monitoring.otlpEndpoint` |
+| `alerts.namespace` | `monitoring.alertsNamespace` |
+| `alerts.enabled` | whether the cluster serves the Alert and Metric CRDs |
+
+`hack/validate-openstack-monitoring.py` is the gate. Not measured on a cluster yet (2026-11-17): see the README's
+"Monitoring" section for what that leaves open.
 
 ## `serviceContract` (contract v1)
 
