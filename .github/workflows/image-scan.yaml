@@ -28,6 +28,7 @@ on:
       - hack/image-cve-allowlist.yaml
       - hack/check-image-cves.py
       - hack/gen-image-inventory.py
+      - hack/image-pin-waivers.yaml
       - .github/workflows/image-scan.yaml
     # paths are not evaluated for tags: every release tag runs.
     tags:
@@ -54,7 +55,8 @@ env:
 jobs:
   inventory:
     # The registry half of the inventory, which no pull request re-measures: each image is still served anonymously,
-    # in a format containerd pulls, for linux/amd64. A moved digest is printed, not failed (docs/supply-chain.md).
+    # in a format containerd pulls, for linux/amd64, and still serves the digest recorded for it: a pinned tag that
+    # moved was re-pushed upstream and fails here (only a waived series tag may move; docs/supply-chain.md).
     runs-on: ubuntu-latest
     outputs:
       images: ${{ steps.matrix.outputs.images }}
