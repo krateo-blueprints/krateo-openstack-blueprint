@@ -517,6 +517,11 @@ dependencies:
       services:
       - endpoint: internal
         service: identity
+    # Krateo (#303): the KOG token minter calls keystone (openstack token issue).
+    kog_token:
+      services:
+      - endpoint: internal
+        service: identity
     fernet_rotate:
       jobs:
       - keystone-fernet-setup
@@ -1160,3 +1165,15 @@ krateo:
   # upgrade hook too, hack/validate-rerun-hooks.py). It is the documented way to re-run hooks that were never run
   # (Ready=False/HooksMayNotHaveRun, README).
   rerunHooksToken: ""
+
+# Krateo blueprint addition (#303): credentials for Krateo KOG operators, from the install's generated admin root
+# (templates/kog-credentials.yaml), in this release's namespace. The umbrella sets enabled from kogCredentials.
+kog_credentials:
+  # Render openstack-kog-clouds (a clouds.yaml for the keystone-, neutron- and glance-kog auth proxies),
+  # openstack-kog-token (an admin token for nova-kog, re-minted on schedule) and openstack-kog-endpoints (nova's and
+  # keystone's internal URLs and the region, resolved by keystone; no secret).
+  enabled: false
+  # The cloud's name in clouds.yaml.
+  cloud_name: openstack
+  # Re-mint the token; tokens last conf.keystone.token.expiration (12 h), so every 6 h keeps one valid.
+  schedule: "0 */6 * * *"

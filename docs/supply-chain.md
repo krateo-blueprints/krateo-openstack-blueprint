@@ -43,8 +43,8 @@ disappear between two runs with nothing changed here. The expiry bounds how long
 Trivy 0.76.1, linux/amd64, run 44188443677.
 
 - **177 CRITICAL findings (167 distinct CVE, image and package keys) in 43 of the 58 images**, and 3,237 HIGH.
-- **Most widespread:** PyJWT 2.11.0 (CVE-2026-102268, fixed in 2.14.0) in 29 airshipit OpenStack service images,
-  and Go stdlib 1.24.4 (CVE-2025-68121) in 14 findings.
+- **Most widespread:** PyJWT 2.11.0 (CVE-2026-102268, fixed in 2.14.0) in 29 images: 25 airshipit OpenStack service
+  images and the 4 Kolla gnocchi images. Go stdlib CVE-2025-68121 accounts for 14 findings, at several Go versions.
 - **Most per image:**
   - `docker.io/nginx:1.13.3`: 54. Debian 9, past end of support. ironic runs it at defaults.
   - `quay.io/airshipit/docker:27.5.0`: 19. image_repo_sync only; no default render runs it.
