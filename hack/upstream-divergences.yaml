@@ -466,3 +466,25 @@ divergences:
           traverses a worker, and / is in cyborg's acl_public_routes so it needs no token.
           hack/validate-uwsgi-probe-traverses-worker.py enforces this for all 16 uwsgi-served
           containers; this entry keeps it true for cyborg across a re-vendor.
+
+  - component: mariadb
+    issue: 302
+    reason: >-
+      Upstream's Swift/RGW remote backup needs a Keystone user that a mariadb ks-user Job creates as an install hook.
+      The hook waits on keystone, which waits on mariadb, so a first install deadlocks, and the user had role admin
+      and a published password. The path and the Job are removed and refused; backups stay local.
+    assertions:
+      - file: templates/configmap-bin.yaml
+        absent: ks-user.sh
+        why: >-
+          The ks-user script, only used by the removed Job. templates/removed-values.yaml refuses job_ks_user, so a
+          re-vendor that brings the Job's switch back fails the render.
+      - file: values.yaml
+        absent: mariadb-backup-user
+        why: >-
+          The Keystone user with role admin and OpenStack-Helm's published password.
+      - file: templates/cron-job-backup-mariadb.yaml
+        absent: remote_backup
+        why: >-
+          The backup CronJob read the remote-backup settings and the Keystone credentials; it now sets
+          REMOTE_BACKUP_ENABLED to false.
