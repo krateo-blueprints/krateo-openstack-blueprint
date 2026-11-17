@@ -49,9 +49,9 @@ images:
     db_init_indexer: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
     db_init: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
     db_sync: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
-    ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
-    ks_service: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
-    ks_endpoints: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+    ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
+    ks_service: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
+    ks_endpoints: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
     gnocchi_api: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
     gnocchi_statsd: quay.io/openstack.kolla/gnocchi-statsd:2026.1-ubuntu-noble
     gnocchi_metricd: quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble
