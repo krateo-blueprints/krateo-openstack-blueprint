@@ -1,0 +1,81 @@
+{{- /* openstack-exporter 1.7.0 in legacy mode: one cloud, /metrics on openstack_exporter.port. Every scrape calls each
+       enabled service's API as the openstack-exporter user; services whose component is not selected are disabled.
+       It reads its clouds.yaml and nothing else, and restarts when that Secret's template changes. */ -}}
+{{- if .Values.manifests.deployment_openstack_exporter }}
+{{- $envAll := . }}
+{{- $serviceAccountName := "openstack-monitoring-openstack-exporter" }}
+{{ tuple $envAll "openstack_exporter" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openstack-exporter
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
+  labels:
+{{ tuple $envAll "openstack-monitoring" "openstack-exporter" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+{{ tuple $envAll "openstack-monitoring" "openstack-exporter" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ tuple $envAll "openstack-monitoring" "openstack-exporter" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+        secret-clouds-hash: {{ tuple "secret-openstack-exporter-clouds.yaml" . | include "helm-toolkit.utils.hash" }}
+    spec:
+{{ dict "envAll" $envAll "application" "openstack_exporter" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
+      serviceAccountName: {{ $serviceAccountName }}
+      nodeSelector:
+        {{ .Values.labels.exporter.node_selector_key }}: {{ .Values.labels.exporter.node_selector_value }}
+{{- if (index .Values.pod.tolerations "openstack-monitoring").enabled }}
+{{ tuple $envAll "openstack-monitoring" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
+      initContainers:
+{{ tuple $envAll "openstack_exporter" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
+      containers:
+        - name: openstack-exporter
+{{ tuple $envAll "openstack_exporter" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.openstack_exporter | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "openstack_exporter" "container" "openstack_exporter" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
+          args:
+            - --os-client-config=/etc/openstack/clouds.yaml
+            - --endpoint-type={{ .Values.openstack_exporter.endpoint_type }}
+            - --web.listen-address=:{{ .Values.openstack_exporter.port }}
+            - --disable-slow-metrics
+            - --disable-deprecated-metrics
+{{- range $service, $component := (include "osm.exporterServices" . | fromYaml) }}
+{{- if not (include "osm.selected" (list $envAll $component)) }}
+            - --disable-service.{{ $service }}
+{{- end }}
+{{- end }}
+            - {{ .Values.openstack_exporter.cloud }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.openstack_exporter.port }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.openstack_exporter.port }}
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.openstack_exporter.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
+            - name: clouds
+              mountPath: /etc/openstack
+              readOnly: true
+      volumes:
+        - name: pod-tmp
+          emptyDir: {}
+        - name: clouds
+          secret:
+            secretName: {{ .Values.secrets.openstack_exporter_clouds }}
+            defaultMode: 0440
+{{- end }}

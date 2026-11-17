@@ -1,0 +1,97 @@
+{{- /* The OpenTelemetry collector's configuration: one prometheus receiver with a scrape job per source, and one
+       metrics pipeline exporting OTLP/HTTP to collector.otlpEndpoint. The job names are the `jobs` of
+       files/alerts.yaml: each becomes the scraped metrics' service.name, which the scrape-down companions filter on.
+       A job is rendered when its component is selected, exactly as its alerts are.
+
+       openstack-exporter calls every enabled API on each scrape (legacy mode), so its timeout is most of the interval.
+
+       transform/agent-state: openstack-exporter 1.7.0 emits nova's and neutron's agent_state as COUNTERS of a 0/1
+       state (exporters/nova.go#L150, exporters/neutron.go#L167), which would land as cumulative sums. Every metric whose
+       upstreamType in files/alerts.yaml is counter while its type is gauge is converted here, from that file. */ -}}
+{{- if .Values.manifests.configmap_collector }}
+{{- $envAll := . }}
+{{- $src := include "osm.alertSource" . | fromYaml }}
+{{- $ns := .Release.Namespace }}
+{{- $suffix := .Values.endpoints.cluster_domain_suffix }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openstack-monitoring-collector
+  labels:
+{{ tuple $envAll "openstack-monitoring" "collector" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+data:
+  collector.yaml: |
+    receivers:
+      prometheus:
+        config:
+          scrape_configs:
+{{- range $job := $src.jobs }}
+{{- if include "osm.selected" (list $envAll $job.requires) }}
+            - job_name: {{ $job.name }}
+              scrape_interval: {{ $envAll.Values.collector.scrapeInterval }}
+{{- if eq $job.name "openstack-exporter" }}
+              scrape_timeout: 50s
+              static_configs:
+                - targets:
+                    - openstack-exporter.{{ $ns }}.svc.{{ $suffix }}:{{ $envAll.Values.openstack_exporter.port }}
+{{- else if eq $job.name "openstack-mysqld-exporter" }}
+              static_configs:
+                - targets:
+                    - openstack-mysqld-exporter.{{ $ns }}.svc.{{ $suffix }}:{{ $envAll.Values.mysqld_exporter.port }}
+{{- else if eq $job.name "openstack-rabbitmq" }}
+              metrics_path: /metrics/detailed
+              params:
+                family:
+                  - queue_coarse_metrics
+                  - queue_consumer_count
+              dns_sd_configs:
+                - names:
+                    - {{ tuple "oslo_messaging" "internal" $envAll | include "helm-toolkit.endpoints.hostname_fqdn_endpoint_lookup" }}
+                  type: A
+                  port: {{ $envAll.Values.rabbitmq.metrics_port }}
+{{- else }}
+{{- fail (printf "files/alerts.yaml declares scrape job %q, which templates/configmap-collector.yaml has no target for" $job.name) }}
+{{- end }}
+{{- end }}
+{{- end }}
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 20
+      transform/agent-state:
+        error_mode: ignore
+        metric_statements:
+{{- range $m := $src.metrics }}
+{{- if and (eq ($m.upstreamType | default "") "counter") (eq $m.type "gauge") }}
+          - convert_sum_to_gauge() where metric.name == {{ $m.metricName | quote }}
+{{- end }}
+{{- end }}
+      resource:
+        attributes:
+          - key: openstack.namespace
+            value: {{ $ns }}
+            action: upsert
+      batch: {}
+    exporters:
+      otlphttp:
+        endpoint: {{ .Values.collector.otlpEndpoint }}
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    service:
+      extensions:
+        - health_check
+      pipelines:
+        metrics:
+          receivers:
+            - prometheus
+          processors:
+            - memory_limiter
+            - transform/agent-state
+            - resource
+            - batch
+          exporters:
+            - otlphttp
+{{- end }}

@@ -266,6 +266,11 @@
           "type": "object",
           "description": "Overrides for the swift Composition (chart CHART_VERSION), deep-merged into its spec. Passed through untyped here; the swift Composition CRD validates them against blueprints/swift/chart/values.schema.json.",
           "x-kubernetes-preserve-unknown-fields": true
+        },
+        "openstack-monitoring": {
+          "type": "object",
+          "description": "Overrides for the openstack-monitoring Composition (chart CHART_VERSION), deep-merged into its spec. Passed through untyped here; the openstack-monitoring Composition CRD validates them against blueprints/openstack-monitoring/chart/values.schema.json.",
+          "x-kubernetes-preserve-unknown-fields": true
         }
       }
     },
@@ -938,6 +943,41 @@
           "type": "string",
           "minLength": 1,
           "description": "Token for swift: any change re-runs swift's hooks."
+        },
+        "openstack-monitoring": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for openstack-monitoring: any change re-runs openstack-monitoring's hooks."
+        }
+      }
+    },
+    "monitoring": {
+      "type": "object",
+      "title": "Monitoring",
+      "description": "The openstack-monitoring component (#312): openstack-exporter, a standalone mysqld-exporter and RabbitMQ's /metrics/detailed, scraped by an OpenTelemetry collector that forwards OTLP to the Krateo observability stack, and alert-provider Alert CRs. Off, the render is byte-identical to a release without it. README: \"Monitoring\".",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "title": "Enabled",
+          "description": "Unset (null): on exactly when the cluster serves observability.krateo.io/v1alpha1 Alert and Metric. true: always on. false: never."
+        },
+        "otlpEndpoint": {
+          "type": "string",
+          "title": "OTLP/HTTP endpoint",
+          "pattern": "^https?://",
+          "default": "http://otel-collector-daemonset-local.krateo-system.svc:4318",
+          "description": "Where the collector exports metrics. The default is the Krateo node agent's node-local Service, which drops traffic from a node with no agent."
+        },
+        "alertsNamespace": {
+          "type": "string",
+          "title": "Alerts namespace",
+          "minLength": 1,
+          "default": "krateo-system",
+          "description": "Where the Alert and Metric CRs go. alert-provider opens Incidents only for Alerts in its home namespace."
         }
       }
     }

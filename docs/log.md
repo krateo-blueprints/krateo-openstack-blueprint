@@ -104,6 +104,21 @@ Curated history; release notes live in GitHub Releases.
   is refused (`hack/validate-removed-values.sh`). The deep-link resolution step, lost from CI
   on 2026-08-11 while the docs still claimed it, runs again.
 
+## 2026-11
+
+- **Monitoring (#312, phase 1).** New component `openstack-monitoring`, switched by the umbrella's `monitoring` value.
+  When unset, it is on wherever the cluster serves alert-provider's CRDs. Off, the render is byte-identical.
+  - An OpenTelemetry collector scrapes three sources and forwards OTLP to the Krateo observability stack:
+    - openstack-exporter 1.7.0, through its own generated Keystone user;
+    - a standalone mysqld-exporter v0.21.0, whose least-privilege MariaDB user the mariadb chart creates without
+      restarting the database;
+    - RabbitMQ's `/metrics/detailed`.
+  - Alerts are alert-provider CRs in `krateo-system`, rendered from one source file. Each has a runbook
+    (`docs/runbooks/`) and a scrape-down companion, and its metric name is cited at the pinned image's tag.
+  - `hack/validate-openstack-monitoring.py` gates the alerts, the credential readers and the switch, and plants a
+    defect for each check.
+  - Not yet run on a cluster.
+
 ## 2026-08
 
 - **Docs standard adopted.** Added the OKF documentation bundle (this `docs/` set +

@@ -804,6 +804,14 @@ true
 {{- $enabled := $top.Values.enabled | default list -}}
 {{- $sel := dict -}}
 {{- if gt (len $enabled) 0 -}}
+  {{- /* A `monitoring: true` component (openstack-monitoring, #312) has one switch, the `monitoring` value: listed here
+         it would be selected while `monitoring.enabled: false` says it is not, or skip the credential root and the
+         mariadb user that the value brings with it. Refused, naming the value. */ -}}
+  {{- range $c := $comps -}}
+    {{- if and $c.monitoring (has $c.name $enabled) -}}
+      {{- fail (printf "enabled lists %s, which is selected by the `monitoring` value alone: set monitoring.enabled: true instead (README \"Monitoring\")" $c.name) -}}
+    {{- end -}}
+  {{- end -}}
   {{- range $e := $enabled -}}{{- $_ := set $sel $e true -}}{{- end -}}
   {{/* expand deps; iterate past the max graph depth so the closure is complete */}}
   {{- range $i := until 8 -}}
@@ -842,14 +850,52 @@ true
          and on 0.3.x the version number cannot signal it. `full-strict` is discoverable, says
          what it means, and leaves anyone who HAS provisioned a PXE interface, an lb-mgmt-net or
          an RWX StorageClass exactly where they were. */}}
-    {{- if or (eq $top.Values.profile "full")
-              (and (eq $top.Values.profile "full-strict") (not $c.requiresProvisioning))
-              (eq $c.tier "identity") -}}
+    {{- if and (not $c.monitoring)
+               (or (eq $top.Values.profile "full")
+                   (and (eq $top.Values.profile "full-strict") (not $c.requiresProvisioning))
+                   (eq $c.tier "identity")) -}}
       {{- $_ := set $sel $c.name true -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
+{{- /* Monitoring (#312): the `monitoring: true` components join the selection exactly when osh.monitoringOn says so,
+       with their dependency closure. Off, nothing here runs and the selection is what it was before #312. */ -}}
+{{- if include "osh.monitoringOn" (list $top) -}}
+  {{- range $c := $comps -}}
+    {{- if $c.monitoring -}}{{- $_ := set $sel $c.name true -}}{{- end -}}
+  {{- end -}}
+  {{- range $i := until 8 -}}
+    {{- range $c := $comps -}}
+      {{- if hasKey $sel $c.name -}}
+        {{- range $d := ($c.deps | default list) -}}{{- $_ := set $sel $d true -}}{{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
 {{- keys $sel | sortAlpha | join " " -}}
+{{- end -}}
+
+{{/* osh.observabilityServed (list $): "true" when the cluster serves alert-provider's Alert and Metric
+     (observability.krateo.io/v1alpha1), i.e. where the Krateo observability stack runs (#312). Read from
+     .Capabilities.APIVersions, which costs no API call; offline (helm template without --api-versions) it is false.
+     NOT MEASURED under composition-dynamic-controller: whether its render fills Capabilities from the cluster's
+     discovery. If it does not, the default (monitoring.enabled unset) stays off there; set monitoring.enabled: true to
+     be sure. */}}
+{{- define "osh.observabilityServed" -}}
+{{- $top := index . 0 -}}
+{{- if and ($top.Capabilities.APIVersions.Has "observability.krateo.io/v1alpha1/Alert") ($top.Capabilities.APIVersions.Has "observability.krateo.io/v1alpha1/Metric") }}true{{ end -}}
+{{- end -}}
+
+{{/* osh.monitoringOn (list $): "true" when the openstack-monitoring component is on (#312). monitoring.enabled true
+     or false decides; unset (null), it follows osh.observabilityServed. */}}
+{{- define "osh.monitoringOn" -}}
+{{- $top := index . 0 -}}
+{{- $m := $top.Values.monitoring | default dict -}}
+{{- if kindIs "bool" $m.enabled -}}
+{{- if $m.enabled }}true{{ end -}}
+{{- else if include "osh.observabilityServed" (list $top) -}}
+true
+{{- end -}}
 {{- end -}}
 
 {{/* The name of the ClusterRole and ClusterRoleBinding that let this release read the cluster's

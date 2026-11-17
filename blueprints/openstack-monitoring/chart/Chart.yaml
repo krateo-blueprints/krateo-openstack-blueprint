@@ -1,0 +1,43 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Krateo's own chart (issue #312), not vendored from OpenStack-Helm: the install's metrics and alerts. An OpenTelemetry
+# collector scrapes openstack-exporter, a standalone mysqld-exporter and RabbitMQ's /metrics/detailed, and forwards
+# OTLP to the Krateo observability stack; the alerts are alert-provider Alert CRs rendered from files/alerts.yaml.
+---
+apiVersion: v2
+appVersion: "1.7.0"
+description: OpenStack monitoring for Krateo (openstack-exporter, mysqld-exporter, an OTel collector and alert-provider alerts)
+name: openstack-monitoring
+type: application
+version: CHART_VERSION
+home: https://github.com/krateo-blueprints/krateo-openstack-blueprint
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
+sources:
+  - https://github.com/krateo-blueprints/krateo-openstack-blueprint
+  - https://github.com/openstack-exporter/openstack-exporter
+  - https://github.com/prometheus/mysqld_exporter
+  - https://github.com/open-telemetry/opentelemetry-collector-contrib
+keywords:
+  - openstack
+  - monitoring
+  - alerts
+  - opentelemetry
+annotations:
+  krateo.io/category: observability
+  krateo.io/maturity: experimental
+  krateoSupportedVersion: ">= 2.5.1"
+dependencies:
+  - name: helm-toolkit
+    repository: file://../../../charts/helm-toolkit
+    version: ">= 0.1.0"
+...

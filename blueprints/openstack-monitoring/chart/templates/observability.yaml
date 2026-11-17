@@ -1,0 +1,129 @@
+{{- /* The alert-provider CRs (observability.krateo.io/v1alpha1), rendered from files/alerts.yaml and from nothing else:
+         - a Metric per `metrics` entry an alert reads, and the scrape-up Metric;
+         - an Alert per `alerts` entry whose `requires` component is selected;
+         - for every scrape job a rendered alert reads, one companion Alert on that job's `up` (service.name = the job),
+           so a scrape that stops is an alert of its own: HyperDX evaluates a window with no data as 0, which silences
+           an "above" alert.
+       Every Alert keeps only points carrying openstack.namespace = this release's namespace (the collector's resource
+       processor sets it), and links docs/runbooks/<runbook>.md at this chart's release tag.
+
+       In alerts.namespace, krateo-system by default: alert-provider opens Incidents (with incident-agent's analysis)
+       only for Alerts in its home namespace, and only for counted log records. These are metric Alerts, so a firing
+       notifies and shows in the portal's alerts page, and opens no Incident (alert-provider docs/api.md). */ -}}
+{{- if and .Values.manifests.observability .Values.alerts.enabled }}
+{{- $envAll := . }}
+{{- $src := include "osm.alertSource" . | fromYaml }}
+{{- $ns := .Release.Namespace }}
+{{- $base := printf "%s/%s/docs/runbooks" (.Values.alerts.runbookBase | trimSuffix "/") .Chart.Version }}
+{{- $metrics := dict }}
+{{- range $m := $src.metrics }}{{- $_ := set $metrics $m.name $m }}{{- end }}
+{{- $jobs := dict }}
+{{- range $j := $src.jobs }}{{- $_ := set $jobs $j.name $j }}{{- end }}
+{{- $usedMetrics := list }}
+{{- $usedJobs := list }}
+{{- range $a := $src.alerts }}
+{{- if include "osm.selected" (list $envAll $a.requires) }}
+{{- $m := index $metrics $a.metric }}
+{{- if not $m }}{{- fail (printf "files/alerts.yaml: alert %s reads metric %q, which `metrics` does not define" $a.name $a.metric) }}{{- end }}
+{{- if not (index $jobs $m.job) }}{{- fail (printf "files/alerts.yaml: metric %s names scrape job %q, which `jobs` does not define" $m.name $m.job) }}{{- end }}
+{{- $usedMetrics = append $usedMetrics $m.name | uniq }}
+{{- $usedJobs = append $usedJobs $m.job | uniq }}
+{{- end }}
+{{- end }}
+{{- range $name := $usedMetrics }}
+{{- $m := index $metrics $name }}
+---
+apiVersion: observability.krateo.io/v1alpha1
+kind: Metric
+metadata:
+  name: {{ $m.name }}
+  namespace: {{ $envAll.Values.alerts.namespace }}
+  labels:
+    app.kubernetes.io/part-of: openstack-monitoring
+    openstack.krateo.io/install-namespace: {{ $ns }}
+spec:
+  metricName: {{ $m.metricName }}
+  type: {{ $m.type }}
+  description: {{ $m.description | quote }}
+  collectedBy: prometheusreceiver
+{{- end }}
+{{- if $usedJobs }}
+---
+apiVersion: observability.krateo.io/v1alpha1
+kind: Metric
+metadata:
+  name: {{ $src.scrapeUp.name }}
+  namespace: {{ $envAll.Values.alerts.namespace }}
+  labels:
+    app.kubernetes.io/part-of: openstack-monitoring
+    openstack.krateo.io/install-namespace: {{ $ns }}
+spec:
+  metricName: {{ $src.scrapeUp.metricName }}
+  type: {{ $src.scrapeUp.type }}
+  description: "1 when the collector's last scrape of the target (service.name = its scrape job) succeeded"
+  collectedBy: prometheusreceiver
+{{- end }}
+{{- range $a := $src.alerts }}
+{{- if include "osm.selected" (list $envAll $a.requires) }}
+---
+apiVersion: observability.krateo.io/v1alpha1
+kind: Alert
+metadata:
+  name: {{ $a.name }}
+  namespace: {{ $envAll.Values.alerts.namespace }}
+  labels:
+    app.kubernetes.io/part-of: openstack-monitoring
+    openstack.krateo.io/install-namespace: {{ $ns }}
+    openstack.krateo.io/scrape-job: {{ (index $metrics $a.metric).job }}
+spec:
+  displayName: {{ $a.displayName | quote }}
+  description: {{ $a.description | quote }}
+  metricRef:
+    name: {{ $a.metric }}
+  aggregation: {{ $a.aggregation }}
+  labels:
+    openstack.namespace: {{ $ns }}
+{{- with $a.groupBy }}
+  groupBy:
+{{- range . }}
+    - {{ . }}
+{{- end }}
+{{- end }}
+  interval: {{ $a.interval | quote }}
+  threshold: {{ $a.threshold }}
+  thresholdType: {{ $a.thresholdType }}
+{{- with $a.consecutiveWindows }}
+  consecutiveWindows: {{ . }}
+{{- end }}
+  runbook: {{ printf "%s\n\nRunbook: %s/%s.md" ($a.guidance | trim) $base $a.runbook | quote }}
+{{- end }}
+{{- end }}
+{{- range $jn := $usedJobs }}
+{{- $j := index $jobs $jn }}
+---
+apiVersion: observability.krateo.io/v1alpha1
+kind: Alert
+metadata:
+  name: openstack-scrape-down-{{ $j.name }}
+  namespace: {{ $envAll.Values.alerts.namespace }}
+  labels:
+    app.kubernetes.io/part-of: openstack-monitoring
+    openstack.krateo.io/install-namespace: {{ $ns }}
+    openstack.krateo.io/scrape-job: {{ $j.name }}
+    openstack.krateo.io/companion: "true"
+spec:
+  displayName: {{ printf "OpenStack: the %s scrape is down" $j.name | quote }}
+  description: {{ printf "The collector could not scrape %s for two consecutive 5-minute windows, so no alert on its metrics can fire." $j.description | quote }}
+  metricRef:
+    name: {{ $src.scrapeUp.name }}
+  aggregation: min
+  labels:
+    openstack.namespace: {{ $ns }}
+    service.name: {{ $j.name }}
+  interval: "5m"
+  threshold: 1
+  thresholdType: below
+  consecutiveWindows: 2
+  runbook: {{ printf "Read the openstack-monitoring-collector pod's logs for this job's scrape error, then the target's pod. Until it scrapes again, the alerts on its metrics see no data.\n\nRunbook: %s/%s.md" $base $src.scrapeUp.runbook | quote }}
+{{- end }}
+{{- end }}

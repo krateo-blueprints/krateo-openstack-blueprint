@@ -1,0 +1,304 @@
+# THE ONE SOURCE of every metric and alert openstack-monitoring ships (issue #312). templates/observability.yaml renders
+# it as alert-provider CRs (observability.krateo.io/v1alpha1): a Metric per entry under `metrics`, an Alert per entry
+# under `alerts`, and, for every scrape job that a rendered alert reads, one "scrape down" companion Alert on that
+# job's `up`. Nothing about an alert is written anywhere else. hack/validate-openstack-monitoring.py checks what this
+# file renders to.
+#
+# Why every alert needs a companion: HyperDX evaluates a window with no data as 0 (alert-provider docs/api.md). An
+# alert of the form "value below 1" fires when its scrape stops, but one of the form "value above N" goes silent. The
+# companion makes a dead scrape loud either way.
+#
+# metrics[].evidence says where the metric NAME (and its type) is established: `cited` is a line of the exporter's
+# source at the pinned tag, `measured` is a scrape of the pinned image. `pinnedTo: <chart>:<images.tags key>` names the
+# image the evidence is about; the gate requires the cited URL to be at that image's tag, so bumping an image without
+# re-citing its metrics fails. Nothing here is measured yet: no cluster ran
+# this chart when it was written (2026-11-17). A metric without evidence is not shipped: the gate refuses it.
+#
+# metrics[].upstreamType is the type the exporter declares when it differs from `type`, the type the Metric records
+# (which otel_metrics_* table HyperDX reads). openstack-exporter 1.7.0 declares its agent_state metrics as COUNTERS
+# although each sample is a 0/1 state, so the collector converts them to gauges (templates/configmap-collector.yaml,
+# convert_sum_to_gauge); HyperDX would otherwise read a cumulative sum.
+#
+# alerts[].requires is the component that must be selected for the alert to render (an absent service's metric never
+# arrives, reads 0, and would fire forever). alerts[].runbook names docs/runbooks/<runbook>.md, linked from the Alert at
+# the chart's release tag; alerts[].guidance is the short text sent with the notification, before that link.
+
+jobs:
+  - name: openstack-exporter
+    requires: keystone
+    description: openstack-exporter, which calls every selected service's API as the openstack-exporter user
+  - name: openstack-mysqld-exporter
+    requires: mariadb
+    description: mysqld-exporter, which logs in to MariaDB as the exporter user
+  - name: openstack-rabbitmq
+    requires: rabbitmq
+    description: RabbitMQ's /metrics/detailed (rabbitmq_prometheus) on every server pod
+
+# The companion's metric: the prometheus receiver's own per-target `up` (1 when the scrape succeeded), with the scrape
+# job as the resource attribute service.name.
+scrapeUp:
+  name: openstack-scrape-up
+  metricName: up
+  type: gauge
+  runbook: openstack-scrape-down
+  evidence:
+    kind: cited
+    pinnedTo: openstack-monitoring:otel_collector
+    source: >-
+      https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.158.0/receiver/prometheusreceiver/internal/metadata.go#L20-L24
+      (up, a gauge) and receiver/prometheusreceiver/README.md#L151 at v0.158.0 (service.name is set from job_name)
+
+metrics:
+  - name: openstack-identity-up
+    metricName: openstack_identity_up
+    type: gauge
+    job: openstack-exporter
+    description: 1 when openstack-exporter could collect at least one Keystone metric, 0 when every collection failed
+    evidence:
+      kind: cited
+      pinnedTo: openstack-monitoring:openstack_exporter
+      source: >-
+        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/exporter.go#L161-L164
+        (<prefix>_<exporter name>_up, a gauge set at #L133-L135) with exporters/keystone.go#L31 (name identity)
+  - name: openstack-glance-up
+    metricName: openstack_glance_up
+    type: gauge
+    job: openstack-exporter
+    description: 1 when openstack-exporter could collect at least one Glance metric
+    evidence:
+      kind: cited
+      pinnedTo: openstack-monitoring:openstack_exporter
+      source: >-
+        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/exporter.go#L161-L164
+        with exporters/glance.go#L21 (name glance)
+  - name: openstack-nova-up
+    metricName: openstack_nova_up
+    type: gauge
+    job: openstack-exporter
+    description: 1 when openstack-exporter could collect at least one Nova metric
+    evidence:
+      kind: cited
+      pinnedTo: openstack-monitoring:openstack_exporter
+      source: >-
+        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/exporter.go#L161-L164
+        with exporters/nova.go#L105 (name nova)
+  - name: openstack-neutron-up
+    metricName: openstack_neutron_up
+    type: gauge
+    job: openstack-exporter
+    description: 1 when openstack-exporter could collect at least one Neutron metric
+    evidence:
+      kind: cited
+      pinnedTo: openstack-monitoring:openstack_exporter
+      source: >-
+        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/exporter.go#L161-L164
+        with exporters/neutron.go#L79 (name neutron)
+  - name: openstack-cinder-up
+    metricName: openstack_cinder_up
+    type: gauge
+    job: openstack-exporter
+    description: 1 when openstack-exporter could collect at least one Cinder metric
+    evidence:
+      kind: cited
+      pinnedTo: openstack-monitoring:openstack_exporter
+      source: >-
+        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/exporter.go#L161-L164
+        with exporters/cinder.go#L75 (name cinder)
+  - name: openstack-placement-up
+    metricName: openstack_placement_up
+    type: gauge
+    job: openstack-exporter
+    description: 1 when openstack-exporter could collect at least one Placement metric
+    evidence:
+      kind: cited
+      pinnedTo: openstack-monitoring:openstack_exporter
+      source: >-
+        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/exporter.go#L161-L164
+        with exporters/placement.go#L23 (name placement)
+  - name: openstack-nova-agent-state
+    metricName: openstack_nova_agent_state
+    type: gauge
+    upstreamType: counter
+    job: openstack-exporter
+    description: Per Nova service (hostname, service), 1 while Nova reports it up, 0 when down
+    evidence:
+      kind: cited
+      pinnedTo: openstack-monitoring:openstack_exporter
+      source: >-
+        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/nova.go#L81 (labels) and
+        #L145-L151 (1 when service.State is up, emitted as a CounterValue)
+  - name: openstack-neutron-agent-state
+    metricName: openstack_neutron_agent_state
+    type: gauge
+    upstreamType: counter
+    job: openstack-exporter
+    description: Per Neutron agent (hostname, service), 1 while the agent is alive, 0 when not
+    evidence:
+      kind: cited
+      pinnedTo: openstack-monitoring:openstack_exporter
+      source: >-
+        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/neutron.go#L67 (labels) and
+        #L147-L168 (1 when agent.Alive, emitted as a CounterValue)
+  - name: openstack-mysql-up
+    metricName: mysql_up
+    type: gauge
+    job: openstack-mysqld-exporter
+    description: 1 when mysqld-exporter could connect to MariaDB and run its scrape, 0 when not
+    evidence:
+      kind: cited
+      pinnedTo: openstack-monitoring:mysqld_exporter
+      source: >-
+        https://github.com/prometheus/mysqld_exporter/blob/v0.21.0/collector/exporter.go#L44-L49 (BuildFQName(namespace,
+        "", "up")) with collector/collector.go#L29 (namespace mysql)
+  - name: openstack-rabbitmq-queue-messages
+    metricName: rabbitmq_detailed_queue_messages
+    type: gauge
+    job: openstack-rabbitmq
+    description: Per queue (vhost, queue), ready plus unacknowledged messages
+    evidence:
+      kind: cited
+      pinnedTo: rabbitmq:rabbitmq
+      source: >-
+        https://github.com/rabbitmq/rabbitmq-server/blob/v3.10.18/deps/rabbitmq_prometheus/src/collectors/prometheus_rabbitmq_core_metrics_collector.erl#L31
+        (the rabbitmq_detailed_ prefix of /metrics/detailed), #L132-L135 (queue_coarse_metrics: queue_messages, a gauge)
+        and #L410-L411 (labels vhost and queue); the rabbitmq chart runs rabbitmq:3.10.18
+
+alerts:
+  - name: openstack-api-down-keystone
+    metric: openstack-identity-up
+    requires: keystone
+    displayName: "OpenStack: the Keystone API is down"
+    description: openstack-exporter could not collect a single Keystone metric for two consecutive 5-minute windows.
+    aggregation: min
+    interval: 5m
+    threshold: 1
+    thresholdType: below
+    consecutiveWindows: 2
+    runbook: openstack-api-down
+    guidance: >-
+      Every OpenStack API authenticates through Keystone, so read keystone-api first: its pods, its logs, and whether
+      MariaDB answers. Do not restart other services to clear it.
+  - name: openstack-api-down-glance
+    metric: openstack-glance-up
+    requires: glance
+    displayName: "OpenStack: the Glance API is down"
+    description: openstack-exporter could not collect a single Glance metric for two consecutive 5-minute windows.
+    aggregation: min
+    interval: 5m
+    threshold: 1
+    thresholdType: below
+    consecutiveWindows: 2
+    runbook: openstack-api-down
+    guidance: Read glance-api's pods and logs, and whether its image store has free space.
+  - name: openstack-api-down-nova
+    metric: openstack-nova-up
+    requires: nova
+    displayName: "OpenStack: the Nova API is down"
+    description: openstack-exporter could not collect a single Nova metric for two consecutive 5-minute windows.
+    aggregation: min
+    interval: 5m
+    threshold: 1
+    thresholdType: below
+    consecutiveWindows: 2
+    runbook: openstack-api-down
+    guidance: Read nova-api-osapi's pods and logs, then nova-conductor's.
+  - name: openstack-api-down-neutron
+    metric: openstack-neutron-up
+    requires: neutron
+    displayName: "OpenStack: the Neutron API is down"
+    description: openstack-exporter could not collect a single Neutron metric for two consecutive 5-minute windows.
+    aggregation: min
+    interval: 5m
+    threshold: 1
+    thresholdType: below
+    consecutiveWindows: 2
+    runbook: openstack-api-down
+    guidance: Read neutron-server's pods and logs, then neutron-rpc-server's.
+  - name: openstack-api-down-cinder
+    metric: openstack-cinder-up
+    requires: cinder
+    displayName: "OpenStack: the Cinder API is down"
+    description: openstack-exporter could not collect a single Cinder metric for two consecutive 5-minute windows.
+    aggregation: min
+    interval: 5m
+    threshold: 1
+    thresholdType: below
+    consecutiveWindows: 2
+    runbook: openstack-api-down
+    guidance: Read cinder-api's pods and logs, then cinder-scheduler's.
+  - name: openstack-api-down-placement
+    metric: openstack-placement-up
+    requires: placement
+    displayName: "OpenStack: the Placement API is down"
+    description: openstack-exporter could not collect a single Placement metric for two consecutive 5-minute windows.
+    aggregation: min
+    interval: 5m
+    threshold: 1
+    thresholdType: below
+    consecutiveWindows: 2
+    runbook: openstack-api-down
+    guidance: Read placement-api's pods and logs. Nova cannot schedule while Placement is down.
+  - name: openstack-nova-service-down
+    metric: openstack-nova-agent-state
+    requires: nova
+    displayName: "OpenStack: a Nova service is down"
+    description: A Nova service (compute, conductor or scheduler) has reported down for two consecutive 5-minute windows.
+    aggregation: min
+    interval: 5m
+    threshold: 1
+    thresholdType: below
+    consecutiveWindows: 2
+    groupBy:
+      - hostname
+      - service
+    runbook: openstack-agent-down
+    guidance: >-
+      The group names the host and the binary. Read that pod's logs and its RabbitMQ connection. A service that stopped
+      reporting is not resolved by HyperDX: read the Alert's status.groups.
+  - name: openstack-neutron-agent-down
+    metric: openstack-neutron-agent-state
+    requires: neutron
+    displayName: "OpenStack: a Neutron agent is down"
+    description: A Neutron agent has not been alive for two consecutive 5-minute windows.
+    aggregation: min
+    interval: 5m
+    threshold: 1
+    thresholdType: below
+    consecutiveWindows: 2
+    groupBy:
+      - hostname
+      - service
+    runbook: openstack-agent-down
+    guidance: >-
+      The group names the host and the agent. Read that pod's logs and its RabbitMQ connection, and for the OVS agent
+      the openvswitch pod on the same node.
+  - name: openstack-mariadb-down
+    metric: openstack-mysql-up
+    requires: mariadb
+    displayName: "OpenStack: MariaDB is unreachable"
+    description: mysqld-exporter could not reach MariaDB for two consecutive 5-minute windows.
+    aggregation: min
+    interval: 5m
+    threshold: 1
+    thresholdType: below
+    consecutiveWindows: 2
+    runbook: openstack-mariadb-down
+    guidance: >-
+      Every OpenStack service stores its state in MariaDB. Read mariadb-server-0's status and logs and its volume's free
+      space. Never delete its PersistentVolumeClaim.
+  - name: openstack-rabbitmq-queue-backlog
+    metric: openstack-rabbitmq-queue-messages
+    requires: rabbitmq
+    displayName: "OpenStack: a RabbitMQ queue is not being drained"
+    description: A RabbitMQ queue held more than 1000 messages throughout a 30-minute window.
+    aggregation: min
+    interval: 30m
+    threshold: 1000
+    thresholdType: above_exclusive
+    groupBy:
+      - vhost
+      - queue
+    runbook: openstack-rabbitmq-queue-backlog
+    guidance: >-
+      The group names the vhost and the queue. A queue whose minimum stays this high is not consumed, or not fast
+      enough: find its consumer count (rabbitmqctl list_queues name messages consumers). Issue 294 is one known cause.

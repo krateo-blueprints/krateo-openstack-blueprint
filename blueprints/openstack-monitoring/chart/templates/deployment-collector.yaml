@@ -1,0 +1,72 @@
+{{- /* The collector: scrapes the sources in configmap-collector.yaml and forwards OTLP. It holds no credential: the
+       exporters authenticate, the collector only reads their /metrics, and RabbitMQ's prometheus port needs none. */ -}}
+{{- if .Values.manifests.deployment_collector }}
+{{- $envAll := . }}
+{{- $serviceAccountName := "openstack-monitoring-collector" }}
+{{ tuple $envAll "collector" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openstack-monitoring-collector
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
+  labels:
+{{ tuple $envAll "openstack-monitoring" "collector" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+spec:
+  replicas: {{ .Values.collector.replicas }}
+  selector:
+    matchLabels:
+{{ tuple $envAll "openstack-monitoring" "collector" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ tuple $envAll "openstack-monitoring" "collector" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+        configmap-collector-hash: {{ tuple "configmap-collector.yaml" . | include "helm-toolkit.utils.hash" }}
+    spec:
+{{ dict "envAll" $envAll "application" "collector" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
+      serviceAccountName: {{ $serviceAccountName }}
+      nodeSelector:
+        {{ .Values.labels.collector.node_selector_key }}: {{ .Values.labels.collector.node_selector_value }}
+{{- if (index .Values.pod.tolerations "openstack-monitoring").enabled }}
+{{ tuple $envAll "openstack-monitoring" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
+      initContainers:
+{{ tuple $envAll "collector" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
+      containers:
+        - name: collector
+{{ tuple $envAll "otel_collector" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.collector | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "collector" "container" "collector" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
+          args:
+            - --config=/etc/otelcol/collector.yaml
+          ports:
+            - name: health
+              containerPort: 13133
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
+            - name: config
+              mountPath: /etc/otelcol
+              readOnly: true
+      volumes:
+        - name: pod-tmp
+          emptyDir: {}
+        - name: config
+          configMap:
+            name: openstack-monitoring-collector
+            defaultMode: 0444
+{{- end }}

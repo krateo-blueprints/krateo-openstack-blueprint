@@ -1409,6 +1409,58 @@ orchestrator also carries a `serviceContract` v1 stanza. Usage and health are em
 The whole surface is documented in [docs/configuration.md](docs/configuration.md), and the
 CRD/schema in [docs/api.md](docs/api.md).
 
+### Monitoring
+
+`spec.monitoring` adds the **openstack-monitoring** component (#312), which sends the install's metrics and alerts to
+the Krateo observability stack:
+
+```yaml
+spec:
+  monitoring:
+    enabled: true          # unset (the default): on where the cluster serves alert-provider's CRDs; false: never
+    otlpEndpoint: http://otel-collector-daemonset-local.krateo-system.svc:4318
+    alertsNamespace: krateo-system
+```
+
+- **What it scrapes.** One OpenTelemetry collector Deployment scrapes three sources and forwards them as OTLP to
+  `otlpEndpoint`:
+  - **openstack-exporter 1.7.0** reports per-service API availability (`openstack_<service>_up`) and nova and neutron
+    agent liveness. It logs in as its own Keystone user, `openstack-exporter`, whose password is a generated root,
+    `openstack-credential-identity-user-openstack-exporter`. Nova, Neutron and Placement show their services and
+    agents only to an admin, so this user has the admin role on the `service` project, like every service user.
+  - **A standalone mysqld-exporter v0.21.0** logs in to the `mariadb` Service as MariaDB's `exporter` user (the
+    `openstack-credential-oslo-db-exporter` root). The mariadb chart's sidecar exporter is not used: its 2019 image
+    gates the database pod's readiness, and switching it on restarts the only database replica.
+    - The mariadb chart creates the user for any host (`krateo.exporterUser`, set by this value).
+    - The grants are PROCESS, BINLOG MONITOR and SLAVE MONITOR, with at most 3 connections. It does not get `SELECT ON *.*`,
+      so it cannot read the OpenStack databases.
+    - Turning it on adds a Job to mariadb and does not change its StatefulSet.
+  - **RabbitMQ's `/metrics/detailed`** gives per-queue depth and consumers on every server pod. The `rabbitmq_prometheus` plugin
+    serving it is already enabled. It is scraped only when rabbitmq is selected.
+- **The alerts.** These are alert-provider `Alert` CRs in `alertsNamespace`. They are defined in one file,
+  `blueprints/openstack-monitoring/chart/files/alerts.yaml`:
+  - an API down for Keystone, Glance, Nova, Neutron, Cinder or Placement;
+  - a Nova service or Neutron agent down;
+  - MariaDB unreachable;
+  - a RabbitMQ queue that is not drained.
+  - Only the alerts for selected components are rendered: an absent service's metric reads 0 and would fire forever.
+  - Each alert links a runbook in [docs/runbooks/](docs/runbooks/openstack-api-down.md).
+  - Every scrape job has a companion alert, `openstack-scrape-down-<job>`. HyperDX reads a window with no data as 0,
+    so without the companion a dead scrape would silence the alerts that fire on high values.
+  - These are metric alerts, so a firing notifies and shows on the portal's alerts page. It opens no Incident:
+    alert-provider opens Incidents only for counted log records.
+- **Off, nothing changes.** The render is byte-identical to a release without this value: no component, no definition,
+  no credential root. `enabled: [openstack-monitoring]` is refused, because this value is the one switch.
+- **Not measured yet, as of 2026-11-17.** No cluster has run this component. These are open:
+  - whether composition-dynamic-controller fills `.Capabilities.APIVersions` from the cluster, which the unset default
+    relies on;
+  - whether it may create the Alert CRs in `krateo-system`, another namespace than the release's;
+  - the metric names, which are cited against each exporter's source at the pinned tag rather than scraped.
+
+  Set `enabled: true` explicitly to avoid the first. `hack/validate-openstack-monitoring.py` is the gate.
+- **Never delete** `openstack-credential-identity-user-openstack-exporter`. Like every root, it holds the only copy of
+  the password, and it is kept when monitoring is switched off.
+
 ## Examples
 
 - [examples/identity-profile/](examples/identity-profile/README.md) — one `Openstack`

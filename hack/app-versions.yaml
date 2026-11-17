@@ -75,6 +75,11 @@ charts:
   blueprints/openstack/chart:
     source: series-of
     chart: blueprints/keystone/chart
+  # Krateo's own chart (#312): what it runs that versions it is openstack-exporter; the collector and mysqld-exporter
+  # images carry their own versions in their tags.
+  blueprints/openstack-monitoring/chart:
+    source: tag
+    image: openstack_exporter
   blueprints/openvswitch/chart:
     source: measured
     image: openvswitch_vswitchd
