@@ -24,11 +24,6 @@
 name: prerelease
 
 on:
-  # TEMPORARY, reverted in the next commit: workflow_dispatch needs the file on the default branch,
-  # so this proves the workflow from its own branch once before merge.
-  push:
-    branches:
-      - feat/prerelease-channel
   workflow_dispatch:
     inputs:
       ref:
