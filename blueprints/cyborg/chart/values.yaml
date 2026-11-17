@@ -362,6 +362,25 @@ dependencies:
           service: identity
 
 pod:
+  probes:
+    conductor:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
+    agent:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
   tolerations:
     cyborg:
       enabled: false
@@ -636,6 +655,9 @@ conf:
       datefmt: '%Y-%m-%d %H:%M:%S'
   cyborg:
     DEFAULT:
+      # The worker readiness probe's RPC call gets NoSuchMethod, logged at DEBUG, rather than
+      # UnsupportedVersion, logged at ERROR on every probe (oslo.messaging ping endpoint, #231).
+      rpc_ping_enabled: true
       use_syslog: false
       state_path: /var/lib/cyborg
       debug: true

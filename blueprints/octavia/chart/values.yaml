@@ -252,6 +252,9 @@ dependencies:
 conf:
   octavia:
     DEFAULT:
+      # The worker readiness probe's RPC call gets NoSuchMethod, logged at DEBUG, rather than
+      # UnsupportedVersion, logged at ERROR on every probe (oslo.messaging ping endpoint, #231).
+      rpc_ping_enabled: true
       log_config_append: /etc/octavia/logging.conf
     ovn:
       ovn_nb_connection: unix:/var/run/ovn/ovnnb_db.sock
@@ -640,6 +643,33 @@ pod:
           operator: Exists
           effect: NoSchedule
   probes:
+    worker:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
+    health_manager:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
+    driver_agent:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
     api:
       octavia-api:
         liveness:

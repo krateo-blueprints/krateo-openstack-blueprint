@@ -1,0 +1,7 @@
+# A Pod's spec is immutable and the controller installs a chart's Pods as plain objects, so
+# a test Pod that is not a `helm.sh/hook: test` hook blocks every later upgrade (#179).
+name: "Every test Pod is a Helm test hook"
+job: job-hooks
+order: 20
+run: |
+  python3 hack/validate-test-pods.py .

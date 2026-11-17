@@ -1,0 +1,12 @@
+# Horizon's OIDC back-channel logout receiver (conf.horizon.backchannel_logout) only works
+# if sessions are rows it can read and four separately rendered pieces line up: the
+# package in horizon-bin, its mounts, horizon.sh's copy step and the local_settings.d
+# snippet. Horizon swallows an exception raised by a snippet (it logs and carries on), so
+# a broken snippet leaves a Ready Horizon answering Keycloak's logouts with 404. This
+# renders the chart, executes the snippet, and checks the session table comes from the
+# bounded db-sync hook and that the chart refuses configurations that cannot work.
+name: "Horizon sessions are in its database and the back-channel logout receiver is wired"
+job: capability-roles
+order: 60
+run: |
+  python3 hack/validate-horizon-backchannel-render.py .

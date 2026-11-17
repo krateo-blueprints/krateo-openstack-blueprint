@@ -425,6 +425,9 @@ conf:
   policy: {}
   mistral:
     DEFAULT:
+      # The worker readiness probe's RPC call gets NoSuchMethod, logged at DEBUG, rather than
+      # UnsupportedVersion, logged at ERROR on every probe (oslo.messaging ping endpoint, #231).
+      rpc_ping_enabled: true
       log_config_append: /etc/mistral/logging.conf
       transport_url: null
     api:
@@ -512,6 +515,34 @@ conf:
       datefmt: "%Y-%m-%d %H:%M:%S"
 
 pod:
+  probes:
+    engine:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
+    executor:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
+    event_engine:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
   tolerations:
     mistral:
       enabled: false

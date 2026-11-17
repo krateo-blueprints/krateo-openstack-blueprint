@@ -1,0 +1,7 @@
+name: "The umbrella CRD must stay small enough to serve several versions"
+job: umbrella-crd-size
+order: 10
+working-directory: hack/umbrella-crd-size
+run: |
+  go vet ./...
+  go run .

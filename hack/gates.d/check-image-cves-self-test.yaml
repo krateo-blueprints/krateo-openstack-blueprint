@@ -1,0 +1,5 @@
+name: "The image scan judges CRITICAL findings and exceptions as specified"
+job: job-hooks
+order: 200
+run: |
+  python3 hack/check-image-cves.py --self-test

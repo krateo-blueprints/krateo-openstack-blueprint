@@ -70,6 +70,34 @@ images:
       - image_repo_sync
 
 pod:
+  probes:
+    central:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
+    producer:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
+    worker:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
   tolerations:
     designate:
       enabled: false
@@ -495,6 +523,9 @@ conf:
   policy: {}
   designate:
     DEFAULT:
+      # The worker readiness probe's RPC call gets NoSuchMethod, logged at DEBUG, rather than
+      # UnsupportedVersion, logged at ERROR on every probe (oslo.messaging ping endpoint, #231).
+      rpc_ping_enabled: true
       debug: false
       log_config_append: /etc/designate/logging.conf
     service:api:
