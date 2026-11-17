@@ -16,7 +16,8 @@ abstract: |
   openstack-kog-endpoints; nova patches nova_url of openstack-kog-endpoints and nothing else. A merge patch keeps the
   keys it does not name, so neither writer clobbers the other's. hack/validate-kog-credentials.py runs both programs.
 values: |
-  The chart's labels.job, pod.tolerations.<application>, images.tags.ks_user and dependencies.static.<depsKey>.
+  The chart's labels.job, images.tags.ks_user and dependencies.static.<depsKey>. The template that includes it applies
+  pod.tolerations.<application> itself, as every Job template does (hack/validate-tolerations.py check 3).
 usage: |
   {{ dict "envAll" $envAll "application" "nova" "mode" "nova" "depsKey" "kog_endpoints" "serviceAccount" "nova-kog-endpoints" "ksUserSecret" .Values.secrets.identity.admin "useCA" false | include "helm-toolkit.snippets.kog_endpoints_pod" }}
 */}}
@@ -28,9 +29,6 @@ usage: |
 {{- end -}}
 serviceAccountName: {{ .serviceAccount }}
 restartPolicy: Never
-{{- if (index $envAll.Values.pod.tolerations .application).enabled }}
-{{ tuple $envAll .application | include "helm-toolkit.snippets.kubernetes_tolerations" }}
-{{- end }}
 nodeSelector:
   {{ $envAll.Values.labels.job.node_selector_key }}: {{ $envAll.Values.labels.job.node_selector_value }}
 initContainers:

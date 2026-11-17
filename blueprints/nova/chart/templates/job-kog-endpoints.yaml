@@ -62,5 +62,8 @@ spec:
       labels:
 {{ tuple $envAll "nova" "kog-endpoints" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
     spec:
+{{- if $envAll.Values.pod.tolerations.nova.enabled }}
+{{ tuple $envAll "nova" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
 {{ dict "envAll" $envAll "application" "nova" "mode" "nova" "depsKey" "kog_endpoints" "serviceAccount" "nova-kog-endpoints" "ksUserSecret" .Values.secrets.identity.admin "useCA" (or .Values.manifests.certificates .Values.tls.identity) | include "helm-toolkit.snippets.kog_endpoints_pod" | indent 6 }}
 {{- end }}

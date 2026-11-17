@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The umbrella's `tolerations` reach every pod the blueprint renders.
 
-    hack/validate-tolerations.py [repo-root]
+    hack/validate-tolerations.py [repo-root] [chart ...]
 
 A trusted-tenant vcluster copies its pool taint (krateo.io/trusted-tenant=<ns>:NoSchedule) onto every child node, so a
 pod without a matching toleration schedules nowhere: every DaemonSet desires 0 pods, and every Deployment, Job and
@@ -15,10 +15,14 @@ Deployments and helm-toolkit Jobs in others never included the snippet. Checked 
      tolerations: <the list>}, an explicit componentValues entry wins, and with no list nothing is added.
   2. EVERY POD CARRIES IT. Every component chart is rendered with pod.tolerations.<chart> enabled and a probe list, at
      defaults and with every workload manifest it ships turned on (each one alone where turning all on does not render,
-     e.g. a backend another one excludes): every Deployment, StatefulSet, DaemonSet, Job and CronJob pod template carries
-     exactly that list. A chart whose values have no pod.tolerations.<chart> fails: the component would ignore it.
+     e.g. a backend another one excludes), and with every opt-in feature it declares turned on (kog_credentials, #303:
+     its Jobs and CronJob are off by default, so no other render reaches them): every Deployment, StatefulSet,
+     DaemonSet, Job and CronJob pod template carries exactly that list. A chart whose values have no
+     pod.tolerations.<chart> fails: the component would ignore it.
   3. NO TEMPLATE IS LEFT OUT. Statically, every template that declares one of those kinds applies the snippet, and every
      helm-toolkit job manifest a chart includes is given tolerationsEnabled: a workload no render turns on is covered.
+
+Named charts limit checks 2 and 3 to them (an unknown name fails); check 1 always covers every component.
 
 Fails when helm or PyYAML is missing, when no chart was rendered, and when no pod template was checked.
 """
@@ -37,6 +41,7 @@ except ImportError:
     sys.exit(2)
 
 ROOT = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else ".")
+ONLY = sys.argv[2:]
 BP = os.path.join(ROOT, "blueprints")
 UMBRELLA = os.path.join(BP, "openstack", "chart")
 TOOLKIT = os.path.join(ROOT, "charts", "helm-toolkit")
@@ -178,12 +183,19 @@ def chart_check(chart, tmp):
                 one = json.loads(json.dumps(base))
                 one["manifests"] = {k: True}
                 renders.append(("manifests.%s on" % k, one))
+    if "kog_credentials" in cv:
+        # #303: opt-in, so neither render above reaches its Jobs. Enabled, keystone requires the admin root's reference.
+        kog = json.loads(json.dumps(base))
+        kog["kog_credentials"] = {"enabled": True}
+        kog["endpoints"] = {"identity": {"auth": {"admin": {"passwordFrom": {
+            "store": "openstack-credentials", "secret": "openstack-credential-identity-admin", "key": "password"}}}}}
+        renders.append(("kog_credentials on", kog))
     rendered = 0
     for label, values in renders:
         rc, out, err = helm_template(w, chart + "-gate", values)
         if rc != 0:
-            if label == "defaults":
-                fail("2: %s: does not render with its tolerations enabled: %s" % (chart, err.strip()[:300]))
+            if label in ("defaults", "kog_credentials on"):
+                fail("2: %s (%s): does not render with its tolerations enabled: %s" % (chart, label, err.strip()[:300]))
             continue  # a workload that renders only with settings this check cannot supply; check 3 covers its template
         rendered += 1
         for name, pod in pod_templates([d for d in yaml.safe_load_all(out) if d]):
@@ -205,7 +217,11 @@ def main():
         sys.exit(2)
     with tempfile.TemporaryDirectory() as tmp:
         umbrella_check(tmp)
-        rendered = sum(chart_check(c, tmp) for c in charts)
+        unknown = sorted(set(ONLY) - set(charts))
+        if unknown:
+            print("FAILED MEASUREMENT: no chart named %s, so nothing was checked for it" % unknown)
+            sys.exit(2)
+        rendered = sum(chart_check(c, tmp) for c in charts if not ONLY or c in ONLY)
     if rendered == 0 or not PODS_CHECKED:
         print("FAILED MEASUREMENT: no chart rendered a pod template, so nothing was checked")
         sys.exit(2)
@@ -214,7 +230,7 @@ def main():
             print("FAIL: " + f)
         sys.exit(1)
     print("OK: %d chart(s), %d render(s), %d pod template(s) carry exactly the umbrella's tolerations; every workload "
-          "template applies them; the umbrella passes them to all %d components" % (len(charts), rendered,
+          "template applies them; the umbrella passes them to all %d components" % (len(set(ONLY) or charts), rendered,
                                                                                   len(PODS_CHECKED), len(listed)))
 
 
