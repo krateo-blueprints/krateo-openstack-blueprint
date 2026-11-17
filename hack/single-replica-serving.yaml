@@ -1,0 +1,14 @@
+# Serving Deployments that hack/validate-api-availability.py lets run one replica, and why.
+#
+# A Deployment that a Service selects must run >= 2 replicas and roll with maxUnavailable 0 (#286). The only entries
+# here are Deployments where a second replica is a second, independent copy of the data: the Service would spread
+# clients over two stores that do not replicate to each other. Each entry names its chart, its rendered Deployment
+# name, the reason, and the issue that makes it highly available. The gate fails on an entry that no longer names a
+# single-replica serving Deployment, so a stale one cannot linger.
+redis:
+  redis:
+    reason: >-
+      redis is one in-memory store, with no replication configured: it holds zaqar's messages and gnocchi's metric
+      storage. Two replicas behind the redis Service would be two unrelated stores, and a surge pod would serve an
+      empty one during every rollout.
+    issue: 309

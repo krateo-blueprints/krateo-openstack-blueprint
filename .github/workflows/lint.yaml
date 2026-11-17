@@ -395,6 +395,18 @@ jobs:
       - name: Hooks can be re-run by a value
         run: python3 hack/validate-rerun-hooks.py .
 
+      # A rollout, a drain or a lost node never takes an API down (#286): every Deployment a Service selects renders
+      # >= 2 replicas and rolls with maxUnavailable 0; a Deployment on a ReadWriteOnce claim runs one pod that never
+      # surges; every multi-replica workload has a drainable PodDisruptionBudget and spreads over hosts and zones;
+      # the schema's replica defaults equal the chart's. Exceptions: hack/single-replica-serving.yaml.
+      - name: APIs stay up through a rollout or a drain
+        run: python3 hack/validate-api-availability.py .
+
+      # Every container is sized (#283): every container and init container of every workload, at defaults and with
+      # every workload manifest on, requests cpu and memory and has a memory limit, and no default CPU limit.
+      - name: Every container requests cpu and memory
+        run: python3 hack/validate-pod-resources.py .
+
       # glance's image store: 10Gi by default, a smaller live claim expanded, a claim never asked to shrink (#295).
       - name: glance's image store size
         run: python3 hack/validate-glance-store.py .
