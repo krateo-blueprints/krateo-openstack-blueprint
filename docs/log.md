@@ -34,6 +34,42 @@ Curated history; release notes live in GitHub Releases.
   - **Also:** nova-compute's `LIBVIRT_CEPH_SECRET_UUID` read the undefined `conf.ceph.secret_uuid` (an upstream defect),
     so it rendered with no value. It now reads `conf.ceph.cinder.secret_uuid`, and the new gate renders it with a
     sentinel.
+- **Image inventory and CVE scan (#316).**
+  - **Inventory:** 58 distinct images across the 38 published charts (quay.io 49, docker.io 8, ghcr.io 1). Every
+    chart is rendered at its defaults and with every off-by-default manifest on, and each chart's `images.tags` is
+    added. All 58 are pullable anonymously as measured on 2026-11-17, gnocchi's Kolla images included (#115).
+    `hack/gen-image-inventory.py` generates `hack/images.yaml` and [images.md](images.md). Offline, in `lint.yaml`,
+    it fails when a chart's images differ from the files, and when an image's registry namespace has no publisher
+    in `hack/image-sources.yaml`.
+  - **Registry re-check:** `--resolve` asks each registry again, without credentials. It fails when an image is no
+    longer pullable (v1 manifest, no linux/amd64, 401 or 404) and reports a moved digest without failing.
+  - **CVE scan:** `.github/workflows/image-scan.yaml` scans every pullable image with Trivy 0.76.1, pinned by a
+    digest in the workflow. It runs on a push that changes the inventory, weekly, and on each release tag. It took
+    2.6 minutes of wall time for all 58. It isn't run on every pull request because only an image change or a new
+    upstream CVE changes its result. A CRITICAL finding fails unless `hack/image-cve-allowlist.yaml` has an entry for
+    that CVE, image and package that hasn't expired (at most 120 days ahead). The judging rules run offline per pull
+    request (`--self-test`).
+  - **First scan:** 177 CRITICAL findings in 43 of the 58 images. PyJWT 2.11.0 is in 29 images (25 airshipit
+    OpenStack service images and the 4 Kolla gnocchi images), and `nginx:1.13.3` (Debian 9, run by ironic at defaults) has 54. All are allowlisted as a measured baseline that
+    expires on 2027-02-15 ([supply-chain.md](supply-chain.md)).
+  - **Pinning, open for Diego** ([supply-chain.md](supply-chain.md)): 35 images use release-series tags, and each
+    airshipit one was pushed 27 to 32 times in 30 days. Proposed: dated tags with the digest recorded and verified
+    in CI. Mirror the four Kolla gnocchi images, which have no immutable tag. Not `@sha256:` in the charts (#72).
+- **KVM guests and KOG credentials (0.3.73, #303).** These are the blueprint's half of the data-plane release stage.
+  - **`compute.virtType: kvm`:** sets nova `virt_type=kvm` and `cpu_mode=host-model` and libvirt's `virt_type`. libvirt
+    then refuses, in an init container, to start on a node without `/dev/kvm`; the message names GKE's
+    `--enable-nested-virtualization`. qemu, the default, renders as before.
+  - **`kogCredentials.enabled`:** has keystone render, from the generated admin root and in the release's namespace,
+    `openstack-kog-clouds` (an ExternalSecret clouds.yaml for the KOG auth proxies), `openstack-kog-token` (nova-kog's
+    admin token) and `openstack-kog-endpoints` (nova's internal URL with the admin project id, keystone's internal URL
+    and the region, as keystone answered them; no secret). keystone's post-install,post-upgrade hook Job and a CronJob
+    (every 6 h) write the token, `keystone_url` and `region_name`. nova's own hook Job writes `nova_url` once nova
+    registered its endpoint. Both run one shared program (`helm-toolkit.snippets.kog_endpoints_pod`), at most 4 tries
+    per run, and merge-patch only their own keys. A failed mint fails that chart's release. Only the mint step holds
+    the password, and each writer may patch only its own objects.
+    Cross-namespace is not supported yet. The README gives each KOG's setting for these names, read from the KOG
+    charts.
+  - **New gates:** `hack/validate-virt-type.py` and `hack/validate-kog-credentials.py`.
 
 - **Start ordering, and re-running hooks (0.3.72, #297, #298, #299).**
   - **#298:** ceilometer-notification now waits for the rabbit-init Job of every vhost it consumes, as the umbrella

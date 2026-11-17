@@ -1699,6 +1699,16 @@ dependencies:
       services:
       - endpoint: internal
         service: identity
+    # Krateo (#303): nova's KOG hook resolves nova_url from keystone's catalog, so it waits for keystone, for nova's
+    # catalog entry (nova-ks-endpoints) and for nova's own API behind it.
+    kog_endpoints:
+      jobs:
+      - nova-ks-endpoints
+      services:
+      - endpoint: internal
+        service: identity
+      - endpoint: internal
+        service: compute
     ks_service:
       services:
       - endpoint: internal
@@ -3025,3 +3035,10 @@ krateo:
   # upgrade hook too, hack/validate-rerun-hooks.py). It is the documented way to re-run hooks that were never run
   # (Ready=False/HooksMayNotHaveRun, README).
   rerunHooksToken: ""
+
+# Krateo blueprint addition (#303): with enabled (the umbrella's kogCredentials.enabled), a post-install,post-upgrade
+# hook Job (templates/job-kog-endpoints.yaml) writes nova_url into keystone's openstack-kog-endpoints ConfigMap as soon
+# as nova registered its endpoint: nova's internal URL from keystone's catalog with the admin project id. It merge-patches
+# that one key and may patch that one ConfigMap only.
+kog_credentials:
+  enabled: false
