@@ -13,6 +13,12 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Provider-agnostic KVM guidance.** libvirt's `/dev/kvm` refusal no longer names a cloud provider. It says what to
+  enable on any node: VT-x/AMD-V with the kvm module on bare metal, nested virtualization on cloud VMs, or
+  `compute.virtType: qemu`. `hack/validate-virt-type.py` now asserts those terms, and that no provider is named. The
+  README's "Running guests on KVM" leads with the generic requirement (nodes exposing `/dev/kvm`, labelled
+  `openstack-compute-node=enabled`). Bare metal, GKE (measured), AWS and Azure follow as examples.
+
 - **KVM guests and KOG credentials (0.3.73, #303).** These are the blueprint's half of the data-plane release stage.
   - **`compute.virtType: kvm`:** sets nova `virt_type=kvm` and `cpu_mode=host-model` and libvirt's `virt_type`. libvirt
     then refuses, in an init container, to start on a node without `/dev/kvm`; the message names GKE's
