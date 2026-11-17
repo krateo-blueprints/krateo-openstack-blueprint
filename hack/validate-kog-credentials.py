@@ -214,7 +214,7 @@ def check_enabled(docs, ns, root, admin, auth_url, pub, label):
         if any("secret" in v or "projected" in v for v in pod.get("volumes") or []):
             fail("4%s: %s keystone-kog-token mounts a Secret volume" % (label, kind))
         script = (mint[0].get("command") or [""])[-1] if mint else ""
-        loops = re.findall(r"^\s*(for|while|until)\b(.*)$", script, re.M)
+        loops = re.findall(r"(?:^\s*|[;&|]\s*)(for|while|until)\b(.*)$", script, re.M)
         bounded = [l for l in loops if l[0] == "for" and re.match(r"\s+\w+\s+in\s+([0-9 ]+);", l[1])]
         if not loops or len(loops) != len(bounded) or any(len(re.match(r"\s+\w+\s+in\s+([0-9 ]+);", l[1]).group(1).split()) > 4
                                                           for l in bounded):
