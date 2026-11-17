@@ -34,14 +34,14 @@
               "title": "Heat API (orchestration) replicas",
               "minimum": 1,
               "maximum": 5,
-              "default": 1
+              "default": 2
             },
             "cfn": {
               "type": "integer",
               "title": "Heat CFN API (cloudformation) replicas",
               "minimum": 1,
               "maximum": 5,
-              "default": 1
+              "default": 2
             },
             "engine": {
               "type": "integer",

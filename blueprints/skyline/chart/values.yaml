@@ -195,15 +195,31 @@ endpoints:
         public: 80
 
 pod:
+  # Soft anti-affinity, as every other chart carries (OpenStack-Helm's pod.affinity, #286): the replicas prefer
+  # different nodes, and different zones when nodes carry the zone label.
+  affinity:
+    anti:
+      type:
+        default: preferredDuringSchedulingIgnoredDuringExecution
+      topologyKey:
+        default: kubernetes.io/hostname
+      weight:
+        default: 10
+      zone:
+        topologyKey: topology.kubernetes.io/zone
+        weight: 5
   replicas:
-    skyline: 1
+    skyline: 2
   lifecycle:
+    disruption_budget:
+      skyline:
+        min_available: 1
     upgrades:
       deployments:
         revision_history: 3
         pod_replacement_strategy: RollingUpdate
         rolling_update:
-          max_unavailable: 1
+          max_unavailable: 0
           max_surge: 1
   security_context:
     skyline:
@@ -228,30 +244,58 @@ pod:
       - key: node-role.kubernetes.io/control-plane
         operator: Exists
         effect: NoSchedule
+  # Sized (#283): every container requests cpu and memory and has a memory limit, so no pod is BestEffort, a
+  # ResourceQuota admits it, and capacity is visible to the scheduler. No CPU limit by default: throttling an API worker
+  # shows up as latency and probe timeouts. The figures are OpenStack-Helm's own per-container ones unless named below;
+  # no per-container usage has been measured yet (README, "Cluster size"). Override any of them, or set enabled: false,
+  # with componentValues.skyline.pod.resources.
+  # kubernetes_entrypoint sizes the dependency-wait init container every pod runs (helm-toolkit).
+  # skyline: gunicorn starts (1 + host CPUs) // 2 workers, so 8 on a 16-core node.
   resources:
-    enabled: false
+    enabled: true
     skyline:
       requests:
-        memory: "128Mi"
-        cpu: "100m"
+        memory: 256Mi
+        cpu: 100m
       limits:
-        memory: "1024Mi"
-        cpu: "2000m"
+        memory: 2Gi
     jobs:
       db_init:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
+          memory: 128Mi
+          cpu: 100m
         limits:
-          memory: "1024Mi"
-          cpu: "2000m"
+          memory: 1024Mi
       db_sync:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
+          memory: 128Mi
+          cpu: 100m
         limits:
-          memory: "1024Mi"
-          cpu: "2000m"
+          memory: 1024Mi
+      ks_user:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          memory: 1024Mi
+      db_drop:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          memory: 1024Mi
+    kubernetes_entrypoint:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+    nginx:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 512Mi
 
 dependencies:
   dynamic:
@@ -316,6 +360,7 @@ conf:
     error_logfile = "-"
 
 manifests:
+  pdb: true
   certificates: false
   configmap_etc: true
   configmap_bin: true

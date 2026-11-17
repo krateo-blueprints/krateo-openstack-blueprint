@@ -23,7 +23,13 @@ rendered at its defaults and with every workload manifest it ships turned on (ea
   3. EVERY MULTI-REPLICA WORKLOAD HAS A DISRUPTION BUDGET THAT ALLOWS A DRAIN. Each Deployment or StatefulSet that
      renders replicas > 1 is selected by a PodDisruptionBudget whose budget keeps at least one pod (minAvailable >= 1,
      or maxUnavailable < replicas) and still lets one go (minAvailable < replicas, or maxUnavailable >= 1): a budget
-     equal to the replica count blocks every node drain.
+     equal to the replica count blocks every node drain. The same holds for one replica: a budget selecting a
+     single pod must let it go. Each chart is also rendered with every pod.replicas key at 1 (an operator scaling
+     down to save capacity), and every budget must then still allow a drain: helm-toolkit.utils.pdb_min_available
+     lowers min_available below the replica count. And every budget the chart renders selects at least one of its
+     pods, with a non-empty selector: designate's six budgets selected `app: designate-<service>`, a label no pod
+     carries, so they protected nothing, and dropping that label alone would have left five of them selecting
+     every pod in the namespace.
   4. EVERY MULTI-REPLICA WORKLOAD SPREADS. Its pod template carries pod anti-affinity or a topology spread constraint
      over kubernetes.io/hostname and over topology.kubernetes.io/zone, selecting its own pods. A preferred term is
      enough: on a single node, or nodes with no zone label, it schedules anyway.
@@ -161,11 +167,28 @@ def spreads(pod, labels, key):
     return False
 
 
-def check_render(chart, label, docs):
+def check_render(chart, label, docs, single=False):
     services = [d for d in docs if d.get("kind") == "Service"]
     pdbs = [d for d in docs if d.get("kind") == "PodDisruptionBudget"]
     claims = {d["metadata"]["name"]: (d.get("spec") or {}).get("accessModes") or []
               for d in docs if d.get("kind") == "PersistentVolumeClaim"}
+    templates = [((d.get("spec") or {}).get("template") or {}).get("metadata", {}).get("labels") or {}
+                 for d in docs if d.get("kind") in ("Deployment", "StatefulSet", "DaemonSet")]
+    seen = set()
+    for d in docs:
+        key = (d.get("kind"), (d.get("metadata") or {}).get("name"))
+        if key[0] in ("Deployment", "StatefulSet", "PodDisruptionBudget") and key in seen:
+            fail("3: %s (%s): %s/%s is rendered twice; Helm refuses a release with a duplicate object"
+                 % (chart, label, key[0], key[1]), chart, "nopdb", "%s/%s" % key)
+        seen.add(key)
+    for p in pdbs:
+        sel = (p.get("spec") or {}).get("selector") or {}
+        if not (sel.get("matchLabels") or sel.get("matchExpressions")):
+            fail("3: %s (%s): PodDisruptionBudget/%s has an empty selector, which selects every pod in the namespace"
+                 % (chart, label, p["metadata"]["name"]), chart, "nopdb", "PodDisruptionBudget/" + p["metadata"]["name"])
+        elif not any(selects(sel, t) for t in templates):
+            fail("3: %s (%s): PodDisruptionBudget/%s selects no pod this chart renders (%s), so it protects nothing"
+                 % (chart, label, p["metadata"]["name"], sel), chart, "nopdb", "PodDisruptionBudget/" + p["metadata"]["name"])
     for d in docs:
         kind = d.get("kind")
         if kind not in ("Deployment", "StatefulSet"):
@@ -182,6 +205,20 @@ def check_render(chart, label, docs):
             fail("5: %s renders replicas: %r; its template reads a pod.replicas key values.yaml does not define, so no "
                  "override reaches it" % (where, replicas), chart)
             replicas = 1
+        if replicas == 1:
+            for p in pdbs:
+                ps = p.get("spec") or {}
+                if not selects(ps.get("selector") or {}, labels):
+                    continue
+                blocks = ("minAvailable" in ps and budget(ps["minAvailable"], 1) >= 1) or \
+                         ("maxUnavailable" in ps and budget(ps["maxUnavailable"], 1) < 1)
+                if blocks:
+                    fail("3: %s renders 1 replica and its PodDisruptionBudget %s (%s) refuses every eviction, so a "
+                         "node drain waits forever" % (where, p["metadata"]["name"],
+                                                       {k: v for k, v in ps.items() if k != "selector"}),
+                         chart, "nopdb", ident)
+        if single:
+            continue
         if kind == "Deployment":
             strategy = spec.get("strategy") or {}
             stype = strategy.get("type", "RollingUpdate")
@@ -280,6 +317,9 @@ def chart_check(chart, tmp):
             renders.append(("every workload manifest on", allon))
         else:
             renders.extend(("manifests.%s on" % k, {"manifests": {k: True}}) for k in toggles)
+    ones = {k: 1 for k, v in (((cv.get("pod") or {}).get("replicas")) or {}).items() if isinstance(v, int)}
+    if ones:
+        renders.append(("every pod.replicas key at 1", {"pod": {"replicas": ones}}))
     rendered = 0
     for label, values in renders:
         rc, out, err = helm_template(w, chart + "-gate", values)
@@ -288,7 +328,7 @@ def chart_check(chart, tmp):
                 fail("0: %s: does not render at its defaults: %s" % (chart, err.strip()[:300]), chart)
             continue
         rendered += 1
-        check_render(chart, label, [d for d in yaml.safe_load_all(out) if d])
+        check_render(chart, label, [d for d in yaml.safe_load_all(out) if d], single=label.startswith("every pod.replicas"))
     return rendered
 
 
@@ -309,6 +349,9 @@ def main():
         sys.exit(2)
     if not ONLY and not SERVING:
         print("FAILED MEASUREMENT: no Deployment selected by a Service was found, so check 1 measured nothing")
+        sys.exit(2)
+    if not ONLY and not MULTI:
+        print("FAILED MEASUREMENT: no multi-replica workload was found, so checks 3 and 4 measured nothing")
         sys.exit(2)
     for chart, entries in sorted(EXEMPT.items()):
         if ONLY and chart not in ONLY:

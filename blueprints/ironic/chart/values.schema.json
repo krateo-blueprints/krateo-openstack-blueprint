@@ -33,7 +33,7 @@
               "type": "integer",
               "title": "ironic-api replicas",
               "minimum": 1,
-              "default": 1
+              "default": 2
             },
             "conductor": {
               "type": "integer",

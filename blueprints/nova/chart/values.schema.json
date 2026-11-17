@@ -169,6 +169,9 @@
         "pdb_metadata": {
           "type": "boolean"
         },
+        "pdb_novncproxy": {
+          "type": "boolean"
+        },
         "pdb_osapi": {
           "type": "boolean"
         },

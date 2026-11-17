@@ -20,7 +20,7 @@ kind: PodDisruptionBudget
 metadata:
   name: manila-api
 spec:
-  minAvailable: {{ .Values.pod.lifecycle.disruption_budget.api.min_available }}
+  minAvailable: {{ tuple .Values.pod.lifecycle.disruption_budget.api.min_available .Values.pod.replicas.api | include "helm-toolkit.utils.pdb_min_available" }}
   selector:
     matchLabels:
 {{ tuple $envAll "manila" "api" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}

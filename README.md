@@ -548,6 +548,80 @@ once a minute, because two writers use two API versions (measured upgrading 0.3.
 CI runs the whole sequence against each released 0.3.35 chart with real data in it
 (`hack/smoke-migrate-to-pvc.sh`). It also checks that an emptied node path is refused.
 
+## Cluster size
+
+From the release after 0.3.72, every container requests CPU and memory (#283), and every API runs two replicas (#286).
+Until then, every pod was BestEffort and requested nothing, so no size could be read from the charts.
+
+**What the defaults request**, summed from the rendered charts (control plane = Deployments and StatefulSets, replicas
+included; DaemonSets count once per node they run on):
+
+| profile | control-plane pods | control-plane requests | DaemonSets, per node |
+|---|---|---|---|
+| `identity` (5 components) | 8 | 0.9 CPU, 2.2 GiB | none |
+| `full-strict` (32) | 92 | 9.8 CPU, 14.6 GiB | 1.3 CPU, 1.9 GiB |
+| `full` (36) | 106 | 11.4 CPU, 17.2 GiB | 1.8 CPU, 2.9 GiB |
+
+So `full-strict` on three nodes requests about 14 CPU and 20 GiB, before the cluster's own system pods. During a
+rollout each rolling Deployment adds one surge pod, and each hook Job requests 0.1 CPU and 128 MiB while it runs.
+
+**The minimum cluster:**
+- `identity`: one node with 2 CPU and 4 GiB allocatable. One node gives no availability: both replicas of each API
+  share it.
+- `full-strict`: 16 CPU and 24 GiB allocatable in all, over at least 2 nodes, so that an API survives the loss of
+  one. Requests are not the whole story: an earlier measurement, before any requests existed, saw about 10 CPU and
+  35 GiB in use across all 32 components during an install or upgrade, and 4.5 CPU at rest. The verified installs
+  above ran on 3 nodes with 16 vCPU and 64 GB each, which leaves ample room. These requests have not been installed on
+  a cluster yet.
+
+**The figures are OpenStack-Helm's own per-container ones** (mostly 100m CPU and 128 MiB requested, with a 1 GiB memory
+limit). They are not measured yet; per-container measurement is #283's open half. Larger limits, each with its reason in
+the chart's values.yaml, apply to the containers that need more memory:
+- mariadb, rabbitmq, memcached and redis;
+- APIs that fork several workers (horizon, neutron-server and neutron-rpc-server, mistral, trove, tacker, skyline,
+  octavia);
+- glance-api, cinder-volume, nova-compute and ovs-vswitchd.
+
+**No CPU limits** by default. A CPU limit throttles an API worker even on an idle node, which shows up as latency and
+probe timeouts rather than as a clear failure.
+
+**Change any of it** through `componentValues.<component>`, with OpenStack-Helm's own keys:
+
+```yaml
+componentValues:
+  keystone:
+    pod:
+      replicas:
+        api: 3
+      resources:
+        api:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            memory: 2Gi
+```
+
+`pod.resources.enabled: false` turns sizing off for a component. Fewer replicas also work: `pod.replicas.api: 1` brings
+back a drop during each rollout, and the PodDisruptionBudget then allows the one pod to be evicted rather than block a
+node drain.
+
+**How each API stays up:**
+- **Two replicas.** Every Deployment that a Service selects runs at least two replicas and rolls with
+  `max_unavailable: 0` and `max_surge: 1`: a new pod is Ready before an old one goes.
+- **PodDisruptionBudgets.** Each multi-replica workload has a PodDisruptionBudget with `min_available: 1`.
+- **Spread.** Each prefers a different node, and a different zone when the nodes carry `topology.kubernetes.io/zone`.
+
+The exceptions are named, never silent:
+- **glance-api and tacker run one pod each.** They mount ReadWriteOnce claims, so a second pod, or a surge pod, on
+  another node would wait on Multi-Attach forever. glance keeps a rolling update with `max_unavailable: 1`, and tacker
+  uses Recreate. A shared store lifts this (#308).
+- **redis runs one pod.** It is an unreplicated in-memory store, and a second replica would be a second, empty store
+  (`hack/single-replica-serving.yaml`, #309).
+
+`hack/validate-api-availability.py` and `hack/validate-pod-resources.py` assert all of this against the rendered
+charts.
+
 ## One install per cluster
 
 **A second OpenStack blueprint cannot be installed onto a cluster that already has one**, in any
@@ -1367,6 +1441,18 @@ From 0.3.72:
   service type).
 - **manila's bootstrap now waits for keystone, glance, nova and manila-api.** So the umbrella creates manila after
   glance and nova. glance's storage-init and octavia's bootstrap now wait for keystone.
+
+### Upgrading to the release after 0.3.72: APIs run two replicas, and every pod requests resources
+
+This upgrade adds pods and starts reserving capacity (#286, #283). See "Cluster size" above for the totals. Check
+that the cluster has room before you apply it:
+- **Every pod is replaced once**, because its resources change. Each API rolls with the new strategy straight away:
+  its second replica, and then each replacement, starts before an old pod is deleted.
+- **A pod that does not fit stays Pending.** Before, every pod requested nothing, so a full cluster still accepted
+  more. If a surge pod cannot be scheduled, the rollout waits, and the old pod keeps serving.
+- **A stored replica default can hold a component at 1 replica.** If your `componentValues.<component>.pod.replicas`
+  set some keys, the API server stored the schema's old default, 1, for that component's other replica keys when it
+  created the Composition. They stay at 1 after the upgrade. Set them explicitly.
 
 ## Configure
 

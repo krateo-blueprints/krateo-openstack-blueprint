@@ -22,7 +22,7 @@ metadata:
   labels:
 {{ tuple $envAll "swift" "proxy" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
-  minAvailable: {{ .Values.pod.pdb.proxy.minAvailable | default 1 }}
+  minAvailable: {{ tuple (.Values.pod.pdb.proxy.minAvailable | default 1) .Values.pod.replicas.proxy | include "helm-toolkit.utils.pdb_min_available" }}
   selector:
     matchLabels:
 {{ tuple $envAll "swift" "proxy" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}

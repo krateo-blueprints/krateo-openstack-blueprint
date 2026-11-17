@@ -1494,6 +1494,10 @@ endpoints:
 pod:
   affinity:
     anti:
+      # Spread over zones too, when nodes carry this label (helm-toolkit, #286).
+      zone:
+        topologyKey: topology.kubernetes.io/zone
+        weight: 5
       type:
         default: preferredDuringSchedulingIgnoredDuringExecution
       topologyKey:
@@ -1566,72 +1570,81 @@ pod:
           enabled: true
           min_ready_seconds: 0
           max_unavailable: 1
+  # Sized (#283): every container requests cpu and memory and has a memory limit, so no pod is BestEffort, a
+  # ResourceQuota admits it, and capacity is visible to the scheduler. No CPU limit by default: throttling an API worker
+  # shows up as latency and probe timeouts. The figures are OpenStack-Helm's own per-container ones unless named below;
+  # no per-container usage has been measured yet (README, "Cluster size"). Override any of them, or set enabled: false,
+  # with componentValues.ceilometer.pod.resources.
+  # kubernetes_entrypoint sizes the dependency-wait init container every pod runs (helm-toolkit).
   resources:
     enabled: true
     compute:
       requests:
-        memory: "128Mi"
-        cpu: "100m"
+        memory: 128Mi
+        cpu: 100m
       limits:
-        memory: "1024Mi"
-        cpu: "2000m"
+        memory: 1024Mi
     notification:
       requests:
-        memory: "128Mi"
-        cpu: "100m"
+        memory: 128Mi
+        cpu: 100m
       limits:
-        memory: "1024Mi"
-        cpu: "2000m"
+        memory: 1024Mi
     central:
       requests:
-        memory: "128Mi"
-        cpu: "100m"
+        memory: 128Mi
+        cpu: 100m
       limits:
-        memory: "1024Mi"
-        cpu: "2000m"
+        memory: 1024Mi
     ipmi:
       requests:
-        memory: "124Mi"
-        cpu: "100m"
+        memory: 124Mi
+        cpu: 100m
       limits:
-        memory: "1024Mi"
-        cpu: "2000m"
+        memory: 1024Mi
     jobs:
       db_sync:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
+          memory: 128Mi
+          cpu: 100m
         limits:
-          memory: "1024Mi"
-          cpu: "2000m"
+          memory: 1024Mi
       rabbit_init:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
+          memory: 128Mi
+          cpu: 100m
         limits:
-          memory: "1024Mi"
-          cpu: "2000m"
+          memory: 1024Mi
       ks_user:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
+          memory: 128Mi
+          cpu: 100m
         limits:
-          memory: "1024Mi"
-          cpu: "2000m"
+          memory: 1024Mi
       tests:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
+          memory: 128Mi
+          cpu: 100m
         limits:
-          memory: "1024Mi"
-          cpu: "2000m"
+          memory: 1024Mi
       image_repo_sync:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
+          memory: 128Mi
+          cpu: 100m
         limits:
-          memory: "1024Mi"
-          cpu: "2000m"
+          memory: 1024Mi
+      bootstrap:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          memory: 1024Mi
+    kubernetes_entrypoint:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
 
 manifests:
   configmap_bin: true

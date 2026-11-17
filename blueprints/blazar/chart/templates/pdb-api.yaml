@@ -23,7 +23,7 @@ metadata:
 {{ tuple $envAll "blazar" "api" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
 {{- if .Values.pod.lifecycle.disruption_budget.api.min_available }}
-  minAvailable: {{ .Values.pod.lifecycle.disruption_budget.api.min_available }}
+  minAvailable: {{ tuple .Values.pod.lifecycle.disruption_budget.api.min_available .Values.pod.replicas.api | include "helm-toolkit.utils.pdb_min_available" }}
 {{- else }}
   maxUnavailable: {{ .Values.pod.lifecycle.disruption_budget.api.max_unavailable | default 1 }}
 {{- end }}

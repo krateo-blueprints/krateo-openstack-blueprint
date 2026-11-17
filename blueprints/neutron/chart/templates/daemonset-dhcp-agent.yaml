@@ -109,6 +109,7 @@ spec:
         {{- if ( has "ovn" .Values.network.backend ) }}
         - name: ovn-neutron-init
 {{ tuple $envAll "neutron_dhcp" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.agent.dhcp | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           command:
             - /tmp/neutron-ovn-init.sh
           volumeMounts:

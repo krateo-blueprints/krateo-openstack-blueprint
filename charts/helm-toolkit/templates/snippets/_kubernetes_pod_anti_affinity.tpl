@@ -59,6 +59,23 @@ return: |
 {{- list $expressionRelease $expressionApplication $expressionComponent | toYaml }}
 {{- end -}}
 
+{{- /* A second, preferred term over zones (#286): replicas spread across zones when the nodes carry
+       pod.affinity.anti.zone.topologyKey (topology.kubernetes.io/zone by default), and schedule exactly as
+       before when they carry none, since a preferred term never filters a node out. An empty topologyKey
+       renders no term. */ -}}
+{{- define "helm-toolkit.snippets.kubernetes_pod_anti_affinity._zone_term" -}}
+{{- $envAll := index . "envAll" -}}
+{{- $zone := $envAll.Values.pod.affinity.anti.zone | default dict -}}
+{{- if $zone.topologyKey }}
+  - podAffinityTerm:
+      labelSelector:
+        matchExpressions:
+{{ index . "matchExpressions" | indent 10 }}
+      topologyKey: {{ $zone.topologyKey }}
+    weight: {{ $zone.weight | default 5 }}
+{{- end -}}
+{{- end -}}
+
 {{- define "helm-toolkit.snippets.kubernetes_pod_anti_affinity" -}}
 {{- $envAll := index . 0 -}}
 {{- $application := index . 1 -}}
@@ -79,12 +96,17 @@ podAntiAffinity:
 {{- else }}
     weight: 10
 {{- end -}}
+{{- include "helm-toolkit.snippets.kubernetes_pod_anti_affinity._zone_term" ( dict "envAll" $envAll "matchExpressions" $matchExpressions ) }}
 {{- else if eq $antiAffinityType "requiredDuringSchedulingIgnoredDuringExecution" }}
   {{ $antiAffinityType }}:
   - labelSelector:
       matchExpressions:
 {{ $matchExpressions | indent 8 }}
     topologyKey: {{ $antiAffinityKey }}
+{{- if (($envAll.Values.pod.affinity.anti.zone | default dict).topologyKey) }}
+  preferredDuringSchedulingIgnoredDuringExecution:
+{{- include "helm-toolkit.snippets.kubernetes_pod_anti_affinity._zone_term" ( dict "envAll" $envAll "matchExpressions" $matchExpressions ) }}
+{{- end }}
 {{- else }}
   {}
 {{- end -}}

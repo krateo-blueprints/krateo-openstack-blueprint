@@ -112,6 +112,7 @@ spec:
               mountPath: /run/openvswitch
         - name: openvswitch-vswitchd-modules
 {{ tuple $envAll "openvswitch_vswitchd" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.ovs.vswitchd | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "ovs" "container" "modules" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
             - /tmp/openvswitch-vswitchd-init-modules.sh

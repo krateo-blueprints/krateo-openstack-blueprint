@@ -864,6 +864,10 @@ network_policy:
 pod:
   affinity:
     anti:
+      # Spread over zones too, when nodes carry this label (helm-toolkit, #286).
+      zone:
+        topologyKey: topology.kubernetes.io/zone
+        weight: 5
       topologyKey:
         default: kubernetes.io/hostname
       type:
@@ -931,100 +935,106 @@ pod:
             timeoutSeconds: 5
   replicas:
     api: 1
+  # Sized (#283): every container requests cpu and memory and has a memory limit, so no pod is BestEffort, a
+  # ResourceQuota admits it, and capacity is visible to the scheduler. No CPU limit by default: throttling an API worker
+  # shows up as latency and probe timeouts. The figures are OpenStack-Helm's own per-container ones unless named below;
+  # no per-container usage has been measured yet (README, "Cluster size"). Override any of them, or set enabled: false,
+  # with componentValues.glance.pod.resources.
+  # kubernetes_entrypoint sizes the dependency-wait init container every pod runs (helm-toolkit).
+  # api: image uploads and imports stream through it (a 952 MB bootstrap image, #295).
   resources:
+    enabled: true
     api:
-      limits:
-        cpu: 2000m
-        memory: 1024Mi
       requests:
         cpu: 100m
         memory: 128Mi
-    enabled: false
+      limits:
+        memory: 2Gi
     jobs:
       bootstrap:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
         requests:
           cpu: 100m
           memory: 128Mi
+        limits:
+          memory: 1024Mi
       db_drop:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
         requests:
           cpu: 100m
           memory: 128Mi
+        limits:
+          memory: 1024Mi
       db_init:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
         requests:
           cpu: 100m
           memory: 128Mi
+        limits:
+          memory: 1024Mi
       db_sync:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
         requests:
           cpu: 100m
           memory: 128Mi
+        limits:
+          memory: 1024Mi
       image_repo_sync:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
         requests:
           cpu: 100m
           memory: 128Mi
+        limits:
+          memory: 1024Mi
       ks_endpoints:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
         requests:
           cpu: 100m
           memory: 128Mi
+        limits:
+          memory: 1024Mi
       ks_service:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
         requests:
           cpu: 100m
           memory: 128Mi
+        limits:
+          memory: 1024Mi
       ks_user:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
         requests:
           cpu: 100m
           memory: 128Mi
+        limits:
+          memory: 1024Mi
       metadefs_load:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
         requests:
           cpu: 100m
           memory: 128Mi
+        limits:
+          memory: 1024Mi
       rabbit_init:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
         requests:
           cpu: 100m
           memory: 128Mi
+        limits:
+          memory: 1024Mi
       storage_init:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
         requests:
           cpu: 100m
           memory: 128Mi
+        limits:
+          memory: 1024Mi
       tests:
-        limits:
-          cpu: 2000m
-          memory: 1024Mi
         requests:
           cpu: 100m
           memory: 128Mi
+        limits:
+          memory: 1024Mi
+    kubernetes_entrypoint:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+    nginx:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 512Mi
   security_context:
     clean:
       container:
