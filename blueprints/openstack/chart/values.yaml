@@ -39,6 +39,23 @@ tolerations:
 # rejected. Merged UNDER componentValues: an explicit componentValues.<component>.krateo.rerunHooksToken wins.
 rerunHooks:
 
+# compute.virtType (#303): qemu (software emulation; works on any node, slowly) or kvm (hardware virtualization).
+# kvm sets nova [libvirt] virt_type=kvm and cpu_mode=host-model, and libvirt's virt_type, and libvirt then refuses to
+# start on a node without /dev/kvm (on GKE: a node pool created with --enable-nested-virtualization; README "Running
+# guests on KVM"). qemu changes nothing: every chart renders as it always has. Merged UNDER componentValues.
+compute:
+  virtType: qemu
+
+# kogCredentials (#303): opt-in credentials for Krateo KOG operators, from the install's own generated admin root
+# (nothing copied by hand, #228). enabled renders, through keystone and in the release's namespace (the KOGs are
+# installed there; cross-namespace is not supported yet): openstack-kog-clouds (a clouds.yaml for the auth proxies of
+# keystone-, neutron- and glance-kog), openstack-kog-token (an admin token for nova-kog, minted when keystone installs
+# or upgrades and re-minted every 6 h) and openstack-kog-endpoints (nova's and keystone's internal URLs and the region;
+# no secret; nova's own hook writes nova_url once nova registered its endpoint). A failed mint fails that chart's
+# release. README "Driving this OpenStack with Krateo KOG operators".
+kogCredentials:
+  enabled: false
+
 # componentValues: per-component spec passed through to that component's Composition, keyed by
 # component name. Each value is exactly that component's own spec (its curated schema),
 # so you can configure any component through the umbrella instead of dropping to a
