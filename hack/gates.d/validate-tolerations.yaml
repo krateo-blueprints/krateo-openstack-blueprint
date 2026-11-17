@@ -1,0 +1,9 @@
+# The umbrella's `tolerations` (0.3.68): a trusted-tenant vcluster taints every child node, and a pod without the
+# toleration schedules nowhere (every DaemonSet desires 0 pods). Each component receives the list as
+# pod.tolerations.<component>, and every Deployment, StatefulSet, DaemonSet, Job and CronJob of every chart, at
+# defaults and with every workload manifest on, must carry exactly that list.
+name: "Every pod carries the umbrella's tolerations"
+job: capability-roles
+order: 90
+run: |
+  python3 hack/validate-tolerations.py .

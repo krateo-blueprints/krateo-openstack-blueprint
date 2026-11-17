@@ -232,8 +232,9 @@ $ helm show chart oci://ghcr.io/krateo-blueprints/charts/keystone  --version X.Y
 1. **`componentValues` schema in sync** — runs `hack/gen-componentvalues-schema.py` and fails
    if `blueprints/openstack/chart/values.schema.json` changed (the umbrella schema must be
    regenerated from the component schemas and committed).
-2. **The `hack/validate-*.py` gates** — each states, in its docstring and in the step comment
-   in `lint.yaml`, the defect it was written for. The step list in `lint.yaml` is the source of
+2. **The `hack/validate-*.py` gates** — each states, in its docstring and in the comment of its
+   `hack/gates.d/<gate>.yaml` file, the defect it was written for. Each `lint.yaml` job runs its
+   gates through one step, `hack/run-gates.py --job <job>`, and `hack/gates.d` is the source of
    truth; this page does not repeat it. A helm template and lint of every chart also runs, as
    information only: it surfaces warnings and never fails the build. Until 2026-11-16 this item
    claimed a byte-identical determinism render and a hook-free check. Neither had run since the
@@ -247,6 +248,26 @@ $ helm show chart oci://ghcr.io/krateo-blueprints/charts/keystone  --version X.Y
    and fails on any placeholder left unresolved.
 5. **`lint-docs`** — the shared Krateo documentation-standard linter (this bundle), added
    under `jobs:` in `lint.yaml`.
+
+## Adding a change: a log.d file and a gates.d file
+
+Branches in flight used to collide on two files every pull request edited in the same place:
+the top of `docs/log.md` and the step list in `lint.yaml`. Both are now one file per change.
+**Never edit `docs/log.md` or the check steps in `lint.yaml` by hand.**
+
+- **Log entry:** add `docs/log.d/<yyyy-mm-dd>-<nn>-<slug>.md`, with front matter (`type: Log`,
+  `title`, `description`) and then the entry's bullet (`- **Title (#issue).** ...`). Write
+  relative links from `docs/log.d/` (`../supply-chain.md`). Then run
+  `python3 hack/render-log.py .`, which regenerates `docs/log.md` (newest first; on one day the
+  higher `<nn>` is the later change), and commit both. CI fails when `docs/log.md` is not the
+  render (`hack/render-log.py . --check`).
+- **Gate:** add `hack/gates.d/<gate>.yaml` with `name`, `job` (an existing `lint.yaml` job, for
+  the tools it installs), `order` and `run` (a block scalar), plus, if needed, `setup`,
+  `working-directory` and `workflow-env`. Say in a comment above the keys what defect it
+  guards. `hack/run-gates.py` documents the format. CI fails when a `hack/validate-*` script is
+  registered in no gate file, or a gate file names a script that doesn't exist
+  (`hack/validate-gates-registered.py`). Only a new job, or a gate needing a new `${{ }}`
+  expression in its runner step's `env`, touches `lint.yaml`.
 
 ## Version pinning downstream
 

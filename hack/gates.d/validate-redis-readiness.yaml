@@ -1,0 +1,17 @@
+# The same shape, on the component added in #131, and the one case where this repo's own
+# precedent points the wrong way. memcached's `tcpSocket 11211` was classified MEANINGFUL
+# because no realistic state was found in which memcached accepts TCP and cannot serve
+# get/set; upstream's redis chart ships the analogous `tcpSocket 6379`, and redis has four
+# such states -- measured in docker.io/library/redis:7.2.17, the image this chart pins:
+# loading an RDB from disk, a failed BGSAVE with writes stopped, a replica whose master
+# link is down, and maxmemory reached with noeviction. A tcpSocket passes in all four, and
+# so does `redis-cli ping` read by exit status, because redis-cli EXITS 0 ON AN ERROR
+# REPLY. zaqar's message store is this redis and posting a message is a write, so
+# readiness does SET then GET and reads the reply text. The gate RUNS the rendered probe
+# scripts against a stub redis-cli reproducing each state, and asserts the converse too:
+# liveness must stay false only for wedged and gone, the two states a restart repairs.
+name: "Redis readiness must prove it can serve, and its liveness must not CrashLoop it"
+job: capability-roles
+order: 190
+run: |
+  python3 hack/validate-redis-readiness.py .

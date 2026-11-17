@@ -111,6 +111,7 @@ spec:
         {{ end }}
       containers:
         - name: manila-share
+{{ dict "envAll" $envAll "component" "share" "container" "default" "args" (list "--process" "manila-share" "--exchange" "openstack" "--rpc-topic" "manila-share" "--rpc-backends" "DEFAULT.enabled_share_backends") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "manila_share" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.share | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "manila" "container" "manila_share" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
@@ -122,6 +123,10 @@ spec:
               value: "/etc/manila/certs/ca.crt"
 {{- end }}
           volumeMounts:
+            - name: manila-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: pod-tmp
               mountPath: /tmp
             - name: oslo-lock-path

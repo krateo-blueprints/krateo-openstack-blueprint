@@ -1,0 +1,16 @@
+name: "Every Job is a Helm hook, in an order its dependencies allow"
+job: job-hooks
+order: 10
+# Set by this job's runner step in lint.yaml, from a GitHub expression the runner cannot evaluate.
+workflow-env:
+  - BASE
+run: |
+  # The hook rules run on every event. The base comparison needs a commit to compare
+  # against, which a first push to a branch does not have.
+  if [ -n "$BASE" ] && [ "$BASE" != "0000000000000000000000000000000000000000" ] \
+    && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+    python3 hack/validate-job-hooks.py . --base "$BASE"
+  else
+    echo "no base commit to compare against; checking the hook rules only"
+    python3 hack/validate-job-hooks.py .
+  fi
