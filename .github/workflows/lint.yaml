@@ -650,8 +650,21 @@ jobs:
       # exclusion by RENDERING the chart rather than by looking for the flag's name in the
       # template -- the first version grepped _helpers.tpl, which its own explanatory comment
       # satisfied.
+      #
+      # From #196 the flag is components[].requires, a capability, and the umbrella can provide one:
+      # block-storage, by storage.backend when it is not none. The gate renders the selection with
+      # none AND with every other backend the schema accepts (the positive control: full-strict must
+      # then add cinder and nothing else), through the osh.selected helper, since an offline render
+      # emits no component.
       - name: full-strict omits what needs provisioning; full still includes it
         run: python3 hack/validate-provisioning-preconditions.py .
+
+      # cinder's only backend is Ceph, and with none it waited in Init forever on ceph-etc and the
+      # keyring Secrets, which nothing creates (#196). The umbrella's storage.backend reaches cinder as
+      # krateo.storageBackend, is the one place that sets it, and with none cinder refuses to render,
+      # naming it. Also: nova-compute's LIBVIRT_CEPH_SECRET_UUID read an undefined value path.
+      - name: cinder renders only with the backend storage.backend names
+        run: python3 hack/validate-storage-backend.py .
 
       # A hostPath is state that stays on one node. mariadb defaulted to /tmp/mysql-data, so a
       # node restart on kind, where /tmp is tmpfs, emptied every OpenStack database, and the pod

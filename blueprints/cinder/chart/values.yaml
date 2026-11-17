@@ -1625,4 +1625,14 @@ krateo:
   # upgrade hook too, hack/validate-rerun-hooks.py). It is the documented way to re-run hooks that were never run
   # (Ready=False/HooksMayNotHaveRun, README).
   rerunHooksToken: ""
+  # storageBackend (#196, #308): which block-storage backend this cinder renders, set by the umbrella from its
+  # storage.backend for every install it makes (templates/krateo-storage-backend.yaml).
+  #   unmanaged      this default: the chart as OpenStack-Helm ships it, outside the umbrella. Its rbd1 backend names
+  #                  the ConfigMap ceph-etc and the Secrets pvc-ceph-client-key and cinder-volume-rbd-keyring, which
+  #                  whoever installs it must provide (hack/provisioning-preconditions.yaml). The umbrella never passes
+  #                  it: it refuses a componentValues.cinder.krateo.storageBackend.
+  #   none           refused: there is no backend, and cinder-volume would wait in Init forever.
+  #   ceph-rook      refused until #308 implements it.
+  #   ceph-external  refused until #308 implements it.
+  storageBackend: unmanaged
 ...
