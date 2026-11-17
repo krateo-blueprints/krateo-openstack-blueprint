@@ -1,0 +1,66 @@
+{{/*
+Krateo blueprint addition (#303): nova_url for Krateo KOG operators, written by nova itself.
+
+keystone renders openstack-kog-endpoints (templates/kog-credentials.yaml in keystone) and installs before nova, when the
+catalog has no compute entry yet. This post-install,post-upgrade hook runs once nova registered its endpoint
+(it waits for nova-ks-endpoints and for nova's API) and writes nova_url: nova's internal URL from keystone's catalog,
+with the admin project id from the token response. It is helm-toolkit.snippets.kog_endpoints_pod in mode nova, the same
+program keystone runs, so both resolve nova_url the same way.
+
+The password reaches only the mint step, through nova's own admin openrc (secrets.identity.admin, which the blueprint
+already writes from the generated admin root for nova's ks-* Jobs): no new reader of the root. The writer sends a JSON
+merge patch of nova_url alone, so keystone's keys stay as they are, and its Role may get and patch that one ConfigMap.
+
+Off unless kog_credentials.enabled (the umbrella's kogCredentials.enabled).
+*/}}
+{{- if .Values.kog_credentials.enabled }}
+{{- $envAll := . }}
+---
+# nova's writer may read and patch openstack-kog-endpoints, and nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nova-kog-endpoints-writer
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    resourceNames:
+      - openstack-kog-endpoints
+    verbs:
+      - get
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nova-kog-endpoints-writer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nova-kog-endpoints-writer
+subjects:
+  - kind: ServiceAccount
+    name: nova-kog-endpoints
+    namespace: {{ .Release.Namespace }}
+{{- /* The pod's ServiceAccount, with the Role kubernetes-entrypoint needs to wait for its dependencies (helm-toolkit). */}}
+{{ tuple $envAll "kog_endpoints" "nova-kog-endpoints" | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nova-kog-endpoints
+  labels:
+{{ tuple $envAll "nova" "kog-endpoints" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+  annotations:
+{{ tuple "kog-endpoints" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+{{ tuple $envAll "nova" "kog-endpoints" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+    spec:
+{{ dict "envAll" $envAll "application" "nova" "mode" "nova" "depsKey" "kog_endpoints" "serviceAccount" "nova-kog-endpoints" "ksUserSecret" .Values.secrets.identity.admin "useCA" (or .Values.manifests.certificates .Values.tls.identity) | include "helm-toolkit.snippets.kog_endpoints_pod" | indent 6 }}
+{{- end }}

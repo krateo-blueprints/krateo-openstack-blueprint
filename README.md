@@ -1372,7 +1372,7 @@ and the schema refuses `kogCredentials.namespace`.
 |---|---|---|
 | Secret `openstack-kog-clouds` (key `clouds.yaml`) | the auth proxies of keystone-, neutron- and glance-kog | rendered by an ExternalSecret from the identity-admin root. Cloud `openstack`: keystone's internal endpoint, the admin user and project, interface `internal`, the region. |
 | Secret `openstack-kog-token` (key `token`) | nova-kog (apiKey auth, no proxy) | an admin token. Keystone tokens here last 12 hours (`token.expiration: 43200`), so a CronJob, `keystone-kog-token`, re-mints it every 6 hours. A post-install,post-upgrade hook Job mints it when keystone installs or upgrades. |
-| ConfigMap `openstack-kog-endpoints` (no secret) | you, when you install nova-kog | `nova_url`: nova's internal endpoint from keystone's catalog, with the admin project id from the token response appended (`.../v2.1/<project id>`). `keystone_url`: keystone's internal endpoint. `region_name`. The same run that mints the token writes these. |
+| ConfigMap `openstack-kog-endpoints` (no secret) | you, when you install nova-kog | `nova_url`: nova's internal endpoint from keystone's catalog, with the admin project id from the token response appended (`.../v2.1/<project id>`). `keystone_url`: keystone's internal endpoint. `region_name`. keystone's runs write `keystone_url` and `region_name`; nova's own hook writes `nova_url` when nova installs or upgrades. |
 
 Set each KOG to these names (read from each KOG chart's default branch, 2026-11-17):
 
@@ -1389,14 +1389,20 @@ How the token and the endpoints are written:
 - **A failed mint fails keystone's release, on purpose.** Each run tries at most 4 times, because keystone locks a user
   after 5 failures. When the hook Job gives up, keystone's install or upgrade fails, and so does every KOG that would
   have used a stale token. Fix the cause, then re-run the hook with `rerunHooks.keystone` (below).
-- `nova_url` stays empty until nova is installed. Keystone installs first, and nova adds its catalog entry when it
-  installs. The next CronJob run fills `nova_url` in. To fill it right away:
-  `kubectl -n openstack create job --from=cronjob/keystone-kog-token keystone-kog-token-now`.
-- Only the mint step holds the admin password. The container that writes may patch `openstack-kog-token` and
-  `openstack-kog-endpoints`, and nothing else.
+- **nova writes `nova_url` itself.** Keystone installs before nova, when keystone's catalog has no compute entry yet.
+  nova's chart runs a post-install,post-upgrade hook Job, `nova-kog-endpoints`. It waits for `nova-ks-endpoints` and
+  nova's API, then writes `nova_url`. It runs the same program as keystone's Job, so both resolve the same URL, and
+  it fails nova's release after 4 tries, as keystone's does. Once nova is in the catalog, keystone's runs write the
+  same `nova_url` too.
+- Only the mint step holds the admin password. keystone's writer may patch `openstack-kog-token` and
+  `openstack-kog-endpoints`; nova's may patch `openstack-kog-endpoints` only. nova's step reads nova's own admin openrc
+  (`nova-keystone-admin`, which nova's other keystone Jobs already read).
+- Each writer sends a JSON merge patch of only its own keys: nova's names `nova_url` alone, and keystone's names
+  `nova_url` only once it resolved one. So neither clears what the other wrote.
 - Both objects are read back from the live cluster on every render, so a reconcile never resets them.
-- `hack/validate-kog-credentials.py` checks the clouds file, the jobs and the writer's permissions. It also runs the
-  mint program against a stand-in keystone, and checks that nothing else in the blueprint reads these objects.
+- `hack/validate-kog-credentials.py` checks the clouds file, the jobs and the writers' permissions. It runs the mint
+  program against a stand-in keystone, and runs both writers against each other in both orders, against a stand-in
+  Kubernetes API. It also checks that nothing else in the blueprint reads these objects.
 - **neutron- and glance-kog read `clouds.yaml` only when their proxy starts.** After the admin password rotates,
   restart them: `kubectl -n openstack rollout restart deployment <their auth-bridge deployment>`. Until then they log
   in with the old password, and keystone locks the account after five failures. keystone-kog re-reads its Secret and

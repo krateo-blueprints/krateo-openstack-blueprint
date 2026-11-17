@@ -76,6 +76,7 @@ return: |
       "metadefs-load" "-8"
       "storage-init" "-8"
       "bootstrap" "-7"
+      "kog-endpoints" "-6"
       "kog-token" "-6"
 -}}
 {{- if not (hasKey $weights $role) -}}
