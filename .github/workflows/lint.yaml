@@ -405,6 +405,11 @@ jobs:
       - name: KOG credentials from the admin root
         run: python3 hack/validate-kog-credentials.py .
 
+      # neutron's tunnel interface defaults to empty, so the OVS agent uses the default route's NIC on any node, not
+      # a provider's NIC name (ens4 was GCE's). The rendered fallback is run against a stand-in `ip`.
+      - name: neutron's tunnel interface is detected, not assumed
+        run: python3 hack/validate-neutron-tunnel-interface.py .
+
       # glance's image store: 10Gi by default, a smaller live claim expanded, a claim never asked to shrink (#295).
       - name: glance's image store size
         run: python3 hack/validate-glance-store.py .
