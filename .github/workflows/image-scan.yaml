@@ -1,0 +1,205 @@
+# Scans every image the charts run for CRITICAL vulnerabilities, and re-asks each registry whether it still serves
+# the image anonymously (#316).
+#
+# What is scanned is hack/images.yaml, the generated inventory that lint.yaml's offline gate keeps equal to what the
+# charts render. A CRITICAL finding fails unless hack/image-cve-allowlist.yaml has an entry for that CVE, image and
+# package whose expiry has not passed (hack/check-image-cves.py says why the key is all three).
+#
+# WHEN, and why not on every pull request. About sixty images, most of them 0.5-1.5 GB OpenStack images: a full scan
+# downloads every layer of every one, which is tens of GB and many runner-minutes per run, for a result that changes
+# when an image changes or when a new CVE is published, not when a template does. So it runs:
+#   * on a push that changes the inventory or the allowlist, on any branch, so a pull request that changes an image
+#     is scanned on that pull request (lint.yaml fails that pull request until hack/images.yaml is regenerated, and
+#     the regenerated file is what triggers this);
+#   * weekly, because a new CVE lands in an unchanged image;
+#   * on every release tag, so each release has a scan of exactly what it ships;
+#   * by hand.
+# Not on pull_request as well: a pull request from this repository is already a push, and the duplicate run would
+# download the same images again.
+name: image-scan
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - hack/images.yaml
+      - hack/image-cve-allowlist.yaml
+      - hack/check-image-cves.py
+      - hack/gen-image-inventory.py
+      - .github/workflows/image-scan.yaml
+    # paths are not evaluated for tags: every release tag runs.
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Trivy is downloaded, not run through aquasecurity/trivy-action, and checked against a digest written HERE as well
+  # as against the release's own checksums file: a release whose assets and checksums were replaced together passes
+  # the second check and not the first, and a git tag an action is pinned to can be moved to other code. A scanner is
+  # the last component a supply-chain check should take on trust. Bump both lines together.
+  TRIVY_VERSION: 0.76.1
+  TRIVY_SHA256: c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0
+
+jobs:
+  inventory:
+    # The registry half of the inventory, which no pull request re-measures: each image is still served anonymously,
+    # in a format containerd pulls, for linux/amd64. A moved digest is printed, not failed (docs/supply-chain.md).
+    runs-on: ubuntu-latest
+    outputs:
+      images: ${{ steps.matrix.outputs.images }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+
+      - name: Install Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install PyYAML
+
+      - name: The inventory matches the charts, and every registry still answers as recorded
+        run: python3 hack/gen-image-inventory.py . --resolve
+
+      - name: The images to scan
+        id: matrix
+        run: |
+          set -euo pipefail
+          images="$(python3 hack/check-image-cves.py . --matrix)"
+          echo "images=$images" >> "$GITHUB_OUTPUT"
+          echo "$images" | python3 -c 'import json,sys; l=json.load(sys.stdin); print(len(l), "images to scan"); print("\n".join(l))'
+
+  trivy-db:
+    # One vulnerability database for every scan job, so every image in a run is judged against the same data, and
+    # the database registry is asked once rather than sixty times in parallel.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Trivy
+        id: trivy
+        uses: krateo-platformops/.github/.github/actions/release-download@main
+        with:
+          repo: aquasecurity/trivy
+          tag: v${{ env.TRIVY_VERSION }}
+          asset: trivy_${{ env.TRIVY_VERSION }}_Linux-64bit.tar.gz
+          checksums: trivy_${{ env.TRIVY_VERSION }}_checksums.txt
+
+      - name: Install Trivy, checked against the digest pinned in this workflow
+        run: |
+          set -euo pipefail
+          echo "$TRIVY_SHA256  ${{ steps.trivy.outputs.path }}" | sha256sum -c -
+          tar -xzf "${{ steps.trivy.outputs.path }}" -C "$RUNNER_TEMP" trivy
+          "$RUNNER_TEMP/trivy" --version
+
+      - name: Download the vulnerability databases
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/trivy" image --download-db-only --cache-dir "$RUNNER_TEMP/trivy-cache"
+          "$RUNNER_TEMP/trivy" image --download-java-db-only --cache-dir "$RUNNER_TEMP/trivy-cache"
+          "$RUNNER_TEMP/trivy" --cache-dir "$RUNNER_TEMP/trivy-cache" version
+
+      - name: Upload the databases
+        uses: actions/upload-artifact@v7
+        with:
+          name: trivy-db
+          path: |
+            ${{ runner.temp }}/trivy-cache/db
+            ${{ runner.temp }}/trivy-cache/java-db
+          retention-days: 1
+
+  scan:
+    needs:
+      - inventory
+      - trivy-db
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        image: ${{ fromJSON(needs.inventory.outputs.images) }}
+    steps:
+      - name: Download Trivy
+        id: trivy
+        uses: krateo-platformops/.github/.github/actions/release-download@main
+        with:
+          repo: aquasecurity/trivy
+          tag: v${{ env.TRIVY_VERSION }}
+          asset: trivy_${{ env.TRIVY_VERSION }}_Linux-64bit.tar.gz
+          checksums: trivy_${{ env.TRIVY_VERSION }}_checksums.txt
+
+      - name: Install Trivy, checked against the digest pinned in this workflow
+        run: |
+          set -euo pipefail
+          echo "$TRIVY_SHA256  ${{ steps.trivy.outputs.path }}" | sha256sum -c -
+          tar -xzf "${{ steps.trivy.outputs.path }}" -C "$RUNNER_TEMP" trivy
+
+      - name: Download the databases
+        uses: actions/download-artifact@v8
+        with:
+          name: trivy-db
+          path: ${{ runner.temp }}/trivy-cache
+
+      - name: Scan ${{ matrix.image }}
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/report"
+          # Straight from the registry (no docker daemon), as linux/amd64, the platform every cluster here runs.
+          # HIGH is reported for the record; only CRITICAL is judged (hack/check-image-cves.py).
+          "$RUNNER_TEMP/trivy" image "$IMAGE" \
+            --cache-dir "$RUNNER_TEMP/trivy-cache" --skip-db-update --skip-java-db-update \
+            --image-src remote --platform linux/amd64 --scanners vuln \
+            --severity CRITICAL,HIGH --timeout 30m \
+            --format json --output "$RUNNER_TEMP/report/trivy.json" --exit-code 0
+          python3 - "$RUNNER_TEMP/report/trivy.json" <<'EOF'
+          import json, sys, collections
+          rep = json.load(open(sys.argv[1]))
+          c = collections.Counter(v["Severity"] for r in rep.get("Results") or [] for v in r.get("Vulnerabilities") or [])
+          print("%s: CRITICAL %d, HIGH %d" % (rep.get("ArtifactName"), c["CRITICAL"], c["HIGH"]))
+          EOF
+
+      - name: Upload the report
+        uses: actions/upload-artifact@v7
+        with:
+          name: trivy-report-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/report/trivy.json
+          retention-days: 30
+
+  gate:
+    # Judges every report against the allowlist. Runs when a scan job failed too: the image it was scanning then has
+    # no report, which this fails on by name, rather than the run reading as one red job among green ones.
+    needs:
+      - inventory
+      - scan
+    if: always() && needs.inventory.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install PyYAML
+
+      - name: Download every report
+        uses: actions/download-artifact@v8
+        with:
+          pattern: trivy-report-*
+          path: reports
+
+      - name: No CRITICAL vulnerability without an exception in date
+        run: python3 hack/check-image-cves.py . reports

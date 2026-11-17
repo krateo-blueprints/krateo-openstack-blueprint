@@ -13,6 +13,25 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Image inventory and CVE scan (#316).**
+  - **Inventory:** 58 distinct images across the 38 published charts (quay.io 49, docker.io 8, ghcr.io 1). Every
+    chart is rendered at its defaults and with every off-by-default manifest on, and each chart's `images.tags` is
+    added. All 58 are pullable anonymously as measured on 2026-11-17, gnocchi's Kolla images included (#115).
+    `hack/gen-image-inventory.py` generates `hack/images.yaml` and [images.md](images.md). Offline, in `lint.yaml`,
+    it fails when a chart's images differ from the files, and when an image's registry namespace has no publisher
+    in `hack/image-sources.yaml`.
+  - **Registry re-check:** `--resolve` asks each registry again, without credentials. It fails when an image is no
+    longer pullable (v1 manifest, no linux/amd64, 401 or 404) and reports a moved digest without failing.
+  - **CVE scan:** `.github/workflows/image-scan.yaml` scans every pullable image with Trivy 0.76.1, pinned by a
+    digest in the workflow. It runs on a push that changes the inventory, weekly, and on each release tag; not on
+    every pull request, since a full scan downloads tens of GB. A CRITICAL finding fails unless
+    `hack/image-cve-allowlist.yaml` has an entry for that CVE, image and package that hasn't expired (at most 120
+    days ahead). An entry that covers nothing fails too. The judging rules run offline per pull request
+    (`--self-test`).
+  - **Pinning, open for Diego** ([supply-chain.md](supply-chain.md)): 35 images use release-series tags, and each
+    airshipit one was pushed 27 to 32 times in 30 days. Proposed: dated tags with the digest recorded and verified
+    in CI. Mirror the four Kolla gnocchi images, which have no immutable tag. Not `@sha256:` in the charts (#72).
+
 - **Start ordering, and re-running hooks (0.3.72, #297, #298, #299).**
   - **#298:** ceilometer-notification now waits for the rabbit-init Job of every vhost it consumes, as the umbrella
     computes it, overrides included (`conf.notification_vhost_jobs`). Check 26b asserts the jobs equal the vhost list.
