@@ -192,8 +192,7 @@
 {{- /* kogCredentials (#303): keystone renders the KOG credentials from the admin root it already receives. Off: nothing
        is passed. Merged UNDER componentValues. hack/validate-kog-credentials.py renders this span. */ -}}
 {{- if and (eq $c.name "keystone") ($.Values.kogCredentials | default dict).enabled }}
-{{- $kc := dict "enabled" true "namespace" (($.Values.kogCredentials).namespace | default $.Release.Namespace) }}
-{{- $ov = mergeOverwrite (dict "kog_credentials" $kc) (deepCopy $ov) }}
+{{- $ov = mergeOverwrite (dict "kog_credentials" (dict "enabled" true)) (deepCopy $ov) }}
 {{- end }}
 {{- /* TWO PHASES: a live component's NEW values are written only at the new apiVersion, and only
        once its CompositionDefinition serves it (status.apiVersion at the current version, Ready

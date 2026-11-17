@@ -965,15 +965,11 @@
         "null"
       ],
       "title": "Credentials for Krateo KOG operators",
-      "description": "Opt-in. enabled renders openstack-kog-clouds (a clouds.yaml for the keystone-, neutron- and glance-kog auth proxies) and openstack-kog-token (an admin token for nova-kog, re-minted every 6 h), both from the install's generated admin root, in namespace (default: the release's). README \"Driving this OpenStack with Krateo KOG operators\" (#303).",
+      "description": "Opt-in. enabled renders, in the release's namespace (cross-namespace is not supported yet), openstack-kog-clouds (a clouds.yaml for the keystone-, neutron- and glance-kog auth proxies), openstack-kog-token (an admin token for nova-kog, re-minted every 6 h) and openstack-kog-endpoints (nova's and keystone's internal URLs and the region, no secret), all from the install's generated admin root. README \"Driving this OpenStack with Krateo KOG operators\" (#303).",
       "additionalProperties": false,
       "properties": {
         "enabled": {
           "type": "boolean"
-        },
-        "namespace": {
-          "type": "string",
-          "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
         }
       }
     }

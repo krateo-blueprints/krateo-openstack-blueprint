@@ -465,15 +465,11 @@
     "kog_credentials": {
       "type": "object",
       "title": "Credentials for Krateo KOG operators",
-      "description": "openstack-kog-clouds (a clouds.yaml) and openstack-kog-token (an admin token re-minted on schedule), from the install's generated admin root (#303). Set by the umbrella's kogCredentials.",
+      "description": "openstack-kog-clouds (a clouds.yaml), openstack-kog-token (an admin token re-minted on schedule) and openstack-kog-endpoints (nova's and keystone's internal URLs and the region, no secret), from the install's generated admin root, in the release's namespace (#303). Set by the umbrella's kogCredentials.",
       "additionalProperties": false,
       "properties": {
         "enabled": {
           "type": "boolean"
-        },
-        "namespace": {
-          "type": "string",
-          "description": "Where the KOGs read them; empty: this release's namespace."
         },
         "cloud_name": {
           "type": "string",

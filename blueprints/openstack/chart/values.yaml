@@ -47,13 +47,13 @@ compute:
   virtType: qemu
 
 # kogCredentials (#303): opt-in credentials for Krateo KOG operators, from the install's own generated admin root
-# (nothing copied by hand, #228). enabled renders, through keystone, openstack-kog-clouds (a clouds.yaml for the auth
-# proxies of keystone-, neutron- and glance-kog) and openstack-kog-token (an admin token for nova-kog, minted when
-# keystone installs or upgrades and re-minted every 6 h), in namespace (empty: the release's). README "Driving this
-# OpenStack with Krateo KOG operators".
+# (nothing copied by hand, #228). enabled renders, through keystone and in the release's namespace (the KOGs are
+# installed there; cross-namespace is not supported yet): openstack-kog-clouds (a clouds.yaml for the auth proxies of
+# keystone-, neutron- and glance-kog), openstack-kog-token (an admin token for nova-kog, minted when keystone installs
+# or upgrades and re-minted every 6 h) and openstack-kog-endpoints (nova's and keystone's internal URLs and the region;
+# no secret). A failed mint fails keystone's release. README "Driving this OpenStack with Krateo KOG operators".
 kogCredentials:
   enabled: false
-  namespace: ""
 
 # componentValues: per-component spec passed through to that component's Composition, keyed by
 # component name. Each value is exactly that component's own spec (its curated schema),

@@ -1362,21 +1362,45 @@ The KOG operators (keystone-, neutron-, glance- and nova-kog) need credentials. 
 ```yaml
 kogCredentials:
   enabled: true
-  namespace: kog-system   # where the KOGs run; empty: the Openstack release's namespace
 ```
 
-| Secret (in `namespace`) | Consumed by | What it is |
-|---|---|---|
-| `openstack-kog-clouds` (key `clouds.yaml`) | the auth proxies of keystone-, neutron- and glance-kog | rendered by an ExternalSecret from the identity-admin root. Cloud `openstack`: keystone's internal endpoint, the admin user and project, interface `internal`, the region. |
-| `openstack-kog-token` (key `token`) | nova-kog (apiKey auth, no proxy) | an admin token. Keystone tokens here last 12 hours (`token.expiration: 43200`), so a CronJob, `keystone-kog-token`, re-mints it every 6 hours. A post-install,post-upgrade hook Job mints it when keystone installs or upgrades, so it exists before any KOG starts. |
+Everything lands in the Openstack release's namespace. Install the KOGs there too: the auth proxies mount
+`openstack-kog-clouds`, and a Pod can mount only a Secret in its own namespace. Other namespaces aren't supported yet,
+and the schema refuses `kogCredentials.namespace`.
 
-How the token is minted:
-- Each run tries at most 4 times; keystone locks a user after 5 failures.
-- Only the mint step holds the admin password. The container that writes the token may patch `openstack-kog-token`
-  and nothing else.
-- In another namespace, a SecretStore of its own reads only the admin root.
-- `hack/validate-kog-credentials.py` checks the clouds file, the token Jobs, and that nothing else in the blueprint
-  reads either Secret.
+| Object | Consumed by | What it is |
+|---|---|---|
+| Secret `openstack-kog-clouds` (key `clouds.yaml`) | the auth proxies of keystone-, neutron- and glance-kog | rendered by an ExternalSecret from the identity-admin root. Cloud `openstack`: keystone's internal endpoint, the admin user and project, interface `internal`, the region. |
+| Secret `openstack-kog-token` (key `token`) | nova-kog (apiKey auth, no proxy) | an admin token. Keystone tokens here last 12 hours (`token.expiration: 43200`), so a CronJob, `keystone-kog-token`, re-mints it every 6 hours. A post-install,post-upgrade hook Job mints it when keystone installs or upgrades. |
+| ConfigMap `openstack-kog-endpoints` (no secret) | you, when you install nova-kog | `nova_url`: nova's internal endpoint from keystone's catalog, with the admin project id from the token response appended (`.../v2.1/<project id>`). `keystone_url`: keystone's internal endpoint. `region_name`. The same run that mints the token writes these. |
+
+Set each KOG to these names (read from each KOG chart's default branch, 2026-11-17):
+
+| KOG | Setting | Its default | Set it to |
+|---|---|---|---|
+| keystone-kog | `authBridge.cloudsSecret` | `keystone-clouds` | `openstack-kog-clouds`. Or skip the clouds file: `authBridge.openrcSecret: keystone-keystone-admin` (0.4.1 and later). |
+| neutron-kog | `authBridge.cloudsSecret` | `neutron-clouds` | `openstack-kog-clouds` |
+| glance-kog | `authBridge.cloudsSecret` | `glance-clouds` | `openstack-kog-clouds` |
+| all three proxies | `authBridge.osCloud` | `openstack` | leave the default. The key `clouds.yaml` is fixed: the proxy mounts the Secret at `/etc/openstack` and reads that file. |
+| nova-kog | `nova.url` (chart value, required) | empty | the `nova_url` of `openstack-kog-endpoints`: `kubectl -n openstack get configmap openstack-kog-endpoints -o jsonpath='{.data.nova_url}'` |
+| nova-kog | `spec.authentication.apiKey.tokenRef` on each `<Kind>Configuration` | sample: `nova-token` / `krateo-system` / `token` | name `openstack-kog-token`, namespace the Openstack release's, key `token` |
+
+How the token and the endpoints are written:
+- **A failed mint fails keystone's release, on purpose.** Each run tries at most 4 times, because keystone locks a user
+  after 5 failures. When the hook Job gives up, keystone's install or upgrade fails, and so does every KOG that would
+  have used a stale token. Fix the cause, then re-run the hook with `rerunHooks.keystone` (below).
+- `nova_url` stays empty until nova is installed. Keystone installs first, and nova adds its catalog entry when it
+  installs. The next CronJob run fills `nova_url` in. To fill it right away:
+  `kubectl -n openstack create job --from=cronjob/keystone-kog-token keystone-kog-token-now`.
+- Only the mint step holds the admin password. The container that writes may patch `openstack-kog-token` and
+  `openstack-kog-endpoints`, and nothing else.
+- Both objects are read back from the live cluster on every render, so a reconcile never resets them.
+- `hack/validate-kog-credentials.py` checks the clouds file, the jobs and the writer's permissions. It also runs the
+  mint program against a stand-in keystone, and checks that nothing else in the blueprint reads these objects.
+- **neutron- and glance-kog read `clouds.yaml` only when their proxy starts.** After the admin password rotates,
+  restart them: `kubectl -n openstack rollout restart deployment <their auth-bridge deployment>`. Until then they log
+  in with the old password, and keystone locks the account after five failures. keystone-kog re-reads its Secret and
+  backs off after a rejection.
 
 **Install oasgen-provider 0.80.0 from OCI**, with its chart and CRDs in step, once per cluster, before the KOGs. Some KOG
 READMEs show an unpinned install from `charts.krateo.io`, which serves 0.10.0; don't use it. nova-kog's owner measured

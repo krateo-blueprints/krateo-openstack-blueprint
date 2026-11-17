@@ -1167,13 +1167,12 @@ krateo:
   rerunHooksToken: ""
 
 # Krateo blueprint addition (#303): credentials for Krateo KOG operators, from the install's generated admin root
-# (templates/kog-credentials.yaml). The umbrella sets enabled and namespace from kogCredentials.
+# (templates/kog-credentials.yaml), in this release's namespace. The umbrella sets enabled from kogCredentials.
 kog_credentials:
-  # Render openstack-kog-clouds (a clouds.yaml for the keystone-, neutron- and glance-kog auth proxies) and
-  # openstack-kog-token (an admin token for nova-kog, re-minted on schedule).
+  # Render openstack-kog-clouds (a clouds.yaml for the keystone-, neutron- and glance-kog auth proxies),
+  # openstack-kog-token (an admin token for nova-kog, re-minted on schedule) and openstack-kog-endpoints (nova's and
+  # keystone's internal URLs and the region, resolved by keystone; no secret).
   enabled: false
-  # Where the KOGs read them; empty: this release's namespace.
-  namespace: ""
   # The cloud's name in clouds.yaml.
   cloud_name: openstack
   # Re-mint the token; tokens last conf.keystone.token.expiration (12 h), so every 6 h keeps one valid.
