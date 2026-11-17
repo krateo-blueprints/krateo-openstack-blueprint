@@ -161,7 +161,30 @@ kubectl create namespace openstack-system
 # reads the RabbitMQ connection 0.3.69 moved there and retries localhost forever. Stay on 0.3.68; the fix
 # ships in 0.3.70.
 #
-# What 0.3.68 has actually been run through, stated so you know what is NOT covered:
+# What 0.3.71 has actually been run through (2026-11-17), stated so you know what is NOT covered:
+#   - 0.3.71 freshly installed with these exact steps, profile: full-strict, on a 3-node GKE cluster
+#     (n2-standard-16, core-provider 2.13.107): all 32 components and the umbrella Ready 35 min after the
+#     apply, with no intervention, although GKE resized the cluster's control plane mid-install (the
+#     API server refused connections and every composition controller restarted; none was in a first
+#     install at that moment). 253 pods, none Pending; containers restarted: mariadb-controller 3 times
+#     (that API outage) and manila-bootstrap 7 times until nova-api was up (#299). Keystone rejects
+#     every published password (51 users) and accepts the 34 generated ones; MariaDB accepts each of
+#     the 25 per-service users with its generated password and refuses the published one, and counted
+#     0 access-denied through the whole install; RabbitMQ accepts each of the 17 per-service users with
+#     its generated password and refuses the published one. No published default remains in any of the
+#     562 Secrets and ConfigMaps scanned (identity, MariaDB, RabbitMQ administrator and per-service).
+#     glance holds exactly one copy of each bootstrap image, and its new image store requests 10 GiB;
+#   - a fresh 0.3.68 install upgraded straight to 0.3.71 as "Upgrading an existing install" below
+#     describes, instrumented (#228, #295): 32 components Ready 18 min after the upgrade started. No
+#     failed Keystone login and no MariaDB access-denied after the upgrade. Each per-service RabbitMQ
+#     user's password moves once, at this upgrade: every refusal came from a pod still holding the old
+#     password before its component's final rabbit-init, or from a pod of the previous version. The
+#     existing 2 GiB image store kept its size, with one copy of each image. A composition controller
+#     killed mid-upgrade (SIGKILL inside horizon's db-sync hook) had its operation recovered within 1 s
+#     of its restart. APIs failed 1-3 times each during their rollouts (#286). Its 0.3.68 base needed
+#     one human step: GKE resized the control plane while cyborg was in its first install, and
+#     core-provider 2.13.107 left cyborg deployed with its install hooks never run; deleting that
+#     component's Composition recovered it in 4 min (core-provider#563, fixed in 2.13.108; #297);
 #   - 0.3.68 freshly installed with these exact steps (External Secrets Operator 2.14.0 included),
 #     profile: full-strict, on a 3-node GKE cluster (n2-standard-16, core-provider 2.13.106): all 32
 #     components Ready 26 min after the apply, the umbrella 28 min; 254 pods, none Pending, and no
@@ -204,14 +227,20 @@ kubectl create namespace openstack-system
 #     and a designate zone round-trip through PowerDNS (#179, #204).
 # Known, measured, not yet fixed:
 #   - a component can read Ready while a pod of it crash-loops (#231);
-#   - ceilometer's notification agent consumes no service notifications in full-strict: it waits on
-#     RabbitMQ vhosts that do not exist there (cinder, glance, keystone) (#285);
-#   - every API runs one replica, so an upgrade or config change drops it for 1-2 min (#286).
+#   - every API runs one replica, so an upgrade or config change drops it for 1-2 min (#286);
+#   - on a fresh install ceilometer's notification agent starts before nova's RabbitMQ vhost exists, and
+#     its worker crashes until nova's rabbit-init has run, then recovers on its own (#298);
+#   - on a fresh install manila's bootstrap Job does not wait for the APIs it calls and fails until
+#     nova-api is up, then succeeds (#299);
+#   - if the API server goes away while a component is in its FIRST install (e.g. a managed control
+#     plane resizing), core-provider up to 2.13.107 can leave it deployed with its install hooks never
+#     run and its pods waiting forever. Recovery: delete that component's Composition, and the umbrella
+#     re-creates it (core-provider#563; 2.13.108 marks it Ready=False/HooksMayNotHaveRun, #297).
 # cinder is not in full-strict because its only backend needs Ceph (#196). NOT verified at this
 # version: the 36-component profile: full, kind, a VNC console in a browser, and the
 # per-component path further down.
 
-BP_VERSION=0.3.68
+BP_VERSION=0.3.71
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 
