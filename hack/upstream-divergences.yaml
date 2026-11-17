@@ -466,3 +466,54 @@ divergences:
           traverses a worker, and / is in cyborg's acl_public_routes so it needs no token.
           hack/validate-uwsgi-probe-traverses-worker.py enforces this for all 16 uwsgi-served
           containers; this entry keeps it true for cyborg across a re-vendor.
+  - component: nova
+    issue: 146
+    reason: >-
+      Upstream's nova-compute liveness and startup probes ping the service over RPC, so a RabbitMQ outage fails them on
+      every node at once and the kubelet restarts the whole compute fleet, which cannot repair RabbitMQ (observed: 9
+      restarts on each nova-compute while RabbitMQ's release was wedged). Liveness and startup check the process only;
+      readiness keeps the RPC check, so the outage still shows.
+    assertions:
+      - file: templates/daemonset-compute.yaml
+        present: define "novaComputeProcessProbe"
+        why: >-
+          The process-only check that liveness and startup include. hack/validate-nova-compute-liveness.py renders the
+          chart and runs the rendered command against stand-in processes.
+      - file: templates/daemonset-compute.yaml
+        absent: --liveness-probe
+        why: >-
+          health-probe.py's liveness mode, which still makes the RPC call. Its return means a probe that restarts
+          nova-compute depends on RabbitMQ again.
+  - component: memcached
+    issue: 309
+    reason: >-
+      Upstream serves every replica behind one ClusterIP with ClientIP affinity, so each client sticks to one replica
+      and the replicas hold disagreeing caches (keystone's token-validation and revocation caches among them). With
+      manifests.service_discovery (the umbrella's ha.enabled) the replicas run behind a headless Service and every
+      client lists them all; off, the chart renders as upstream's.
+    assertions:
+      - file: templates/service-discovery.yaml
+        present: "clusterIP: None"
+        why: >-
+          Pod DNS names exist only under a headless governing Service, and every client's server list names the pods
+          through it. hack/validate-ha-propagation.py checks the names the clients list against the pods it governs.
+      - file: templates/statefulset.yaml
+        present: $stsName = printf "%s-ha"
+        why: >-
+          A new StatefulSet name with discovery, because serviceName is immutable: patching the existing StatefulSet
+          onto the headless Service would be refused, and the release would stop upgrading.
+      - file: templates/service.yaml
+        present: "if not .Values.manifests.service_discovery"
+        why: ClientIP affinity is what pinned each client to one replica; with discovery it is dropped.
+  - component: swift
+    issue: 309
+    reason: >-
+      swift's proxy start pins the memcached Service's address in /etc/hosts (an eventlet DNS workaround). With
+      memcached's replicas listed one by one (ha), proxy-server.conf names each pod, so each pod is pinned the same way;
+      without the list nothing changes.
+    assertions:
+      - file: templates/bin/_proxy-start.sh.tpl
+        present: if .Values.endpoints.oslo_cache.statefulset
+        why: >-
+          Without it the proxy's memcache list names pods that the workaround never resolved, which is the state the
+          workaround exists to avoid.

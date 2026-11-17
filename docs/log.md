@@ -13,6 +13,14 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **High availability, first phases (#309), and nova-compute liveness (#146).**
+  - **`ha.enabled` (opt-in):** memcached as 3 replicas behind a headless Service, every component listing each
+    replica, and a refusal while fewer than 3 nodes carry `openstack-control-plane=enabled`. More than one memcached
+    replica without `ha` is refused. Off renders as before.
+  - **RabbitMQ's host count** comes from `componentValues.rabbitmq.pod.replicas.server` alone and reaches every
+    transport URL and ceilometer's notification URLs; a conflicting per-component count is refused.
+  - **nova-compute** liveness and startup check the process only; readiness keeps the RPC check.
+  - **New gates:** `hack/validate-ha-propagation.py` and `hack/validate-nova-compute-liveness.py`.
 - **KVM guests and KOG credentials (0.3.73, #303).** These are the blueprint's half of the data-plane release stage.
   - **`compute.virtType: kvm`:** sets nova `virt_type=kvm` and `cpu_mode=host-model` and libvirt's `virt_type`. libvirt
     then refuses, in an init container, to start on a node without `/dev/kvm`; the message names GKE's

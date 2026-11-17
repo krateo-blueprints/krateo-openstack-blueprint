@@ -405,6 +405,18 @@ jobs:
       - name: KOG credentials from the admin root
         run: python3 hack/validate-kog-credentials.py .
 
+      # nova-compute's liveness and startup probes check the process only, so a RabbitMQ outage no longer restarts the
+      # compute fleet; readiness keeps the RPC check. The rendered command is run against stand-in processes (#146).
+      - name: No probe that restarts nova-compute depends on RabbitMQ
+        run: |
+          pip install "psutil==7.0.0"
+          python3 hack/validate-nova-compute-liveness.py .
+
+      # One source for each stateful host list (#309): the RabbitMQ server count to every transport URL, and with ha
+      # memcached's replicas to every memcache server list; ha off passes nothing; the 3-node refusal.
+      - name: High availability reaches every reader, and off changes nothing
+        run: python3 hack/validate-ha-propagation.py .
+
       # glance's image store: 10Gi by default, a smaller live claim expanded, a claim never asked to shrink (#295).
       - name: glance's image store size
         run: python3 hack/validate-glance-store.py .

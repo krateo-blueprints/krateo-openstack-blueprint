@@ -1210,3 +1210,100 @@ krateo-openstack-node-reader
 {{- end -}}
 {{- $out | toJson -}}
 {{- end -}}
+
+{{- /* osh.mqReplicas ($): the RabbitMQ server replica count, from its ONE source: componentValues.rabbitmq.pod.replicas.server,
+       the rabbitmq chart's own value (default 1). Every transport URL lists this many hosts (osh.haValues). #309. */ -}}
+{{- define "osh.mqReplicas" -}}
+{{- $cv := (index ($.Values.componentValues | default dict) "rabbitmq") | default dict -}}
+{{- (((($cv.pod | default dict).replicas | default dict).server) | default 1) | int -}}
+{{- end -}}
+
+{{- /* osh.cacheReplicas ($): the memcached replica count. componentValues.memcached.pod.replicas.server when set, else
+       haTopology.cacheReplicas with ha.enabled, else 1. More than one replica without ha.enabled is refused: the chart's
+       one ClusterIP pins each client to one replica (ClientIP affinity), so the replicas would hold disagreeing caches and
+       no client would list them. #309. */ -}}
+{{- define "osh.cacheReplicas" -}}
+{{- $ha := ($.Values.ha | default dict).enabled -}}
+{{- $cv := (index ($.Values.componentValues | default dict) "memcached") | default dict -}}
+{{- $set := ((($cv.pod | default dict).replicas | default dict).server) -}}
+{{- $n := 1 -}}
+{{- if $set -}}{{- $n = int $set -}}{{- else if $ha -}}{{- $n = int ($.Values.haTopology.cacheReplicas | default 3) -}}{{- end -}}
+{{- if and (gt $n 1) (not $ha) -}}
+{{- fail (printf "componentValues.memcached.pod.replicas.server is %d while ha.enabled is false.\n\nWithout ha, memcached's one ClusterIP Service pins each client to a single replica (sessionAffinity ClientIP) and no component lists the replicas, so %d replicas would hold %d disagreeing caches: keystone's token-validation and revocation caches among them. Set ha.enabled: true (memcached then runs behind a headless Service and every component lists each replica), or leave the replica count at 1. #309." $n $n $n) -}}
+{{- end -}}
+{{- $n -}}
+{{- end -}}
+
+{{- /* osh.haValues (list $ $c): what high availability passes component $c (#309), as a YAML dict merged UNDER its
+       componentValues.
+         messaging: a component in haTopology.messaging gets endpoints.oslo_messaging.statefulset
+           {name: haTopology.messagingStatefulset, replicas: osh.mqReplicas} when the count is above 1, so its transport
+           URL lists every RabbitMQ node. At 1 nothing is passed: each chart's own default lists the one host.
+         cache: with ha.enabled, memcached gets 3 replicas (osh.cacheReplicas) and manifests.service_discovery (a headless
+           Service and the StatefulSet haTopology.cacheStatefulset), and a component in haTopology.cache gets
+           endpoints.oslo_cache {hosts.default: haTopology.cacheDiscovery, statefulset: {name, replicas}}, so its memcache
+           server list names every replica.
+       Refused, because the merge would otherwise let it win silently: a component whose componentValues set
+       endpoints.oslo_messaging.statefulset or endpoints.oslo_cache.statefulset to a replica count other than the one
+       source. hack/validate-ha-propagation.py renders this span for every component. */ -}}
+{{- define "osh.haValues" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- $topo := $top.Values.haTopology | default dict -}}
+{{- $ha := ($top.Values.ha | default dict).enabled -}}
+{{- $cv := (index ($top.Values.componentValues | default dict) $c.name) | default dict -}}
+{{- $ep := $cv.endpoints | default dict -}}
+{{- $out := dict -}}
+{{- $mq := include "osh.mqReplicas" $top | int -}}
+{{- if has $c.name ($topo.messaging | default list) -}}
+{{- with (($ep.oslo_messaging | default dict).statefulset) -}}
+{{- if ne (int (.replicas | default 0)) $mq -}}
+{{- fail (printf "componentValues.%s.endpoints.oslo_messaging.statefulset.replicas is %v, but RabbitMQ runs %d server replica(s) (componentValues.rabbitmq.pod.replicas.server, the one source).\n\nA transport URL that lists fewer hosts than the cluster has cannot fail over to the nodes it omits. Remove the override: the umbrella passes the count to every component that builds a transport URL. #309." $c.name .replicas $mq) -}}
+{{- end -}}
+{{- end -}}
+{{- if gt $mq 1 -}}
+{{- $_ := set $out "endpoints" (dict "oslo_messaging" (dict "statefulset" (dict "name" $topo.messagingStatefulset "replicas" $mq))) -}}
+{{- end -}}
+{{- end -}}
+{{- $cache := include "osh.cacheReplicas" $top | int -}}
+{{- if has $c.name ($topo.cache | default list) -}}
+{{- with (($ep.oslo_cache | default dict).statefulset) -}}
+{{- if or (not $ha) (ne (int (.replicas | default 0)) $cache) -}}
+{{- $want := "no list, because ha.enabled is false" -}}
+{{- if $ha -}}{{- $want = printf "%d replica(s), with ha.enabled" $cache -}}{{- end -}}
+{{- fail (printf "componentValues.%s.endpoints.oslo_cache.statefulset is set (replicas %v), but memcached's replica list is the umbrella's: %s.\n\nThe list names pods through memcached's headless Service, which exists only with ha.enabled, and it must name every replica so that every client hashes a key to the same one. Remove the override. #309." $c.name .replicas $want) -}}
+{{- end -}}
+{{- end -}}
+{{- if $ha -}}
+{{- $eps := $out.endpoints | default dict -}}
+{{- $_ := set $eps "oslo_cache" (dict "hosts" (dict "default" $topo.cacheDiscovery) "statefulset" (dict "name" $topo.cacheStatefulset "replicas" $cache)) -}}
+{{- $_ := set $out "endpoints" $eps -}}
+{{- end -}}
+{{- end -}}
+{{- if and $ha (eq $c.name "memcached") -}}
+{{- $_ := set $out "pod" (dict "replicas" (dict "server" $cache)) -}}
+{{- $_ := set $out "manifests" (dict "service_discovery" true) -}}
+{{- end -}}
+{{- if $out -}}{{- toYaml $out -}}{{- end -}}
+{{- end -}}
+
+{{- /* osh.requireHaNodes (list $ $nodes): with ha.enabled, refuse to render while fewer than haTopology.minNodes of the
+       nodes this release can see carry haTopology.nodeLabel. 3 replicas with required anti-affinity schedule one per
+       node: on 2 nodes the third stays Pending forever, and a quorum system on 2 nodes tolerates no node loss.
+       Like osh.requireNodeLabels, EMPTY <nodes> is not measured (helm template, or no node-read grant) and is not
+       refused; templates/node-preconditions-state.yaml records which. A pure function of its arguments, so
+       hack/validate-ha-propagation.py calls it with synthetic node lists. #309. */ -}}
+{{- define "osh.requireHaNodes" -}}
+{{- $top := index . 0 -}}{{- $nodes := index . 1 | default list -}}
+{{- if and (($top.Values.ha | default dict).enabled) (gt (len $nodes) 0) -}}
+{{- $topo := $top.Values.haTopology | default dict -}}
+{{- $key := $topo.nodeLabel.key -}}{{- $value := $topo.nodeLabel.value | toString -}}
+{{- $min := int ($topo.minNodes | default 3) -}}
+{{- $carry := 0 -}}
+{{- range $n := $nodes -}}
+{{- if eq (index (($n.metadata).labels | default dict) $key | toString) $value -}}{{- $carry = add1 $carry -}}{{- end -}}
+{{- end -}}
+{{- if lt $carry $min -}}
+{{- fail (printf "\n\nha.enabled needs %d nodes carrying %s=%s; %d of the %d node(s) this release can see carry it.\n\nWith ha, memcached runs %d replicas with required anti-affinity, one per node, so on fewer nodes the rest stay Pending forever; and a quorum system on 2 nodes survives no node loss. Label more nodes:\n\n    kubectl label --overwrite node <node> %s=%s\n\nor set ha.enabled: false. #309, README \"High availability\".\n" $min $key $value $carry (len $nodes) $min $key $value) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
