@@ -44,7 +44,8 @@ Curated history; release notes live in GitHub Releases.
     monitors, designate-sink with no handlers). Each is listed with its reason in
     `hack/readiness-probe-exceptions.yaml`.
   - **New gates:** `hack/validate-readiness-probes.py` renders every chart at its defaults and with
-    every workload on. It fails when a container has no probe and no exception, when an exception is
+    every workload on (CI, 2026-11-17: 114 long-running containers in 37 charts; 53 without a readiness
+    probe on main, 12 on this change, all listed). It fails when a container has no probe and no exception, when an exception is
     unneeded, when a probe is `true`, or when a probe's /tmp script isn't mounted (this caught
     tacker-conductor's). `hack/validate-health-probe.py` runs the rendered script against
     oslo.messaging's real RPC server and dispatcher, and against real processes and sockets in /proc.
