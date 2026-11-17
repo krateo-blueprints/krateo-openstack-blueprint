@@ -35,6 +35,7 @@ holds their keys. The umbrella COPIES each key and the monitor addresses into th
 
 Fails when helm or PyYAML is missing, when the umbrella defines no provided item, and when a render it needs fails.
 """
+import base64
 import json
 import os
 import shutil
@@ -321,9 +322,8 @@ def scripts(docs):
             for k, v in (d.get("data") or {}).items():
                 if d["kind"] == "Secret":
                     try:
-                        import base64
                         v = base64.b64decode(v).decode()
-                    except Exception:
+                    except (ValueError, UnicodeDecodeError):
                         continue
                 out.setdefault(k, []).append(v or "")
     return out
