@@ -527,7 +527,11 @@ dependencies:
     storage_init:
       jobs:
       - glance-ks-user
-      services: null
+      # Krateo (#299): with the swift store its script calls keystone (token issue, project show, endpoint list);
+      # hack/validate-job-service-dependencies.py requires the wait.
+      services:
+      - endpoint: internal
+        service: identity
     tests:
       services:
       - endpoint: internal
@@ -1125,3 +1129,11 @@ volume:
   # it (never lowered: a claim cannot shrink), which needs its StorageClass to set allowVolumeExpansion: true. Empty:
   # not set.
   size: ""
+
+# Krateo blueprint addition (#297): controls that belong to the blueprint, not to OpenStack-Helm.
+krateo:
+  # rerunHooksToken: rendered nowhere. The umbrella sets it from rerunHooks.<component>. Changing it changes this
+  # component's values, so core-provider runs a real helm upgrade, which runs every hook again (each install hook is an
+  # upgrade hook too, hack/validate-rerun-hooks.py). It is the documented way to re-run hooks that were never run
+  # (Ready=False/HooksMayNotHaveRun, README).
+  rerunHooksToken: ""

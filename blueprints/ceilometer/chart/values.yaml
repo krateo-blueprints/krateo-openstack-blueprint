@@ -72,6 +72,10 @@ conf:
     - keystone
     - neutron
     - heat
+  # Krateo blueprint addition (#298): the rabbit-init Jobs that create the vhosts above (other components' Jobs, in this
+  # namespace), added to ceilometer-notification's dependency jobs so it starts only once they exist. The umbrella
+  # passes the Jobs of the vhosts it passes. Empty: only ceilometer's own Jobs.
+  notification_vhost_jobs: []
   ceilometer:
     DEFAULT:
       transport_url: null
@@ -1675,4 +1679,12 @@ extraObjects: []
   #       type: Opaque
   #       labels:
   #         app.kubernetes.io/part-of: osh
+
+# Krateo blueprint addition (#297): controls that belong to the blueprint, not to OpenStack-Helm.
+krateo:
+  # rerunHooksToken: rendered nowhere. The umbrella sets it from rerunHooks.<component>. Changing it changes this
+  # component's values, so core-provider runs a real helm upgrade, which runs every hook again (each install hook is an
+  # upgrade hook too, hack/validate-rerun-hooks.py). It is the documented way to re-run hooks that were never run
+  # (Ready=False/HooksMayNotHaveRun, README).
+  rerunHooksToken: ""
 ...

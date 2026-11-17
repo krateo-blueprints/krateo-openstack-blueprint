@@ -29,6 +29,16 @@ enabled:
 #       effect: NoSchedule
 tolerations:
 
+# rerunHooks (#297): a token per component name, e.g.
+#   rerunHooks:
+#     cyborg: "2026-11-18T10:00:00Z"
+# Setting or changing rerunHooks.<component> passes the token to that component alone, as its krateo.rerunHooksToken
+# (declared in every component's schema, rendered nowhere). Its values change, so core-provider runs a real helm
+# upgrade, and every hook runs again: each install hook is also an upgrade hook (hack/validate-rerun-hooks.py). The way
+# to recover a component reading Ready=False/HooksMayNotHaveRun (README). Use the current time; an unknown name is
+# rejected. Merged UNDER componentValues: an explicit componentValues.<component>.krateo.rerunHooksToken wins.
+rerunHooks:
+
 # componentValues: per-component spec passed through to that component's Composition, keyed by
 # component name. Each value is exactly that component's own spec (its curated schema),
 # so you can configure any component through the umbrella instead of dropping to a
@@ -981,6 +991,11 @@ components:
       - keystone
       - rabbitmq
       - mariadb
+      # manila's bootstrap Job uploads its service image to glance and creates its service flavor in nova, and now
+      # waits for both APIs (#299: it failed 7 times on a fresh install until nova-api was up). Found by
+      # hack/validate-job-service-dependencies.py; hack/validate-component-config-closure.py then requires the edges.
+      - glance
+      - nova
     tier: compute
   - name: mistral
     kind: Mistral

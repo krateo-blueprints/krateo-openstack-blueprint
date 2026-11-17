@@ -312,6 +312,15 @@ dependencies:
       services:
       - endpoint: internal
         service: local_image_registry
+    # Krateo (#299): the ks-user Job (manifests.job_ks_user, off by default) creates the Keystone user remote backups
+    # authenticate as (conf.backup.remote_backup, the mariadb-backup-user of endpoints.identity) with the openstack
+    # client (domain, project, user and role create), and declared no wait; hack/validate-job-service-dependencies.py
+    # requires it. It is a post-install,post-upgrade hook, and keystone itself waits for mariadb: switch it on once
+    # keystone runs (an upgrade), because on a first install the hook would wait for a keystone that waits for mariadb.
+    ks_user:
+      services:
+      - endpoint: internal
+        service: identity
     mariadb_backup:
       jobs:
       - mariadb-ks-user
@@ -810,3 +819,11 @@ volume:
   use_local_path_for_single_pod_cluster:
     enabled: false
     host_path: /tmp/mysql-data
+
+# Krateo blueprint addition (#297): controls that belong to the blueprint, not to OpenStack-Helm.
+krateo:
+  # rerunHooksToken: rendered nowhere. The umbrella sets it from rerunHooks.<component>. Changing it changes this
+  # component's values, so core-provider runs a real helm upgrade, which runs every hook again (each install hook is an
+  # upgrade hook too, hack/validate-rerun-hooks.py). It is the documented way to re-run hooks that were never run
+  # (Ready=False/HooksMayNotHaveRun, README).
+  rerunHooksToken: ""

@@ -18,6 +18,15 @@ limitations under the License.
 {{- $mounts_ceilometer_notification := .Values.pod.mounts.ceilometer_notification.ceilometer_notification }}
 {{- $mounts_ceilometer_notification_init := .Values.pod.mounts.ceilometer_notification.init_container }}
 
+{{- /* Krateo (#298): the agent consumes other components' vhosts (conf.notification_vhosts, #285), which their own
+       rabbit-init Jobs create. It waits for those Jobs too (conf.notification_vhost_jobs, which the umbrella passes from
+       the same list), as well as its own; otherwise it starts on a fresh install before nova's vhost exists and its
+       workers die with NOT_ALLOWED until it does (measured on GKE, 2026-11-17). kubernetes-entrypoint resolves a Job by
+       name in the pod's namespace, where every component runs. */ -}}
+{{- with .Values.conf.notification_vhost_jobs }}
+{{- $static := $envAll.Values.dependencies.static.notification }}
+{{- $_ := set $static "jobs" (concat ($static.jobs | default list) . | uniq) }}
+{{- end }}
 {{- $serviceAccountName := "ceilometer-notification" }}
 {{ tuple $envAll "notification" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 

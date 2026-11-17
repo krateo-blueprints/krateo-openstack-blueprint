@@ -80,6 +80,27 @@ def main():
         "additionalProperties": False,
         "properties": props,
     }
+    # rerunHooks (#297): one token per component, by the same names, passed to that component alone as its
+    # krateo.rerunHooksToken, which every component schema must declare (a key the CRD does not declare is pruned).
+    undeclared = [n for n in props
+                  if "rerunHooksToken" not in ((json.load(open(os.path.join(ROOT, f"blueprints/{n}/chart/values.schema.json")))
+                                                ["properties"].get("krateo") or {}).get("properties") or {})]
+    if undeclared:
+        sys.exit(f"ERROR: {undeclared} declare no krateo.rerunHooksToken in values.schema.json: the umbrella's "
+                 "rerunHooks.<component> would be pruned from their Composition spec")
+    schema["properties"]["rerunHooks"] = {
+        "type": ["object", "null"],
+        "title": "Re-run a component's hooks",
+        "description": (
+            "A token per component name (an unknown name is rejected). Setting or changing "
+            "rerunHooks.<component> passes it to that component alone, as its krateo.rerunHooksToken: its values "
+            "change, so core-provider runs a real helm upgrade, which runs every hook again. Use the current time. "
+            "README: \"A component reads Ready=False/HooksMayNotHaveRun\" (#297)."
+        ),
+        "additionalProperties": False,
+        "properties": {n: {"type": "string", "minLength": 1,
+                           "description": f"Token for {n}: any change re-runs {n}'s hooks."} for n in props},
+    }
     json.dump(schema, open(sp, "w"), indent=2)
     open(sp, "a").write("\n")
     print(f"\nwrote componentValues for {len(props)} components -> {sp}")

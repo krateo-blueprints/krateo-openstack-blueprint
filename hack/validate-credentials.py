@@ -1826,6 +1826,7 @@ def rabbit_init_check(chart, cid, docs, tmp, label=""):
 # and oslo.messaging retries a missing one forever: on a full-strict install (cinder not selected; glance and keystone
 # create no vhost) it consumed nothing (GKE 2026-11-16, 442 NOT_ALLOWED in 26 minutes).
 VHOST_CASES_CHECKED = []
+VHOST_JOBS_CHECKED = []
 
 
 _VHOST_CACHE = {}
@@ -1840,7 +1841,7 @@ def rabbit_init_vhost(tmp, chart, values=None):
         return _VHOST_CACHE[key]
     w = stage(os.path.join(BP, chart, "chart"), tmp, "vhost-%s-%d" % (chart, len(_VHOST_CACHE)))
     rc, o, e = helm_template(w, chart + "-gate1234", values or {})
-    out = {"job": False, "secret": False, "vhost": None}
+    out = {"job": False, "secret": False, "vhost": None, "name": None}
     if rc != 0:
         fail("26: %s: does not render with %s: %s" % (chart, values or "its defaults", e.strip()[:200]))
     else:
@@ -1850,6 +1851,7 @@ def rabbit_init_vhost(tmp, chart, values=None):
             if j.get("kind") != "Job" or not j["metadata"]["name"].endswith("rabbit-init"):
                 continue
             out["job"] = True
+            out["name"] = j["metadata"]["name"]
             for c in j["spec"]["template"]["spec"].get("containers") or []:
                 for ev in c.get("env") or []:
                     if ev["name"] != "RABBITMQ_USER_CONNECTION":
@@ -1889,6 +1891,9 @@ def notification_vhosts_check(tmp, components):
         at_defaults = rabbit_init_vhost(tmp, n)
         on[n] = full["vhost"]
         dflt[n] = at_defaults["vhost"]
+        if full["name"] is not None and full["name"] != "%s-rabbit-init" % n:
+            fail("26b: %s's rabbit-init Job renders as %s; the umbrella passes ceilometer %s-rabbit-init to wait for"
+                 % (n, full["name"], n))
         if c.get("rabbitmqVhost") != on[n]:
             fail("26: umbrella: component %s declares rabbitmqVhost %s, its chart's rabbit-init declares %s" % (
                 n, c.get("rabbitmqVhost"), on[n]))
@@ -1963,13 +1968,14 @@ def notification_vhosts_check(tmp, components):
             continue
         # what the selected closure creates, each chart rendered with its own componentValues: default vhost -> created
         cvs = vals.get("componentValues") or {}
-        created = {}
+        created, creator_job = {}, {}
         for c in components:
             if c["name"] not in sel or on.get(c["name"]) is None:
                 continue
-            eff = rabbit_init_vhost(tmp, c["name"], cvs[c["name"]])["vhost"] if c["name"] in cvs else dflt[c["name"]]
-            if eff is not None:
-                created[on[c["name"]]] = eff
+            r = rabbit_init_vhost(tmp, c["name"], cvs[c["name"]] if c["name"] in cvs else None)
+            if r["vhost"] is not None:
+                created[on[c["name"]]] = r["vhost"]
+                creator_job[r["vhost"]] = (c["name"], r["name"])
         made = set(created.values())
         w = stage(os.path.join(BP, consumer, "chart"), tmp, "vh-%s-%d" % (consumer, n))
         rcc, oc, ec = helm_template(w, consumer + "-gate1234", spec or {})
@@ -2006,6 +2012,30 @@ def notification_vhosts_check(tmp, components):
         missing = sorted(set(want) - set(listed))
         if missing:
             fail("26: %s: %s does not consume %s, which selected components create" % (label, consumer, missing))
+        # 26b (#298): ceilometer-notification waits for the rabbit-init Job of every vhost it consumes (its own aside,
+        # which its chart already lists): its rendered DEPENDENCY_JOBS, less the chart's own static jobs, are exactly
+        # the Jobs the creating components render, by the names they render them under.
+        own = set(((((yaml.safe_load(open(os.path.join(BP, consumer, "chart", "values.yaml"))) or {}).get("dependencies")
+                    or {}).get("static") or {}).get("notification") or {}).get("jobs") or [])
+        deps = None
+        for d in yaml.safe_load_all(oc):
+            if d and d.get("kind") == "Deployment" and d["metadata"]["name"] == "%s-notification" % consumer:
+                for ic in d["spec"]["template"]["spec"].get("initContainers") or []:
+                    for ev in ic.get("env") or []:
+                        if ev["name"] == "DEPENDENCY_JOBS":
+                            deps = set(x for x in (ev.get("value") or "").split(",") if x)
+        want_jobs = {creator_job[v][1] for v in listed if v in creator_job and creator_job[v][0] != consumer}
+        if deps is None:
+            fail("26b: %s: %s-notification renders no DEPENDENCY_JOBS" % (label, consumer))
+        else:
+            extra, missing = sorted((deps - own) - want_jobs), sorted(want_jobs - deps)
+            if missing:
+                fail("26b: %s: %s-notification consumes the vhosts of %s but does not wait for those Jobs: on a fresh "
+                     "install it starts before they exist and its workers die with NOT_ALLOWED (#298)"
+                     % (label, consumer, missing))
+            if extra:
+                fail("26b: %s: %s-notification waits for %s, which create no vhost it consumes" % (label, consumer, extra))
+            VHOST_JOBS_CHECKED.append((label, tuple(sorted(want_jobs))))
         VHOST_CASES_CHECKED.append((label, tuple(listed)))
 
 
@@ -3185,6 +3215,9 @@ def main():
         fail("22m: no exec probe parsing a config that carried a transport URL was found; the probe check had no input")
     if checked and not RABBIT_INIT_CHECKED:
         fail("23m: no chart's rabbit-init.sh was run; the check had no input")
+    if not [x for x in VHOST_JOBS_CHECKED if x[1]]:
+        fail("26b: no case rendered a notification consumer that waits for another component's rabbit-init; the check "
+             "had no input")
     if not [x for x in VHOST_CASES_CHECKED if x[1]]:
         fail("26: no case rendered the notification consumer's vhost list; the check had no input")
     if len([x for x in VHOST_CASES_CHECKED if x[1] and x[0].startswith("full-strict, ")]) != 5:
@@ -3218,6 +3251,8 @@ def main():
              len(MQ_DROPIN_CHECKED), len(RABBIT_INIT_CHECKED), len(MQ_PROBES_CHECKED), len(VHOST_CASES_CHECKED)))
     for chart, podname, cname, conf in sorted(set(INIT_CONFD_CHECKED)):
         print("  19c: %s: %s init container %s mounts %s and %s.d" % (chart, podname, cname, conf, conf))
+    for label, jobs in VHOST_JOBS_CHECKED:
+        print("  26b: %s: ceilometer-notification also waits for %s" % (label, ", ".join(jobs) or "nothing"))
     for label, listed in VHOST_CASES_CHECKED:
         print("  26: %s: ceilometer consumes %s" % (label, ", ".join(listed) if listed else "(not selected)"))
 

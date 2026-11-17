@@ -749,6 +749,197 @@
           "description": "Removed in 0.3.68; must be false or absent."
         }
       }
+    },
+    "rerunHooks": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "Re-run a component's hooks",
+      "description": "A token per component name (an unknown name is rejected). Setting or changing rerunHooks.<component> passes it to that component alone, as its krateo.rerunHooksToken: its values change, so core-provider runs a real helm upgrade, which runs every hook again. Use the current time. README: \"A component reads Ready=False/HooksMayNotHaveRun\" (#297).",
+      "additionalProperties": false,
+      "properties": {
+        "mariadb": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for mariadb: any change re-runs mariadb's hooks."
+        },
+        "memcached": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for memcached: any change re-runs memcached's hooks."
+        },
+        "keystone": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for keystone: any change re-runs keystone's hooks."
+        },
+        "glance": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for glance: any change re-runs glance's hooks."
+        },
+        "horizon": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for horizon: any change re-runs horizon's hooks."
+        },
+        "rabbitmq": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for rabbitmq: any change re-runs rabbitmq's hooks."
+        },
+        "openvswitch": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for openvswitch: any change re-runs openvswitch's hooks."
+        },
+        "placement": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for placement: any change re-runs placement's hooks."
+        },
+        "libvirt": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for libvirt: any change re-runs libvirt's hooks."
+        },
+        "neutron": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for neutron: any change re-runs neutron's hooks."
+        },
+        "nova": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for nova: any change re-runs nova's hooks."
+        },
+        "ironic": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for ironic: any change re-runs ironic's hooks."
+        },
+        "cinder": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for cinder: any change re-runs cinder's hooks."
+        },
+        "heat": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for heat: any change re-runs heat's hooks."
+        },
+        "barbican": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for barbican: any change re-runs barbican's hooks."
+        },
+        "powerdns": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for powerdns: any change re-runs powerdns's hooks."
+        },
+        "designate": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for designate: any change re-runs designate's hooks."
+        },
+        "octavia": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for octavia: any change re-runs octavia's hooks."
+        },
+        "magnum": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for magnum: any change re-runs magnum's hooks."
+        },
+        "manila": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for manila: any change re-runs manila's hooks."
+        },
+        "mistral": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for mistral: any change re-runs mistral's hooks."
+        },
+        "ceilometer": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for ceilometer: any change re-runs ceilometer's hooks."
+        },
+        "aodh": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for aodh: any change re-runs aodh's hooks."
+        },
+        "cloudkitty": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for cloudkitty: any change re-runs cloudkitty's hooks."
+        },
+        "masakari": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for masakari: any change re-runs masakari's hooks."
+        },
+        "trove": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for trove: any change re-runs trove's hooks."
+        },
+        "watcher": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for watcher: any change re-runs watcher's hooks."
+        },
+        "tacker": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for tacker: any change re-runs tacker's hooks."
+        },
+        "cyborg": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for cyborg: any change re-runs cyborg's hooks."
+        },
+        "blazar": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for blazar: any change re-runs blazar's hooks."
+        },
+        "redis": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for redis: any change re-runs redis's hooks."
+        },
+        "zaqar": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for zaqar: any change re-runs zaqar's hooks."
+        },
+        "freezer": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for freezer: any change re-runs freezer's hooks."
+        },
+        "skyline": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for skyline: any change re-runs skyline's hooks."
+        },
+        "gnocchi": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for gnocchi: any change re-runs gnocchi's hooks."
+        },
+        "swift": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for swift: any change re-runs swift's hooks."
+        }
+      }
     }
   },
   "definitions": {

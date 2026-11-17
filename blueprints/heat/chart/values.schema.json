@@ -313,6 +313,18 @@
       },
       "title": "extraObjects",
       "description": "Deep-merged into the chart's `extraObjects` values."
+    },
+    "krateo": {
+      "type": "object",
+      "title": "Krateo blueprint controls",
+      "description": "Controls that belong to the blueprint, not to OpenStack-Helm (#297).",
+      "additionalProperties": false,
+      "properties": {
+        "rerunHooksToken": {
+          "type": "string",
+          "description": "Rendered nowhere. The umbrella sets it from rerunHooks.<component>; changing it makes core-provider run a helm upgrade, which re-runs every hook (#297)."
+        }
+      }
     }
   }
 }

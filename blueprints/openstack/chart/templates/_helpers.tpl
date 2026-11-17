@@ -1156,8 +1156,8 @@ krateo-openstack-node-reader
 {{- toYaml $out -}}
 {{- end -}}
 
-{{- /* osh.notificationVhosts (list $ $sel): .Values.notificationVhosts.vhosts, in order, mapped to what the selected
-       closure $sel actually creates. Each entry names a component's default vhost (components[].rabbitmqVhost). It is kept
+{{- /* osh.notificationVhostSources (list $ $sel): .Values.notificationVhosts.vhosts, in order, mapped to what the
+       selected closure $sel actually creates, as JSON [{vhost, component, job}]. Each entry names a component's default vhost (components[].rabbitmqVhost). It is kept
        when that component is selected and its rabbit-init runs: the Job is on (its componentValues
        manifests.job_rabbit_init when set, else its chart default, rabbitmqInit, true unless false) and so is the Secret
        the Job reads (manifests.secret_rabbitmq, else rabbitmqSecret: keystone ships it off, and its Job then never
@@ -1165,7 +1165,7 @@ krateo-openstack-node-reader
        its componentValues endpoints.oslo_messaging.path without the leading slash when set, else the default. As a JSON
        list. A consumer given a vhost nothing created retries it forever and never reaches the others (#285); measured by
        hack/validate-credentials.py check 26, overrides included. */ -}}
-{{- define "osh.notificationVhosts" -}}
+{{- define "osh.notificationVhostSources" -}}
 {{- $top := index . 0 -}}{{- $sel := index . 1 -}}
 {{- $cvs := $top.Values.componentValues | default dict -}}
 {{- $created := dict -}}
@@ -1180,12 +1180,33 @@ krateo-openstack-node-reader
 {{- $vhost := $c.rabbitmqVhost -}}
 {{- $path := ((($cv.endpoints | default dict).oslo_messaging | default dict).path) | default "" | toString -}}
 {{- if $path -}}{{- $vhost = trimPrefix "/" $path | default "/" -}}{{- end -}}
-{{- if and $init $secret -}}{{- $_ := set $created $c.rabbitmqVhost $vhost -}}{{- end -}}
+{{- if and $init $secret -}}{{- $_ := set $created $c.rabbitmqVhost (dict "vhost" $vhost "component" $c.name "job" (printf "%s-rabbit-init" $c.name)) -}}{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- $out := list -}}
 {{- range $v := (($top.Values.notificationVhosts | default dict).vhosts | default list) -}}
 {{- if hasKey $created $v -}}{{- $out = append $out (index $created $v) -}}{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{- /* osh.notificationVhosts (list $ $sel): the vhost names of osh.notificationVhostSources, as a JSON list. */ -}}
+{{- define "osh.notificationVhosts" -}}
+{{- $out := list -}}
+{{- range $s := include "osh.notificationVhostSources" . | fromJsonArray -}}{{- $out = append $out $s.vhost -}}{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{- /* osh.notificationVhostJobs (list $ $sel): the rabbit-init Jobs that create those vhosts, as a JSON list, the
+       consumer's own left out (it is already one of its dependencies). <component>-rabbit-init is the name each chart's
+       rabbit-init Job renders under (helm-toolkit job_rabbit_init: <serviceUser>-rabbit-init), measured by check 26. The
+       consumer waits for them, so it starts only once every vhost it consumes exists (#298). */ -}}
+{{- define "osh.notificationVhostJobs" -}}
+{{- $top := index . 0 -}}
+{{- $consumer := ($top.Values.notificationVhosts | default dict).component -}}
+{{- $out := list -}}
+{{- range $s := include "osh.notificationVhostSources" . | fromJsonArray -}}
+{{- if ne $s.component $consumer -}}{{- $out = append $out $s.job -}}{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
 {{- end -}}

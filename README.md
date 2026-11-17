@@ -1315,6 +1315,59 @@ kubectl -n openstack get compositiondefinitions \
   -o custom-columns='NAME:.metadata.name,API:.status.apiVersion,READY:.status.conditions[?(@.type=="Ready")].status'
 ```
 
+### A component reads Ready=False/HooksMayNotHaveRun
+
+core-provider (#563, fixed in 2.13.108 by #569) can leave a component's first install `deployed` with its post-install
+hooks never created. That happens when every composition-dynamic-controller loses its lease mid-install, for instance
+while GKE resizes the control plane (measured 2026-11-17: cyborg's pods sat in `Init` forever). A core-provider that
+carries the fix marks such a release `krateo.io/hooks-unverified`, and the component reads
+`Ready=False/HooksMayNotHaveRun`. Removing that annotation by hand only stops the report. It does not run the hooks.
+
+Recover in this order:
+
+**a) Re-run the hooks with `rerunHooks.<component>`.** Set it on the Openstack resource to the current time:
+
+```yaml
+rerunHooks:
+  cyborg: "2026-11-18T10:00:00Z"
+```
+
+- The umbrella passes the token to that component alone, as its `krateo.rerunHooksToken`. Every component schema
+  declares it, and no template renders it.
+- The component's values change, so core-provider runs a real helm upgrade. Every hook runs again: each install hook
+  is also an upgrade hook, which `hack/validate-rerun-hooks.py` enforces.
+- core-provider then clears the annotation itself. No other component moves.
+- To run them again later, set a new time.
+
+A label or annotation on the Composition would do nothing, because core-provider upgrades only on a change of chart
+version, of the spec's values, or after healing drift. A spec key the CRD doesn't declare does nothing either: it's pruned.
+
+**b) Or run the hooks by hand.** Render the component's chart at the deployed version and values, apply its hook Jobs
+(`helm template ... --show-only` the hook templates), and wait for each to complete. Check what they set up (users,
+databases, endpoints), then remove the `krateo.io/hooks-unverified` annotation.
+
+**c) Last resort: delete the component's Composition.** The umbrella re-creates it, and a fresh install runs every hook
+(measured on GKE: Ready 4 minutes after the delete). It is destructive: it uninstalls everything the first install
+created, so only do this for a component whose state you can lose.
+
+### Start ordering follows what each program calls (0.3.72)
+
+Measured on a fresh 0.3.71 install on GKE:
+- ceilometer-notification started before nova's vhost existed, and its workers died with `NOT_ALLOWED` until it did
+  (#298).
+- manila's bootstrap failed 7 times until nova-api was up (#299).
+
+From 0.3.72:
+- **ceilometer-notification waits for the vhosts it consumes.** It waits for the rabbit-init Job of every vhost it
+  consumes (`conf.notification_vhost_jobs`, passed by the umbrella from the same list as `conf.notification_vhosts`).
+  The cost: on a fresh install it starts only after nova, neutron and heat have run their rabbit-init Jobs, so it is
+  the last of them to come up.
+- **Every Job that calls an OpenStack API waits for that API.** Its kubernetes-entrypoint waits for each service its
+  script's `openstack` commands call (`hack/validate-job-service-dependencies.py`, from an explicit map of CLI noun to
+  service type).
+- **manila's bootstrap now waits for keystone, glance, nova and manila-api.** So the umbrella creates manila after
+  glance and nova. glance's storage-init and octavia's bootstrap now wait for keystone.
+
 ## Configure
 
 For anything between the profiles, set **`spec.enabled`** to an explicit component list — it
