@@ -98,6 +98,9 @@ conf:
   policy: {}
   magnum:
     DEFAULT:
+      # The worker readiness probe's RPC call gets NoSuchMethod, logged at DEBUG, rather than
+      # UnsupportedVersion, logged at ERROR on every probe (oslo.messaging ping endpoint, #231).
+      rpc_ping_enabled: true
       log_config_append: /etc/magnum/logging.conf
       transport_url: null
     cluster:
@@ -528,6 +531,16 @@ endpoints:
         default: 24220
 
 pod:
+  probes:
+    conductor:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
   tolerations:
     magnum:
       enabled: false

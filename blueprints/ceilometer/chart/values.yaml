@@ -1492,6 +1492,16 @@ endpoints:
         default: 15672
 
 pod:
+  probes:
+    notification:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
   affinity:
     anti:
       # Spread over zones too, when nodes carry this label (helm-toolkit, #286).

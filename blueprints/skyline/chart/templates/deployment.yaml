@@ -92,6 +92,20 @@ spec:
           ports:
             - name: api
               containerPort: {{ tuple "skyline" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+          # nginx is the console's front door: it serves the static console and proxies
+          # /api/openstack/skyline/ to the API server's unix socket (skyline-apiserver's
+          # nginx.conf.j2). This asks nginx for the same document the skyline container's probe asks
+          # gunicorn for, so it passes only when nginx runs, its generated config loaded and the
+          # proxy reaches a serving API (#231). Readiness only: a liveness probe through the proxy
+          # would restart nginx whenever the API server is down, which repairs nothing.
+          readinessProbe:
+            httpGet:
+              path: /api/openstack/skyline/api/v1/openapi.json
+              port: {{ tuple "skyline" "service" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 3
           volumeMounts:
             - name: pod-tmp
               mountPath: /tmp

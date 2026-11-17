@@ -351,6 +351,15 @@ pod:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
   probes:
+    processor:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
     cloudkitty:
       default:
         liveness:
@@ -583,6 +592,9 @@ conf:
       stats-http: true
   cloudkitty:
     DEFAULT:
+      # The worker readiness probe's RPC call gets NoSuchMethod, logged at DEBUG, rather than
+      # UnsupportedVersion, logged at ERROR on every probe (oslo.messaging ping endpoint, #231).
+      rpc_ping_enabled: true
       log_config_append: /etc/cloudkitty/logging.conf
       api_paste_config: /etc/cloudkitty/api-paste.ini
       auth_strategy: keystone

@@ -387,6 +387,15 @@ pod:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
   probes:
+    engine:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
     rpc_timeout: 60
     rpc_retries: 2
     masakari:
@@ -631,6 +640,9 @@ conf:
       paste.app_factory: masakari.api.openstack.ha.versions:Versions.factory
   masakari:
     DEFAULT:
+      # The worker readiness probe's RPC call gets NoSuchMethod, logged at DEBUG, rather than
+      # UnsupportedVersion, logged at ERROR on every probe (oslo.messaging ping endpoint, #231).
+      rpc_ping_enabled: true
       auth_strategy: keystone
       duplicate_notification_detection_interval: 180
       host_failure_recovery_threads: 1

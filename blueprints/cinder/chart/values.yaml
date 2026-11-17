@@ -84,6 +84,33 @@ jobs:
 
 pod:
   probes:
+    scheduler:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
+    volume:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
+    backup:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
     api:
       cinder-api:
         liveness:
@@ -832,6 +859,9 @@ conf:
         app_name: cinder-volume
   cinder:
     DEFAULT:
+      # The worker readiness probe's RPC call gets NoSuchMethod, logged at DEBUG, rather than
+      # UnsupportedVersion, logged at ERROR on every probe (oslo.messaging ping endpoint, #231).
+      rpc_ping_enabled: true
       state_path: /var/lib/cinder
       volume_usage_audit_period: hour
       resource_query_filters_file: /etc/cinder/resource_filters.json

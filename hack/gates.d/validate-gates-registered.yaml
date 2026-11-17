@@ -1,0 +1,8 @@
+# Gates live in hack/gates.d, one file each, and lint.yaml's jobs run them through hack/run-gates.py. A gate never
+# registered never runs, which looks like a gate that passes: every validate script is registered once, every
+# script a gate names exists, and lint.yaml runs no validate script outside gates.d.
+name: "Every gate script is registered in hack/gates.d, and every registration runs"
+job: capability-roles
+order: 460
+run: |
+  python3 hack/validate-gates-registered.py .

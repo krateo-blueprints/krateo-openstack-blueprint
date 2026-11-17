@@ -12,6 +12,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
+{{/*
+tacker-server is the API (#231). GET / is the versions document, which the server answers itself,
+with no authentication, database or RabbitMQ (tacker's api-paste.ini maps `/` to tackerversions,
+stable/2026.1). A failure there is this process's own and a restart can repair it, so liveness asks
+the same question and cannot restart the API because a dependency is down (the #146 shape). The
+start script installs packages and downloads a helm binary before it starts the server, so the
+startup probe allows ten minutes before liveness applies.
+*/}}
+{{- define "tackerServerHttpProbeTemplate" }}
+httpGet:
+  path: /
+  port: {{ tuple "nfv_orchestration" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+{{- end }}
 {{- if .Values.manifests.deployment_server }}
 {{- $envAll := . }}
 {{- $serviceAccountName := "tacker-server" }}
@@ -47,6 +60,9 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.server.timeout | default "30" }}
       containers:
         - name: tacker-server
+{{ dict "envAll" $envAll "component" "server" "container" "default" "type" "startup" "probeTemplate" (include "tackerServerHttpProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "server" "container" "default" "type" "readiness" "probeTemplate" (include "tackerServerHttpProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "server" "container" "default" "type" "liveness" "probeTemplate" (include "tackerServerHttpProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | indent 10 }}
           image: {{ .Values.images.tags.tacker_server }}
           imagePullPolicy: {{ .Values.images.pull_policy }}
 {{ tuple $envAll $envAll.Values.pod.resources.server | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}

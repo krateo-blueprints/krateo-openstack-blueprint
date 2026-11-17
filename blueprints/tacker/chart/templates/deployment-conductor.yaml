@@ -67,6 +67,7 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.conductor.timeout | default "30" }}
       containers:
         - name: tacker-conductor
+{{ dict "envAll" $envAll "component" "conductor" "container" "default" "args" (list "--process" "tacker-conductor" "--exchange" "tacker" "--rpc-topic" "TACKER_CONDUCTOR") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
           image: {{ .Values.images.tags.tacker_conductor }}
           imagePullPolicy: {{ .Values.images.pull_policy }}
 {{ tuple $envAll $envAll.Values.pod.resources.conductor | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
@@ -75,6 +76,10 @@ spec:
             - -c
             - /tmp/tacker-conductor.sh
           volumeMounts:
+          - name: tacker-conductor-sh
+            mountPath: /tmp/worker-health-probe.py
+            subPath: worker-health-probe.py
+            readOnly: true
           - name: localtime
             mountPath: "/etc/localtime"
             readOnly: yes

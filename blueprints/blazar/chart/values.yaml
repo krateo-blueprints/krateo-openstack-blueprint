@@ -388,6 +388,15 @@ endpoints:
 
 pod:
   probes:
+    manager:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 50
+            failureThreshold: 3
     rpc_timeout: 60
     rpc_retries: 2
     api:
@@ -610,6 +619,9 @@ jobs:
 conf:
   blazar:
     DEFAULT:
+      # The worker readiness probe's RPC call gets NoSuchMethod, logged at DEBUG, rather than
+      # UnsupportedVersion, logged at ERROR on every probe (oslo.messaging ping endpoint, #231).
+      rpc_ping_enabled: true
       debug: false
       log_config_append: /etc/blazar/logging.conf
       api_paste_config: /etc/blazar/api-paste.ini
