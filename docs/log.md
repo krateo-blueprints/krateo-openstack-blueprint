@@ -23,11 +23,14 @@ Curated history; release notes live in GitHub Releases.
   - **Registry re-check:** `--resolve` asks each registry again, without credentials. It fails when an image is no
     longer pullable (v1 manifest, no linux/amd64, 401 or 404) and reports a moved digest without failing.
   - **CVE scan:** `.github/workflows/image-scan.yaml` scans every pullable image with Trivy 0.76.1, pinned by a
-    digest in the workflow. It runs on a push that changes the inventory, weekly, and on each release tag; not on
-    every pull request, since a full scan downloads tens of GB. A CRITICAL finding fails unless
-    `hack/image-cve-allowlist.yaml` has an entry for that CVE, image and package that hasn't expired (at most 120
-    days ahead). An entry that covers nothing fails too. The judging rules run offline per pull request
-    (`--self-test`).
+    digest in the workflow. It runs on a push that changes the inventory, weekly, and on each release tag. It took
+    2.6 minutes of wall time for all 58. It isn't run on every pull request because only an image change or a new
+    upstream CVE changes its result. A CRITICAL finding fails unless `hack/image-cve-allowlist.yaml` has an entry for
+    that CVE, image and package that hasn't expired (at most 120 days ahead). The judging rules run offline per pull
+    request (`--self-test`).
+  - **First scan:** 177 CRITICAL findings in 43 of the 58 images. PyJWT 2.11.0 is in 29 OpenStack service images,
+    and `nginx:1.13.3` (Debian 9, run by ironic at defaults) has 54. All are allowlisted as a measured baseline that
+    expires on 2027-02-15 ([supply-chain.md](supply-chain.md)).
   - **Pinning, open for Diego** ([supply-chain.md](supply-chain.md)): 35 images use release-series tags, and each
     airshipit one was pushed 27 to 32 times in 30 days. Proposed: dated tags with the digest recorded and verified
     in CI. Mirror the four Kolla gnocchi images, which have no immutable tag. Not `@sha256:` in the charts (#72).

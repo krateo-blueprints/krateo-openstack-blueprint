@@ -24,15 +24,41 @@ Issue #316. Two parts: what is in place, and a pinning decision that is still op
 | **Registry re-measurement.** Each image is still served anonymously, in a format containerd pulls (not Docker Registry v1, #115), with a linux/amd64 manifest and a downloadable config blob. | `hack/gen-image-inventory.py --resolve` | `image-scan.yaml`: weekly, on each release tag, and on a push that changes the inventory |
 | **CVE scan.** Trivy (pinned version, tarball checked against a digest written in the workflow) scans every pullable image as linux/amd64. A CRITICAL finding fails unless `hack/image-cve-allowlist.yaml` has an entry for that CVE, image and package that has not expired. | `.github/workflows/image-scan.yaml`, `hack/check-image-cves.py` | Same as above. The judging rules also run offline on every pull request (`--self-test`) |
 
-**Why the scan is not on every pull request.** Most of the images are 0.5 to 1.5 GB OpenStack images, so a full scan
-downloads tens of GB. Its result changes when an image changes or a new CVE is published, not when a template changes.
-A pull request that changes an image does get scanned: the offline gate fails until `hack/images.yaml` is
-regenerated, and pushing the regenerated file triggers the scan.
+**Why the scan is not on every pull request.** Not for speed. The first full run (image-scan run 44188443677) scanned
+all 58 images in 2.6 minutes of wall time, 18 runner-minutes in total, 11 to 49 seconds per image. The reason is that
+a pull request which changes no image can't change the result. Only a newly published CVE can, and gating every
+pull request on that would turn unrelated changes red on upstream news. So the scan runs:
+- on a push that changes `hack/images.yaml`, which a pull request that changes an image must regenerate to pass
+  `lint.yaml`;
+- weekly, which catches newly published CVEs;
+- on each release tag.
 
 **Exceptions.** An allowlist entry names the CVE, the image exactly as the inventory writes it, and the package. It
 carries a reason and an expiry at most 120 days ahead. An expired entry stops covering its finding. An entry that
-covers no finding fails, so a fixed image doesn't leave behind an exception that would hide the same CVE if it came
-back.
+covers no finding is reported, not failed: images on series tags are rebuilt upstream almost daily, so a finding can
+disappear between two runs with nothing changed here. The expiry bounds how long a leftover entry can stay.
+
+### First scan, 2026-11-17
+
+Trivy 0.76.1, linux/amd64, run 44188443677.
+
+- **177 CRITICAL findings (167 distinct CVE, image and package keys) in 43 of the 58 images**, and 3,237 HIGH.
+- **Most widespread:** PyJWT 2.11.0 (CVE-2026-102268, fixed in 2.14.0) in 29 airshipit OpenStack service images,
+  and Go stdlib 1.24.4 (CVE-2025-68121) in 14 findings.
+- **Most per image:**
+  - `docker.io/nginx:1.13.3`: 54. Debian 9, past end of support. ironic runs it at defaults.
+  - `quay.io/airshipit/docker:27.5.0`: 19. image_repo_sync only; no default render runs it.
+  - `docker.io/xrally/xrally-openstack:2.0.0`: 11. Ubuntu 18.04, helm test pods only.
+  - `docker.io/powerdns/pdns-auth-49:4.9.18`: 8.
+  - `quay.io/airshipit/memcached:1.6.32`: 7.
+  - Each of the four Kolla gnocchi images: 6.
+- **Past end of support** (Trivy's OS metadata): `nginx:1.13.3` (Debian 9), `xrally-openstack:2.0.0` (Ubuntu 18.04),
+  `airshipit/rabbitmq:3.10.18` and `-management` and `kubernetes-entrypoint:…-ubuntu_focal` (Ubuntu 20.04),
+  `docker:17.07.0` (Alpine 3.6) and `airshipit/docker:27.5.0` (Alpine 3.21).
+
+Every finding is in `hack/image-cve-allowlist.yaml` with its measured facts and a shared expiry, 2027-02-15. That
+date is when the remediation is due. The entries don't claim the findings are harmless; they only make the gate fail
+on anything new.
 
 ## Open: how to pin images
 

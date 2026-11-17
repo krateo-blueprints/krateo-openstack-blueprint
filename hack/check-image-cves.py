@@ -20,8 +20,9 @@ Judging, in <results-dir> (one Trivy `--format json` report per image, any file 
     an id alone would excuse that CVE in every image, and an image alone every CVE in it.
   * Every entry must carry a `reason` and an `expires` no more than MAX_DAYS ahead, so an exception is a dated
     decision that comes back, never a permanent mute.
-  * An entry that covers no finding fails: the image was fixed or replaced, and an exception left behind would
-    silently cover the same CVE if it came back.
+  * An entry that covers no finding is reported, not failed. The images on series tags are rebuilt upstream almost
+    daily (docs/supply-chain.md), so a finding can disappear between two runs with no change here; failing on that
+    would turn good news into a red run. The expiry bounds how long a leftover entry can wait to be removed.
 """
 import datetime
 import glob
@@ -115,7 +116,7 @@ def judge(images, reports, allowlist, today):
             "; its exception " + expired if expired else "; no exception"))
     for e, exp, where in valid:
         if id(e) not in used:
-            failures.append("%s: covers no %s finding for %s; remove it" % (where, SEVERITY, e["image"]))
+            notes.append("%s: covers no %s finding for %s; remove it" % (where, SEVERITY, e["image"]))
     return failures, notes, len(findings)
 
 
@@ -148,9 +149,9 @@ def self_test():
         ("covered critical", [A], [rep(A, ("CVE-1", "libx", "CRITICAL"))], [entry()], 0),
         ("covers today", [A], [rep(A, ("CVE-1", "libx", "CRITICAL"))], [entry(expires="2026-11-17")], 0),
         ("expired yesterday", [A], [rep(A, ("CVE-1", "libx", "CRITICAL"))], [entry(expires="2026-11-16")], 1),
-        ("other image's entry", [A, B], [rep(A, ("CVE-1", "libx", "CRITICAL")), rep(B)], [entry(img=B)], 2),
-        ("other package's entry", [A], [rep(A, ("CVE-1", "libx", "CRITICAL"))], [entry(pkg="liby")], 2),
-        ("stale entry", [A], [rep(A)], [entry()], 1),
+        ("other image's entry", [A, B], [rep(A, ("CVE-1", "libx", "CRITICAL")), rep(B)], [entry(img=B)], 1),
+        ("other package's entry", [A], [rep(A, ("CVE-1", "libx", "CRITICAL"))], [entry(pkg="liby")], 1),
+        ("stale entry is reported, not failed", [A], [rep(A)], [entry()], 0),
         ("no reason", [A], [rep(A, ("CVE-1", "libx", "CRITICAL"))], [entry(reason=" ")], 2),
         ("expiry too far", [A], [rep(A, ("CVE-1", "libx", "CRITICAL"))], [entry(expires="2027-06-01")], 2),
         ("expiry not a date", [A], [rep(A, ("CVE-1", "libx", "CRITICAL"))], [entry(expires="soon")], 2),
@@ -164,6 +165,9 @@ def self_test():
         failures, _, _ = judge(images, reports, {"entries": entries}, today)
         if len(failures) != want:
             bad.append("%s: %d failure(s), want %d: %s" % (name, len(failures), want, failures))
+    _, notes, _ = judge([A], [rep(A)], {"entries": [entry()]}, today)
+    if not any("covers no" in n for n in notes):
+        bad.append("a stale entry is not reported: %s" % notes)
     # load_reports reads nested files, and an unparseable one is a report for no image, not a crash.
     with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, "scan-a"))
@@ -176,7 +180,7 @@ def self_test():
         print("FAIL: self-test " + b)
     if bad:
         sys.exit(1)
-    print("OK: %d judging cases behave as specified" % (len(cases) + 1))
+    print("OK: %d judging cases behave as specified" % (len(cases) + 2))
 
 
 def main():

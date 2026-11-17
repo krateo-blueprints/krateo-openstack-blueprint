@@ -5,9 +5,10 @@
 # charts render. A CRITICAL finding fails unless hack/image-cve-allowlist.yaml has an entry for that CVE, image and
 # package whose expiry has not passed (hack/check-image-cves.py says why the key is all three).
 #
-# WHEN, and why not on every pull request. About sixty images, most of them 0.5-1.5 GB OpenStack images: a full scan
-# downloads every layer of every one, which is tens of GB and many runner-minutes per run, for a result that changes
-# when an image changes or when a new CVE is published, not when a template does. So it runs:
+# WHEN, and why not on every pull request. Not for speed: the first full run (44188443677) scanned all 58 images in
+# 2.6 minutes of wall time, 18 runner-minutes in total. But the result changes only when an image changes or a CVE is
+# published, never when a template does, and gating every pull request on a CVE published upstream would turn unrelated
+# changes red on news. So it runs:
 #   * on a push that changes the inventory or the allowlist, on any branch, so a pull request that changes an image
 #     is scanned on that pull request (lint.yaml fails that pull request until hack/images.yaml is regenerated, and
 #     the regenerated file is what triggers this);
@@ -84,10 +85,12 @@ jobs:
           echo "$images" | python3 -c 'import json,sys; l=json.load(sys.stdin); print(len(l), "images to scan"); print("\n".join(l))'
 
   scan:
-    # Each job downloads Trivy's vulnerability database itself (about 70 MB compressed, from its mirror registry).
-    # Sharing one copy through an artifact was tried on this workflow's second run and was slower than all of it:
-    # the database and the Java database unpack to over 1 GB, and uploading them had not finished after 11 minutes.
-    # The Java database is not fetched up front; Trivy downloads it only for an image that contains a JAR.
+    # Each job downloads Trivy's vulnerability database itself, compressed, from its mirror registry. Measured on this
+    # workflow's second run: downloading both databases took 25 s in one job, and uploading them unpacked as an
+    # artifact took 82 s, after which every scan job would have downloaded the unpacked copy. Fetching per job costs
+    # about the same and needs no artifact. (That run was cancelled on a misreading: the wait that was watching it had
+    # never started. An earlier commit message says the upload stalled for 11 minutes; it did not.) The Java database
+    # is not fetched up front; Trivy downloads it only for an image that contains a JAR.
     needs:
       - inventory
     runs-on: ubuntu-latest
