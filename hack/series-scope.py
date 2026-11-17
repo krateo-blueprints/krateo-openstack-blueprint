@@ -31,7 +31,8 @@ from pathlib import Path
 IMG = re.compile(
     r"(?P<repo>(?:quay\.io|docker\.io)/[a-z0-9][a-z0-9._/-]*):(?P<tag>[A-Za-z0-9][A-Za-z0-9._-]*)"
 )
-SERIES = re.compile(r"^(?P<series>\d{4}\.\d)-(?P<base>ubuntu_[a-z]+)$")
+# A series tag or a dated build of one (2026.1-ubuntu_noble-20261117, pinned since #316): both move with the series.
+SERIES = re.compile(r"^(?P<series>\d{4}\.\d)-(?P<base>ubuntu_[a-z]+)(?:-20\d{6})?$")
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 only = None

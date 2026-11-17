@@ -270,6 +270,11 @@ jobs:
         run: python3 hack/gen-image-inventory.py .
       - name: The image scan judges CRITICAL findings and exceptions as specified
         run: python3 hack/check-image-cves.py --self-test
+      # #316: the mirror list copies only builds image-scan measured, to dated tags in the org's registry.
+      - name: Every image mirror copies a recorded digest to an immutable ghcr.io/krateo-blueprints tag
+        run: |
+          python3 hack/image-mirror.py --self-test
+          python3 hack/image-mirror.py . --check
 
   capability-roles:
     # Gating. A capability aggregates into a predefined role via a

@@ -33,22 +33,22 @@ labels:
 
 images:
   tags:
-    ironic_manage_cleaning_network: quay.io/airshipit/heat:2026.1-ubuntu_noble
-    ironic_retrive_cleaning_network: quay.io/airshipit/heat:2026.1-ubuntu_noble
-    ironic_retrive_swift_config: quay.io/airshipit/heat:2026.1-ubuntu_noble
+    ironic_manage_cleaning_network: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
+    ironic_retrive_cleaning_network: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
+    ironic_retrive_swift_config: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
     # Bootstrap image requires curl
-    bootstrap: quay.io/airshipit/heat:2026.1-ubuntu_noble
-    db_drop: quay.io/airshipit/heat:2026.1-ubuntu_noble
-    db_init: quay.io/airshipit/heat:2026.1-ubuntu_noble
-    ironic_db_sync: quay.io/airshipit/ironic:2026.1-ubuntu_noble
-    ks_user: quay.io/airshipit/heat:2026.1-ubuntu_noble
-    ks_service: quay.io/airshipit/heat:2026.1-ubuntu_noble
-    ks_endpoints: quay.io/airshipit/heat:2026.1-ubuntu_noble
-    rabbit_init: docker.io/rabbitmq:3.13-management
-    ironic_api: quay.io/airshipit/ironic:2026.1-ubuntu_noble
-    ironic_conductor: quay.io/airshipit/ironic:2026.1-ubuntu_noble
-    ironic_pxe: quay.io/airshipit/ironic:2026.1-ubuntu_noble
-    ironic_pxe_init: quay.io/airshipit/ironic:2026.1-ubuntu_noble
+    bootstrap: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
+    db_drop: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
+    db_init: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
+    ironic_db_sync: quay.io/airshipit/ironic:2026.1-ubuntu_noble-20261117
+    ks_user: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
+    ks_service: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
+    ks_endpoints: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
+    rabbit_init: docker.io/rabbitmq:3.13.7-management
+    ironic_api: quay.io/airshipit/ironic:2026.1-ubuntu_noble-20261117
+    ironic_conductor: quay.io/airshipit/ironic:2026.1-ubuntu_noble-20261117
+    ironic_pxe: quay.io/airshipit/ironic:2026.1-ubuntu_noble-20261117
+    ironic_pxe_init: quay.io/airshipit/ironic:2026.1-ubuntu_noble-20261117
     ironic_pxe_http: docker.io/nginx:1.13.3
     dep_check: quay.io/airshipit/kubernetes-entrypoint:4fbcf7ce324dc66e78480f73035e31434cfea1e8-ubuntu_focal
     image_repo_sync: docker.io/docker:17.07.0
