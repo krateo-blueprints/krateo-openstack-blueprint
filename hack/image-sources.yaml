@@ -13,6 +13,9 @@ sources:
     source: >-
       opendev.org/openstack/loci (OpenStack service images), opendev.org/openstack/openstack-helm-images
       (infrastructure images), opendev.org/airship/kubernetes-entrypoint, opendev.org/airship/porthole
+  - prefix: quay.io/prometheus/
+    publisher: Prometheus project
+    source: github.com/prometheus/mysqld_exporter (openstack-monitoring's standalone mysqld-exporter, #312)
   - prefix: quay.io/openstack.kolla/
     publisher: OpenStack Kolla project
     source: opendev.org/openstack/kolla (gnocchi only, replacing upstream's unpullable images, #115 and #117)
@@ -28,9 +31,15 @@ sources:
   - prefix: docker.io/prom/
     publisher: Prometheus project
     source: github.com/prometheus/mysqld_exporter
+  - prefix: docker.io/otel/
+    publisher: OpenTelemetry project
+    source: github.com/open-telemetry/opentelemetry-collector-releases (opentelemetry-collector-contrib, openstack-monitoring's collector, #312)
   - prefix: docker.io/xrally/
     publisher: OpenStack Rally project
     source: opendev.org/openstack/rally-openstack
+  - prefix: ghcr.io/openstack-exporter/
+    publisher: openstack-exporter project
+    source: github.com/openstack-exporter/openstack-exporter (openstack-monitoring, #312)
   - prefix: ghcr.io/vexxhost/
     publisher: VEXXHOST
     source: github.com/vexxhost/netoffload
