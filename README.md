@@ -1554,6 +1554,8 @@ Index: [docs/examples.md](docs/examples.md).
   the upstream audit grounding the distribution-layer design.
 - [docs/medium-openstack-as-a-service.md](docs/medium-openstack-as-a-service.md) — the
   narrative write-up.
+- [docs/images.md](docs/images.md) — every container image a chart can run (generated).
+- [docs/supply-chain.md](docs/supply-chain.md) — image inventory, CVE scan, and the pinning decision.
 - [docs/llms.txt](docs/llms.txt) — the version-pinned LLM doc index.
 
 The dashboard (Horizon) logs in as `admin` with the install's generated password (domain `Default`): `kubectl -n openstack get secret openstack-credential-identity-admin -o jsonpath='{.data.password}' | base64 -d`:
