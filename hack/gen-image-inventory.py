@@ -40,6 +40,9 @@ manifest resolves, and its config blob downloads. Layers are not fetched; that w
 Every image's registry namespace must have a publisher in hack/image-sources.yaml, and every entry there must match an
 image: where an image comes from is part of the inventory, so a new source is a decision someone writes down.
 
+Every check, offline or not, also fails on an image recorded as not pullable anonymously: docs/images.md says why,
+and the chart still fails at install until the reference changes.
+
 Fails when helm or PyYAML is missing, when no chart renders, and when no image is found.
 """
 import datetime
@@ -551,8 +554,16 @@ def main():
 
     for img, a, b in moved:
         print("DIGEST MOVED (reported, not failed; see docs/supply-chain.md): %s %s -> %s" % (img, a, b))
+    # --write records a changed answer (that is what it is for); a check fails on it.
     for img, a, b in changed:
-        failures.append("%s: the registry's answer changed: recorded %s, now %s" % (img, a, b))
+        (print if WRITE else failures.append)("%s: the registry's answer changed: recorded %s, now %s" % (img, a, b))
+    # An image no one can pull is documented in docs/images.md and still fails: a chart that names it fails at
+    # install, however correct the reference looks (#115). --write records it so the reason is on the page.
+    for e in entries:
+        r = e.get("registry_facts") or {}
+        if r and r.get("anonymous_pull") is not True:
+            (print if WRITE else failures.append)("%s is not pullable anonymously: %s" % (
+                e["image"], r.get("reason", "no reason recorded")))
 
     if failures:
         for f in failures:

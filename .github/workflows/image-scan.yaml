@@ -83,10 +83,19 @@ jobs:
           echo "images=$images" >> "$GITHUB_OUTPUT"
           echo "$images" | python3 -c 'import json,sys; l=json.load(sys.stdin); print(len(l), "images to scan"); print("\n".join(l))'
 
-  trivy-db:
-    # One vulnerability database for every scan job, so every image in a run is judged against the same data, and
-    # the database registry is asked once rather than sixty times in parallel.
+  scan:
+    # Each job downloads Trivy's vulnerability database itself (about 70 MB compressed, from its mirror registry).
+    # Sharing one copy through an artifact was tried on this workflow's second run and was slower than all of it:
+    # the database and the Java database unpack to over 1 GB, and uploading them had not finished after 11 minutes.
+    # The Java database is not fetched up front; Trivy downloads it only for an image that contains a JAR.
+    needs:
+      - inventory
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        image: ${{ fromJSON(needs.inventory.outputs.images) }}
     steps:
       - name: Install Trivy, checked against the digest pinned in this workflow
         run: |
@@ -99,46 +108,6 @@ jobs:
           tar -xzf "$tarball" -C "$RUNNER_TEMP/trivy-bin" trivy
           "$RUNNER_TEMP/trivy-bin/trivy" --version
 
-      - name: Download the vulnerability databases
-        run: |
-          set -euo pipefail
-          "$RUNNER_TEMP/trivy-bin/trivy" image --download-db-only --cache-dir "$RUNNER_TEMP/trivy-cache"
-          "$RUNNER_TEMP/trivy-bin/trivy" image --download-java-db-only --cache-dir "$RUNNER_TEMP/trivy-cache"
-          "$RUNNER_TEMP/trivy-bin/trivy" --cache-dir "$RUNNER_TEMP/trivy-cache" version
-
-      # The checked binary travels with the databases, so the scan jobs run exactly the bytes checked above.
-      - name: Upload Trivy and the databases
-        uses: actions/upload-artifact@v7
-        with:
-          name: trivy-db
-          path: |
-            ${{ runner.temp }}/trivy-bin/trivy
-            ${{ runner.temp }}/trivy-cache/db
-            ${{ runner.temp }}/trivy-cache/java-db
-          retention-days: 1
-
-  scan:
-    needs:
-      - inventory
-      - trivy-db
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 20
-      matrix:
-        image: ${{ fromJSON(needs.inventory.outputs.images) }}
-    steps:
-      - name: Download Trivy and the databases
-        uses: actions/download-artifact@v8
-        with:
-          name: trivy-db
-          path: ${{ runner.temp }}
-
-      - name: Trivy is executable (an artifact does not keep file modes)
-        run: |
-          chmod +x "$RUNNER_TEMP/trivy-bin/trivy"
-          "$RUNNER_TEMP/trivy-bin/trivy" --version
-
       - name: Scan ${{ matrix.image }}
         env:
           IMAGE: ${{ matrix.image }}
@@ -148,7 +117,7 @@ jobs:
           # Straight from the registry (no docker daemon), as linux/amd64, the platform every cluster here runs.
           # HIGH is reported for the record; only CRITICAL is judged (hack/check-image-cves.py).
           "$RUNNER_TEMP/trivy-bin/trivy" image "$IMAGE" \
-            --cache-dir "$RUNNER_TEMP/trivy-cache" --skip-db-update --skip-java-db-update \
+            --cache-dir "$RUNNER_TEMP/trivy-cache" \
             --image-src remote --platform linux/amd64 --scanners vuln \
             --severity CRITICAL,HIGH --timeout 30m \
             --format json --output "$RUNNER_TEMP/report/trivy.json" --exit-code 0
