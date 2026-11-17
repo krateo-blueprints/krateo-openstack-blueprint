@@ -81,6 +81,9 @@ def ceph_schema():
                                    "libvirt and nova.",
                                    pattern="^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"),
             "glanceStore": s("pvc keeps images on glance's volume; rbd stores them in the images pool.", enum=["pvc", "rbd"]),
+            "glanceImagesMigrated": {"type": "boolean", "description": (
+                "With glanceStore rbd on an install whose images are on the glance-images claim, glance refuses until "
+                "this is true: copy the images to the rbd store first, or confirm there is none to keep.")},
         },
     }
 

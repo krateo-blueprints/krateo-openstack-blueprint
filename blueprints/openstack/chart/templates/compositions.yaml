@@ -78,6 +78,7 @@
 {{- end }}
 {{- include "osh.requireNodeLabels" (list $ $sel $nodes) -}}
 {{- include "osh.requireStorageNotOverridden" (list $) -}}
+{{- include "osh.requireCephReadGrant" (list $) -}}
 {{- /* Selected components this render does NOT emit (their dependencies are not Ready yet, or their CRD
        is not served yet). While any remain, the ConfigMap openstack-install-pending below is emitted,
        and the CompositionDefinition's statusDataTemplate projects health Ready=False/Creating from its
@@ -154,7 +155,9 @@
        failed exactly that way when this note was first added. */}}
 {{- $strictReady := include "osh.depsReady" (list $ $strict $.Values.components $crds) }}
 {{- $relaxedExist := include "osh.depsExist" (list $ $relaxed $.Values.components $crds) }}
-{{- if and (eq $crd "true") (or (and (eq $strictReady "true") (eq $relaxedExist "true")) (eq $exists "true")) }}
+{{- /* #308: a Ceph consumer is created only once the copies of the keys it reads report Ready (osh.cephRootsReady). */ -}}
+{{- $cephReady := include "osh.cephRootsReady" (list $ $c) }}
+{{- if and (eq $crd "true") (or (and (eq $strictReady "true") (eq $relaxedExist "true") (eq $cephReady "true")) (eq $exists "true")) }}
 {{- $ov := (index ($.Values.componentValues | default dict) $c.name) | default dict }}
 {{- /* Credential references (#228): merged UNDER the component's own values, so an explicit
        componentValues entry wins. osh.credentialRefs says what is passed and why. */ -}}

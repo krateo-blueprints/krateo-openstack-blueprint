@@ -31,10 +31,10 @@ preconditions:
     symptom: >-
       With storage.backend none, profile full-strict leaves cinder out, and a cinder selected anyway (profile full, or
       enabled:) does not install: its Composition reports the render error "cinder needs a volume backend, and
-      storage.backend is none (#196)". With a ceph backend whose sources are missing or not granted, the root
-      ExternalSecrets openstack-credential-ceph-* report SecretSyncedError (the copy store's 403 or NotFound names the
-      Secret), and cinder-storage-init fails with "client.<user> cannot list pool <pool>" when the pool or the user's caps
-      are missing. Before the #196 fix the same install sat in Init forever on FailedMount for ceph-etc (#179, #204).
+      storage.backend is none (#196)". With a ceph backend whose read grant is missing, the Openstack Composition
+      refuses to render, naming the namespace, the ServiceAccount and the Secrets to grant; while a source Secret is
+      missing, cinder is held in openstack-install-pending; and cinder-storage-init fails with "client.<user> cannot list
+      pool <pool>" when the pool or the user's caps are missing. Before the #196 fix the same install sat in Init forever on FailedMount for ceph-etc (#179, #204).
     check: kubectl get externalsecret openstack-credential-ceph-client-cinder openstack-credential-ceph-mon-host
     issue: 196
   - component: ironic

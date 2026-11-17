@@ -24,9 +24,13 @@ Curated history; release notes live in GitHub Releases.
     backend every chart renders as before.
   - **One source:** pools, users and the libvirt secret UUID reach cinder, glance, libvirt and nova from
     `storage.ceph` only; `componentValues` may not set them, nor wire Ceph by hand.
+  - **Held, refused, never stuck:** a Ceph consumer is created only once the copies of its keys report Ready; the
+    Openstack Composition refuses while ESO reports the copy store unable to read the source Secrets, naming the grant;
+    glance refuses to move its store to `rbd` off a live `glance-images` claim until `storage.ceph.glanceImagesMigrated`.
   - **Gates:** the new `hack/validate-ceph-consumer.py` (27 copied roots, P projections, 22c reader closure against
-    the measured `hack/ceph-readers.yaml`, 18c readers restart, 28 no client.admin, 29 delivery and consistency
-    through `hack/umbrella_spec.py`). `validate-pod-references` renders the storage-dependent charts as the umbrella
+    the measured `hack/ceph-readers.yaml`, 18c readers restart, 18d the checksum can read its Secret, 28 no
+    client.admin, 29 delivery and consistency through `hack/umbrella_spec.py`, 30 the hold and the read-grant refusal);
+    `hack/validate-glance-store.py` adds the migration refusal on the same single claim lookup. `validate-pod-references` renders the storage-dependent charts as the umbrella
     delivers them.
 
 - **cinder refuses to render without a block-storage backend (#196, phase P0 of #308).**

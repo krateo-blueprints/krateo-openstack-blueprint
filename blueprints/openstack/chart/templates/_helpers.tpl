@@ -879,6 +879,7 @@ true
   {{- else if and (eq $c.name "glance") (eq (include "osh.cephConsumes" (list $top $c)) "true") -}}
     {{- $rbd := dict "rbd_store_pool" $ceph.pools.images "rbd_store_user" $ceph.clients.glance -}}
     {{- $_ := set $out "storage" "rbd" -}}
+    {{- $_ := set $out "krateo" (dict "imagesMigratedFromPvc" ($ceph.glanceImagesMigrated | default false)) -}}
     {{- $_ := set $out "conf" (dict "glance" (dict "rbd" $rbd "glance_store" (deepCopy $rbd) "DEFAULT" (dict "show_image_direct_url" true))) -}}
   {{- end -}}
 {{- end -}}
@@ -892,6 +893,71 @@ true
 {{- $p := ternary $k (printf "%s.%s" $prefix $k) (eq $prefix "") -}}
 {{- if kindIs "map" $v -}}{{- include "osh.leafPaths" (dict "node" $v "prefix" $p) -}}{{- else -}}{{- $p }}
 {{ end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* (list $ <name>): the ExternalSecret <name> in this namespace, as JSON ("{}" when absent). One named GET; the umbrella
+     renders these objects, so its render identity may read them. The only ExternalSecret read in the chart. */}}
+{{- define "osh.lookupExternalSecret" -}}
+{{- $top := index . 0 -}}
+{{- lookup "external-secrets.io/v1" "ExternalSecret" $top.Release.Namespace (index . 1) | default dict | toJson -}}
+{{- end -}}
+
+{{/* (list $): the copy store <credentials.store>-ceph, as JSON ("{}" when absent). One named GET. */}}
+{{- define "osh.lookupCephStore" -}}
+{{- $top := index . 0 -}}
+{{- lookup "external-secrets.io/v1" "SecretStore" $top.Release.Namespace (printf "%s-ceph" $top.Values.credentials.store) | default dict | toJson -}}
+{{- end -}}
+
+{{/* (obj): "True", "False" or "" -- the status of obj's Ready condition, judged on type and status only. */}}
+{{- define "osh.readyStatus" -}}
+{{- $out := "" -}}
+{{- range $c := ((. | default dict).status | default dict).conditions | default list -}}
+{{- if eq ($c.type | default "") "Ready" -}}{{- $out = toString $c.status -}}{{- end -}}
+{{- end -}}
+{{- $out -}}
+{{- end -}}
+
+{{/* (list $ $c): "true" when component $c may be CREATED as far as Ceph is concerned (#308): it consumes no Ceph here,
+     or every provided root it lists reports Ready=True -- the copy of the key Ceph minted exists. Until then the
+     component is held, exactly like a dependency that is not Ready yet: listed in openstack-install-pending, never
+     created on a key nothing has copied, so no post-install hook of it can time out on a missing grant or Secret. Only
+     creation: compositions.yaml keeps an existing component (`or $exists`), since a component that stops rendering is
+     uninstalled (#68). hack/validate-ceph-consumer.py (check 30) renders it with stand-in ExternalSecrets. */}}
+{{- define "osh.cephRootsReady" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- $ready := true -}}
+{{- if eq (include "osh.cephConsumes" (list $top $c)) "true" -}}
+{{- range $id := ($c.credentials | default list) -}}
+{{- range $i := ($top.Values.credentials.items | default list) -}}
+{{- if and (eq $i.id $id) (eq ($i.source | default "") "provided") -}}
+{{- if ne (include "osh.readyStatus" (include "osh.lookupExternalSecret" (list $top $i.secret) | fromJson)) "True" -}}{{- $ready = false -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $ready -}}
+{{- end -}}
+
+{{/* (list $): with a ceph backend, refuse the render while the copy store reports Ready=False (#308). External Secrets
+     Operator validates a kubernetes-provider store by asking, in storage.ceph.sourceNamespace, whether its ServiceAccount
+     may read Secrets there (that is why its Role carries selfsubjectrulesreviews), so Ready=False is ESO's measurement
+     that the read grant is missing or wrong -- typically the Role that namespace's owner must create. Refused with the
+     exact grant, on the Composition's status, rather than holding cinder with no reason given. A store not yet
+     validated (no condition) only holds the consumers (osh.cephRootsReady). Check 30 renders both. */}}
+{{- define "osh.requireCephReadGrant" -}}
+{{- $top := index . 0 -}}
+{{- if eq (include "osh.cephActive" (list $top)) "true" -}}
+{{- $store := include "osh.lookupCephStore" (list $top) | fromJson -}}
+{{- if eq (include "osh.readyStatus" $store) "False" -}}
+{{- $msg := "" -}}
+{{- range $c := ($store.status | default dict).conditions | default list -}}{{- if eq ($c.type | default "") "Ready" -}}{{- $msg = $c.message | default "" -}}{{- end -}}{{- end -}}
+{{- $ns := include "osh.cephSourceNamespace" (list $top) -}}
+{{- $sa := printf "%s-ceph-reader" $top.Values.credentials.store -}}
+{{- $names := list -}}
+{{- range $i := ($top.Values.credentials.items | default list) -}}{{- if eq ($i.source | default "") "provided" -}}{{- $names = append $names (include "osh.cephSource" (list $top $i) | fromJson).secret -}}{{- end -}}{{- end -}}
+{{- fail (printf "\n\nThe Ceph copy store %s-ceph cannot read the key Secrets in namespace %s (#308). External Secrets Operator reports: %s\n\nGrant the ServiceAccount %s/%s get on exactly %s there, and create on selfsubjectrulesreviews -- the Role and RoleBinding in the README's \"Storage: consuming a Ceph cluster\". Until then no Ceph consumer (cinder, libvirt, glance with rbd) is created.\n" $top.Values.credentials.store $ns $msg $top.Release.Namespace $sa (join ", " ($names | uniq))) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 

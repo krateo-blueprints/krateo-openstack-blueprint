@@ -1120,6 +1120,10 @@
                 "pvc",
                 "rbd"
               ]
+            },
+            "glanceImagesMigrated": {
+              "type": "boolean",
+              "description": "With glanceStore rbd on an install whose images are on the glance-images claim, glance refuses until this is true: copy the images to the rbd store first, or confirm there is none to keep."
             }
           }
         },

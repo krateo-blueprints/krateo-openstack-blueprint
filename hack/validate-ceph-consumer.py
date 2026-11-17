@@ -43,6 +43,18 @@ holds their keys. The umbrella COPIES each key and the monitor addresses into th
       those, nor the references, nor glance's storage rbd/radosgw, nor conf.ceph.enabled on libvirt or nova: the
       umbrella refuses each, naming it.
 
+  30. HELD UNTIL COPIED, AND THE GRANT. With a ceph backend a Ceph consumer is CREATED only once every provided root it
+      lists reports Ready=True (osh.cephRootsReady, gating creation beside the dependency gate, never an existing
+      component); and while the copy store reports Ready=False -- External Secrets Operator's own check that the read
+      grant in storage.ceph.sourceNamespace exists -- the umbrella refuses, naming the namespace, the ServiceAccount and
+      the exact Secrets to grant. Rendered with stand-in ExternalSecrets and SecretStore in place of the two named GETs,
+      which are the chart's only reads of those kinds.
+  18d. THE CHECKSUM CAN READ ITS SECRET. composition-dynamic-controller grants a release's ServiceAccount every verb on
+      each kind its chart renders, with no resourceNames (internal/rbacgen/rbacgen.go, read 2026-11-18), so the
+      checksum's lookup of the projected Secret is allowed exactly when the chart renders a Secret: each reader chart's
+      ceph-managed render must. A denied lookup is not silent either way: Helm fails the render with the API's
+      Forbidden (measured in this repo, osh.nodeReadGranted).
+
 Fails when helm or PyYAML is missing, when the umbrella defines no provided item, and when a render it needs fails.
 """
 import base64
@@ -666,13 +678,125 @@ def check29(tmp, uv):
         count("29")
 
 
+ES_LOOKUP = '{{- lookup "external-secrets.io/v1" "ExternalSecret" $top.Release.Namespace (index . 1) | default dict | toJson -}}'
+STORE_LOOKUP = ('{{- lookup "external-secrets.io/v1" "SecretStore" $top.Release.Namespace '
+                '(printf "%s-ceph" $top.Values.credentials.store) | default dict | toJson -}}')
+
+
+def ready_obj(status, message=""):
+    return {"status": {"conditions": [{"type": "Ready", "status": status, "message": message}]}}
+
+
+def check30(tmp, uv):
+    helpers = open(os.path.join(UMBRELLA, "templates", "_helpers.tpl")).read()
+    comp = open(os.path.join(UMBRELLA, "templates", "compositions.yaml")).read()
+    import re
+    for lk in (ES_LOOKUP, STORE_LOOKUP):
+        if helpers.count(lk) != 1:
+            fail("30: _helpers.tpl must read with exactly one `%s` (found %d)" % (lk[:70], helpers.count(lk)))
+            return
+    for kind in ("ExternalSecret", "SecretStore"):
+        n = sum(len(re.findall(r'lookup\s+"external-secrets\.io/v1"\s+"%s"' % kind, open(os.path.join(dp, f)).read()))
+                for dp, _, fs in os.walk(os.path.join(UMBRELLA, "templates")) for f in fs)
+        if n != 1:
+            fail("30: the umbrella reads %s %d time(s); osh.lookup* must be the only read" % (kind, n))
+    if '{{- $cephReady := include "osh.cephRootsReady" (list $ $c) }}' not in comp:
+        fail("30: compositions.yaml does not compute $cephReady from osh.cephRootsReady for each component")
+    gate = [l for l in comp.splitlines() if l.startswith('{{- if and (eq $crd "true")')]
+    want = ('(or (and (eq $strictReady "true") (eq $relaxedExist "true") (eq $cephReady "true")) (eq $exists "true"))')
+    if len(gate) != 1 or want not in gate[0]:
+        fail("30: the creation gate must hold a component on $cephReady beside its dependencies, and never an existing "
+             "one: want `%s` in `%s`" % (want, gate))
+    if 'include "osh.requireCephReadGrant" (list $)' not in comp:
+        fail("30: compositions.yaml does not call osh.requireCephReadGrant")
+
+    def stubbed(w):
+        p = os.path.join(w, "templates", "_helpers.tpl")
+        t = open(p).read()
+        t = t.replace(ES_LOOKUP, '{{- index (($top.Values.gateLookup | default dict).es | default dict) (index . 1) | default dict | toJson -}}')
+        t = t.replace(STORE_LOOKUP, '{{- ($top.Values.gateLookup | default dict).store | default dict | toJson -}}')
+        open(p, "w").write(t)
+        open(os.path.join(w, "templates", "zz-ceph-hold-probe.yaml"), "w").write(
+            '{{- range $c := .Values.components }}\n'
+            '{{ printf "\\n# CEPHREADY %s %s\\n" $c.name (include "osh.cephRootsReady" (list $ $c)) }}\n{{- end }}\n')
+    u = stage(UMBRELLA, tmp, "umbrella-30", stubbed)
+    items = {i["id"]: i for i in uv["credentials"]["items"]}
+    roots = {k: items[k]["secret"] for k in ("ceph-client-cinder", "ceph-client-glance", "ceph-mon-host")}
+    rook_rbd = {"backend": "ceph-rook", "ceph": {"glanceStore": "rbd", "sourceNamespace": "rook-ceph"}}
+    allready = {n: ready_obj("True") for n in roots.values()}
+    cases = [
+        ("none, nothing copied", {}, {}, set()),
+        ("ceph-rook, glanceStore rbd, nothing copied yet", {"storage": rook_rbd}, {}, {"cinder", "libvirt", "glance"}),
+        ("ceph-rook, every copy Ready", {"storage": rook_rbd}, {"es": allready}, set()),
+        ("ceph-rook, mon_host's copy Ready=False", {"storage": rook_rbd},
+         {"es": dict(allready, **{roots["ceph-mon-host"]: ready_obj("False", "x")})}, {"cinder", "libvirt", "glance"}),
+        ("ceph-rook, glance's copy missing", {"storage": rook_rbd},
+         {"es": {k: v for k, v in allready.items() if k != roots["ceph-client-glance"]}}, {"glance"}),
+        ("ceph-rook, glanceStore pvc, nothing copied", {"storage": {"backend": "ceph-rook"}}, {}, {"cinder", "libvirt"}),
+    ]
+    for label, values, stub, held in cases:
+        v = dict(values, gateLookup=stub, profile="full")
+        rc, out, err = helm_template(u, "openstack-gate", v)
+        if rc != 0:
+            fail("30: %s: the umbrella does not render: %s" % (label, err.strip()[-250:]))
+            continue
+        got = {l.split()[2]: l.split()[3] for l in out.splitlines() if l.startswith("# CEPHREADY ")}
+        if not got:
+            fail("30: %s: the probe printed nothing" % label)
+            continue
+        now_held = {n for n, r in got.items() if r != "true"}
+        if now_held != held:
+            fail("30: %s: held %s, want %s" % (label, sorted(now_held), sorted(held)))
+        count("30")
+    # the read grant
+    src = ["rook-ceph-client-cinder", "rook-ceph-client-glance", "rook-ceph-config"]
+    for label, store, refused in (("store Ready=False", ready_obj("False", "client is not allowed to get secrets"), True),
+                                  ("store Ready=True", ready_obj("True"), False),
+                                  ("store not validated yet", {}, False)):
+        v = {"profile": "full", "storage": rook_rbd, "gateLookup": {"store": store, "es": allready}}
+        rc, out, err = helm_template(u, "openstack-gate", v)
+        if refused:
+            if rc == 0:
+                fail("30: %s: renders; a store ESO reports unable to read must refuse the render" % label)
+            else:
+                for frag in ["rook-ceph", "%s/%s-ceph-reader" % (NS, uv["credentials"]["store"]),
+                             ", ".join(src), "client is not allowed to get secrets"]:
+                    if frag not in err:
+                        fail("30: %s: the refusal does not name %r: %s" % (label, frag, err.strip()[-300:]))
+        elif rc != 0:
+            fail("30: %s: refused; only a store ESO reports Ready=False refuses: %s" % (label, err.strip()[-200:]))
+        count("30")
+    v = {"profile": "full", "gateLookup": {"store": ready_obj("False", "x")}}
+    rc, out, err = helm_template(u, "openstack-gate", v)
+    if rc != 0:
+        fail("30: with storage.backend none a copy store's state refuses the render: %s" % err.strip()[-200:])
+    count("30")
+
+
+def check18d(tmp, uv):
+    for chart, spec in CHARTS.items():
+        cdir = os.path.join(BP, chart, "chart")
+        w = stage(cdir, tmp, chart + "-18d")
+        values = deep_merge(json.loads(json.dumps(list(spec["modes"].values())[0])), ceph_refs(uv, spec["item"]))
+        rc, out, err = helm_template(w, chart + "-gate1234", values)
+        if rc != 0:
+            fail("18d: %s does not render ceph-managed: %s" % (chart, err.strip()[-200:]))
+            continue
+        if not [d for d in docs_of(out) if d.get("kind") == "Secret" and d.get("apiVersion") == "v1"]:
+            fail("18d: %s's ceph-managed render has no v1 Secret, so composition-dynamic-controller grants its release "
+                 "nothing on Secrets and the key checksum's lookup is Forbidden" % chart)
+        count("18d")
+
+
 def main():
     uv = yaml.safe_load(open(os.path.join(UMBRELLA, "values.yaml")))
     with tempfile.TemporaryDirectory() as tmp:
         check27(tmp, uv)
         check_charts(tmp, uv)
         check29(tmp, uv)
-    for k in ("27", "P", "22c", "18c", "28", "29"):
+        check30(tmp, uv)
+        check18d(tmp, uv)
+    for k in ("27", "P", "22c", "18c", "18d", "28", "29", "30"):
         if not counts.get(k):
             fail("%s: measured nothing" % k)
     if failures:

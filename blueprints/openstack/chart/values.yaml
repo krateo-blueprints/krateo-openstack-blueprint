@@ -73,6 +73,10 @@ storage:
     libvirtSecretUUID: 457eb676-33da-42ec-9a8c-9293d545c337
     # glanceStore: pvc keeps images on glance's volume; rbd stores them in the images pool (#308 P1: opt-in).
     glanceStore: pvc
+    # glanceImagesMigrated: with glanceStore rbd on an install whose images are on the glance-images claim, glance
+    # refuses to render until this is true: copy each image to the rbd store first (README), or confirm there is none
+    # to keep. Ignored with glanceStore pvc.
+    glanceImagesMigrated: false
 
 # tolerations: one list of Kubernetes tolerations applied to EVERY pod the blueprint renders, in every component
 # (Deployments, StatefulSets, DaemonSets, Jobs and CronJobs, helm-toolkit's Jobs included). Passed to each component

@@ -331,6 +331,10 @@
               }
             }
           }
+        },
+        "imagesMigratedFromPvc": {
+          "type": "boolean",
+          "description": "Set by the umbrella from storage.ceph.glanceImagesMigrated (#308): the images on the glance-images claim were copied to the rbd store, or there were none to keep. Without it, a ceph-managed rbd render refuses while that claim exists."
         }
       }
     }

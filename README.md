@@ -520,8 +520,13 @@ subjects:
     namespace: openstack
 ```
 
-Without it, the root ExternalSecrets `openstack-credential-ceph-*` report `SecretSyncedError` naming the refused
-Secret. Check with `kubectl get externalsecret openstack-credential-ceph-client-cinder openstack-credential-ceph-mon-host`.
+Without it, External Secrets Operator reports the copy store `openstack-credentials-ceph` not Ready, and the Openstack
+Composition **refuses to render**, naming the namespace, the ServiceAccount and the exact Secrets to grant. A Ceph
+consumer (cinder, libvirt, glance with `rbd`) is **created only once the copies of the keys it reads report Ready**:
+until then it is listed in `openstack-install-pending`, like a dependency that is not Ready yet, and never starts on
+a key nothing has copied. Check with
+`kubectl get secretstore openstack-credentials-ceph` and
+`kubectl get externalsecret openstack-credential-ceph-client-cinder openstack-credential-ceph-mon-host`.
 
 **Rotation.** A key Ceph's side rotates (Rook's cephx rotation, or the Ceph admin) reaches the copies within 5 minutes,
 then the projections. Each reader — `cinder-volume`, `glance-api`, `libvirt` — carries a checksum of the key it
@@ -530,8 +535,13 @@ until its readers restart; libvirt defines its secret at start. What a running V
 volume does across a rotation is not measured yet (#308, live test L4): rotate in a maintenance window.
 
 **Not covered yet:** nova's ephemeral disks stay on the hypervisor (Ceph-backed ephemeral disks are a later phase of
-#308); switching an existing install's glance from `pvc` to `rbd` does not migrate its images, so do it on a new
-install or migrate them first; and this path has been rendered and gated, not yet run on a live cluster.
+#308); and this path has been rendered and gated, not yet run on a live cluster.
+
+**Moving an existing glance to `rbd`.** glance stops mounting its `glance-images` claim, so every image stored there
+would become unreadable. While the claim exists, glance refuses to render until you set
+`storage.ceph.glanceImagesMigrated: true`: first copy each image into the rbd store (with both stores enabled,
+`glance image-import <id> --import-method copy-image --stores rbd`), or confirm there is nothing to keep. The claim
+itself is kept (`keep_pvc`) until you delete it.
 
 ## swift needs a ReadWriteMany StorageClass
 
