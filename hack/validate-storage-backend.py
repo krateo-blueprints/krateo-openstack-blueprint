@@ -18,7 +18,8 @@ without a backend, naming the value. Each half is checked here, by rendering:
      message naming storage.backend, whatever its value (unmanaged included: it would install upstream's wiring under a
      full-strict that left cinder out). The umbrella's schema refuses a backend it does not list.
   3. THE CHART REFUSES. Rendered with krateo.storageBackend none, cinder fails, naming storage.backend and #196; with each
-     other backend the umbrella accepts and the chart cannot render yet, it fails naming that backend and #308. Its own
+     ceph backend but without the krateo.ceph references the umbrella passes with it, it fails naming that backend and
+     the references (#308); with them it renders, which hack/validate-ceph-consumer.py checks. Its own
      default is `unmanaged` (the chart as OpenStack-Helm ships it, for a standalone install), which renders
      cinder-volume: the other gates render each chart at its defaults and must keep seeing cinder's pods.
   4. ONE LIBVIRT SECRET UUID. nova-compute's DaemonSet read `.Values.conf.ceph.secret_uuid`, which nova's values never
@@ -53,7 +54,7 @@ if shutil.which("helm") is None:
 
 SENTINEL_UUID = "0b5e7a1c-5e47-4c1e-9f00-196196196196"
 REFUSE_NONE = "storage.backend is none (#196)"
-REFUSE_LATER = "is not implemented in this release (#308)"
+REFUSE_LATER = "renders only with krateo.ceph.keyringFrom and krateo.ceph.monHostFrom (#308)"
 failures = []
 counts = {}
 

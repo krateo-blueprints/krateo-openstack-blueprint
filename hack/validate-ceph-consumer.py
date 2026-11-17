@@ -17,6 +17,22 @@ holds their keys. The umbrella COPIES each key and the monitor addresses into th
       source Secrets with get. The projection store's Role lists the provided roots only with a ceph backend.
       ceph-external with an empty source Secret is refused, naming it.
 
+  P.  PROJECTIONS. Each ceph-managed chart (cinder, glance in rbd, libvirt), rendered with the references the umbrella
+      passes, renders exactly two ExternalSecrets through the umbrella's store: its keyring Secret (exactly `key`, from
+      its user's root) and its ceph.conf Secret (exactly `ceph.conf`, mon_host from ceph-mon-host's root), each with the
+      teardown annotation. Its ceph-etc and keyring volumes mount those two Secrets.
+  22c. READER CLOSURE. hack/ceph-readers.yaml, measured per program, names the containers that receive each projection,
+      per chart and mode (cinder as a Deployment and as a StatefulSet): exactly those mount it.
+  18c. READERS RESTART. A reader holds the key it read at start (an init container's keyring file; libvirt's secret).
+      Each long-running reader's pod template carries a checksum of the projected key as it is live, read with one
+      lookup: rendered with a stand-in live Secret, the reader templates change with the key and nothing else does, and
+      the checksum is of the Secret the pod mounts.
+  28. NO CLIENT.ADMIN. In each ceph-managed render no pod references the admin keyring Secret (ceph_client.
+      user_secret_name), no container runs or mounts ceph-admin-keyring.sh, no script a container runs creates a user or
+      a pool (`ceph auth`, `osd pool create`), and no env var carries a key. Literal keys and hand-wired second Cephs are
+      refused, naming the path; one reference without the other, references with a non-ceph backend (cinder), a non-rbd
+      store (glance) or conf.ceph.enabled false (libvirt) are refused.
+
 Fails when helm or PyYAML is missing, when the umbrella defines no provided item, and when a render it needs fails.
 """
 import json
@@ -226,11 +242,256 @@ def check27(tmp, uv):
         count("27")
 
 
+CHARTS = {
+    "cinder": {
+        "item": "ceph-client-cinder", "keyring": "cinder-volume-rbd-keyring", "etc": "cinder-ceph-etc",
+        "modes": {"deployment": {"krateo": {"storageBackend": "ceph-external"}},
+                  "statefulset": {"krateo": {"storageBackend": "ceph-external"},
+                                  "manifests": {"statefulset_volume": True}}},
+        "restart": ["Deployment/cinder-volume", "StatefulSet/cinder-volume"],
+        "literals": {"conf.ceph.admin_keyring": "AQgateliteral==", "ceph_client.enable_external_ceph_backend": True,
+                     "ceph_client.external_ceph.rbd_user_keyring": "AQgateliteral==",
+                     "backup.external_ceph_rbd.enabled": True, "backup.external_ceph_rbd.admin_keyring": "AQgate=="},
+        "mismatch": [("krateo.storageBackend unmanaged", {"krateo": {"storageBackend": "unmanaged"}})],
+    },
+    "glance": {
+        "item": "ceph-client-glance", "keyring": "images-rbd-keyring", "etc": "glance-ceph-etc",
+        "modes": {"rbd": {"storage": "rbd"}},
+        "restart": ["Deployment/glance-api"],
+        "literals": {"conf.ceph.admin_keyring": "AQgateliteral=="},
+        "mismatch": [("storage pvc", {"storage": "pvc"})],
+    },
+    "libvirt": {
+        "item": "ceph-client-cinder", "keyring": "libvirt-ceph-cinder-keyring", "etc": "libvirt-ceph-etc",
+        "modes": {"daemonset": {"conf": {"ceph": {"enabled": True}}}},
+        "restart": ["DaemonSet/libvirt-libvirt-default"],
+        "literals": {"conf.ceph.admin_keyring": "AQgateliteral==", "conf.ceph.cinder.keyring": "AQgateliteral==",
+                     "conf.ceph.cinder.external_ceph.enabled": True},
+        "mismatch": [("conf.ceph.enabled false", {"conf": {"ceph": {"enabled": False}}})],
+    },
+}
+LOOKUP = 'lookup "v1" "Secret" $envAll.Release.Namespace $name'
+
+
+def deep_merge(a, b):
+    for k, v in b.items():
+        if isinstance(v, dict) and isinstance(a.get(k), dict):
+            deep_merge(a[k], v)
+        else:
+            a[k] = v
+    return a
+
+
+def nested(path, value):
+    out = cur = {}
+    parts = path.split(".")
+    for p in parts[:-1]:
+        cur[p] = {}
+        cur = cur[p]
+    cur[parts[-1]] = value
+    return out
+
+
+def ceph_refs(uv, item_id):
+    items = {i["id"]: i for i in uv["credentials"]["items"]}
+    store = uv["credentials"]["store"]
+    k, m = items[item_id], items["ceph-mon-host"]
+    return {"krateo": {"ceph": {"keyringFrom": {"store": store, "secret": k["secret"], "key": k["key"]},
+                                "monHostFrom": {"store": store, "secret": m["secret"], "key": m["key"]}}}}
+
+
+def pods(docs):
+    for d in docs:
+        if d.get("kind") not in ("Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"):
+            continue
+        spec = d.get("spec") or {}
+        if d["kind"] == "CronJob":
+            spec = (spec.get("jobTemplate") or {}).get("spec") or {}
+        yield "%s/%s" % (d["kind"], d["metadata"]["name"]), (spec.get("template") or {})
+
+
+def containers(pod):
+    return ((pod.get("spec") or {}).get("initContainers") or []) + ((pod.get("spec") or {}).get("containers") or [])
+
+
+def scripts(docs):
+    out = {}
+    for d in docs:
+        if d.get("kind") in ("ConfigMap", "Secret"):
+            for k, v in (d.get("data") or {}).items():
+                if d["kind"] == "Secret":
+                    try:
+                        import base64
+                        v = base64.b64decode(v).decode()
+                    except Exception:
+                        continue
+                out.setdefault(k, []).append(v or "")
+    return out
+
+
+def check_charts(tmp, uv):
+    readers = (yaml.safe_load(open(os.path.join(ROOT, "hack", "ceph-readers.yaml"))) or {}).get("readers") or {}
+    if sorted(readers) != sorted(CHARTS):
+        fail("22c: hack/ceph-readers.yaml lists %s, the ceph-managed charts are %s" % (sorted(readers), sorted(CHARTS)))
+    items = {i["id"]: i for i in uv["credentials"]["items"]}
+    store = uv["credentials"]["store"]
+    for chart, spec in CHARTS.items():
+        cdir = os.path.join(BP, chart, "chart")
+        cvals = yaml.safe_load(open(os.path.join(cdir, "values.yaml")))
+        admin_secret = (cvals.get("ceph_client") or {}).get("user_secret_name")
+        refs = ceph_refs(uv, spec["item"])
+        w = stage(cdir, tmp, chart)
+        rd = readers.get(chart) or {}
+        if sorted(rd.get("modes") or []) != sorted(spec["modes"]):
+            fail("22c: hack/ceph-readers.yaml renders %s in modes %s, this gate in %s" % (
+                chart, rd.get("modes"), sorted(spec["modes"])))
+        for mode, mv in spec["modes"].items():
+            label = "%s (%s)" % (chart, mode)
+            values = deep_merge(json.loads(json.dumps(mv)), json.loads(json.dumps(refs)))
+            rc, out, err = helm_template(w, chart + "-gate1234", values)
+            if rc != 0:
+                fail("P: %s does not render ceph-managed: %s" % (label, err.strip()[-300:]))
+                continue
+            docs = docs_of(out)
+            # P. projections
+            es = {d["metadata"]["name"]: d for d in by(docs, "ExternalSecret")}
+            want = {spec["keyring"]: (items[spec["item"]], "key"), spec["etc"]: (items["ceph-mon-host"], "ceph.conf")}
+            for name, (item, key) in want.items():
+                d = es.get(name)
+                if not d:
+                    fail("P: %s renders no ExternalSecret %s" % (label, name))
+                    continue
+                sp = d.get("spec") or {}
+                if (d["metadata"].get("annotations") or {}).get("krateo.io/teardown") != "with-release":
+                    fail("P: %s: %s lacks krateo.io/teardown: with-release" % (label, name))
+                if (sp.get("secretStoreRef") or {}).get("name") != store:
+                    fail("P: %s: %s reads store %r, want %s" % (label, name, (sp.get("secretStoreRef") or {}).get("name"), store))
+                rr = [((x.get("remoteRef") or {}).get("key"), (x.get("remoteRef") or {}).get("property"))
+                      for x in sp.get("data") or []]
+                if rr != [(item["secret"], item["key"])]:
+                    fail("P: %s: %s reads %s, want [(%s, %s)]" % (label, name, rr, item["secret"], item["key"]))
+                data = ((sp.get("target") or {}).get("template") or {}).get("data") or {}
+                if sorted(data) != [key] or (sp.get("target") or {}).get("name") != name:
+                    fail("P: %s: %s holds %s, want exactly [%s]" % (label, name, sorted(data), key))
+                if key == "ceph.conf" and "mon_host = {{ .mon_host }}" not in (data.get(key) or ""):
+                    fail("P: %s: %s's ceph.conf does not set mon_host from the root: %r" % (label, name, data.get(key)))
+                count("P")
+            # 22c. reader closure
+            got = {"keyring": set(), "etc": set()}
+            for owner, pod in pods(docs):
+                vols = {v["name"]: (v.get("secret") or {}).get("secretName")
+                        for v in (pod.get("spec") or {}).get("volumes") or []}
+                for c in containers(pod):
+                    for m in c.get("volumeMounts") or []:
+                        sec = vols.get(m["name"])
+                        if sec == spec["keyring"]:
+                            got["keyring"].add((owner, c["name"]))
+                        if sec == spec["etc"]:
+                            got["etc"].add((owner, c["name"]))
+            present = {owner for owner, _ in pods(docs)}
+            for what in ("keyring", "etc"):
+                listed = {(wl, e["container"]) for e in rd.get(what) or [] for wl in e.get("workloads") or []
+                          if wl in present}
+                for x in sorted(got[what] - listed):
+                    fail("22c: %s: %s %s receives the %s projection, and hack/ceph-readers.yaml does not list it"
+                         % (label, x[0], x[1], what))
+                for x in sorted(listed - got[what]):
+                    fail("22c: %s: %s %s is listed as a %s reader and does not receive it" % (label, x[0], x[1], what))
+                if not got[what]:
+                    fail("22c: %s: nothing receives the %s projection" % (label, what))
+                count("22c")
+            # 28. no client.admin
+            scr = scripts(docs)
+            for owner, pod in pods(docs):
+                for v in (pod.get("spec") or {}).get("volumes") or []:
+                    if admin_secret and (v.get("secret") or {}).get("secretName") == admin_secret:
+                        fail("28: %s: %s mounts %s, the client.admin keyring" % (label, owner, admin_secret))
+                for c in containers(pod):
+                    cmd = " ".join(c.get("command") or []) + " " + " ".join(c.get("args") or [])
+                    subs = " ".join(m.get("subPath") or "" for m in c.get("volumeMounts") or [])
+                    if "ceph-admin-keyring" in cmd or "ceph-admin-keyring" in subs:
+                        fail("28: %s: %s %s runs or mounts ceph-admin-keyring.sh" % (label, owner, c["name"]))
+                    for e in c.get("env") or []:
+                        if "KEYRING" in e.get("name", "") and e.get("value"):
+                            fail("28: %s: %s %s carries a key in env %s" % (label, owner, c["name"], e["name"]))
+                    for tok in (c.get("command") or []):
+                        base = os.path.basename(tok)
+                        for body in scr.get(base, []):
+                            for bad in ("ceph auth", "osd pool create"):
+                                if bad in body:
+                                    fail("28: %s: %s %s runs %s, which contains `%s`" % (label, owner, c["name"], base, bad))
+                count("28")
+            # 18c. readers restart
+            if mode == list(spec["modes"])[0] or chart == "cinder":
+                restart_check(tmp, chart, cdir, label, values, spec)
+        # refusals
+        base = deep_merge(json.loads(json.dumps(list(spec["modes"].values())[0])), json.loads(json.dumps(refs)))
+        for path, val in spec["literals"].items():
+            v = deep_merge(json.loads(json.dumps(base)), nested(path, val))
+            rc, out, err = helm_template(w, chart + "-gate1234", v)
+            if rc == 0:
+                fail("28: %s ceph-managed with %s set renders; it must refuse" % (chart, path))
+            elif path not in err:
+                fail("28: %s refuses %s without naming it: %s" % (chart, path, err.strip()[-200:]))
+            count("28")
+        for half in ("keyringFrom", "monHostFrom"):
+            v = json.loads(json.dumps(base))
+            del v["krateo"]["ceph"][half]
+            rc, out, err = helm_template(w, chart + "-gate1234", v)
+            if rc == 0 or "come together" not in err:
+                fail("28: %s with krateo.ceph without %s %s" % (chart, half, "renders" if rc == 0 else
+                                                                 "is refused without saying both are needed"))
+            count("28")
+        for what, mv in spec["mismatch"]:
+            v = deep_merge(json.loads(json.dumps(base)), mv)
+            rc, out, err = helm_template(w, chart + "-gate1234", v)
+            if rc == 0:
+                fail("28: %s with krateo.ceph references and %s renders; it must refuse" % (chart, what))
+            count("28")
+
+
+def restart_check(tmp, chart, cdir, label, values, spec):
+    tk = open(os.path.join(TOOLKIT, "templates", "manifests", "_ceph_client.tpl")).read()
+    if tk.count(LOOKUP) != 1:
+        fail("18c: helm-toolkit's ceph_key_checksum must read the projection with exactly one `%s` (found %d)"
+             % (LOOKUP, tk.count(LOOKUP)))
+        return
+    renders = {}
+    for tag, stub in (("a", '(dict "data" (dict "key" $name))'),
+                      ("b", '(dict "data" (dict "key" (printf "%s-rotated" $name)))')):
+        def patch(w, stub=stub):
+            p = os.path.join(w, "charts", "helm-toolkit", "templates", "manifests", "_ceph_client.tpl")
+            body = open(p).read()
+            open(p, "w").write(body.replace(LOOKUP, stub))
+        w = stage(cdir, tmp, "%s-restart-%s-%s" % (chart, tag, abs(hash(label)) % 10000), patch)
+        rc, out, err = helm_template(w, chart + "-gate1234", values)
+        if rc != 0:
+            fail("18c: %s does not render with a stand-in live Secret: %s" % (label, err.strip()[-200:]))
+            return
+        renders[tag] = {o: p for o, p in pods(docs_of(out))}
+    import hashlib
+    for owner in sorted(set(renders["a"]) | set(renders["b"])):
+        a, b = renders["a"].get(owner), renders["b"].get(owner)
+        if owner in spec["restart"]:
+            ann = ((a or {}).get("metadata") or {}).get("annotations") or {}
+            want = hashlib.sha256(spec["keyring"].encode()).hexdigest()
+            if ann.get("krateo.io/ceph-key-checksum") != want:
+                fail("18c: %s: %s's checksum is %r, want the checksum of %s, the key Secret it mounts"
+                     % (label, owner, ann.get("krateo.io/ceph-key-checksum"), spec["keyring"]))
+            if a == b:
+                fail("18c: %s: %s's pod template does not change when the live key does, so it keeps the old key"
+                     % (label, owner))
+            count("18c")
+        elif a != b:
+            fail("18c: %s: %s's pod template changes with the Ceph key, which it does not read" % (label, owner))
+
+
 def main():
     uv = yaml.safe_load(open(os.path.join(UMBRELLA, "values.yaml")))
     with tempfile.TemporaryDirectory() as tmp:
         check27(tmp, uv)
-    for k in ("27",):
+        check_charts(tmp, uv)
+    for k in ("27", "P", "22c", "18c", "28"):
         if not counts.get(k):
             fail("%s: measured nothing" % k)
     if failures:

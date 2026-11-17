@@ -67,12 +67,12 @@ KNOWN_DEFECTS = {}
 # pvc-ceph-client-key and cinder-volume-rbd-keyring that only a standalone install's operator provides). They are
 # rendered the way the umbrella delivers them, once per storage.backend its schema accepts. A backend the chart
 # refuses must refuse with the chart's own message for it -- with none, "storage.backend is none (#196)"; a backend
-# not implemented yet, "is not implemented in this release (#308)" -- and any backend it renders is checked like every
+# rendered without the krateo.ceph references, "renders only with krateo.ceph.keyringFrom ..." -- and any backend it renders is checked like every
 # other chart. Until #196 there was an allowlist here for those three objects; the refusal is what replaced it.
 REFUSALS = {
     "none": "storage.backend is none (#196)",
 }
-NOT_IMPLEMENTED = "is not implemented in this release (#308)"
+NOT_IMPLEMENTED = "renders only with krateo.ceph.keyringFrom and krateo.ceph.monHostFrom (#308)"
 
 
 def umbrella(root: Path):

@@ -15,6 +15,10 @@ limitations under the License.
 {{- if .Values.manifests.job_storage_init }}
 {{- $envAll := . }}
 
+{{- /* Krateo (#308): ceph-managed, this Job creates nothing. The pool and client.<rbd_store_user> are made on Ceph's
+       side (a Rook CephBlockPool and CephClient, or the Ceph admin); it checks with that user's own key, and no
+       client.admin, that the pool exists and the user can use it. */ -}}
+{{- $managed := eq (include "helm-toolkit.utils.ceph_managed" $envAll) "true" }}
 {{- $serviceAccountName := "glance-storage-init" }}
 {{ tuple $envAll "storage_init" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
@@ -77,6 +81,29 @@ spec:
       initContainers:
 {{ tuple $envAll "storage_init" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
         {{ if or (eq .Values.storage "rbd") (eq .Values.storage "radosgw") }}
+        {{- if $managed }}
+        - name: ceph-keyring-placement
+{{ tuple $envAll "glance_api" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ dict "envAll" $envAll "application" "storage_init" "container" "ceph_keyring_placement" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
+          env:
+            - name: RBD_STORE_USER
+              value: {{ .Values.conf.glance.rbd.rbd_store_user | quote }}
+          command:
+            - /tmp/ceph-keyring.sh
+          volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
+            - name: etcceph
+              mountPath: /etc/ceph
+            - name: glance-bin
+              mountPath: /tmp/ceph-keyring.sh
+              subPath: ceph-keyring.sh
+              readOnly: true
+            - name: ceph-keyring
+              mountPath: /tmp/client-keyring
+              subPath: key
+              readOnly: true
+        {{- else }}
         - name: ceph-keyring-placement
 {{ tuple $envAll "glance_api" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ dict "envAll" $envAll "application" "storage_init" "container" "ceph_keyring_placement" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
@@ -97,6 +124,7 @@ spec:
               subPath: key
               readOnly: true
             {{ end }}
+        {{- end }}
         {{ end }}
       containers:
         - name: glance-storage-init
@@ -157,7 +185,7 @@ spec:
               mountPath: /etc/ceph/ceph.conf
               subPath: ceph.conf
               readOnly: true
-            {{- if empty .Values.conf.ceph.admin_keyring }}
+            {{- if and (not $managed) (empty .Values.conf.ceph.admin_keyring) }}
             - name: ceph-keyring
               mountPath: /tmp/client-keyring
               subPath: key
@@ -175,6 +203,15 @@ spec:
         {{ if or (eq .Values.storage "rbd") (eq .Values.storage "radosgw") }}
         - name: etcceph
           emptyDir: {}
+        {{- if $managed }}
+        - name: ceph-etc
+          secret:
+            secretName: glance-ceph-etc
+            defaultMode: 0444
+        - name: ceph-keyring
+          secret:
+            secretName: {{ .Values.secrets.rbd | quote }}
+        {{- else }}
         - name: ceph-etc
           configMap:
             name: {{ .Values.ceph_client.configmap }}
@@ -184,6 +221,7 @@ spec:
           secret:
             secretName: {{ .Values.ceph_client.user_secret_name }}
         {{ end }}
+        {{- end }}
         {{ end }}
 {{- dict "enabled" .Values.manifests.certificates "name" .Values.secrets.tls.image.api.internal | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
 {{- end }}

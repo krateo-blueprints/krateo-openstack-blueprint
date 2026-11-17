@@ -378,6 +378,45 @@
           ],
           "default": "unmanaged",
           "description": "Which block-storage backend this cinder renders (#196, #308). The umbrella sets it from its storage.backend and refuses a componentValues override. unmanaged (the default) is the chart as OpenStack-Helm ships it, for a standalone install whose operator provides ceph-etc, pvc-ceph-client-key and cinder-volume-rbd-keyring; none is refused (no backend: cinder-volume would wait in Init forever); ceph-rook and ceph-external are refused until #308 implements them."
+        },
+        "ceph": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Set by the umbrella with a ceph storage.backend (#308): references to its copies of the keys Ceph mints. With both, the chart consumes Ceph through projections and renders no client.admin keyring; without them it renders as upstream.",
+          "properties": {
+            "keyringFrom": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The key of the Ceph user this chart authenticates as.",
+              "properties": {
+                "store": {
+                  "type": "string"
+                },
+                "secret": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                }
+              }
+            },
+            "monHostFrom": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The monitor addresses (ceph.conf mon_host).",
+              "properties": {
+                "store": {
+                  "type": "string"
+                },
+                "secret": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         }
       }
     }
