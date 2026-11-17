@@ -39,6 +39,8 @@ rendered at its defaults and with every workload manifest it ships turned on (ea
      no override reaches it. Every pod.replicas.<key> default a component's values.schema.json declares equals
      values.yaml's: that schema becomes the Composition CRD, and the API server applies its defaults.
 
+Features that are off by default (hack/feature-renders.yaml) are rendered too.
+
 The one exception to check 1 is hack/single-replica-serving.yaml: a serving Deployment whose second replica would be a
 second, unreplicated copy of its data. Each entry carries a reason and an issue, and an entry that no longer names a
 single-replica serving Deployment fails.
@@ -77,6 +79,11 @@ SERVING = {}
 PINNED = {}
 MULTI = {}
 WORKLOADS = []
+try:
+    FEATURES = yaml.safe_load(open(os.path.join(ROOT, "hack", "feature-renders.yaml"))) or {}
+except OSError as e:
+    print("FAILED MEASUREMENT: cannot read hack/feature-renders.yaml: %s" % e)
+    sys.exit(2)
 EXEMPT_USED = set()
 COUNT = {"under2": set(), "surge": set(), "nopdb": set(), "nospread": set()}
 try:
@@ -317,6 +324,8 @@ def chart_check(chart, tmp):
             renders.append(("every workload manifest on", allon))
         else:
             renders.extend(("manifests.%s on" % k, {"manifests": {k: True}}) for k in toggles)
+    features = sorted((FEATURES.get(chart) or {}).items())
+    renders.extend(features)
     ones = {k: 1 for k, v in (((cv.get("pod") or {}).get("replicas")) or {}).items() if isinstance(v, int)}
     if ones:
         renders.append(("every pod.replicas key at 1", {"pod": {"replicas": ones}}))
@@ -324,8 +333,8 @@ def chart_check(chart, tmp):
     for label, values in renders:
         rc, out, err = helm_template(w, chart + "-gate", values)
         if rc != 0:
-            if label == "defaults":
-                fail("0: %s: does not render at its defaults: %s" % (chart, err.strip()[:300]), chart)
+            if label == "defaults" or label in dict(features):
+                fail("0: %s: does not render (%s): %s" % (chart, label, err.strip()[:300]), chart)
             continue
         rendered += 1
         check_render(chart, label, [d for d in yaml.safe_load_all(out) if d], single=label.startswith("every pod.replicas"))

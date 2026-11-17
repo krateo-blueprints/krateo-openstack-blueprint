@@ -39,7 +39,10 @@ Curated history; release notes live in GitHub Releases.
     - Turning the switch on was not enough. These containers still rendered no sizing, because nothing in values
       reached them: the kubernetes-entrypoint init container every pod runs (helm-toolkit), 41 template containers
       with no resources include, and keys the templates read but values never defined (designate's five workers,
-      neutron-rpc-server, memcached's `server`, and others).
+      neutron-rpc-server, memcached's `server`, and others). 0.3.73's KOG credential Jobs and CronJob
+      (`pod.resources.jobs.kog_token` and `jobs.kog_endpoints`) and libvirt's kvm-check init container are sized too.
+      They render only behind a switch, so `hack/feature-renders.yaml` declares the values that turn each one on, and
+      both gates render them.
     - The figures are OpenStack-Helm's own unless a reason is written next to them, because no per-container usage
       has been measured. `full-strict` now requests 9.8 CPU and 14.6 GiB for the control plane, plus 1.3 CPU and
       1.9 GiB per node (README, "Cluster size").
@@ -55,6 +58,22 @@ Curated history; release notes live in GitHub Releases.
       - 11 budget defects, and 3 multi-replica workloads that do not spread;
       - 808 of 837 containers unsized.
     - 20 mutations, each caught.
+
+- **KVM guests and KOG credentials (0.3.73, #303).** These are the blueprint's half of the data-plane release stage.
+  - **`compute.virtType: kvm`:** sets nova `virt_type=kvm` and `cpu_mode=host-model` and libvirt's `virt_type`. libvirt
+    then refuses, in an init container, to start on a node without `/dev/kvm`; the message names GKE's
+    `--enable-nested-virtualization`. qemu, the default, renders as before.
+  - **`kogCredentials.enabled`:** has keystone render, from the generated admin root and in the release's namespace,
+    `openstack-kog-clouds` (an ExternalSecret clouds.yaml for the KOG auth proxies), `openstack-kog-token` (nova-kog's
+    admin token) and `openstack-kog-endpoints` (nova's internal URL with the admin project id, keystone's internal URL
+    and the region, as keystone answered them; no secret). keystone's post-install,post-upgrade hook Job and a CronJob
+    (every 6 h) write the token, `keystone_url` and `region_name`. nova's own hook Job writes `nova_url` once nova
+    registered its endpoint. Both run one shared program (`helm-toolkit.snippets.kog_endpoints_pod`), at most 4 tries
+    per run, and merge-patch only their own keys. A failed mint fails that chart's release. Only the mint step holds
+    the password, and each writer may patch only its own objects.
+    Cross-namespace is not supported yet. The README gives each KOG's setting for these names, read from the KOG
+    charts.
+  - **New gates:** `hack/validate-virt-type.py` and `hack/validate-kog-credentials.py`.
 
 - **Start ordering, and re-running hooks (0.3.72, #297, #298, #299).**
   - **#298:** ceilometer-notification now waits for the rabbit-init Job of every vhost it consumes, as the umbrella

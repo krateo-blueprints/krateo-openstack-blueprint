@@ -28,6 +28,10 @@ data:
 {{- end }}
   libvirt.sh: |
 {{ tuple "bin/_libvirt.sh.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
+{{- if eq (toString .Values.conf.libvirt.virt_type) "kvm" }}
+  kvm-check.sh: |
+{{ tuple "bin/_kvm-check.sh.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
+{{- end }}
 {{- if eq .Values.conf.qemu.vnc_tls "1" }}
   cert-init.sh: |
 {{ tpl .Values.conf.vencrypt.cert_init_sh . | indent 4 }}

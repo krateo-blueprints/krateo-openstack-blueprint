@@ -19,6 +19,10 @@ containers included. Checked here, for every component chart:
   3. THE SWITCH IS THE CHART'S OWN. values.yaml sets pod.resources.enabled: true, so the umbrella's componentValues can
      turn it off or resize any one container with OpenStack-Helm's own keys.
 
+  4. FEATURES ARE RENDERED TOO. A workload behind a switch that is off by default (keystone's and nova's KOG
+     credential Jobs, libvirt's kvm-check init container) is rendered from hack/feature-renders.yaml; an entry that
+     fails to render, or adds no container, fails.
+
 Fails when helm or PyYAML is missing, when a chart named on the command line does not exist, when no chart rendered and
 when no container was checked. Naming charts limits the run to them (a local check); CI runs it with none, over all.
 """
@@ -49,6 +53,11 @@ UNITS = {"Ki": 2 ** 10, "Mi": 2 ** 20, "Gi": 2 ** 30, "Ti": 2 ** 40, "k": 10 ** 
 failures = []
 FAILING = set()
 CHECKED = []
+try:
+    FEATURES = yaml.safe_load(open(os.path.join(ROOT, "hack", "feature-renders.yaml"))) or {}
+except OSError as e:
+    print("FAILED MEASUREMENT: cannot read hack/feature-renders.yaml: %s" % e)
+    sys.exit(2)
 
 
 def fail(m, chart):
@@ -152,6 +161,8 @@ def chart_check(chart, tmp):
             renders.append(("every workload manifest on", allon))
         else:
             renders.extend(("manifests.%s on" % k, {"manifests": {k: True}}) for k in toggles)
+    features = sorted((FEATURES.get(chart) or {}).items())
+    renders.extend(features)
     rendered = 0
     seen = set()
     for label, values in renders:
@@ -159,13 +170,20 @@ def chart_check(chart, tmp):
         if rc != 0:
             if label == "defaults":
                 fail("1: %s: does not render at its defaults: %s" % (chart, err.strip()[:300]), chart)
+            elif label in dict(features):
+                fail("4: %s: hack/feature-renders.yaml's %r does not render: %s" % (chart, label, err.strip()[:300]),
+                     chart)
             continue
         rendered += 1
+        before = len(seen)
         for workload, pod in pod_templates([d for d in yaml.safe_load_all(out) if d]):
             for c in pod.get("initContainers") or []:
                 check_container(chart, label, workload, dict(c, _init=True), seen)
             for c in pod.get("containers") or []:
                 check_container(chart, label, workload, c, seen)
+        if label in dict(features) and len(seen) == before:
+            fail("4: %s: hack/feature-renders.yaml's %r renders no container the other renders lack; drop or fix the "
+                 "entry" % (chart, label), chart)
     return rendered
 
 
