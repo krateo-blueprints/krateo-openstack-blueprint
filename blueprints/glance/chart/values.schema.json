@@ -282,6 +282,18 @@
           "description": "Set to resize the image store: a fresh install requests it, an existing claim is raised to it (never lowered), which needs its StorageClass to allow volume expansion. Empty: not set (#295)."
         }
       }
+    },
+    "krateo": {
+      "type": "object",
+      "title": "Krateo blueprint controls",
+      "description": "Controls that belong to the blueprint, not to OpenStack-Helm (#297).",
+      "additionalProperties": false,
+      "properties": {
+        "rerunHooksToken": {
+          "type": "string",
+          "description": "Rendered nowhere. The umbrella sets it from rerunHooks.<component>; changing it makes core-provider run a helm upgrade, which re-runs every hook (#297)."
+        }
+      }
     }
   }
 }

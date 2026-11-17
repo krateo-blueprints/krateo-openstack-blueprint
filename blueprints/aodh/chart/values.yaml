@@ -801,4 +801,12 @@ extraObjects: []
   #       type: Opaque
   #       labels:
   #         app.kubernetes.io/part-of: osh
+
+# Krateo blueprint addition (#297): controls that belong to the blueprint, not to OpenStack-Helm.
+krateo:
+  # rerunHooksToken: rendered nowhere. The umbrella sets it from rerunHooks.<component>. Changing it changes this
+  # component's values, so core-provider runs a real helm upgrade, which runs every hook again (each install hook is an
+  # upgrade hook too, hack/validate-rerun-hooks.py). It is the documented way to re-run hooks that were never run
+  # (Ready=False/HooksMayNotHaveRun, README).
+  rerunHooksToken: ""
 ...

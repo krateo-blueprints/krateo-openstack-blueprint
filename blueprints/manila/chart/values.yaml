@@ -361,6 +361,20 @@ dependencies:
           - endpoint: node
             service: local_image_registry
   static:
+    # Krateo (#299): the bootstrap's script calls keystone (the openstack client's token), glance (image list/create),
+    # nova (flavor show/create) and manila itself (share type, share group type). It declared nothing, so on a fresh
+    # install it failed 7 times until nova-api was up (GKE 2026-11-17). hack/validate-job-service-dependencies.py
+    # derives the list from the rendered script.
+    bootstrap:
+      services:
+        - endpoint: internal
+          service: identity
+        - endpoint: internal
+          service: image
+        - endpoint: internal
+          service: compute
+        - endpoint: internal
+          service: sharev2
     tests:
       services:
         - endpoint: internal
@@ -1043,6 +1057,38 @@ endpoints:
       api:
         default: 80
         internal: 5000
+  # Krateo (#299): glance and nova, which the bootstrap Job waits for (dependencies.static.bootstrap); the same
+  # definitions as the other charts that name them (cinder's image, neutron's compute).
+  image:
+    name: glance
+    hosts:
+      default: glance-api
+      public: glance
+    host_fqdn_override:
+      default: null
+    path:
+      default: null
+    scheme:
+      default: http
+    port:
+      api:
+        default: 9292
+        public: 80
+  compute:
+    name: nova
+    hosts:
+      default: nova-api
+      public: nova
+    host_fqdn_override:
+      default: null
+    path:
+      default: /v2.1/%(tenant_id)s
+    scheme:
+      default: http
+    port:
+      api:
+        default: 8774
+        public: 80
   sharev2:
     name: manilav2
     hosts:
@@ -1230,4 +1276,12 @@ extraObjects: []
   #       type: Opaque
   #       labels:
   #         app.kubernetes.io/part-of: osh
+
+# Krateo blueprint addition (#297): controls that belong to the blueprint, not to OpenStack-Helm.
+krateo:
+  # rerunHooksToken: rendered nowhere. The umbrella sets it from rerunHooks.<component>. Changing it changes this
+  # component's values, so core-provider runs a real helm upgrade, which runs every hook again (each install hook is an
+  # upgrade hook too, hack/validate-rerun-hooks.py). It is the documented way to re-run hooks that were never run
+  # (Ready=False/HooksMayNotHaveRun, README).
+  rerunHooksToken: ""
 ...

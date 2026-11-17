@@ -385,6 +385,16 @@ jobs:
       - name: Bootstrap uploads each image once
         run: python3 hack/validate-bootstrap-idempotent.py .
 
+      # Every Job that calls an OpenStack API waits for it (#299): each openstack CLI noun in a Job's script maps to a
+      # service its kubernetes-entrypoint must wait for; an unknown noun fails.
+      - name: Jobs wait for the APIs they call
+        run: python3 hack/validate-job-service-dependencies.py .
+
+      # rerunHooks.<component> moves that component alone, every component schema declares the token, and every
+      # install hook is also an upgrade hook (#297).
+      - name: Hooks can be re-run by a value
+        run: python3 hack/validate-rerun-hooks.py .
+
       # glance's image store: 10Gi by default, a smaller live claim expanded, a claim never asked to shrink (#295).
       - name: glance's image store size
         run: python3 hack/validate-glance-store.py .
