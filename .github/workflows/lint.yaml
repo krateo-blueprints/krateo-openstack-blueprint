@@ -264,6 +264,12 @@ jobs:
       # agent there resolves the wrong FQDN (#200).
       - name: No Service selects a hostNetwork pod
         run: python3 hack/validate-hostnetwork-services.py .
+      # #316: image-scan.yaml scans the images hack/images.yaml lists, so an image a chart can run and the inventory
+      # omits would never be scanned. Offline: the registry half is re-measured by image-scan.yaml, not here.
+      - name: Every image a chart can run is in the generated inventory, with a named publisher
+        run: python3 hack/gen-image-inventory.py .
+      - name: The image scan judges CRITICAL findings and exceptions as specified
+        run: python3 hack/check-image-cves.py --self-test
 
   capability-roles:
     # Gating. A capability aggregates into a predefined role via a
