@@ -66,6 +66,7 @@ spec:
 {{ tuple $envAll "notifier" $mounts_aodh_notifier_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: aodh-notifier
+{{ dict "envAll" $envAll "component" "notifier" "container" "default" "args" (list "--process" "aodh-notifier" "--broker") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "aodh_notifier" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.notifier | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "aodh" "container" "aodh_notifier" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
@@ -79,6 +80,10 @@ spec:
                   - /tmp/aodh-notifier.sh
                   - stop
           volumeMounts:
+            - name: aodh-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: pod-tmp
               mountPath: /tmp
             - name: oslo-lock-path

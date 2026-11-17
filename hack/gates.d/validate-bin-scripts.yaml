@@ -1,0 +1,7 @@
+# designate-sink.sh shipped without its `function start () {` line and swift's bootstrap.sh assigned an unquoted
+# URL containing parentheses: both off by default, both rendered, neither noticed. Every rendered script parses.
+name: "Every shell script a chart renders parses (bash -n)"
+job: job-hooks
+order: 130
+run: |
+  python3 hack/validate-bin-scripts.py .

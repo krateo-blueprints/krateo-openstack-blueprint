@@ -1,0 +1,5 @@
+name: "Every image tag must be immutable"
+job: image-tags
+order: 10
+run: |
+  python3 hack/preflight-refs.py . --mutable-only

@@ -1,0 +1,7 @@
+# compute.virtType: qemu changes nothing; kvm sets nova and libvirt, and libvirt refuses a node without /dev/kvm,
+# the refusal script run here (#303).
+name: "KVM guests and the /dev/kvm refusal"
+job: capability-roles
+order: 130
+run: |
+  python3 hack/validate-virt-type.py .

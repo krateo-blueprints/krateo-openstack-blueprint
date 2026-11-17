@@ -1,0 +1,7 @@
+# Every Job that calls an OpenStack API waits for it (#299): each openstack CLI noun in a Job's script maps to a
+# service its kubernetes-entrypoint must wait for; an unknown noun fails.
+name: "Jobs wait for the APIs they call"
+job: capability-roles
+order: 110
+run: |
+  python3 hack/validate-job-service-dependencies.py .

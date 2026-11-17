@@ -1,0 +1,7 @@
+# A workload that mounts its chart's -etc/-bin without the matching hash annotation never rolls
+# on a config change: the Secret changes, the pod keeps the old file (subPath) (#223).
+name: "Every long-running workload rolls when the config it mounts changes"
+job: job-hooks
+order: 70
+run: |
+  python3 hack/validate-config-hash-rollout.py .
