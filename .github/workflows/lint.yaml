@@ -49,8 +49,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Every chart's defaults must satisfy its own schema
-        run: python3 hack/validate-values-schema.py .
+      # Checks: hack/gates.d/*.yaml with `job: values-schema`. Add a file there, never a step here.
+      - name: Gates (hack/gates.d, job values-schema)
+        run: python3 hack/run-gates.py --job values-schema .
 
   umbrella-crd-size:
     # Gating. The umbrella's generated Openstack CRD is stored once per version it still serves,
@@ -71,11 +72,9 @@ jobs:
           go-version-file: hack/umbrella-crd-size/go.mod
           cache-dependency-path: hack/umbrella-crd-size/go.sum
 
-      - name: The umbrella CRD must stay small enough to serve several versions
-        working-directory: hack/umbrella-crd-size
-        run: |
-          go vet ./...
-          go run .
+      # Checks: hack/gates.d/*.yaml with `job: umbrella-crd-size`. Add a file there, never a step here.
+      - name: Gates (hack/gates.d, job umbrella-crd-size)
+        run: python3 hack/run-gates.py --job umbrella-crd-size .
 
   powerdns-runs:
     # Gating, and the only job here that starts a server. The powerdns chart merged with 28 offline
@@ -98,8 +97,9 @@ jobs:
       - name: Install PyYAML
         run: pip install pyyaml
 
-      - name: The rendered powerdns pods must actually serve
-        run: python3 hack/smoke-powerdns.py .
+      # Checks: hack/gates.d/*.yaml with `job: powerdns-runs`. Add a file there, never a step here.
+      - name: Gates (hack/gates.d, job powerdns-runs)
+        run: python3 hack/run-gates.py --job powerdns-runs .
 
   migrate-to-pvc:
     # Gating. Up to 0.3.35 mariadb and rabbitmq kept their state on a hostPath, and 0.3.36 moves
@@ -144,8 +144,11 @@ jobs:
           go install sigs.k8s.io/kind@v0.27.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      - name: State moved by the migration script must survive the upgrade
-        run: hack/smoke-migrate-to-pvc.sh ${{ matrix.component }} .
+      # Checks: hack/gates.d/*.yaml with `job: migrate-to-pvc`. Add a file there, never a step here.
+      - name: Gates (hack/gates.d, job migrate-to-pvc)
+        env:
+          MATRIX_COMPONENT: ${{ matrix.component }}
+        run: python3 hack/run-gates.py --job migrate-to-pvc .
 
   job-hooks:
     # Gating. A Job's pod template is immutable and Krateo patches a plain Job in place, so any
@@ -175,101 +178,11 @@ jobs:
       - name: Install the gate's Python dependencies
         run: pip install PyYAML
 
-      - name: Every Job is a Helm hook, in an order its dependencies allow
+      # Checks: hack/gates.d/*.yaml with `job: job-hooks`. Add a file there, never a step here.
+      - name: Gates (hack/gates.d, job job-hooks)
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          # The hook rules run on every event. The base comparison needs a commit to compare
-          # against, which a first push to a branch does not have.
-          if [ -n "$BASE" ] && [ "$BASE" != "0000000000000000000000000000000000000000" ] \
-            && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            python3 hack/validate-job-hooks.py . --base "$BASE"
-          else
-            echo "no base commit to compare against; checking the hook rules only"
-            python3 hack/validate-job-hooks.py .
-          fi
-      # A Pod's spec is immutable and the controller installs a chart's Pods as plain objects, so
-      # a test Pod that is not a `helm.sh/hook: test` hook blocks every later upgrade (#179).
-      - name: Every test Pod is a Helm test hook
-        run: python3 hack/validate-test-pods.py .
-      # watcher's [watcher_clients_auth] named no auth plugin and no keystone URL, so the decision
-      # engine exited 1 at start-up; the section is judged merged as each pod mounts it (#203).
-      - name: Every keystoneauth section a pod reads names its plugin and endpoint
-        run: python3 hack/validate-oslo-auth-sections.py .
-      # 20 workloads passed an init-container dependency key their chart did not define, so they
-      # waited on nothing: watcher's decision engine crashed on missing tables before its db-sync
-      # ran (#236). Also: entries must use keys the snippet reads, and services the chart defines.
-      - name: Every init container waits on a declared, resolvable dependency
-        run: python3 hack/validate-init-container-dependencies.py .
-      # README applied the Composition before core-provider served its kind (ServiceUnavailable on a
-      # fresh cluster). Every documented apply waits for the kind at its BP_VERSION, by API-server poll.
-      - name: Every documented Composition apply waits until its kind is served at that version
-        run: python3 hack/validate-docs-wait-for-served-kind.py .
-      # Behind that, every watcher client defaulted to the public catalog endpoint, the ingress-backed
-      # <svc>:80 with no backend without an ingress controller, so the decision engine's start-up
-      # catalog lookup was refused. Listed client options must be internal where pods read them.
-      - name: OpenStack clients call internal endpoints, never the ingress-backed public one
-        run: python3 hack/validate-client-endpoint-interface.py .
-      # A workload that mounts its chart's -etc/-bin without the matching hash annotation never rolls
-      # on a config change: the Secret changes, the pod keeps the old file (subPath) (#223).
-      - name: Every long-running workload rolls when the config it mounts changes
-        run: python3 hack/validate-config-hash-rollout.py .
-      # The root logger on NullHandler hid that very error; a logger that also propagates to a
-      # printing root prints every record twice (#203).
-      - name: The root logger prints, and nothing is printed twice
-        run: python3 hack/validate-root-logger.py .
-      # Helm writes "<no value>" for a missing or null value, and an OpenStack service reads that
-      # text literally: magnum-api ran uWSGI with no workers because of it (#202).
-      - name: No rendered config carries Helm's <no value> placeholder
-        run: python3 hack/validate-rendered-config.py .
-      # Values reach the Composition CR in plaintext, so Keystone's OIDC client secret must come
-      # from a Secret (oidc.clientSecretRef), and a secret written into conf.wsgi_keystone must be
-      # refused at render time.
-      - name: Keystone's OIDC client secret comes from a Secret, never from values
-        run: python3 hack/validate-keystone-oidc-secret.py .
-      # The docs pointed OIDC users at keystone-oidc:2025.1 while every other keystone image is 2026.1,
-      # so keystone-api ran two releases behind its own db-sync schema (#229).
-      - name: Every keystone-oidc image named is the series of the chart's keystone images
-        run: python3 hack/validate-keystone-oidc-image-series.py .
-      # Every chart said appVersion "2025.1" while the images were 2026.1 since 0.3.46, and consumers pinned docs to
-      # the wrong release (#235): appVersion is the software the chart runs (hack/app-versions.yaml).
-      - name: Every chart's appVersion is the version of the software it runs
-        run: python3 hack/validate-app-version.py .
-      # designate-sink.sh shipped without its `function start () {` line and swift's bootstrap.sh assigned an unquoted
-      # URL containing parentheses: both off by default, both rendered, neither noticed. Every rendered script parses.
-      - name: Every shell script a chart renders parses (bash -n)
-        run: python3 hack/validate-bin-scripts.py .
-      # The README, usage/quickstart docs and an example still said "log in as `admin` / `password`" and passed
-      # OS_PASSWORD=password after both had been generated per install for months (#228).
-      - name: No document passes a published OpenStack-Helm password
-        run: python3 hack/validate-docs-no-published-credentials.py .
-      # The umbrella's contract emitter was removed in 0.3.68 (usage and health come from
-      # cmp-usage-collector). A removed value must be refused, not silently ignored.
-      - name: Removed values are refused, never ignored
-        run: bash hack/validate-removed-values.sh .
-      # The README and docs/release.md said CI resolved the deep-link; the step was lost in the
-      # 2026-08-11 workflow rewrite and had not run since.
-      - name: The service-contract SSO deep-link resolves
-        run: |
-          set -euo pipefail
-          for ctx in "--project demo" "--org acme --tenant t1 --namespace ns1 --project demo"; do
-            bash tools/resolve-deeplink.sh --from-chart $ctx
-          done
-      # A default cluster's StorageClass is ReadWriteOnce: no default claim may ask for
-      # ReadWriteMany, and pods sharing a ReadWriteOnce claim must be co-located (#201).
-      - name: Every default claim can be bound, and shared ReadWriteOnce claims are co-located
-        run: python3 hack/validate-shared-claims.py .
-      # A Service selecting a hostNetwork pod makes that node's IP a Service endpoint, and cluster
-      # DNS then answers the node's own reverse lookup with the Service name, so every host-network
-      # agent there resolves the wrong FQDN (#200).
-      - name: No Service selects a hostNetwork pod
-        run: python3 hack/validate-hostnetwork-services.py .
-      # #316: image-scan.yaml scans the images hack/images.yaml lists, so an image a chart can run and the inventory
-      # omits would never be scanned. Offline: the registry half is re-measured by image-scan.yaml, not here.
-      - name: Every image a chart can run is in the generated inventory, with a named publisher
-        run: python3 hack/gen-image-inventory.py .
-      - name: The image scan judges CRITICAL findings and exceptions as specified
-        run: python3 hack/check-image-cves.py --self-test
+        run: python3 hack/run-gates.py --job job-hooks .
 
   capability-roles:
     # Gating. A capability aggregates into a predefined role via a
@@ -305,456 +218,9 @@ jobs:
       - name: Install the gates' Python dependencies
         run: pip install PyYAML
 
-      # Also: the capability roles and guards come from the per-cluster chart and never from the
-      # umbrella, which an Openstack instance installs, so they exist before the first instance;
-      # the umbrella's handoff from a 0.3.47 install renders only what its own release owns; and
-      # the per-cluster chart's inputs are the umbrella's, regenerated.
-      - name: Every capability must aggregate to a predefined role, from the per-cluster chart
-        run: python3 hack/validate-capability-roles.py .
-
-      # Offline and fast. pidof identifies a process by its executable, which under an
-      # emulating runtime is the emulator -- so a pidof-based probe fails forever while the
-      # program runs normally, the kubelet kills a healthy process, and the pod never becomes
-      # Ready. That reads as a slow environment rather than a broken probe, which is why it
-      # needs a gate and not just a fix. See issue #96.
-      - name: No probe may identify a process with pidof
-        run: python3 hack/validate-no-pidof.py .
-
-      # Renders the chart and inspects the probes the kubelet would receive. A readiness probe
-      # that does not depend on the fernet keys lets an identity plane which cannot issue a
-      # single token report Ready at every layer, including the umbrella's own condition --
-      # and a revert of the fix is as invisible as the bug was. See issue #99.
-      - name: Keystone readiness must require the fernet keys
-        run: python3 hack/validate-keystone-readiness.py .
-
-      # The schema types cmpRole as a free string and only describes it as a CMP role or
-      # capability name, so an invented name validates cleanly and binds nothing. That is
-      # how the defaults came to read openstack-viewer / openstack-operator /
-      # openstack-admin, which match neither the six predefined roles nor any capability.
-      # The same failure shape as keystone's, one service along. Glance answers /healthcheck
-      # with 200 whenever its API process is up, but its image store is a PVC written as uid
-      # 42424 with no fsGroup -- writable only because an init container chowns it. If the
-      # volume does not honour that chown, every upload 500s while the pod sits 1/1 Ready.
-      # See issue #110.
-      - name: Glance readiness must require a writable image store
-        run: python3 hack/validate-glance-readiness.py .
-
-      # Not the same shape: the one place upstream gets a probe actively wrong rather than
-      # merely shallow. Upstream points horizon's liveness at /, and horizon's own
-      # SimultaneousSessionsMiddleware touches the default cache on EVERY request, so with
-      # memcached away every Django path answers 500 -- measured in the real image, where
-      # /static/dashboard/img/favicon.ico still answered 200. Upstream's probe therefore
-      # restarts every replica for the duration of a memcached outage, repairs nothing, and
-      # pays for a collectstatic of ~4000 files per restart. Liveness stays on the static
-      # handler; the keystone readiness check that shipped beside it was an improvement with
-      # no upstream defect behind it and has been reverted. See issue #110.
-      - name: No probe that restarts horizon may enter Django
-        run: python3 hack/validate-horizon-liveness.py .
-
-      # Horizon's OIDC back-channel logout receiver (conf.horizon.backchannel_logout) only works
-      # if sessions are rows it can read and four separately rendered pieces line up: the
-      # package in horizon-bin, its mounts, horizon.sh's copy step and the local_settings.d
-      # snippet. Horizon swallows an exception raised by a snippet (it logs and carries on), so
-      # a broken snippet leaves a Ready Horizon answering Keycloak's logouts with 404. This
-      # renders the chart, executes the snippet, and checks the session table comes from the
-      # bounded db-sync hook and that the chart refuses configurations that cannot work.
-      - name: Horizon sessions are in its database and the back-channel logout receiver is wired
-        run: python3 hack/validate-horizon-backchannel-render.py .
-
-      # The validator (a Keycloak 26.4-shaped logout token and every rejection) and the logout
-      # path through Django with Keystone and the forward mocked, including a refused forward
-      # answering non-200. Fails when no test ran or any was skipped. Versions are pinned so a run
-      # is reproducible.
-      - name: Install the back-channel logout receiver's test dependencies
-        run: pip install "Django==5.2.19" "cryptography==46.0.5"
-
-      - name: The back-channel logout receiver's unit tests pass
-        run: python3 hack/validate-horizon-backchannel-tests.py .
-
-      # Per-install credentials (#228): the umbrella passes each component a REFERENCE to a
-      # credential ESO generated once, the charts project it, and the value from values reaches no
-      # rendered object (a per-chart sentinel, since the published default is a common word); the
-      # consumers listed by the umbrella are exactly the charts that render the credential; the
-      # roots are kept and never renamed against the latest release.
-      - name: Every install's credentials are its own
-        run: python3 hack/validate-credentials.py .
-
-      # The umbrella's `tolerations` (0.3.68): a trusted-tenant vcluster taints every child node, and a pod without the
-      # toleration schedules nowhere (every DaemonSet desires 0 pods). Each component receives the list as
-      # pod.tolerations.<component>, and every Deployment, StatefulSet, DaemonSet, Job and CronJob of every chart, at
-      # defaults and with every workload manifest on, must carry exactly that list.
-      - name: Every pod carries the umbrella's tolerations
-        run: python3 hack/validate-tolerations.py .
-
-      # A bootstrap never creates a duplicate (#295): no rendered script creates a resource whose API accepts a
-      # duplicate name after a failed lookup, and every image bootstrap is run against a stand-in openstack.
-      - name: Bootstrap uploads each image once
-        run: python3 hack/validate-bootstrap-idempotent.py .
-
-      # Every Job that calls an OpenStack API waits for it (#299): each openstack CLI noun in a Job's script maps to a
-      # service its kubernetes-entrypoint must wait for; an unknown noun fails.
-      - name: Jobs wait for the APIs they call
-        run: python3 hack/validate-job-service-dependencies.py .
-
-      # rerunHooks.<component> moves that component alone, every component schema declares the token, and every
-      # install hook is also an upgrade hook (#297).
-      - name: Hooks can be re-run by a value
-        run: python3 hack/validate-rerun-hooks.py .
-
-      # compute.virtType: qemu changes nothing; kvm sets nova and libvirt, and libvirt refuses a node without /dev/kvm,
-      # the refusal script run here (#303).
-      - name: KVM guests and the /dev/kvm refusal
-        run: python3 hack/validate-virt-type.py .
-
-      # KOG credentials from the generated admin root: the clouds file, the token Jobs (password only in the mint step,
-      # at most 4 tries), and no other reader (#303).
-      - name: KOG credentials from the admin root
-        run: python3 hack/validate-kog-credentials.py .
-
-      # glance's image store: 10Gi by default, a smaller live claim expanded, a claim never asked to shrink (#295).
-      - name: glance's image store size
-        run: python3 hack/validate-glance-store.py .
-
-      # The umbrella is not Ready while a selected component does not exist yet (#257): the chart emits
-      # ConfigMap openstack-install-pending exactly while it holds a selected component back, and the
-      # CompositionDefinition's statusDataTemplate projects Ready=False/Creating from its presence --
-      # {} (no ready key) otherwise, never ready: true. The jq is executed, not just read.
-      - name: The umbrella waits for its last tier before reporting Ready
-        run: python3 hack/validate-umbrella-install-pending.py .
-
-      # Horizon's home page (#247): on a deployment without compute every login landed on 403,
-      # because the default home (Project > Overview) needs openstack.services.compute. Renders the
-      # chart, checks the package, its mounts, its install step and the EXECUTED settings snippet
-      # (Horizon only logs a snippet that raises), then runs the /auth/home/ view's tests.
-      - name: Horizon sends every user to a page they can open
-        run: python3 hack/validate-horizon-home.py .
-
-      # The quietest version of the same failure. gnocchi-metricd and gnocchi-statsd had no
-      # probe at all, and both swallow every backend error and loop forever
-      # (MetricProcessBase.run and Stats.flush in gnocchi 4.7.0), so a metricd that cannot
-      # reach its indexer, its measure store or its coordinator reports Ready and aggregates
-      # nothing while measures are still accepted -- with no user-facing error at any point.
-      # gnocchi-api had a bare tcpSocket on 8041, which `uwsgi --http` answers in its HTTP
-      # router rather than in a worker: measured, a TCP connect succeeds with both workers
-      # SIGSTOPped. Also asserts api-paste.ini still names the composite gnocchi asks for,
-      # without which the API loads no app at all. See issues #110 and #117.
-      - name: Gnocchi probes must check its backends
-        run: python3 hack/validate-gnocchi-readiness.py .
-
-      # The same shape, on the component added in #131, and the one case where this repo's own
-      # precedent points the wrong way. memcached's `tcpSocket 11211` was classified MEANINGFUL
-      # because no realistic state was found in which memcached accepts TCP and cannot serve
-      # get/set; upstream's redis chart ships the analogous `tcpSocket 6379`, and redis has four
-      # such states -- measured in docker.io/library/redis:7.2.17, the image this chart pins:
-      # loading an RDB from disk, a failed BGSAVE with writes stopped, a replica whose master
-      # link is down, and maxmemory reached with noeviction. A tcpSocket passes in all four, and
-      # so does `redis-cli ping` read by exit status, because redis-cli EXITS 0 ON AN ERROR
-      # REPLY. zaqar's message store is this redis and posting a message is a write, so
-      # readiness does SET then GET and reads the reply text. The gate RUNS the rendered probe
-      # scripts against a stub redis-cli reproducing each state, and asserts the converse too:
-      # liveness must stay false only for wedged and gone, the two states a restart repairs.
-      - name: Redis readiness must prove it can serve, and its liveness must not CrashLoop it
-        run: python3 hack/validate-redis-readiness.py .
-
-      # Renders every chart and reads the ports its probes actually reach. uwsgi's stats socket
-      # is served by the MASTER process, which never imports the application and never handles a
-      # request, so with stats-http it answers 200 with every worker wedged -- a liveness probe
-      # on it can never be false, which makes liveness strictly weaker than the readiness probe
-      # beside it and leaves a hung API running forever with zero restarts. Four containers
-      # shipped that (placement-api, neutron-server, heat-api, heat-cfn). The forbidden ports are
-      # derived from the rendered uwsgi ini files rather than hardcoded, and the check covers
-      # every chart and container, so a new chart cannot reintroduce it. See issue #110.
-      - name: No probe may target a uwsgi stats port
-        run: python3 hack/validate-probe-not-uwsgi-stats.py .
-
-      # protocol on a ServicePort and on a ContainerPort defaults to TCP, so a port entry written
-      # without one in front of a UDP-only daemon produces a Service kube-proxy programs for TCP
-      # over a socket that has no TCP listener -- every datagram dropped before it reaches a pod,
-      # with no error at either end, because UDP sends no reply and gnocchi's Stats.flush() logs
-      # each failed measure and carries on. gnocchi-statsd shipped exactly that, in both layers
-      # at once, verified against gnocchi/statsd.py's create_datagram_endpoint in the Kolla image
-      # it installs. The same check found the statsd Service selecting component=statsd while its
-      # DaemonSet labelled pods component=metricd, so it had no endpoints either. Renders every
-      # chart: half of the gate needs no configuration and asserts that every Service port and
-      # the container port it resolves to agree on protocol, which is what catches a half-revert.
-      # See issue #127.
-      - name: A Service in front of a UDP-only listener must declare UDP
-        run: python3 hack/validate-udp-services.py .
-
-      # revendor.py three-way merges values.yaml, so a values override survives a re-vendor by
-      # itself. It never writes templates, so a template divergence has no protection at all --
-      # and reverting one half of a fix while the other half stays is worse than reverting both.
-      # gnocchi is the live case: Kolla images with upstream's apache start script would exec a
-      # binary that is not in the image. See issue #115.
-      - name: Deliberate upstream divergences must still hold
-        run: python3 hack/validate-upstream-divergences.py .
-
-      - name: roleMapping must name real CMP roles
-        run: python3 hack/validate-rolemapping.py .
-
-      # Compiles the RENDERED scripts, not the templates: the templates contain Go directives
-      # and no textual substitution parses them in every context. A SyntaxWarning today is an
-      # error in a later Python, and these run inside containers at install time where nobody
-      # reads warnings -- the keystone fernet init container was emitting one.
-      - name: Shipped python must compile without warnings
-        run: python3 hack/validate-shipped-python.py .
-
-      # A dep naming a component that does not exist is never Ready, so the dependent is never
-      # emitted and nothing reports an error -- and an install stopped partway looks identical
-      # to a healthy install in its first minutes. Same for a cycle, and for a kind that
-      # core-provider does not serve. Also renders all 35 charts; 30 are compute-tier and have
-      # never been installed anywhere, since libvirt needs /dev/kvm and ovs needs kernel modules.
-      - name: Component DAG must be closed, acyclic and renderable
-        run: python3 hack/validate-component-dag.py .
-
-      # The gate above proves the DECLARED graph is acyclic, and that is not enough: the compute
-      # tier of a 4-node GKE install of profile=full deadlocked while it was (#110). neutron's
-      # agents will not start until Service nova-api has endpoints -- upstream openstack-helm's
-      # own kubernetes-entrypoint wait, unchanged here -- so with nova's creation gated on
-      # neutron's READINESS, neutron could not become Ready until nova existed and nova was not
-      # created until neutron was Ready. The cycle ran through two dimensions at once and neither
-      # gate that looks at one of them could see it. Nothing reported an error: 3 of neutron's 73
-      # managed children were simply never ready.
-      #
-      # Readiness is still the default creation gate, because it is what sequences a dependent
-      # behind a dependency that works; the edges relaxed to existence are declared in the
-      # umbrella's values. This renders all 35 charts, builds the graph of every wait in them,
-      # and checks the relax-set in BOTH directions: every cycle must be broken by a declared
-      # relaxation (a new chart that introduces one fails here instead of deadlocking an
-      # install), and every declared relaxation must still be inside a cycle (so the set cannot
-      # accrete, and a blanket switch to existence fails as ~85 unnecessary relaxations). The fix
-      # and its guard are the same change.
-      - name: The creation gate's relax-set must be exactly the cycles that need it
-        run: python3 hack/validate-readiness-deadlock.py .
-
-      # The two gates above judge the graph: that it is well formed, and that its runtime wait
-      # consequences are not deadlocked. Neither looks at what a component's rendered config
-      # points at, which is how gnocchi shipped declaring `deps: [keystone,
-      # mariadb]` while its config said `indexer.driver: postgresql` and `storage.driver:
-      # ceph` -- two backends with no component in this blueprint. On a 4-node GKE install of
-      # the full profile its pods sat in Init reporting `Service postgresql ... has no ready
-      # endpoints`, with every gate green. This checks the rendered kubernetes-entrypoint
-      # waits and the rendered backend identities against each component's declared
-      # transitive closure. See issue #115.
-      - name: Rendered config may only reference declared dependencies
-        run: python3 hack/validate-component-config-closure.py .
-
-      # The gates above judge what the components point at. None of them asks whether any node
-      # can run the pods at all, and that is how a fresh GKE install came to stall with 5 pods
-      # Pending on a label the README documents in both of its install sequences: the scheduler
-      # says "4 node(s) didn't match Pod's node affinity/selector" and names neither the label
-      # nor the chart, so it was found by diffing a working cluster's node labels against the
-      # broken one's. A precondition that can only be noticed by reading prose eventually is
-      # not noticed.
-      #
-      # It is also not one label. The umbrella now refuses to render when the cluster's nodes
-      # carry none of the labels the SELECTED components need, and this asserts that mechanism:
-      # that the required set is exactly what the 35 charts' rendered pods select on (4 labels,
-      # not the 6 a values-key scan finds -- sriov and openstack-node belong to manifests that
-      # are off by default and requiring them would refuse installs that are fine), that the
-      # node list is looked up once and above the component loop, that the lookup stays guarded
-      # (the controller's generated role cannot list nodes, and a refused `lookup` is a template
-      # error that would fail every reconcile), and that the decision itself fires -- exercised
-      # with synthetic node lists, once per required label, since a check narrowed to the
-      # dominant label would otherwise look green.
-      - name: The node labels the selected components need must be checked, not documented
-        run: python3 hack/validate-node-label-preconditions.py .
-
-      # The gates above all judge WHAT is installed. This one judges the API version it is
-      # emitted at, which is the only thing that decides whether an upgrade lands on the
-      # release that is already running. The composition apiVersion is derived from the chart
-      # version, so until #303 every bump changed every object's GVK, helm deleted and recreated
-      # each Composition, the new UID produced a new release name, and each component ended up
-      # with two helm releases -- one running its workloads and one that can never succeed,
-      # because its Deployments would have to change a spec.selector Kubernetes will not let
-      # them change. Measured: mariadb-92wd4czz at revisions 4,5,6 all FAILED beside
-      # mariadb-9c847c79 rev 2 DEPLOYED and serving the database.
-      #
-      # So an existing Composition is emitted at its krateo.io/composition-origin-version stamp
-      # and only a new one at the current version, and this asserts the whole mechanism: that
-      # the call site uses it, that the annotation key is core-provider's and written once, that
-      # every branch of the decision is right (including the dangerous one -- a stamped version
-      # the CRD no longer serves must fall back, because emitting it 500s the render and a
-      # release that stops rendering gets uninstalled), that no cluster-wide lookup was added,
-      # and -- differentially, against a counterfactual chart with the pin removed -- that the
-      # offline render is byte-identical. It also asserts the pin's two silent costs are
-      # documented: a narrower origin schema DROPS values properties added after it, and
-      # approving instance migration defeats the pin.
-      - name: An existing Composition must be emitted at the version it was created at
-        run: python3 hack/validate-origin-version-pin.py .
-
-      # Gating. The render that moves a component's definition to the new chart also wrote its new
-      # values, at the OLD apiVersion, because the new one is not served yet in that render. The
-      # object kept the old krateo.io/composition-version label, so the old controller ran the OLD
-      # chart with the NEW values: measured on GKE 2026-11-15 (0.3.64 → 0.3.65, core-provider
-      # 2.13.102; #228), 3 of 33 components, whose old pre-upgrade Job rotated passwords early. The
-      # umbrella now writes new values only at the new version once the definition reports it
-      # Ready, and until then re-emits the live spec at the version its label says it is at. This
-      # asserts the decision with synthetic input, the Ready signal by type and status (never the
-      # reason, never ControllerActive), the whole compositions.yaml path with the cluster reads
-      # stubbed, the reads as named GETs (structurally: offline `lookup` returns nothing), and an
-      # offline render byte-identical to the chart without the hold.
-      - name: New component values are written only at the new apiVersion, once it is served
-        run: python3 hack/validate-two-phase-values.py .
-
-      # Gating, and the counterpart the pin gate could not be. `helm template` NEVER resolves
-      # `lookup` -- only `--dry-run=server` does -- so offline the umbrella's component gate is
-      # closed and zero component documents are emitted. Every offline check of that template,
-      # the pin gate included, has therefore been comparing empty output against empty output.
-      # Issue #152 lived in exactly that blind spot: a right-trim above the document separator
-      # glued it to the previous document's `spec: {}`, so any render emitting two or more
-      # components failed with "yaml: line 5: did not find expected key" and the umbrella could
-      # create at most ONE component -- while the Composition reported Ready=True.
-      #
-      # This gate manufactures the opportunity: it stubs the three lookup-driven gate helpers
-      # open, renders offline, and parses the result as multi-document YAML.
-      - name: The umbrella must emit well-formed YAML for every component at once
-        run: python3 hack/validate-umbrella-multidoc.py .
-
-      # A component override the schema does not declare is PRUNED by the Composition CRD, at
-      # the umbrella (componentValues) and again at the component, with only a client-side
-      # warning (#209). Every component chart was narrower than its values: nova exposed only
-      # `images`, so `componentValues.nova.pod.*`, `.conf.*` and `.manifests.*` did nothing. A
-      # chosen subset is the same defect (it still dropped `labels` in 35 charts), so this gate
-      # requires EVERY top-level values key to be declared and open all the way down, and the
-      # umbrella's componentValues to be exactly what hack/gen-componentvalues-schema.py emits.
-      - name: Every tunable component key must reach the chart instead of being pruned
-        run: python3 hack/validate-component-schema-surface.py .
-
-      # Gating, and it guards the other gates. Four checks here printed "SKIP: PyYAML
-      # unavailable" and exited 0 for weeks (#120) -- the lint job green on every run while
-      # nothing was measured, including the gate written to protect the keystone fernet fix.
-      # #120 added `pip install PyYAML` above, which made them run; it did not remove the path
-      # that passes when they cannot, and that path was still in all four until now. Delete one
-      # line from this workflow and the suite would have gone quiet and green again.
-      #
-      # Checked with ast rather than by grepping for "SKIP": a text search over these files also
-      # matches the comments documenting this history, which has produced false readings here
-      # twice. It follows one level of indirection, because most gates route through a
-      # measurement_failed() helper -- the first version did not, and reported six
-      # already-correct gates as defective.
-      - name: No gate may exit 0 when it could not measure anything
-        run: python3 hack/validate-gates-cannot-skip.py .
-
-      # Gating. kubernetes-entrypoint can require a dependency pod ON THE SAME NODE. When the
-      # waiting workload and the required workload are scheduled by DIFFERENT node labels, the
-      # requirement is satisfiable only on nodes carrying both -- and unsatisfiable, forever and
-      # silently, on any node carrying one. Measured on a 4-node GKE install of profile=full:
-      # openstack-control-plane on a 4-node pool, openvswitch on a separate 2-node pool,
-      # DISJOINT, so all twelve neutron dhcp/l3/metadata pods waited forever for a co-located
-      # ovs-agent. They sit in Init:0/2 -- neither Pending nor CrashLoopBackOff -- so a pod
-      # census reports "19 in Init" and names nothing.
-      #
-      # validate-node-label-preconditions.py asserts the four labels EXIST. The precondition is
-      # a RELATIONSHIP between node sets, and that is what this checks: every same-node pair
-      # whose halves use different node selectors must be declared in hack/node-colocation.yaml
-      # with the relation operators have to satisfy. Derived from the renders -- exactly 3 pairs
-      # exist across 36 charts today -- so a fourth cannot appear undeclared.
-      - name: Every requireSameNode pair must be satisfiable by the documented node labels
-        run: python3 hack/validate-same-node-colocation.py .
-
-      # Gating. `profile: full` used to select all 35 components, including three that cannot
-      # start on any Kubernetes cluster: ironic wants an interface named ironic-pxe, octavia
-      # wants a Neutron port per host on its management network, swift wants a ReadWriteMany
-      # StorageClass. Measured on a 4-node GKE install of profile=full: six pods at 14 restarts
-      # in Init plus four Pending, none of which could ever become Ready -- and `Init:` is
-      # neither Pending nor CrashLoopBackOff, so a pod census reports "21 in Init" and names
-      # nothing.
-      #
-      # They are now excluded from every profile and selectable through `enabled:`. This gate
-      # asserts the flag and the declaration agree in BOTH directions, and verifies the
-      # exclusion by RENDERING the chart rather than by looking for the flag's name in the
-      # template -- the first version grepped _helpers.tpl, which its own explanatory comment
-      # satisfied.
-      - name: full-strict omits what needs provisioning; full still includes it
-        run: python3 hack/validate-provisioning-preconditions.py .
-
-      # A hostPath is state that stays on one node. mariadb defaulted to /tmp/mysql-data, so a
-      # node restart on kind, where /tmp is tmpfs, emptied every OpenStack database, and the pod
-      # crash-looped on a missing grastate.dat. Nothing was misconfigured: the chart defaults
-      # did it, and every check passed until a machine rebooted (#177). Rendered rather than
-      # read from values, because the template decides what ships.
-      - name: State that exists nowhere else must be on a claim, not on a node
-        run: python3 hack/validate-durable-state.py .
-
-      # The Marketplace installs what the helm index at krateo-blueprints/charts lists. Its gate
-      # refuses a chart without a schema or an https icon, and at release time that refusal comes
-      # after GHCR already holds the version, so the two disagree: the state that had the
-      # Marketplace installing 0.2.0 for weeks. Refuse here instead.
-      - name: Every blueprint chart is one the Marketplace index will accept
-        run: python3 hack/validate-marketplace-metadata.py .
-
-      - name: YAML this repo authors uses block style
-        run: python3 hack/validate-yaml-block-style.py .
-
-      - name: A version bump must not prune a component that already exists
-        run: python3 hack/validate-upgrade-does-not-prune.py .
-
-      # Gating. Measured on GKE upgrading 0.3.34 to 0.3.36: the umbrella moved, and all 33
-      # components stayed at 0.3.34, because the version came from a value whose schema default
-      # the API server had frozen into the Composition at create time (#179). Every check above
-      # rendered a fresh chart, where the default always matches, so none could see it. This one
-      # renders with the stale spec an older install actually holds, and refuses any
-      # release-stamped schema default anywhere in the repo.
-      - name: An umbrella upgrade must move every component to the umbrella's version
-        run: python3 hack/validate-component-version-follows-chart.py .
-
-      # Gating. Measured on GKE (#179): powerdns's db-init Job mounted a ConfigMap and a Secret
-      # its chart never created, because the chart named them after the release and helm-toolkit
-      # used fixed names. The two agree only under a release called `powerdns`, which is what
-      # every render here used, and a Krateo release never is. This renders every component under
-      # a release name unlike its chart's and refuses a pod that names an object nobody renders.
-      - name: Every object a pod names must be one its chart renders
-        run: python3 hack/validate-pod-references.py .
-      # Gating, and the general form of the stats-port check above. `uwsgi --http` runs its HTTP
-      # router in the MASTER process, so a bare tcpSocket probe against the service port is
-      # answered by a process that is still fine while every worker is wedged or no application
-      # ever loaded. gnocchi-api shipped that and reported Ready through 500s (#110);
-      # designate-api and magnum-api answered "no python application found" for 38 hours with
-      # Running pods and zero restarts (#149). An httpGet traverses a worker.
-      #
-      # Derived, not listed: a container counts as uwsgi-served when its command runs a script
-      # from this chart's own ConfigMaps containing `exec uwsgi`. 16 qualify today and none has a
-      # bare tcpSocket, so there are no waivers. The gate also fails when it recognises ZERO
-      # uwsgi-served containers, because that would make every later run a pass over nothing.
-      - name: A uwsgi-served container may not be probed with a bare tcpSocket
-        run: python3 hack/validate-uwsgi-probe-traverses-worker.py .
-
-      # Gating. Three shipped crashes shared one shape: the chart told a process to read a file
-      # and nothing in the chart ever put that file there. cyborg passed
-      # `--log-config-append /tmp/logging-cyborg.conf` with no conf.logging, no key in its
-      # secret and no mount, so all three of its services died at startup on every cluster --
-      # 520 restarts in 38 hours where it was found. designate and magnum named a uwsgi
-      # `wsgi-file` the 2026.1 images do not ship, so uwsgi answered "no python application
-      # found" forever while the master held the socket open and the pod stayed Running.
-      #
-      # The gate resolves each mountPath back to its volume rather than trusting the path: an
-      # emptyDir supplies a directory and no contents, and the first version of this check
-      # called /tmp/logging-cyborg.conf delivered -- because /tmp IS mounted -- and printed OK
-      # for the exact bug it was written for. A file under a runtime-populated directory counts
-      # only when another script in the same pod writes it, which is what separates
-      # openstack-helm's /tmp/pod-shared idiom from a file nobody creates.
-      - name: Every config file a start script names must be delivered to the container
-        run: python3 hack/validate-config-file-refs.py .
-
-      # Gating. `oslo_middleware:Healthcheck.factory` -- the paste FILTER entry point -- raises
-      # NotImplementedError unconditionally in the shipped library, so a chart declaring
-      # filter:healthcheck cannot build its WSGI application at all. magnum did, and its api
-      # sat Running and 0/1 with uwsgi reporting "no python application found" and its listen
-      # queue filling with probe traffic. Eleven sibling charts and the image's own
-      # api-paste.ini already use app:healthcheck + Healthcheck.app_factory.
-      - name: oslo_middleware Healthcheck must be a paste app, not a filter
-        run: python3 hack/validate-paste-healthcheck.py .
-
-      # Gating. designate registers `workers` in each [service:*] section with NO default and
-      # passes it straight to oslo_service, which lets None past both of its guards and hands
-      # it to cotyledon: ValueError: 'workers' must be an int >= 1, not: None. The chart set it
-      # for service:api only, so five of six designate services crashed on every startup --
-      # 447-452 restarts each over 38 hours -- since the chart first shipped. The gate also
-      # fails a workload deployed with no section at all, which is the worse case: it reads as
-      # "upstream's default is fine" when there is no default.
-      - name: Every service:<name> config section must set workers >= 1
-        run: python3 hack/validate-service-workers.py .
+      # Checks: hack/gates.d/*.yaml with `job: capability-roles`. Add a file there, never a step here.
+      - name: Gates (hack/gates.d, job capability-roles)
+        run: python3 hack/run-gates.py --job capability-roles .
 
   capabilities-first-release:
     # Gating. The per-cluster chart `openstack-capabilities` was written for 0.3.47, slipped to
@@ -775,8 +241,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Every version claim about the per-cluster capabilities chart names its real first release
-        run: python3 hack/validate-capabilities-first-release.py .
+      # Checks: hack/gates.d/*.yaml with `job: capabilities-first-release`. Add a file there, never a step here.
+      - name: Gates (hack/gates.d, job capabilities-first-release)
+        run: python3 hack/run-gates.py --job capabilities-first-release .
 
   image-tags:
     # Gating, and offline. A rebuildable tag -- `latest`, or any variant containing it --
@@ -799,8 +266,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Every image tag must be immutable
-        run: python3 hack/preflight-refs.py . --mutable-only
+      # Checks: hack/gates.d/*.yaml with `job: image-tags`. Add a file there, never a step here.
+      - name: Gates (hack/gates.d, job image-tags)
+        run: python3 hack/run-gates.py --job image-tags .
 
   examples-apiversion:
     # Gating. core-provider derives the served group version from the chart version, so a literal
@@ -813,29 +281,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Examples must not pin a literal composition apiVersion
-        run: |
-          set -uo pipefail
-          bad=$(grep -rnE 'composition\.krateo\.io/v[0-9]+-[0-9]+-[0-9]+' examples/ || true)
-          if [ -n "$bad" ]; then
-            echo "$bad" | sed 's/^/  /'
-            echo
-            echo "Examples must carry composition.krateo.io/COMPOSITION_API_VERSION, which the"
-            echo "release stamps from the tag and publishes as a release asset. A literal version"
-            echo "here is wrong for every release but one."
-            exit 1
-          fi
-          # Counted rather than using grep -L: GNU grep honours the LAST of -L/-l while BSD grep
-          # does not, so a -Ll combination passes on macOS and fails on a runner. Counts mean the
-          # same thing everywhere.
-          total=$(find examples -maxdepth 1 -name '*.yaml' | wc -l | tr -d ' ')
-          withph=$(grep -l COMPOSITION_API_VERSION examples/*.yaml 2>/dev/null | wc -l | tr -d ' ')
-          if [ "$total" = "0" ] || [ "$total" != "$withph" ]; then
-            echo "$withph of $total examples/*.yaml carry COMPOSITION_API_VERSION; all must."
-            grep -L COMPOSITION_API_VERSION examples/*.yaml 2>/dev/null | sed 's/^/  missing: /' || true
-            exit 1
-          fi
-          echo "all $total example(s) defer their apiVersion to the release stamp"
+      # Checks: hack/gates.d/*.yaml with `job: examples-apiversion`. Add a file there, never a step here.
+      - name: Gates (hack/gates.d, job examples-apiversion)
+        run: python3 hack/run-gates.py --job examples-apiversion .
 
   chart-deps:
     # Gating. Every chart declares helm-toolkit at a file:// path; before charts/helm-toolkit was
@@ -857,16 +305,9 @@ jobs:
           find . -type f -name Chart.yaml -not -path '*/charts/*' -not -path './.git/*' \
             -exec sed -i "s/CHART_VERSION/0.0.0-ci/g" {} +
 
-      - name: Every chart's declared dependencies must resolve
-        run: |
-          set -euo pipefail
-          # --skip-refresh: the only dependency is a local path, so no remote index is involved.
-          while IFS= read -r -d '' cf; do
-            dir=$(dirname "$cf")
-            echo "::group::${dir}"
-            helm dependency update "$dir" --skip-refresh
-            echo "::endgroup::"
-          done < <(find . -type f -name Chart.yaml -not -path '*/charts/*' -not -path './.git/*' -print0)
+      # Checks: hack/gates.d/*.yaml with `job: chart-deps`. Add a file there, never a step here.
+      - name: Gates (hack/gates.d, job chart-deps)
+        run: python3 hack/run-gates.py --job chart-deps .
 
   lint:
     runs-on: ubuntu-latest
@@ -882,18 +323,6 @@ jobs:
           find . -type f -name Chart.yaml -not -path '*/charts/*' -not -path './.git/*' \
             -exec sed -i "s/CHART_VERSION/0.0.0-ci/g" {} +
 
-      - name: helm template + lint every chart (informational)
-        run: |
-          set -uo pipefail
-          # Informational only: charts across repos legitimately require values or private
-          # dependencies to render, so render/lint issues are surfaced as warnings, never failing
-          # the build. The lint-docs job above is the authoritative gate.
-          while IFS= read -r -d '' cf; do
-            dir=$(dirname "$cf")
-            echo "::group::${dir}"
-            helm dependency update "$dir" --skip-refresh
-            helm template release "$dir" >/dev/null \
-              || echo "::warning::helm template failed for ${dir} (may require values or private deps)"
-            helm lint "$dir" || true
-            echo "::endgroup::"
-          done < <(find . -type f -name Chart.yaml -not -path '*/charts/*' -not -path './.git/*' -print0)
+      # Checks: hack/gates.d/*.yaml with `job: lint`. Add a file there, never a step here.
+      - name: Gates (hack/gates.d, job lint)
+        run: python3 hack/run-gates.py --job lint .
