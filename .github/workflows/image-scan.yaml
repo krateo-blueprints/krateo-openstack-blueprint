@@ -39,10 +39,14 @@ permissions:
   contents: read
 
 env:
-  # Trivy is downloaded, not run through aquasecurity/trivy-action, and checked against a digest written HERE as well
-  # as against the release's own checksums file: a release whose assets and checksums were replaced together passes
-  # the second check and not the first, and a git tag an action is pinned to can be moved to other code. A scanner is
-  # the last component a supply-chain check should take on trust. Bump both lines together.
+  # Trivy is downloaded, not run through aquasecurity/trivy-action, and checked against a digest written HERE rather
+  # than against the release's own checksums file: a release whose assets and checksums were replaced together passes
+  # that check, and a git tag an action is pinned to can be moved to other code. A scanner is the last component a
+  # supply-chain check should take on trust. Bump both lines together.
+  #
+  # Anonymously, with curl, not with the org's release-download action: that action authenticates with the job's
+  # token, and aquasecurity's IP allow list refuses an authenticated request from a runner ("your IP address is not
+  # permitted to access this resource"), measured on this workflow's first run. A public asset needs no token.
   TRIVY_VERSION: 0.76.1
   TRIVY_SHA256: c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0
 
@@ -84,34 +88,31 @@ jobs:
     # the database registry is asked once rather than sixty times in parallel.
     runs-on: ubuntu-latest
     steps:
-      - name: Download Trivy
-        id: trivy
-        uses: krateo-platformops/.github/.github/actions/release-download@main
-        with:
-          repo: aquasecurity/trivy
-          tag: v${{ env.TRIVY_VERSION }}
-          asset: trivy_${{ env.TRIVY_VERSION }}_Linux-64bit.tar.gz
-          checksums: trivy_${{ env.TRIVY_VERSION }}_checksums.txt
-
       - name: Install Trivy, checked against the digest pinned in this workflow
         run: |
           set -euo pipefail
-          echo "$TRIVY_SHA256  ${{ steps.trivy.outputs.path }}" | sha256sum -c -
-          tar -xzf "${{ steps.trivy.outputs.path }}" -C "$RUNNER_TEMP" trivy
-          "$RUNNER_TEMP/trivy" --version
+          tarball="$RUNNER_TEMP/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors -o "$tarball" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "$TRIVY_SHA256  $tarball" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/trivy-bin"
+          tar -xzf "$tarball" -C "$RUNNER_TEMP/trivy-bin" trivy
+          "$RUNNER_TEMP/trivy-bin/trivy" --version
 
       - name: Download the vulnerability databases
         run: |
           set -euo pipefail
-          "$RUNNER_TEMP/trivy" image --download-db-only --cache-dir "$RUNNER_TEMP/trivy-cache"
-          "$RUNNER_TEMP/trivy" image --download-java-db-only --cache-dir "$RUNNER_TEMP/trivy-cache"
-          "$RUNNER_TEMP/trivy" --cache-dir "$RUNNER_TEMP/trivy-cache" version
+          "$RUNNER_TEMP/trivy-bin/trivy" image --download-db-only --cache-dir "$RUNNER_TEMP/trivy-cache"
+          "$RUNNER_TEMP/trivy-bin/trivy" image --download-java-db-only --cache-dir "$RUNNER_TEMP/trivy-cache"
+          "$RUNNER_TEMP/trivy-bin/trivy" --cache-dir "$RUNNER_TEMP/trivy-cache" version
 
-      - name: Upload the databases
+      # The checked binary travels with the databases, so the scan jobs run exactly the bytes checked above.
+      - name: Upload Trivy and the databases
         uses: actions/upload-artifact@v7
         with:
           name: trivy-db
           path: |
+            ${{ runner.temp }}/trivy-bin/trivy
             ${{ runner.temp }}/trivy-cache/db
             ${{ runner.temp }}/trivy-cache/java-db
           retention-days: 1
@@ -127,26 +128,16 @@ jobs:
       matrix:
         image: ${{ fromJSON(needs.inventory.outputs.images) }}
     steps:
-      - name: Download Trivy
-        id: trivy
-        uses: krateo-platformops/.github/.github/actions/release-download@main
-        with:
-          repo: aquasecurity/trivy
-          tag: v${{ env.TRIVY_VERSION }}
-          asset: trivy_${{ env.TRIVY_VERSION }}_Linux-64bit.tar.gz
-          checksums: trivy_${{ env.TRIVY_VERSION }}_checksums.txt
-
-      - name: Install Trivy, checked against the digest pinned in this workflow
-        run: |
-          set -euo pipefail
-          echo "$TRIVY_SHA256  ${{ steps.trivy.outputs.path }}" | sha256sum -c -
-          tar -xzf "${{ steps.trivy.outputs.path }}" -C "$RUNNER_TEMP" trivy
-
-      - name: Download the databases
+      - name: Download Trivy and the databases
         uses: actions/download-artifact@v8
         with:
           name: trivy-db
-          path: ${{ runner.temp }}/trivy-cache
+          path: ${{ runner.temp }}
+
+      - name: Trivy is executable (an artifact does not keep file modes)
+        run: |
+          chmod +x "$RUNNER_TEMP/trivy-bin/trivy"
+          "$RUNNER_TEMP/trivy-bin/trivy" --version
 
       - name: Scan ${{ matrix.image }}
         env:
@@ -156,7 +147,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/report"
           # Straight from the registry (no docker daemon), as linux/amd64, the platform every cluster here runs.
           # HIGH is reported for the record; only CRITICAL is judged (hack/check-image-cves.py).
-          "$RUNNER_TEMP/trivy" image "$IMAGE" \
+          "$RUNNER_TEMP/trivy-bin/trivy" image "$IMAGE" \
             --cache-dir "$RUNNER_TEMP/trivy-cache" --skip-db-update --skip-java-db-update \
             --image-src remote --platform linux/amd64 --scanners vuln \
             --severity CRITICAL,HIGH --timeout 30m \
