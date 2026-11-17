@@ -111,6 +111,29 @@ spec:
               mountPath: /tmp/init-dynamic-options.sh
               subPath: init-dynamic-options.sh
               readOnly: true
+{{- if eq (toString .Values.conf.libvirt.virt_type) "kvm" }}
+        {{- /* Krateo (#303): with virt_type kvm, refuse to start on a node without /dev/kvm (after the modules are loaded). */}}
+        - name: libvirt-kvm-check
+{{ tuple $envAll "libvirt" | include "helm-toolkit.snippets.image" | indent 10 }}
+          terminationMessagePath: /var/log/termination-log
+          command:
+            - /tmp/kvm-check.sh
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
+            - name: dev
+              mountPath: /dev
+              readOnly: true
+            - name: libvirt-bin
+              mountPath: /tmp/kvm-check.sh
+              subPath: kvm-check.sh
+              readOnly: true
+{{- end }}
 {{- if eq .Values.conf.qemu.vnc_tls "1" }}
         - name: cert-init-vnc
 {{ tuple $envAll "kubectl" | include "helm-toolkit.snippets.image" | indent 10 }}

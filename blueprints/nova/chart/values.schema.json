@@ -505,6 +505,17 @@
           "description": "Rendered nowhere. The umbrella sets it from rerunHooks.<component>; changing it makes core-provider run a helm upgrade, which re-runs every hook (#297)."
         }
       }
+    },
+    "kog_credentials": {
+      "type": "object",
+      "title": "nova_url for Krateo KOG operators",
+      "description": "enabled: a hook Job writes nova_url (nova's internal URL from keystone's catalog, with the admin project id) into keystone's openstack-kog-endpoints ConfigMap (#303). Set by the umbrella's kogCredentials.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
     }
   }
 }

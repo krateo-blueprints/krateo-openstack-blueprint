@@ -180,6 +180,22 @@
 {{- with index ($.Values.rerunHooks | default dict) $c.name }}
 {{- $ov = mergeOverwrite (dict "krateo" (dict "rerunHooksToken" (toString .))) (deepCopy $ov) }}
 {{- end }}
+{{- /* compute.virtType kvm (#303): nova's virt_type and cpu_mode, and libvirt's virt_type, which makes libvirt refuse a
+       node without /dev/kvm. qemu passes nothing: the charts' own defaults are qemu. Merged UNDER componentValues.
+       hack/validate-virt-type.py renders this span. */ -}}
+{{- if eq (toString (($.Values.compute | default dict).virtType | default "qemu")) "kvm" }}
+{{- if eq $c.name "nova" }}
+{{- $ov = mergeOverwrite (dict "conf" (dict "nova" (dict "libvirt" (dict "virt_type" "kvm" "cpu_mode" "host-model")))) (deepCopy $ov) }}
+{{- else if eq $c.name "libvirt" }}
+{{- $ov = mergeOverwrite (dict "conf" (dict "libvirt" (dict "virt_type" "kvm"))) (deepCopy $ov) }}
+{{- end }}
+{{- end }}
+{{- /* kogCredentials (#303): keystone renders the KOG credentials from the admin root it already receives, and nova's
+       hook writes nova_url into keystone's openstack-kog-endpoints. Off: nothing is passed. Merged UNDER
+       componentValues. hack/validate-kog-credentials.py renders this span. */ -}}
+{{- if and (has $c.name (list "keystone" "nova")) ($.Values.kogCredentials | default dict).enabled }}
+{{- $ov = mergeOverwrite (dict "kog_credentials" (dict "enabled" true)) (deepCopy $ov) }}
+{{- end }}
 {{- /* Storage backend (#196, #308): a component that requires block-storage receives storage.backend as its
        krateo.storageBackend, always, `none` included: with none, cinder refuses to render and names the value, rather
        than waiting in Init on Ceph objects nothing creates. Not overridable (osh.requireStorageNotOverridden refuses a

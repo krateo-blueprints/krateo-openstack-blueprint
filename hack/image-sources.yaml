@@ -1,0 +1,36 @@
+# Where each image the charts run comes from (#316). hack/gen-image-inventory.py requires every image's
+# <registry>/<repository> to start with exactly one prefix here (the longest wins), and every prefix to match an
+# image, so a new image source is a decision written down here rather than a line nobody reviews in a values file.
+# docs/images.md renders this table next to the images.
+#
+# Each entry:
+#   prefix     <registry>/<namespace>/, Docker Hub official images under docker.io/library/
+#   publisher  who builds and pushes the images
+#   source     where they are built from
+sources:
+  - prefix: quay.io/airshipit/
+    publisher: OpenStack-Helm (OpenInfra Airship)
+    source: >-
+      opendev.org/openstack/loci (OpenStack service images), opendev.org/openstack/openstack-helm-images
+      (infrastructure images), opendev.org/airship/kubernetes-entrypoint, opendev.org/airship/porthole
+  - prefix: quay.io/openstack.kolla/
+    publisher: OpenStack Kolla project
+    source: opendev.org/openstack/kolla (gnocchi only, replacing upstream's unpullable images, #115 and #117)
+  - prefix: docker.io/library/
+    publisher: Docker Official Images
+    source: github.com/docker-library/official-images
+  - prefix: docker.io/bitnami/
+    publisher: Bitnami (Broadcom)
+    source: github.com/bitnami/containers
+  - prefix: docker.io/powerdns/
+    publisher: PowerDNS
+    source: github.com/PowerDNS/pdns
+  - prefix: docker.io/prom/
+    publisher: Prometheus project
+    source: github.com/prometheus/mysqld_exporter
+  - prefix: docker.io/xrally/
+    publisher: OpenStack Rally project
+    source: opendev.org/openstack/rally-openstack
+  - prefix: ghcr.io/vexxhost/
+    publisher: VEXXHOST
+    source: github.com/vexxhost/netoffload
