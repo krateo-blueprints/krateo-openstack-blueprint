@@ -79,9 +79,15 @@ def visit(n, stack):
 for n in sorted(names):
     visit(n, [])
 
-# 3. kind matches the name core-provider will serve
+# 3. kind matches the name core-provider will serve: flect.Pascalize(strutil.ToGolangName(<chart name>))
+# (core-provider go/core-provider/internal/tools/chart/chartfs/gvr.go). ToGolangName splits the name on every character
+# that cannot appear in a Go name and capitalises each part's first letter, so `mariadb` serves Mariadb and
+# `openstack-monitoring` serves OpenstackMonitoring (#312). Python's capitalize() agreed only for one-word names.
+import re as _re
+def served_kind(name):
+    return "".join(p[:1].upper() + p[1:] for p in _re.split(r"[^A-Za-z0-9_]+", name) if p)
 for n, c in sorted(comps.items()):
-    want = n.capitalize()
+    want = served_kind(n)
     got = c.get("kind")
     if got != want:
         problems.append(f"{n}: kind is {got!r}, but core-provider serves {want!r} -- the gate "
