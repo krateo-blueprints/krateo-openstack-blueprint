@@ -2,8 +2,10 @@
 # hack/validate-credentials.py check 22m: a container that mounts a config which carried the user's transport URL receives
 # the drop-in <chart>-transport exactly when it is listed here, and every other one must NOT, so the RabbitMQ password
 # reaches no program that cannot use it. A listed container that no render shows reading the config fails (a list that
-# keeps entries nothing checks stops meaning anything). Main containers only: an init container shares its pod's
-# projected config volume, on the same node, and none of them starts an OpenStack program.
+# keeps entries nothing checks stops meaning anything). Main containers, and every init container that starts an
+# OpenStack program (0.3.70, #291: 0.3.69 left init containers out on the premise that they share their pod's
+# drop-in volume, and designate-worker-init mounted designate.conf alone, so designate-manage pool update had no
+# transport_url and dialled localhost forever).
 #
 # The rule: a container is listed when its program sends or receives over RabbitMQ, or would once a setting an install
 # can change is set (a notification driver, barbican's [queue] enable); a program that never creates an RPC client or
@@ -75,6 +77,9 @@ charts:
       - designate-producer
       - designate-sink
       - designate-worker
+      # designate-manage pool update: rpc.init(CONF), then designate-central over RPC (designate/manage/pool.py,
+      # PoolCommands._setup and update; measured at stable/2026.1). No database: central reads it.
+      - designate-worker-init
   glance:
     readers:
       - glance-api

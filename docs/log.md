@@ -13,6 +13,15 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **designate-worker's init container reads designate.conf.d (0.3.70, #291).** The 0.3.69 GKE upgrade never got
+  designate Ready: `designate-worker-init` runs `designate-manage pool update`, which reaches designate-central over RPC,
+  and it mounted `designate.conf` alone. 0.3.69 had moved `transport_url` into `designate.conf.d`, so the `[ -d ]` guard
+  dropped `--config-dir` and oslo.messaging dialled localhost:5672 forever. The init container now mounts the pod's own
+  drop-in volume, as the worker does. The gate had left init containers out on a premise that was false for this chart
+  (that they share their pod's drop-in volume): checks 13, 22 and 22m now treat an init container that starts an
+  OpenStack program as a reader, and new check 19c requires every such init container, in every chart and rendered mode,
+  that mounts its project's main config to mount its `.conf.d` too. The survey found no other one.
+
 - **Per-service RabbitMQ users and ceilometer's vhosts (0.3.69, #228, #285).** The last #228 tier: 22 services' own
   RabbitMQ users still logged in with OpenStack-Helm's published password. Each username now has a generated root,
   `openstack-credential-oslo-messaging-<user>`, passed only to the chart that renders it (no username is rendered by

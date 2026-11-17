@@ -87,6 +87,14 @@ spec:
               mountPath: /etc/designate/designate.conf
               subPath: designate.conf
               readOnly: true
+            # Krateo (#291): designate-manage pool update reaches designate-central over RPC (rpc.init, CentralAPI), so it
+            # needs [DEFAULT] transport_url, which 0.3.69 delivers in designate.conf.d (88-transport.conf). Without this
+            # mount the [ -d ] guard dropped --config-dir and oslo.messaging dialled localhost:5672 forever. The pod's
+            # own drop-in volume, as the worker below mounts it: the init container runs in the same pod, on the same
+            # node, so it adds no place a credential reaches.
+            - name: designate-etc-snippets
+              mountPath: /etc/designate/designate.conf.d/
+              readOnly: true
             {{- if .Values.conf.designate.DEFAULT.log_config_append }}
             - name: designate-etc
               mountPath: {{ .Values.conf.designate.DEFAULT.log_config_append }}
