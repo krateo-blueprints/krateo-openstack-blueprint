@@ -142,6 +142,30 @@ four things hold, and each is checked here:
      nova.conf names: a literal would store the password in nova_api, and a process that cached it before an update
      kept it until it exited (CELL_CACHE). 24b: every container that loads cell mappings has the [database] connection
      and [DEFAULT] transport_url the templates format from.
+  15c. hack/mq-users.yaml is exactly what the charts render: every per-service endpoints.oslo_messaging.auth key, rendered
+     with a sentinel, under the map's username (0.3.69). ONE USERNAME, ONE ROOT: each oslo-messaging-<user> item reaches
+     every chart rendering that username at its key (closure, check 2), and no other item reaches any of those keys; a
+     username two charts render (a cross-chart reader) is listed under both, with one root. 20b covers a RabbitMQ URL
+     logging in, at any of its hosts, as a per-service RabbitMQ user, and check 20 no longer exempts the messaging
+     sections.
+  22m. THE TRANSPORT URL DROP-IN. For a per-service RabbitMQ user with its root, every ini option that carried the user's
+     password in values mode is gone from that config and is in the drop-in <chart>-transport (88-transport.conf), as
+     exactly the values-mode URL with every host's password read from the root (URL-quoted); a container mounting a carrier
+     receives it in a .conf.d exactly when hack/mq-readers.yaml lists it (its program sends or receives over RabbitMQ,
+     measured per program), and no other container does; every exec probe of a receiving container that parses a carrier
+     with --config-file passes --config-dir <that .conf.d> (neutron's health-probe.py reads no .conf.d by itself, and
+     without transport_url reports success unchecked). Every optional workload is rendered on too.
+  23m. RABBIT-INIT SETS THE PASSWORD. Every chart's rendered rabbit-init.sh is RUN with a stand-in rabbitmqadmin that
+     reports the user as existing, on the connections its Job reads (built from the roots): it must `declare user` with
+     the root's password (an HTTP PUT, create or replace: measured on the chart's rabbitmq:3.13-management image to set a
+     new password on an existing user), then declare the vhost and the user's permissions.
+  26. NOTIFICATION VHOSTS THAT EXIST (#285). components[].rabbitmqVhost is exactly the vhost each chart's rabbit-init
+     declares, and rabbitmqInit: false exactly where the chart ships that Job off (measured from renders);
+     notificationVhosts.vhosts is ceilometer's own conf.notification_vhosts default; and for the identity, full and
+     full-strict profiles, sample explicit selections, and componentValues that switch a component's rabbit-init off or on
+     or rename its vhost, the vhosts ceilometer renders in [notification] messaging_urls, given the spec compositions.yaml
+     builds, are exactly those of that list the selected closure creates, under the names it creates them (each chart
+     rendered with its componentValues).
   18. READERS RESTART. Every Deployment, StatefulSet and DaemonSet that reads an ExternalSecret projecting an
      item's root has a pod template that differs between the render without that one item's reference and the
      render with it, every other reference set in both (0.3.63: ks-etc kept its name, nothing hashed it, and
@@ -486,6 +510,64 @@ for _cid, _u in DBUSER_BY_ITEM.items():
     }
     if any(c in DB_FILEREAD for c in DBUSERS[_u]):
         RULES[_cid]["fileread"] = lambda chart: DB_FILEREAD[chart]
+
+# Per-service RabbitMQ users (0.3.69): one item per USERNAME (id oslo-messaging-<username>). Which charts render which
+# username under which endpoints.oslo_messaging.auth key is the committed map hack/mq-users.yaml, re-verified by check 15c.
+_MQF = os.path.join(ROOT, "hack", "mq-users.yaml")
+MQUSERS = ((yaml.safe_load(open(_MQF)) or {}).get("users") or {}) if os.path.isfile(_MQF) else {}
+MQUSER_BY_ITEM = {"oslo-messaging-" + u.replace("_", "-"): u for u in MQUSERS}
+# The URL drop-in's name and file (helm-toolkit.manifests.transport_dropin, templates/_transport_dropin_entries.tpl).
+MQ_DROPIN_FILE = "88-transport.conf"
+# Which containers send or receive over RabbitMQ (or would under a setting), measured per program: only they receive the
+# drop-in, and every other container that mounts that config must not (check 22m).
+_MQR = os.path.join(ROOT, "hack", "mq-readers.yaml")
+MQ_READERS = ((yaml.safe_load(open(_MQR)) or {}).get("charts") or {}) if os.path.isfile(_MQR) else {}
+MQ_READERS_SEEN = set()
+MQ_DROPIN_CHECKED = []
+MQ_PROBES_CHECKED = []
+# The keys of endpoints.oslo_messaging.auth that are not a per-service user: the administrator (auth.admin, and the
+# rabbitmq chart's own auth.user), the retired guest and the Erlang cookie.
+MQ_NOT_SERVICE = ("admin", "user", "guest", "erlang_cookie")
+
+
+def mq_key(chart, u):
+    """The endpoints.oslo_messaging.auth key RabbitMQ user u renders under in chart (hack/mq-users.yaml), or None."""
+    return (MQUSERS.get(u) or {}).get(chart)
+
+
+def all_workloads(chart):
+    """manifests.<x>: true for every workload a chart ships switched off (DaemonSets, Deployments, StatefulSets, Jobs,
+    CronJobs: cron_job_* and cinder's and manila's cron_*; masakari's *_monitor DaemonSets): a reader that only an optional
+    workload runs must be checked too, and so must a non-reader."""
+    man = (yaml.safe_load(open(os.path.join(BP, chart, "chart", "values.yaml"))) or {}).get("manifests") or {}
+    on = {k: True for k, v in man.items() if v is False and (k.startswith(("daemonset_", "deployment_", "statefulset_",
+                                                                             "cron_", "job_")) or k.endswith("_monitor"))
+          and k != "job_image_repo_sync"}
+    return {"manifests": on} if on else None
+
+
+# Workloads a manifest alone does not switch on: nova's console proxies follow console.console_kind, neutron's SR-IOV
+# agent network.backend.
+MQ_VARIANTS = {
+    "nova": [{"console": {"console_kind": "spice"}, "manifests": {"deployment_spiceproxy": True}},
+             {"console": {"console_kind": "serial"}, "manifests": {"deployment_serialproxy": True}}],
+    "neutron": [{"network": {"backend": ["openvswitch", "sriov"]}, "manifests": {"daemonset_sriov_agent": True}}],
+}
+
+for _cid, _u in MQUSER_BY_ITEM.items():
+    RULES[_cid] = {
+        "what": "renders RabbitMQ user %s" % _u,
+        "consumes": (lambda u: lambda d, has: d in MQUSERS[u])(_u),
+        "password_path": (lambda u: lambda chart: "endpoints.oslo_messaging.auth.%s.password"
+                          % (mq_key(chart, u) or "gate_unmapped"))(_u),
+        # <chart>-rabbitmq-user (RABBITMQ_CONNECTION, read by rabbit-init): secrets.oslo_messaging.<key>
+        "projections": (lambda u: lambda chart, cv: [((cv.get("secrets") or {}).get("oslo_messaging") or {})
+                                                     .get(mq_key(chart, u) or "gate_unmapped")])(_u),
+        # keystone ships secret_rabbitmq off; render it on, or its projection would pass vacuously
+        "enable": lambda chart: {"manifests": {"secret_rabbitmq": True}},
+        "mq": True,
+        "variants": lambda chart: [v for v in [all_workloads(chart)] if v] + MQ_VARIANTS.get(chart, []),
+    }
 
 
 def no_guest_user(tmp):
@@ -1262,6 +1344,11 @@ def cell_mapping_check(docs_s, docs, sentinel, label=""):
                         dropins += [t for (n, k), t in sorted(texts.items()) if n == s and k.endswith(".conf")]
             if base is None or base[1] == "nova-compute.conf":
                 continue
+            # helm-toolkit's db-init.py and db-drop.py (MariaDB only) and the bootstrap Job (the openstack client) mount
+            # nova.conf too and run no nova code, so they load no cell mapping (0.3.69: they get no transport URL)
+            cmd = " ".join((cont.get("command") or []) + (cont.get("args") or []))
+            if re.search(r"/tmp/db-(init|drop)\.py$", cmd) or podname == "Job/nova-bootstrap":
+                continue
             loaders += 1
             eff = ini_options(texts.get(base) or "")
             for t in dropins:
@@ -1423,6 +1510,471 @@ def identity_map_check(tmp):
             fail("identity map: %s key %s is user %s, the map says %s" % (pair[0], pair[1], rendered[pair], mapped[pair]))
 
 
+def mq_map_check(tmp):
+    """15c. hack/mq-users.yaml is exactly what the charts render: every chart is rendered with a sentinel per per-service
+    endpoints.oslo_messaging.auth key, and the (chart, key) pairs whose URL logs in with it must equal the map's, under the
+    map's username. A chart rendering another service's username (a cross-chart reader) shows up here under its own key,
+    and the map then lists that username under both charts, with one root."""
+    rendered = {}
+    for d in sorted(os.listdir(BP)):
+        vf = os.path.join(BP, d, "chart", "values.yaml")
+        if d == "openstack" or not os.path.isfile(vf):
+            continue
+        auth = ((((yaml.safe_load(open(vf)) or {}).get("endpoints") or {}).get("oslo_messaging") or {}).get("auth") or {})
+        keys = {k: a.get("username") for k, a in auth.items()
+                if k not in MQ_NOT_SERVICE and isinstance(a, dict) and "password" in a}
+        if not keys:
+            continue
+        sent = {k: "gatemqmap%s%s7f3c" % (d.replace("-", ""), k.replace("_", "")) for k in keys}
+        w = stage(os.path.join(BP, d, "chart"), tmp, "mqmap-" + d)
+        rc, out, err = helm_template(w, d + "-gate1234", {"endpoints": {"oslo_messaging": {"auth": {
+            k: {"password": s} for k, s in sent.items()}}}})
+        if rc != 0:
+            fail("15c: %s: does not render for the RabbitMQ user map: %s" % (d, err.strip()[:200]))
+            continue
+        decoded = out
+        for doc in yaml.safe_load_all(out):
+            if doc and doc.get("kind") == "Secret":
+                decoded += "\n".join(object_text(doc, k) or "" for k in (doc.get("data") or {}))
+        for k, s in sent.items():
+            if re.search(r"[/,]%s:%s@" % (re.escape(urllib.parse.quote(str(keys[k]), safe="")), re.escape(s)), decoded):
+                rendered[(d, k)] = keys[k]
+    mapped = {(c, k): u for u, cs in MQUSERS.items() for c, k in (cs or {}).items()}
+    if not rendered:
+        fail("15c: no chart renders a per-service RabbitMQ user; the map check had no input")
+    for pair in sorted(set(rendered) - set(mapped)):
+        fail("15c: %s renders %s (RabbitMQ user %s) but hack/mq-users.yaml does not list it" % (pair[0], pair[1],
+                                                                                              rendered[pair]))
+    for pair in sorted(set(mapped) - set(rendered)):
+        fail("15c: hack/mq-users.yaml lists %s %s, which the chart does not render" % pair)
+    for pair in sorted(set(mapped) & set(rendered)):
+        if mapped[pair] != rendered[pair]:
+            fail("15c: %s %s is RabbitMQ user %s, the map says %s" % (pair[0], pair[1], rendered[pair], mapped[pair]))
+
+
+# 20b/22m: every `<user>:<password>@` of a RabbitMQ URL, the first after the scheme and each further host's after a comma
+# (authenticated_transport_endpoint_uri_lookup writes one per StatefulSet replica).
+MQ_URL = re.compile(r"\b(?:rabbit|amqp|kombu)[a-z0-9+.-]*://\S")
+MQ_USERINFO = re.compile(r"(?:\b(?:rabbit|amqp|kombu)[a-z0-9+.-]*://|,)([^:/@\s,'\"]+):(\{\{.*?\}\}|[^@/\s,'\"]+)@")
+
+
+def probe_texts(pod, cont, docs):
+    """[(probe, the words it runs and the text of any mounted script it names)] for every exec probe of a container."""
+    vols = {v["name"]: v for v in pod.get("volumes") or []}
+    out = []
+    for p in ("startupProbe", "readinessProbe", "livenessProbe"):
+        cmd = ((cont.get(p) or {}).get("exec") or {}).get("command")
+        if not cmd:
+            continue
+        texts = [" ".join(cmd)]
+        for m in cont.get("volumeMounts") or []:
+            if m.get("subPath") and any(m["mountPath"] == w or m["mountPath"] in w.split() for w in cmd):
+                v = vols.get(m["name"]) or {}
+                kind, name = (("ConfigMap", (v.get("configMap") or {}).get("name")) if "configMap" in v else
+                              ("Secret", (v.get("secret") or {}).get("secretName")) if "secret" in v else (None, None))
+                for d in docs:
+                    if d.get("kind") == kind and d["metadata"]["name"] == name:
+                        texts.append(re.sub(r"\\\n\s*", " ", object_text(d, m["subPath"]) or ""))
+        out.append((p, "\n".join(texts)))
+    return out
+
+
+def mq_dropin_check(chart, cid, sentinel, docs_s, docs, label=""):
+    """22m. A per-service RabbitMQ user's URLs, with its root: every ini option of a config that carried the user's password
+    in values mode (sentinel render docs_s) is gone from that config and is in the drop-in <chart>-transport
+    (88-transport.conf), as exactly the values-mode URL with every password read from this user's root (URL-quoted); a
+    container that mounts a carrier receives the drop-in in a .conf.d exactly when hack/mq-readers.yaml lists it as using
+    RabbitMQ, and no container reading none of the carriers receives it; and every exec probe of a
+    receiving container that parses a carrier with --config-file also passes --config-dir <that .conf.d> (neutron's
+    health-probe.py parses with no project, so it never reads a .conf.d by itself, and without transport_url it reports
+    success without checking the agent's queue)."""
+    drop = "%s-transport" % chart
+    root = [i["secret"] for i in ITEMS_REF.values() if i["id"] == cid]
+    projections = set(RULES[cid]["projections"](chart, yaml.safe_load(open(os.path.join(BP, chart, "chart", "values.yaml")))))
+    carriers, want = set(), {}
+    for d in docs_s:
+        if d.get("kind") not in ("Secret", "ConfigMap") or d["metadata"]["name"] in projections:
+            continue  # <chart>-rabbitmq-user (RABBITMQ_CONNECTION, read by rabbit-init): checks 3, 8 and 23m
+        for k in (d.get("data") or {}):
+            for so, val in ini_options(object_text(d, k)).items():
+                if sentinel in val:
+                    carriers.add((d["kind"], d["metadata"]["name"], k))
+                    if want.get(so, val) != val:
+                        fail("22m%s: %s: %s carries %s's URL with two values in values mode (%s/%s)" % (
+                            label, chart, so, cid, d["metadata"]["name"], k))
+                    want[so] = val
+    if not carriers:
+        fail("22m%s: %s: no rendered config carries %s's password in an ini option in values mode, so where the drop-in "
+             "must arrive cannot be determined" % (label, chart, cid))
+        return
+    byname = {(d.get("kind"), d["metadata"]["name"]): d for d in docs}
+    for kind, name, k in sorted(carriers):
+        d = byname.get((kind, name))
+        left = {so for so, v in ini_options(object_text(d, k) if d else "").items() if so in want}
+        if left:
+            fail("22m%s: %s: %s/%s %s still sets %s with %s's reference: the base config must not render the URL"
+                 % (label, chart, kind, name, k, sorted(left, key=str), cid))
+    es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == drop]
+    if len(es) != 1:
+        fail("22m%s: %s: renders %d ExternalSecret(s) %s, want 1 (%s)" % (label, chart, len(es), drop, cid))
+        return
+    tdata = ((es[0]["spec"].get("target") or {}).get("template") or {}).get("data") or {}
+    if sorted(tdata) != [MQ_DROPIN_FILE]:
+        fail("22m%s: %s: %s holds %s, want exactly %s" % (label, chart, drop, sorted(tdata), MQ_DROPIN_FILE))
+        return
+    keys = {e.get("secretKey"): (e.get("remoteRef") or {}).get("key") for e in es[0]["spec"].get("data") or []}
+    got = ini_options(tdata[MQ_DROPIN_FILE])
+    for so in sorted(set(got) - set(want), key=str):
+        fail("22m%s: %s: drop-in %s sets %s, which carried no %s URL in values mode" % (label, chart, drop, so, cid))
+    for so, val in sorted(want.items(), key=str):
+        g = got.get(so)
+        if g is None:
+            fail("22m%s: %s: drop-in %s has no %s for %s" % (label, chart, drop, so, cid))
+            continue
+        used = re.findall(r"\{\{ \.(\w+) \| urlquery \}\}", g)
+        filled = g
+        for sk in set(used):
+            if not root or keys.get(sk) != root[0]:
+                fail("22m%s: %s: drop-in %s fills %s from %s (%s), not %s's root" % (label, chart, drop, so, sk,
+                                                                                   keys.get(sk), cid))
+            filled = filled.replace("{{ .%s | urlquery }}" % sk, urllib.parse.quote_plus(sentinel))
+        if not used or "{{" in filled or filled != val:
+            fail("22m%s: %s: drop-in %s %s is not the values-mode URL with every password from the root (%d placeholder(s); "
+                 "same once filled: %s)" % (label, chart, drop, so, len(used), filled == val))
+    spec = MQ_READERS.get(chart)
+    if spec is None or not (spec or {}).get("readers"):
+        fail("22m%s: %s: hack/mq-readers.yaml does not list which of %s's containers use RabbitMQ, so "
+             "who must receive %s cannot be checked" % (label, chart, chart, drop))
+        return
+    users = set(spec["readers"])
+    readers = 0
+    for podname, cname, mounts, vols, reads in conf_readers(carriers, docs):
+        gets = receives_in_confd(mounts, vols, drop)
+        if reads and cname not in users:
+            if gets:
+                fail("22m%s: %s: %s container %s receives %s, but hack/mq-readers.yaml does not list it as using RabbitMQ "
+                     "(it reads %s): the RabbitMQ password has no business there" % (label, chart, podname, cname, drop,
+                                                                                         sorted(reads)))
+            continue
+        if reads:
+            MQ_READERS_SEEN.add((chart, cname))
+            readers += 1
+            if not gets:
+                fail("22m%s: %s: %s container %s reads %s and uses RabbitMQ (hack/mq-readers.yaml) but does not "
+                     "receive %s in a .conf.d directory: it would have no transport URL" % (label, chart, podname, cname,
+                                                                                           sorted(reads), drop))
+                continue
+            # where the drop-in lands in this container
+            dirs = set()
+            for m in mounts:
+                v = vols.get(m["name"]) or {}
+                srcs = [(v.get("secret") or {}).get("secretName")] if "secret" in v else \
+                       [(x.get("secret") or {}).get("name") for x in (v.get("projected") or {}).get("sources") or []]
+                if drop in srcs:
+                    p = m["mountPath"].rstrip("/")
+                    dirs.add(p if not m.get("subPath") else os.path.dirname(p))
+            carrier_paths = {m["mountPath"] for m in mounts if m.get("subPath") in {k for _, _, k in carriers}}
+            pod = [p for n, p in pod_specs(docs) if n == podname][0]
+            cont = [c for c in pod.get("containers") or [] if c["name"] == cname][0]
+            for probe, text in probe_texts(pod, cont, docs):
+                files = set(re.findall(r"--config-file(?:=|\s+)(\S+)", text))
+                if not files & carrier_paths:
+                    continue
+                MQ_PROBES_CHECKED.append((chart, podname, cname, probe))
+                if not any(re.search(r"--config-dir(?:=|\s+)%s/?(?=\s|$)" % re.escape(dd), text) for dd in dirs):
+                    fail("22m%s: %s: %s container %s's %s parses %s with --config-file but passes no --config-dir %s: "
+                         "it never reads the drop-in, so it has no transport URL and checks nothing" % (
+                             label, chart, podname, cname, probe, sorted(files & carrier_paths), " or ".join(sorted(dirs))))
+        elif gets:
+            fail("22m%s: %s: %s container %s receives %s but reads no config that carried %s's URL: the RabbitMQ password "
+                 "has no business there" % (label, chart, podname, cname, drop, cid))
+    if readers == 0:
+        fail("22m%s: %s: no listed container reads a config that carried %s's URL" % (label, chart, cid))
+    else:
+        MQ_DROPIN_CHECKED.append((chart, cid, label, readers))
+
+
+RABBIT_INIT_CHECKED = []
+# A stand-in for rabbitmqadmin: every call is recorded, and any listing answers that the user already exists, so a script
+# that declares the user only when it is missing (and so never sets a new password on an existing one) is caught.
+RABBITMQADMIN_STUB = """#!/bin/bash
+for a in "$@"; do printf '%s\\037' "$a"; done >> "$GATE_MQ_LOG"
+printf '\\n' >> "$GATE_MQ_LOG"
+case " $* " in *" list "*|*" show "*) printf '%s\\n' "$GATE_MQ_USER";; esac
+exit 0
+"""
+
+
+def rabbit_init_check(chart, cid, docs, tmp, label=""):
+    """23m. RABBIT-INIT SETS THE PASSWORD. The chart's rendered rabbit-init.sh is RUN, with a stand-in rabbitmqadmin, on the
+    connection URLs its Job reads, the user's built from this user's root as the ExternalSecret renders it: it must
+    `declare user name=<user> password=<the root's password>` unconditionally, with the user already existing, then
+    declare the vhost and the user's permissions on it. `declare user` is an HTTP PUT of the user (create or replace), so
+    it sets a new password on an existing user: measured 2026-11-16 on docker.io/rabbitmq:3.13-management, the chart's
+    image (rabbitmqadmin invoke_declare -> PUT /api/users/<name>): run twice with two passwords, the second accepted and
+    the first refused afterwards."""
+    jobs = [d for d in docs if d.get("kind") == "Job" and d["metadata"]["name"].endswith("rabbit-init")]
+    if not jobs:
+        return
+    script = None
+    for d in docs:
+        if d.get("kind") in ("ConfigMap", "Secret") and "rabbit-init.sh" in (d.get("data") or {}):
+            script = object_text(d, "rabbit-init.sh")
+    if not script:
+        fail("23m%s: %s: renders a rabbit-init Job but no rabbit-init.sh" % (label, chart))
+        return
+    root = [i["secret"] for i in ITEMS_REF.values() if i["id"] == cid]
+    pw = "Gate%sRotate7f3c" % chart.replace("-", "")
+    admin_pw = "GateAdmin7f3c"
+    admin_root = (ITEMS_REF.get("oslo-messaging-admin") or {}).get("secret")
+
+    def connection(name, want_root, password):
+        for d in docs:
+            if d.get("kind") == "ExternalSecret" and (((d["spec"].get("target") or {}).get("name")) or
+                                                      d["metadata"]["name"]) == name:
+                data = {e.get("secretKey"): (e.get("remoteRef") or {}).get("key") for e in d["spec"].get("data") or []}
+                if want_root not in data.values():
+                    return None, "ExternalSecret %s reads %s, not the root %s" % (name, sorted(data.values()), want_root)
+                t = (((d["spec"].get("target") or {}).get("template") or {}).get("data") or {}).get("RABBITMQ_CONNECTION")
+                for sk in data:
+                    t = (t or "").replace("{{ .%s }}" % sk, password)
+                return t, None
+        return None, "%s is not an ExternalSecret reading the root, so rabbit-init would set the published password" % name
+    pod = jobs[0]["spec"]["template"]["spec"]
+    cont = [c for c in pod.get("containers") or [] if c["name"] == "rabbit-init"]
+    env = {e["name"]: e for e in (cont[0].get("env") or [])} if cont else {}
+    refname = lambda n: (((env.get(n) or {}).get("valueFrom") or {}).get("secretKeyRef") or {}).get("name")
+    user_conn, why = connection(refname("RABBITMQ_USER_CONNECTION"), root[0] if root else None, pw)
+    admin_conn, why2 = connection(refname("RABBITMQ_ADMIN_CONNECTION"), admin_root, admin_pw)
+    if not user_conn or not admin_conn:
+        fail("23m%s: %s: rabbit-init's connections are not built from the roots: %s" % (label, chart, why or why2))
+        return
+    u = urllib.parse.urlsplit(user_conn)
+    work = tempfile.mkdtemp(dir=tmp, prefix="rabbitinit-%s-" % chart)
+    os.makedirs(os.path.join(work, "bin"))
+    stub = os.path.join(work, "bin", "rabbitmqadmin")
+    open(stub, "w").write(RABBITMQADMIN_STUB)
+    os.chmod(stub, 0o755)
+    sp = os.path.join(work, "rabbit-init.sh")
+    open(sp, "w").write(script)
+    log = os.path.join(work, "calls.log")
+    runenv = {"PATH": os.path.join(work, "bin") + os.pathsep + os.environ.get("PATH", ""), "GATE_MQ_LOG": log,
+              "GATE_MQ_USER": u.username or "", "RABBITMQ_ADMIN_CONNECTION": admin_conn,
+              "RABBITMQ_USER_CONNECTION": user_conn}
+    if (env.get("RABBITMQ_AUXILIARY_CONFIGURATION") or {}).get("value"):
+        runenv["RABBITMQ_AUXILIARY_CONFIGURATION"] = env["RABBITMQ_AUXILIARY_CONFIGURATION"]["value"]
+    r = subprocess.run(["bash", sp], env=runenv, capture_output=True, text=True, cwd=work)
+    calls = [l.rstrip("\n").split("\x1f")[:-1] for l in open(log)] if os.path.exists(log) else []
+    if r.returncode != 0:
+        fail("23m%s: %s: rabbit-init.sh did not run against the stand-in (rc %d): %s" % (label, chart, r.returncode,
+                                                                                        r.stderr.strip()[-300:]))
+        return
+    vhost = urllib.parse.unquote(u.path.lstrip("/")) or "/"
+    want_user = ["declare", "user", "name=%s" % u.username, "password=%s" % pw]
+    has = lambda seq, c: any(c[i:i + len(seq)] == seq for i in range(len(c) - len(seq) + 1))
+    users = [c for c in calls if has(want_user, c)]
+    if not users:
+        fail("23m%s: %s: rabbit-init.sh never runs `declare user name=%s password=<the root's>` while the user exists: the "
+             "generated password would never reach RabbitMQ (calls: %d)" % (label, chart, u.username, len(calls)))
+        return
+    if any("--host=%s" % u.hostname not in c for c in users):
+        fail("23m%s: %s: rabbit-init.sh declares the user against another host than the connection names" % (label, chart))
+    if not any("--password=%s" % admin_pw in c for c in users):
+        fail("23m%s: %s: rabbit-init.sh does not authenticate as the administrator from its root" % (label, chart))
+    if vhost != "/" and not any(has(["declare", "vhost", "name=%s" % vhost], c) for c in calls):
+        fail("23m%s: %s: rabbit-init.sh does not declare vhost %s" % (label, chart, vhost))
+    if not any(has(["declare", "permission", "vhost=%s" % vhost, "user=%s" % u.username], c) for c in calls):
+        fail("23m%s: %s: rabbit-init.sh does not grant %s its permissions on %s" % (label, chart, u.username, vhost))
+    RABBIT_INIT_CHECKED.append((chart, label))
+
+
+# 26. NOTIFICATION VHOSTS THAT EXIST (#285). ceilometer's notification agent consumed upstream's fixed list of seven vhosts,
+# and oslo.messaging retries a missing one forever: on a full-strict install (cinder not selected; glance and keystone
+# create no vhost) it consumed nothing (GKE 2026-11-16, 442 NOT_ALLOWED in 26 minutes).
+VHOST_CASES_CHECKED = []
+
+
+_VHOST_CACHE = {}
+
+
+def rabbit_init_vhost(tmp, chart, values=None):
+    """What chart's rabbit-init renders with `values`: {"job": a rabbit-init Job renders, "secret": the Secret its
+    RABBITMQ_USER_CONNECTION reads renders too, "vhost": that connection's path, the vhost it declares, or None}. A Job
+    whose Secret is not rendered never starts (keystone ships secret_rabbitmq off), so it creates no vhost."""
+    key = (chart, json.dumps(values or {}, sort_keys=True))
+    if key in _VHOST_CACHE:
+        return _VHOST_CACHE[key]
+    w = stage(os.path.join(BP, chart, "chart"), tmp, "vhost-%s-%d" % (chart, len(_VHOST_CACHE)))
+    rc, o, e = helm_template(w, chart + "-gate1234", values or {})
+    out = {"job": False, "secret": False, "vhost": None}
+    if rc != 0:
+        fail("26: %s: does not render with %s: %s" % (chart, values or "its defaults", e.strip()[:200]))
+    else:
+        docs = [x for x in yaml.safe_load_all(o) if x]
+        secrets = {x["metadata"]["name"]: x for x in docs if x.get("kind") == "Secret"}
+        for j in docs:
+            if j.get("kind") != "Job" or not j["metadata"]["name"].endswith("rabbit-init"):
+                continue
+            out["job"] = True
+            for c in j["spec"]["template"]["spec"].get("containers") or []:
+                for ev in c.get("env") or []:
+                    if ev["name"] != "RABBITMQ_USER_CONNECTION":
+                        continue
+                    n = ((ev.get("valueFrom") or {}).get("secretKeyRef") or {}).get("name")
+                    url = object_text(secrets[n], "RABBITMQ_CONNECTION") if n in secrets else None
+                    if not url:
+                        continue  # the Job's Secret is not rendered: it never starts
+                    out["secret"] = True
+                    vh = urllib.parse.unquote(urllib.parse.urlsplit(url).path.lstrip("/")) or "/"
+                    if out["vhost"] is not None and out["vhost"] != vh:
+                        fail("26: %s: two rabbit-init Jobs declare vhosts %s and %s" % (chart, out["vhost"], vh))
+                    out["vhost"] = vh
+    _VHOST_CACHE[key] = out
+    return out
+
+
+def notification_vhosts_check(tmp, components):
+    """26. The umbrella's components[].rabbitmqVhost is exactly the vhost each chart's rabbit-init declares (rendered with
+    the Job and its Secret on), rabbitmqInit: false exactly when the chart ships that Job off and rabbitmqSecret: false
+    exactly when it ships the Job's Secret off (keystone), all measured, both ways; notificationVhosts.vhosts is the consumer chart's own conf.notification_vhosts default, in order; and for
+    each profile, a sample of explicit selections, and componentValues that switch a component's rabbit-init or its
+    Secret off or on or rename its vhost (endpoints.oslo_messaging.path), the list the consumer RENDERS (its [notification]
+    messaging_urls, in its config or its drop-in, given the spec compositions.yaml builds) holds exactly what the
+    selected closure creates, each component's chart rendered with that component's componentValues: for every entry of
+    notificationVhosts.vhosts whose component is selected and creates a vhost, the vhost it creates, under the name it
+    creates it; none that nothing created (oslo.messaging would retry it forever and never reach the others), and none
+    left out."""
+    uv = yaml.safe_load(open(os.path.join(UMBRELLA, "values.yaml")))
+    nv = uv.get("notificationVhosts") or {}
+    consumer = nv.get("component") or "ceilometer"
+    on, dflt = {}, {}
+    for c in components:
+        n = c["name"]
+        full = rabbit_init_vhost(tmp, n, {"manifests": {"job_rabbit_init": True, "secret_rabbitmq": True}})
+        job_on = rabbit_init_vhost(tmp, n, {"manifests": {"job_rabbit_init": True}})
+        at_defaults = rabbit_init_vhost(tmp, n)
+        on[n] = full["vhost"]
+        dflt[n] = at_defaults["vhost"]
+        if c.get("rabbitmqVhost") != on[n]:
+            fail("26: umbrella: component %s declares rabbitmqVhost %s, its chart's rabbit-init declares %s" % (
+                n, c.get("rabbitmqVhost"), on[n]))
+        if on[n] is None:
+            for k in ("rabbitmqInit", "rabbitmqSecret"):
+                if k in c:
+                    fail("26: umbrella: component %s declares %s, but its chart has no rabbit-init" % (n, k))
+            continue
+        for k, got, what in (("rabbitmqInit", at_defaults["job"], "a rabbit-init Job"),
+                             ("rabbitmqSecret", job_on["secret"], "the rabbit-init Job's Secret")):
+            declared = str(c.get(k, True)).lower() == "true"
+            if declared != got:
+                fail("26: umbrella: component %s declares %s %s, its chart renders %s %s at its defaults" % (
+                    n, k, str(declared).lower(), what, "" if got else "off"))
+    if not any(on.values()):
+        fail("26: no chart renders a rabbit-init Job; the vhost map had no input")
+    cdef = ((yaml.safe_load(open(os.path.join(BP, consumer, "chart", "values.yaml"))) or {}).get("conf") or {}).get(
+        "notification_vhosts")
+    if nv.get("vhosts") != cdef:
+        fail("26: umbrella: notificationVhosts.vhosts is %s, %s's conf.notification_vhosts default is %s: the two must be "
+             "the same list" % (nv.get("vhosts"), consumer, cdef))
+    comp = open(os.path.join(UMBRELLA, "templates", "compositions.yaml")).read()
+    start = comp.find("{{- $ov := ")
+    mark = comp.find("include \"osh.notificationVhosts\"", start)
+    if mark < 0:
+        # no such block: the spec ends after the tolerations merge, and the consumer renders its chart default
+        mark = comp.find('"tolerations"', start)
+    end = comp.find("{{- end }}", mark) if mark >= 0 else -1
+    if start < 0 or end < 0:
+        fail("26: compositions.yaml no longer builds $ov the way this check extracts it (from `{{- $ov := ` through the "
+             "notification vhosts merge)")
+        return
+    span = comp[start:end + len("{{- end }}")]
+    fs = "full-strict"
+    cases = [("profile identity", {"profile": "identity"}), ("profile full", {"profile": "full"}),
+             ("profile full-strict", {"profile": fs}),
+             ("enabled [ceilometer]", {"enabled": ["ceilometer"]}),
+             ("enabled [ceilometer, cinder, glance]", {"enabled": ["ceilometer", "cinder", "glance"]}),
+             ("enabled [ceilometer, nova]", {"enabled": ["ceilometer", "nova"]}),
+             ("full-strict, nova's rabbit-init off", {"profile": fs, "componentValues": {
+                 "nova": {"manifests": {"job_rabbit_init": False}}}}),
+             ("full-strict, glance's rabbit-init on", {"profile": fs, "componentValues": {
+                 "glance": {"manifests": {"job_rabbit_init": True}}}}),
+             ("full-strict, heat's vhost renamed /orchestration", {"profile": fs, "componentValues": {
+                 "heat": {"endpoints": {"oslo_messaging": {"path": "/orchestration"}}}}}),
+             ("full-strict, keystone's rabbit-init on, its Secret off", {"profile": fs, "componentValues": {
+                 "keystone": {"manifests": {"job_rabbit_init": True}}}}),
+             ("full-strict, keystone's rabbit-init and Secret on", {"profile": fs, "componentValues": {
+                 "keystone": {"manifests": {"job_rabbit_init": True, "secret_rabbitmq": True}}}})]
+    for n, (label, vals) in enumerate(cases):
+        u = stage(UMBRELLA, tmp, "umbrella-vh-%d" % n)
+        with open(os.path.join(u, "templates", "zz-gate-vhosts-probe.yaml"), "w") as f:
+            f.write('{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n'
+                    '# SELECTED {{ join " " $sel }}\n'
+                    '{{- range $c := .Values.components }}\n{{- if has $c.name $sel }}\n' + span + '\n'
+                    '# VHSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n{{- end }}\n')
+        rc, out, err = helm_template(u, "openstack-gate", vals)
+        if rc != 0:
+            fail("26: %s: the umbrella does not render: %s" % (label, err.strip()[:300]))
+            continue
+        sel, spec = None, None
+        for line in out.splitlines():
+            if line.startswith("# SELECTED "):
+                sel = set(line[len("# SELECTED "):].split())
+            elif line.startswith("# VHSPEC %s " % consumer):
+                spec = json.loads(line.split(" ", 3)[3])
+        if not sel:
+            fail("26: %s: osh.selected returned nothing" % label)
+            continue
+        if consumer not in sel:
+            VHOST_CASES_CHECKED.append((label, None))
+            continue
+        # what the selected closure creates, each chart rendered with its own componentValues: default vhost -> created
+        cvs = vals.get("componentValues") or {}
+        created = {}
+        for c in components:
+            if c["name"] not in sel or on.get(c["name"]) is None:
+                continue
+            eff = rabbit_init_vhost(tmp, c["name"], cvs[c["name"]])["vhost"] if c["name"] in cvs else dflt[c["name"]]
+            if eff is not None:
+                created[on[c["name"]]] = eff
+        made = set(created.values())
+        w = stage(os.path.join(BP, consumer, "chart"), tmp, "vh-%s-%d" % (consumer, n))
+        rcc, oc, ec = helm_template(w, consumer + "-gate1234", spec or {})
+        if rcc != 0:
+            fail("26: %s: %s does not render with the spec the umbrella builds: %s" % (label, consumer, ec.strip()[:300]))
+            continue
+        listed = []
+        for d in yaml.safe_load_all(oc):
+            if not d:
+                continue
+            texts = []
+            if d.get("kind") in ("Secret", "ConfigMap"):
+                texts = [object_text(d, k) or "" for k in (d.get("data") or {})]
+            elif d.get("kind") == "ExternalSecret":
+                texts = [str(v) for v in (((d["spec"].get("target") or {}).get("template") or {}).get("data") or {}).values()]
+            for t in texts:
+                section = None
+                for line in t.splitlines():
+                    s = line.strip()
+                    if s.startswith("[") and s.endswith("]"):
+                        section = s[1:-1]
+                    elif section == "notification" and re.match(r"messaging_urls\s*=", s):
+                        url = s.split("=", 1)[1].strip()
+                        listed.append(urllib.parse.unquote(url.rsplit("/", 1)[-1]))
+        want = [created[v] for v in (nv.get("vhosts") or []) if v in created]
+        if not listed:
+            fail("26: %s: %s renders no [notification] messaging_urls" % (label, consumer))
+            continue
+        for v in listed:
+            if v not in made:
+                fail("26: %s: %s consumes vhost %s, which no selected component creates (the selected closure creates "
+                     "%s); oslo.messaging retries it forever and never reaches the others" % (label, consumer, v,
+                                                                                               sorted(made)))
+        missing = sorted(set(want) - set(listed))
+        if missing:
+            fail("26: %s: %s does not consume %s, which selected components create" % (label, consumer, missing))
+        VHOST_CASES_CHECKED.append((label, tuple(listed)))
+
+
 # 19. Programs named after these projects read oslo.config. swift's servers read paste-deploy files, not oslo.config,
 # so swift- is not here. Horizon and skyline run no such binary.
 OSLO_PROJECTS = ("aodh", "barbican", "blazar", "ceilometer", "cinder", "cloudkitty", "cyborg", "designate", "freezer",
@@ -1538,9 +2090,10 @@ def config_dir_defaults(chart, docs0):
 # value sits in values (endpoints.*.auth) by planting a sentinel there; a literal written under conf instead is invisible
 # to that. blazar's conf.blazar.physical_host_plugin.blazar_password: password (the blazar user's published default)
 # stayed in blazar.conf with the blazar user generated, found by a live scan on GKE 2026-11-16 (r066).
-# The per-service RabbitMQ users (0.3.69) and the cache sections are #228's remaining tier. The database sections were
-# exempt too until the per-service MariaDB users got their roots (0.3.68): they are checked now.
-TIER2_SECTIONS = {"oslo_messaging_rabbit", "oslo_messaging_notifications", "cache", "coordination"}
+# The cache sections are #228's remaining tier. The database sections were exempt too until the per-service MariaDB
+# users got their roots (0.3.68), and the messaging sections until the per-service RabbitMQ users did (0.3.69): both are
+# checked now.
+TIER2_SECTIONS = {"cache", "coordination"}
 PW_KEY = re.compile(r"(^|_)(password|passwd|secret|secret_key)$")
 LITERALS_CHECKED = []
 # 20b. A password inside a URL's userinfo has no password-like option name: ceilometer's [notification]
@@ -1555,6 +2108,7 @@ LITERALS_CHECKED = []
 URL_USERINFO = re.compile(r"\b([a-z][a-z0-9+.-]*)://([^:/@\s'\"]+):(\{\{.*?\}\}|[^@/\s'\"]+)@")
 URLS_CHECKED = []
 DB_URLS_CHECKED = []
+MQ_URLS_CHECKED = []
 
 
 def admin_usernames(values):
@@ -1586,11 +2140,11 @@ def published_secrets(values):
     return out
 
 
-def no_published_literal(chart, published, docs, admins=frozenset(), dbusers=frozenset()):
-    """20. With every reference set, no ini option with a password-like name outside tier-2 sections (messaging,
-    cache: the per-service RabbitMQ users, #228's remaining tier) holds a value the chart publishes. 20b. No URL
-    logging in as an install-wide administrator (`admins`), or a mysql URL logging in as a per-service MariaDB user
-    (`dbusers`), carries a value the chart publishes, in any section or Secret."""
+def no_published_literal(chart, published, docs, admins=frozenset(), dbusers=frozenset(), mqusers=frozenset()):
+    """20. With every reference set, no ini option with a password-like name outside tier-2 sections holds a value the
+    chart publishes. 20b. No URL logging in as an install-wide administrator (`admins`), a mysql URL logging in as a
+    per-service MariaDB user (`dbusers`), or a RabbitMQ URL logging in, at any of its hosts, as a per-service RabbitMQ
+    user (`mqusers`, 0.3.69), carries a value the chart publishes, in any section or Secret."""
     for d in docs:
         if d.get("kind") not in ("Secret", "ConfigMap", "ExternalSecret"):
             continue
@@ -1621,6 +2175,19 @@ def no_published_literal(chart, published, docs, admins=frozenset(), dbusers=fro
                              "references set it must be built from the generated root (a drop-in), not from a literal"
                              % (chart, d["kind"], d["metadata"]["name"], k, section,
                                 "MariaDB user " if as_db_user else "", user))
+                if MQ_URL.search(line):
+                    for um in MQ_USERINFO.finditer(line):
+                        user, pw = urllib.parse.unquote(um.group(1)), urllib.parse.unquote(um.group(2))
+                        if user not in mqusers or user in admins:
+                            continue
+                        MQ_URLS_CHECKED.append((chart, d["metadata"]["name"], k, section, user))
+                        if "{{" in pw:
+                            continue  # read from the generated root by the ExternalSecret template
+                        if pw in published:
+                            fail("20b: %s: %s/%s %s [%s] a URL logs in as RabbitMQ user %s with a password the chart "
+                                 "publishes; with the references set it must be built from the generated root (a "
+                                 "drop-in), not from a literal" % (chart, d["kind"], d["metadata"]["name"], k, section,
+                                                                   user))
                 m = re.match(r"^\s*([\w.-]+)\s*=\s*(.*?)\s*$", line)
                 if not m or not PW_KEY.search(m.group(1).lower()):
                     continue
@@ -1963,6 +2530,36 @@ def main():
                 if got != want:
                     fail("umbrella: %s reaches %s at %s, but that chart renders MariaDB user %s under %s (one account "
                          "has one password: every key, one root)" % (cid, c["name"], got, DBUSER_BY_ITEM[cid], want))
+    # 15c. ONE RABBITMQ ACCOUNT, ONE ROOT: a RabbitMQ user's item reaches every chart rendering that username at the key the
+    # chart renders it under (closure, check 2, makes it every such chart), and no other item reaches any of those keys:
+    # two roots for one username would have each chart's rabbit-init set its own in turn, the last winning and every
+    # other reader refused.
+    reached = {}
+    for c in components:
+        for cid in c.get("credentials") or []:
+            i = items.get(cid)
+            if not i:
+                continue
+            for p in [(i.get("pathFor") or {}).get(c["name"], i["path"])] + list(i.get("extraPaths") or []):
+                m = re.match(r"^endpoints\.oslo_messaging\.auth\.([^.]+)\.passwordFrom$", p)
+                if m and m.group(1) not in MQ_NOT_SERVICE:
+                    reached.setdefault((c["name"], m.group(1)), set()).add(cid)
+    for (chart, key), cids in sorted(reached.items()):
+        users = [u for u, cs in MQUSERS.items() if (cs or {}).get(chart) == key]
+        if not users:
+            fail("umbrella: %s reach %s at endpoints.oslo_messaging.auth.%s, which hack/mq-users.yaml does not map to a "
+                 "RabbitMQ username" % (sorted(cids), chart, key))
+            continue
+        want = {"oslo-messaging-" + users[0].replace("_", "-")}
+        if cids != want:
+            fail("umbrella: %s's RabbitMQ user %s (endpoints.oslo_messaging.auth.%s) is reached by %s, want exactly %s: "
+                 "one username, one root" % (chart, users[0], key, sorted(cids), sorted(want)))
+    for cid, u in MQUSER_BY_ITEM.items():
+        if cid in items:
+            for chart, key in sorted((MQUSERS[u] or {}).items()):
+                if (chart, key) not in reached:
+                    fail("umbrella: %s renders RabbitMQ user %s under endpoints.oslo_messaging.auth.%s, but %s does not reach "
+                         "it there" % (chart, u, key, cid))
 
     def refs_for(c, skip=None):
         out = {}
@@ -2106,7 +2703,8 @@ def main():
             config_dir_check(c["name"], docs)
             chart_values = yaml.safe_load(open(os.path.join(chart_dir, "values.yaml")))
             no_published_literal(c["name"], published_secrets(chart_values), docs, admin_usernames(chart_values),
-                                 {u for u, cs in DBUSERS.items() if c["name"] in cs})
+                                 {u for u, cs in DBUSERS.items() if c["name"] in cs},
+                                 {u for u, cs in MQUSERS.items() if c["name"] in cs})
             for cid, sentinel in sentinels.items():
                 if sentinel in out:
                     fail("%s: the %s password from values appears in the rendered text" % (c["name"], cid))
@@ -2266,6 +2864,26 @@ def main():
                     else:
                         fail("22: %s renders MariaDB user %s but lists no database URL drop-in entries "
                              "(templates/_db_dropin_entries.tpl) and is no known special case" % (c["name"], DBUSER_BY_ITEM[cid]))
+                if RULES[cid].get("mq"):
+                    vsx = json.loads(json.dumps(enabled))
+                    for pp in paths(RULES[cid]["password_path"](c["name"])):
+                        deep_merge(vsx, nested(pp, sentinels[cid]))
+                    rcx, outx, errx = helm_template(w, release, vsx)
+                    if rcx != 0:
+                        fail("%s: does not render in values mode with the %s sentinel: %s" % (c["name"], cid, errx.strip()[:200]))
+                    else:
+                        mq_dropin_check(c["name"], cid, sentinels[cid], [d for d in yaml.safe_load_all(outx) if d], docs)
+                    rabbit_init_check(c["name"], cid, docs, tmp)
+                    # 22m: a literal URL in values together with the reference is refused (it carries a password, and the
+                    # drop-in would replace it silently)
+                    vlit = json.loads(json.dumps(values))
+                    deep_merge(vlit, {"conf": {c["name"]: {"DEFAULT": {"transport_url": "rabbit://gate:Literal7f3c@h:5672/v"}}}})
+                    rcl, _, errl = helm_template(w, release, vlit)
+                    if rcl == 0 or "conf.%s.DEFAULT.transport_url is set while" % c["name"] not in errl:
+                        fail("22m: %s: a literal conf.%s.DEFAULT.transport_url renders together with %s's reference (rc=%d); "
+                             "it must be refused" % (c["name"], c["name"], cid, rcl))
+                    elif "Literal7f3c" in errl:
+                        fail("22m: %s: the refusal of a literal transport_url prints its password" % c["name"])
                 if RULES[cid].get("carriers"):
                     ks_user_rotation(c["name"], cid, cv, items[cid]["secret"], docs)
                     vsx = json.loads(json.dumps(enabled))
@@ -2329,6 +2947,19 @@ def main():
                                 cell_mapping_check(dsv, docsv, sentinels[cid], " (with %s)" % json.dumps(variant, sort_keys=True))
                     if RULES[cid].get("db"):
                         dbinit_check(c["name"], docsv, tmp)
+                    if RULES[cid].get("mq"):
+                        vlabel = " (with %s)" % json.dumps(variant, sort_keys=True)
+                        vs = json.loads(json.dumps(enabled))
+                        deep_merge(vs, json.loads(json.dumps(variant)))
+                        for pp in paths(RULES[cid]["password_path"](c["name"])):
+                            deep_merge(vs, nested(pp, sentinels[cid]))
+                        rcs, outs, errs = helm_template(w, release, vs)
+                        if rcs != 0:
+                            fail("%s: does not render with %s and the %s sentinel: %s" % (c["name"], variant, cid, errs.strip()[:200]))
+                        else:
+                            mq_dropin_check(c["name"], cid, sentinels[cid], [d for d in yaml.safe_load_all(outs) if d], docsv,
+                                            vlabel)
+                        rabbit_init_check(c["name"], cid, docsv, tmp, vlabel)
                     if RULES[cid].get("carriers"):
                         ks_user_rotation(c["name"], cid, cv, items[cid]["secret"], docsv)
                         di = RULES[cid]["dropin_for"](c["name"])
@@ -2383,6 +3014,8 @@ def main():
         identity_map_check(tmp)
         db_map_check(tmp)
         one_account_check(tmp)
+        mq_map_check(tmp)
+        notification_vhosts_check(tmp, components)
         rabbit = [c for c in components if c["name"] == "rabbitmq"]
         if "oslo-messaging-erlang-cookie" in items and rabbit:
             cookie_rotation_cases(tmp, refs_for(rabbit[0]))
@@ -2439,6 +3072,33 @@ def main():
             if checked and (chart, cname) not in DB_READERS_SEEN:
                 fail("22: hack/db-readers.yaml lists %s container %s, which no render shows reading the chart's config; "
                      "remove it or render the mode that runs it" % (chart, cname))
+    if not MQUSERS:
+        fail("15c/22m: hack/mq-users.yaml lists no per-service RabbitMQ user (or is missing), so no RabbitMQ URL was checked")
+    if not MQ_READERS:
+        fail("22m: hack/mq-readers.yaml lists no chart (or is missing), so who receives a RabbitMQ URL cannot be checked")
+    if checked and not MQ_URLS_CHECKED:
+        fail("20b: no RabbitMQ URL logging in as a per-service RabbitMQ user was found in any rendered chart; the check had "
+             "no input")
+    for cid, rule in RULES.items():
+        if rule.get("mq") and cid in items and not any(x[1] == cid for x in MQ_DROPIN_CHECKED):
+            fail("22m: no render checked where %s's RabbitMQ URLs arrive; the check had no input" % cid)
+    for cid, u in MQUSER_BY_ITEM.items():
+        if cid not in items:
+            fail("15c: hack/mq-users.yaml lists RabbitMQ user %s, but the umbrella defines no item %s: every chart rendering "
+                 "it keeps the published password" % (u, cid))
+    for chart, spec in sorted(MQ_READERS.items()):
+        for cname in (spec or {}).get("readers") or []:
+            if checked and (chart, cname) not in MQ_READERS_SEEN:
+                fail("22m: hack/mq-readers.yaml lists %s container %s, which no render shows reading the chart's config; "
+                     "remove it or render the mode that runs it" % (chart, cname))
+    if checked and not MQ_PROBES_CHECKED:
+        fail("22m: no exec probe parsing a config that carried a transport URL was found; the probe check had no input")
+    if checked and not RABBIT_INIT_CHECKED:
+        fail("23m: no chart's rabbit-init.sh was run; the check had no input")
+    if not [x for x in VHOST_CASES_CHECKED if x[1]]:
+        fail("26: no case rendered the notification consumer's vhost list; the check had no input")
+    if len([x for x in VHOST_CASES_CHECKED if x[1] and x[0].startswith("full-strict, ")]) != 5:
+        fail("26: the componentValues override cases did not all render the consumer's vhost list; the check had no input")
     if "oslo-db-nova" in items and checked and not CELLMAP_CHECKED:
         fail("24: no render checked nova's cell mapping templates; the check had no input")
     if checked and not DBINIT_CHECKED:
@@ -2460,9 +3120,14 @@ def main():
           "%d service-user ks-user Job(s) rotate pre-upgrade from the root with the exemption first; %d (workload, item) "
           "reader pair(s) restart when that item's reference is applied; %d program start(s) in a container with a "
           "conf.d pass --config-dir; %d per-service MariaDB user URL(s) carry no published password; %d database URL "
-          "delivery check(s); %d db-init/db-drop run(s) set and drop the drop-in's user"
+          "delivery check(s); %d db-init/db-drop run(s) set and drop the drop-in's user; %d per-service RabbitMQ URL(s) "
+          "carry no published password; %d transport URL delivery check(s); %d rabbit-init run(s) set the root's "
+          "password; %d exec probe(s) that parse a carrier read the drop-in; %d notification-vhost case(s)"
           % (len(items), checked, len(KS_USER_CHECKED), len(READERS_CHECKED), len(CONFIG_DIR_CHECKED),
-             len(DB_URLS_CHECKED), len(DB_DROPIN_CHECKED), len(DBINIT_CHECKED)))
+             len(DB_URLS_CHECKED), len(DB_DROPIN_CHECKED), len(DBINIT_CHECKED), len(MQ_URLS_CHECKED),
+             len(MQ_DROPIN_CHECKED), len(RABBIT_INIT_CHECKED), len(MQ_PROBES_CHECKED), len(VHOST_CASES_CHECKED)))
+    for label, listed in VHOST_CASES_CHECKED:
+        print("  26: %s: ceilometer consumes %s" % (label, ", ".join(listed) if listed else "(not selected)"))
 
 
 main()

@@ -19,6 +19,7 @@ limitations under the License.
 {{- $_ := tuple "oslo_cache" "internal" "memcache" . | include "helm-toolkit.endpoints.host_and_port_endpoint_uri_lookup" | set .Values.conf.ceilometer.cache "memcache_servers" -}}
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "ceilometer.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "ceilometer" | include "helm-toolkit.utils.transport_dropin_refuse" }}
 {{- if empty .Values.conf.ceilometer.DEFAULT.transport_url -}}
 {{- $_ := tuple "oslo_messaging" "internal" "ceilometer" "amqp" . | include "helm-toolkit.endpoints.authenticated_transport_endpoint_uri_lookup" | set .Values.conf.ceilometer.DEFAULT "transport_url" -}}
 {{- end -}}
@@ -61,6 +62,7 @@ limitations under the License.
 
 ---
 {{- dict "envAll" $envAll "entries" (include "ceilometer.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "ceilometer" | include "helm-toolkit.utils.identity_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "ceilometer.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "ceilometer" | include "helm-toolkit.utils.transport_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

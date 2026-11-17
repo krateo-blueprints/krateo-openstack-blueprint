@@ -49,6 +49,7 @@ limitations under the License.
 {{- end -}}
 {{- end }}
 
+{{- dict "envAll" $envAll "entries" (include "neutron.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "neutron" | include "helm-toolkit.utils.transport_dropin_refuse" }}
 {{- if empty $envAll.Values.conf.neutron.DEFAULT.transport_url -}}
 {{- $_ := tuple "oslo_messaging" "internal" "neutron" "amqp" . | include "helm-toolkit.endpoints.authenticated_transport_endpoint_uri_lookup" | set $envAll.Values.conf.neutron.DEFAULT "transport_url" -}}
 {{- end }}
@@ -183,6 +184,7 @@ limitations under the License.
 {{- dict "envAll" $envAll "from" (include "helm-toolkit.utils.metadata_proxy_secret_ref" $envAll | fromJson) "option" "metadata_proxy_shared_secret" "confKeys" (list "metadata_agent" "ovn_agent" "ovn_metadata_agent") | include "helm-toolkit.utils.secret_option_strip" }}
 {{- tuple $envAll "neutron" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 {{- dict "envAll" $envAll "entries" (include "neutron.db_dropin_entries" $envAll | fromJsonArray) "confKey" "neutron" | include "helm-toolkit.utils.db_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "neutron.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "neutron" | include "helm-toolkit.utils.transport_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

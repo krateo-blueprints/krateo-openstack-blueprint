@@ -103,6 +103,7 @@ spec:
 {{- include "helm-toolkit.snippets.memcache_secret_key_mount" (tuple . "trove") | nindent 12 }}
 {{- include "helm-toolkit.snippets.identity_dropin_mount" (tuple . (include "trove.identity_dropin_entries" . | fromJsonArray) "trove") | nindent 12 }}
 {{- include "helm-toolkit.snippets.db_dropin_mount" (tuple . (include "trove.db_dropin_entries" . | fromJsonArray) "trove") | nindent 12 }}
+{{- with include "helm-toolkit.snippets.transport_dropin_mount" (tuple . (include "trove.transport_dropin_entries" . | fromJsonArray) "trove") }}{{ . | nindent 12 }}{{- end }}
             - name: trove-etc
               mountPath: /etc/trove/trove.conf
               subPath: trove.conf
@@ -132,6 +133,7 @@ spec:
 {{- include "helm-toolkit.snippets.memcache_secret_key_volume" (tuple . "trove") | nindent 8 }}
 {{- include "helm-toolkit.snippets.identity_dropin_volume" (tuple . (include "trove.identity_dropin_entries" . | fromJsonArray) "trove") | nindent 8 }}
 {{- include "helm-toolkit.snippets.db_dropin_volume" (tuple . (include "trove.db_dropin_entries" . | fromJsonArray) "trove") | nindent 8 }}
+{{- with include "helm-toolkit.snippets.transport_dropin_volume" (tuple . (include "trove.transport_dropin_entries" . | fromJsonArray) "trove") }}{{ . | nindent 8 }}{{- end }}
         - name: trove-etc
           secret:
             secretName: trove-etc

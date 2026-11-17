@@ -9,3 +9,10 @@
 {{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "nova.db_dropin_entries" . | fromJsonArray) "nova") }}{{- $out = append $out (fromJson .) }}{{- end }}
 {{- $out | toJson -}}
 {{- end -}}
+
+{{/* Krateo (#228, 0.3.69): the drop-ins of the db-sync Job, whose programs use RabbitMQ (hack/mq-readers.yaml: nova-manage builds a transport on every parse (nova.config.parse_args: rpc.init), and the cell mapping templates are formatted from [DEFAULT] transport_url): nova.dropin_etc_sources plus nova-transport, the RabbitMQ URLs. */}}
+{{- define "nova.db_sync_etc_sources" -}}
+{{- $out := include "nova.dropin_etc_sources" . | fromJsonArray -}}
+{{- with include "helm-toolkit.snippets.transport_dropin_etc_source" (tuple . (include "nova.transport_dropin_entries" . | fromJsonArray) "nova") }}{{- $out = append $out (fromJson .) }}{{- end }}
+{{- $out | toJson -}}
+{{- end -}}

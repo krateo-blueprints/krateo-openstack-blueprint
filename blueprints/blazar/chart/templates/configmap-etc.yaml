@@ -40,6 +40,7 @@ limitations under the License.
 {{- if and (not (kindIs "invalid" .Values.conf.blazar.database.connection)) (empty .Values.conf.blazar.database.connection) -}}
 {{- $_ := tuple "oslo_db" "internal" "blazar" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup"| set .Values.conf.blazar.database "connection" -}}
 {{- end -}}
+{{- dict "envAll" $envAll "entries" (include "blazar.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "blazar" | include "helm-toolkit.utils.transport_dropin_refuse" }}
 {{- if empty .Values.conf.blazar.DEFAULT.transport_url -}}
 {{- $_ := tuple "oslo_messaging" "internal" "blazar" "amqp" . | include "helm-toolkit.endpoints.authenticated_transport_endpoint_uri_lookup" | set .Values.conf.blazar.DEFAULT "transport_url" -}}
 {{- end -}}
@@ -107,6 +108,7 @@ Openstack auth
 ---
 {{- tuple $envAll "blazar" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 {{- dict "envAll" $envAll "entries" (include "blazar.db_dropin_entries" $envAll | fromJsonArray) "confKey" "blazar" | include "helm-toolkit.utils.db_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "blazar.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "blazar" | include "helm-toolkit.utils.transport_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

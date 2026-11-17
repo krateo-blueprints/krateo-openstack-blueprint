@@ -62,6 +62,7 @@ limitations under the License.
 {{- $_ := tuple "oslo_db" "internal" "aodh" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" | set .Values.conf.aodh.database "connection" -}}
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "aodh.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "aodh" | include "helm-toolkit.utils.transport_dropin_refuse" }}
 {{- if empty .Values.conf.aodh.DEFAULT.transport_url -}}
 {{- $_ := tuple "oslo_messaging" "internal" "aodh" "amqp" . | include "helm-toolkit.endpoints.authenticated_transport_endpoint_uri_lookup" | set .Values.conf.aodh.DEFAULT "transport_url" -}}
 {{- end -}}
@@ -110,6 +111,7 @@ limitations under the License.
 {{- tuple $envAll "aodh" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 {{- dict "envAll" $envAll "entries" (include "aodh.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "aodh" | include "helm-toolkit.utils.identity_dropin_strip" }}
 {{- dict "envAll" $envAll "entries" (include "aodh.db_dropin_entries" $envAll | fromJsonArray) "confKey" "aodh" | include "helm-toolkit.utils.db_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "aodh.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "aodh" | include "helm-toolkit.utils.transport_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

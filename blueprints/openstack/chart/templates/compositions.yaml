@@ -165,6 +165,13 @@
 {{- $tol := dict "pod" (dict "tolerations" (dict $c.name (dict "enabled" true "tolerations" .))) }}
 {{- $ov = mergeOverwrite $tol (deepCopy $ov) }}
 {{- end }}
+{{- /* Notification vhosts (#285): the consumer named by .Values.notificationVhosts (ceilometer) gets, as
+       conf.notification_vhosts, only the vhosts a SELECTED component creates (osh.notificationVhosts). Merged UNDER
+       componentValues: an explicit entry wins. hack/validate-credentials.py check 26 renders this span for each profile. */ -}}
+{{- if eq $c.name ($.Values.notificationVhosts | default dict).component }}
+{{- $nv := dict "conf" (dict "notification_vhosts" (include "osh.notificationVhosts" (list $ $sel) | fromJsonArray)) }}
+{{- $ov = mergeOverwrite $nv (deepCopy $ov) }}
+{{- end }}
 {{- /* TWO PHASES: a live component's NEW values are written only at the new apiVersion, and only
        once its CompositionDefinition serves it (status.apiVersion at the current version, Ready
        status True). Until then the object is not changed at all: its live spec is re-emitted at the

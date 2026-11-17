@@ -66,6 +66,7 @@ limitations under the License.
 {{- $_ := tuple "oslo_db" "internal" "watcher" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup"| set .Values.conf.watcher.database "connection" -}}
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "watcher.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "watcher" | include "helm-toolkit.utils.transport_dropin_refuse" }}
 {{- if empty .Values.conf.watcher.DEFAULT.transport_url -}}
 {{- $_ := tuple "oslo_messaging" "internal" "watcher" "amqp" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" | set .Values.conf.watcher.DEFAULT "transport_url" -}}
 {{- end -}}
@@ -90,6 +91,7 @@ limitations under the License.
 {{- tuple $envAll "watcher" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 {{- dict "envAll" $envAll "entries" (include "watcher.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "watcher" | include "helm-toolkit.utils.identity_dropin_strip" }}
 {{- dict "envAll" $envAll "entries" (include "watcher.db_dropin_entries" $envAll | fromJsonArray) "confKey" "watcher" | include "helm-toolkit.utils.db_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "watcher.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "watcher" | include "helm-toolkit.utils.transport_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

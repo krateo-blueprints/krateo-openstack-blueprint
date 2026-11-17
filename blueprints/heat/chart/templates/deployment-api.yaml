@@ -22,6 +22,7 @@ limitations under the License.
 {{ tuple $envAll "api" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 
 {{- $etcSources := .Values.pod.etcSources.heat_api }}
+{{- with include "helm-toolkit.snippets.transport_dropin_etc_source" (tuple . (include "heat.transport_dropin_entries" . | fromJsonArray) "heat") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.memcache_secret_key_etc_source" (tuple . "heat") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.identity_dropin_etc_source" (tuple . (include "heat.identity_dropin_entries" . | fromJsonArray) "heat") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}
 {{- with include "helm-toolkit.snippets.db_dropin_etc_source" (tuple . (include "heat.db_dropin_entries" . | fromJsonArray) "heat") }}{{- $etcSources = append $etcSources (fromJson .) }}{{- end }}

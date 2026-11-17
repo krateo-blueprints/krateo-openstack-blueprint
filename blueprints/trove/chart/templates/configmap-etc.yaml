@@ -20,6 +20,7 @@ limitations under the License.
 {{- $_ := tuple "oslo_db" "internal" "trove" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup"| set .Values.conf.trove.database "connection" -}}
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "trove.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "trove" | include "helm-toolkit.utils.transport_dropin_refuse" }}
 {{- if empty .Values.conf.trove.DEFAULT.transport_url }}
 {{- $_ := tuple "oslo_messaging" "internal" "trove" "amqp" . | include "helm-toolkit.endpoints.authenticated_transport_endpoint_uri_lookup" | set .Values.conf.trove.DEFAULT "transport_url" -}}
 {{- end -}}
@@ -104,6 +105,7 @@ limitations under the License.
 {{- tuple $envAll "trove" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 {{- dict "envAll" $envAll "entries" (include "trove.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "trove" | include "helm-toolkit.utils.identity_dropin_strip" }}
 {{- dict "envAll" $envAll "entries" (include "trove.db_dropin_entries" $envAll | fromJsonArray) "confKey" "trove" | include "helm-toolkit.utils.db_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "trove.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "trove" | include "helm-toolkit.utils.transport_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:

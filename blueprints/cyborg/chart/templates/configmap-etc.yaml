@@ -61,6 +61,7 @@ limitations under the License.
 {{- $_ := tuple "oslo_db" "internal" "cyborg" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup"| set .Values.conf.cyborg.database "connection" -}}
 {{- end -}}
 
+{{- dict "envAll" $envAll "entries" (include "cyborg.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "cyborg" | include "helm-toolkit.utils.transport_dropin_refuse" }}
 {{- if empty .Values.conf.cyborg.DEFAULT.transport_url -}}
 {{- $_ := tuple "oslo_messaging" "internal" "cyborg" "amqp" . | include "helm-toolkit.endpoints.authenticated_transport_endpoint_uri_lookup" | set .Values.conf.cyborg.DEFAULT "transport_url" -}}
 {{- end -}}
@@ -138,6 +139,7 @@ limitations under the License.
 {{- tuple $envAll "cyborg" | include "helm-toolkit.utils.memcache_secret_key_strip" }}
 {{- dict "envAll" $envAll "entries" (include "cyborg.identity_dropin_entries" $envAll | fromJsonArray) "confKey" "cyborg" | include "helm-toolkit.utils.identity_dropin_strip" }}
 {{- dict "envAll" $envAll "entries" (include "cyborg.db_dropin_entries" $envAll | fromJsonArray) "confKey" "cyborg" | include "helm-toolkit.utils.db_dropin_strip" }}
+{{- dict "envAll" $envAll "entries" (include "cyborg.transport_dropin_entries" $envAll | fromJsonArray) "confKey" "cyborg" | include "helm-toolkit.utils.transport_dropin_strip" }}
 apiVersion: v1
 kind: Secret
 metadata:
