@@ -94,9 +94,30 @@ spec:
 {{ tuple $envAll "mariadb_controller" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ dict "envAll" $envAll "application" "controller" "container" "controller" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.controller | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+          # The controller is a loop with no endpoint: each pass lists the mariadb pods and points
+          # the master Service at the first ready one. It touches a heartbeat after every pass, and
+          # this requires one younger than three sleeps plus two API timeouts, so a crash-looping
+          # or hung controller is not Ready (#231). The heartbeat is written whether or not a
+          # mariadb pod is ready, so this cannot wait on the servers it serves. Readiness only: a
+          # pass that fails raises, and the container already restarts.
+          readinessProbe:
+            exec:
+              command:
+                - python3
+                - -c
+                - >-
+                  import os, sys, time;
+                  sys.exit(time.time() - os.stat(os.environ["MARIADB_CONTROLLER_HEARTBEAT"]).st_mtime
+                  > {{ add (mul 3 .Values.pod.env.mariadb_controller.MARIADB_CONTROLLER_CHECK_PODS_DELAY) (mul 2 .Values.pod.env.mariadb_controller.MARIADB_CONTROLLER_PYKUBE_REQUEST_TIMEOUT) }})
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
           command:
             - /tmp/mariadb_controller.py
           env:
+            - name: MARIADB_CONTROLLER_HEARTBEAT
+              value: /tmp/mariadb-controller-heartbeat
 {{ include "helm-toolkit.utils.to_k8s_env_vars" .Values.pod.env.mariadb_controller | indent 12 }}
             - name: MARIADB_CONTROLLER_PODS_NAMESPACE
               value: {{ $envAll.Release.Namespace }}
