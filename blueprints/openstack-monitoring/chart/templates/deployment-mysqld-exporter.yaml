@@ -1,6 +1,7 @@
 {{- /* mysqld-exporter v0.21.0, standalone: it connects to the mariadb Service as the exporter user from its own pod, so
-       nothing about the database's pod (its spec, its readiness) depends on it. It waits for the mariadb chart's
-       mariadb-exporter-user Job, which creates that user for any host. It reads its .my.cnf and nothing else. */ -}}
+       nothing about the database's pod (its spec, its readiness) depends on it. The mariadb chart's
+       mariadb-exporter-user Job creates that user for any host; until it has, mysql_up reads 0 (the exporter keeps
+       serving and retries). It reads its .my.cnf and nothing else. */ -}}
 {{- if .Values.manifests.deployment_mysqld_exporter }}
 {{- $envAll := . }}
 {{- $serviceAccountName := "openstack-monitoring-mysqld-exporter" }}

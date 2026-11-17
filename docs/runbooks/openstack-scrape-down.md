@@ -22,7 +22,7 @@ HyperDX reads a window with no data as 0, which fires a "below" alert and silenc
    `kubectl -n openstack logs deploy/openstack-monitoring-collector`. Its default endpoint is the Krateo node agent's
    node-local Service, which drops traffic from a node that runs no agent (a tainted node, for instance).
 2. **One job:** that target's pod. `openstack-exporter` exits when it cannot enable a single service (Keystone down, or
-   its user's password refused). `openstack-mysqld-exporter` waits in Init until the `mariadb-exporter-user` Job has run.
+   its user's password refused). `openstack-mysqld-exporter` waits in Init until MariaDB answers.
    RabbitMQ answers on port 15692 of each server pod.
 3. **The collector's log** names the scrape error per target.
 

@@ -19,8 +19,10 @@ log in to the `mariadb` Service as the `exporter` user and run its scrape.
 1. **The server:** `kubectl -n openstack get pod mariadb-server-0`, its events and logs. A full volume stops it: check
    the `mysql-data` claim's usage.
 2. **The exporter user:** if the server is up and every OpenStack service works, the exporter's login may be what
-   fails. The `mariadb-exporter-user` Job creates it (`kubectl -n openstack logs job/mariadb-exporter-user`), and
-   `kubectl -n openstack logs deploy/openstack-mysqld-exporter` shows the error MariaDB returned.
+   fails: `kubectl -n openstack logs deploy/openstack-mysqld-exporter` shows the error MariaDB returned. The
+   `mariadb-exporter-user` Job creates the user (`kubectl -n openstack logs job/mariadb-exporter-user`). It exists only
+   when mariadb runs with `krateo.exporterUser`, which the umbrella's `monitoring` value sets. A standalone
+   openstack-monitoring without it fires this alert, by design.
 3. **The scrape:** `openstack-scrape-down-openstack-mysqld-exporter` firing as well means the exporter pod is down, not
    the database. See [openstack-scrape-down](openstack-scrape-down.md).
 

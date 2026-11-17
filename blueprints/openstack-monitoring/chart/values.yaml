@@ -110,11 +110,11 @@ dependencies:
       services:
         - endpoint: internal
           service: identity
-    # The exporter user is created by the mariadb chart's mariadb-exporter-user Job (krateo.exporterUser), which the
-    # umbrella switches on together with this component.
+    # Waits for the database, NOT for the mariadb chart's mariadb-exporter-user Job (krateo.exporterUser) that creates its
+    # user: a Job of another chart that is not rendered (krateo.exporterUser off) would hold this pod in Init forever,
+    # silently (hack/validate-component-config-closure.py). Without the user, mysql_up reads 0 and
+    # openstack-mariadb-down fires, which says so.
     mysqld_exporter:
-      jobs:
-        - mariadb-exporter-user
       services:
         - endpoint: internal
           service: oslo_db
