@@ -188,6 +188,12 @@
 {{- if has "block-storage" ($c.requires | default list) }}
 {{- $ov = mergeOverwrite (deepCopy $ov) (dict "krateo" (dict "storageBackend" (include "osh.storageBackend" (list $)))) }}
 {{- end }}
+{{- /* Ceph values (#308): the pools, users and libvirt secret UUID the charts must agree on, from storage.ceph alone
+       (osh.storageValues), merged over componentValues, which may not set them. hack/validate-ceph-consumer.py (check 29)
+       renders this span through hack/umbrella_spec.py and the four charts it reaches. */ -}}
+{{- with include "osh.storageValues" (list $ $c) }}
+{{- $ov = mergeOverwrite (deepCopy $ov) (fromYaml .) }}
+{{- end }}
 {{- /* TWO PHASES: a live component's NEW values are written only at the new apiVersion, and only
        once its CompositionDefinition serves it (status.apiVersion at the current version, Ready
        status True). Until then the object is not changed at all: its live spec is re-emitted at the

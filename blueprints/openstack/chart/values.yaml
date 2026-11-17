@@ -24,9 +24,9 @@ enabled:
 # krateo.storageBackend; a componentValues.<component>.krateo.storageBackend is refused, so this is the one place that
 # says which backend the install has.
 #   none           no backend (the default).
-#   ceph-rook      Ceph run by the rook-ceph blueprint, which mints the client keys (#308). Not implemented yet:
-#                  cinder refuses it, naming #308.
-#   ceph-external  an existing Ceph whose admin provides the client keys (#308). Not implemented yet, likewise.
+#   ceph-rook      Ceph run by Rook, whose CephClients mint the client keys (#308); storage.ceph says where.
+#   ceph-external  an existing Ceph whose admin creates the users and places their keys (#308); storage.ceph.keys
+#                  names each Secret.
 # Typed by values.schema.json, which hack/gen-componentvalues-schema.py generates.
 storage:
   backend: none
@@ -802,6 +802,11 @@ components:
       - identity-user-glance
       - oslo-db-glance
       - oslo-messaging-glance
+      - ceph-client-glance
+      - ceph-mon-host
+    ## ceph (#308): with a ceph storage.backend this component consumes Ceph (the rbd image store, when storage.ceph.glanceStore is rbd); the umbrella passes it the
+    ## provided items it lists and the storage values for its role (osh.storageValues).
+    ceph: images
     deps:
       - keystone
     tier: identity
@@ -839,6 +844,12 @@ components:
     tier: compute
   - name: libvirt
     kind: Libvirt
+    credentials:
+      - ceph-client-cinder
+      - ceph-mon-host
+    ## ceph (#308): with a ceph storage.backend this component consumes Ceph (libvirt's secret for attached volumes); the umbrella passes it the
+    ## provided items it lists and the storage values for its role (osh.storageValues).
+    ceph: volumes
     deps:
       - openvswitch
     tier: compute
@@ -934,6 +945,11 @@ components:
       - identity-user-glance
       - oslo-db-cinder
       - oslo-messaging-cinder
+      - ceph-client-cinder
+      - ceph-mon-host
+    ## ceph (#308): with a ceph storage.backend this component consumes Ceph (cinder-volume's RBD backend); the umbrella passes it the
+    ## provided items it lists and the storage values for its role (osh.storageValues).
+    ceph: volumes
     deps:
       - keystone
       - rabbitmq

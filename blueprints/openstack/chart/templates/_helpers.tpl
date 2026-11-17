@@ -847,6 +847,54 @@ true
 {{- end -}}
 {{- end -}}
 
+{{/* (list $ $c): "true" when component $c consumes Ceph in this install (#308): storage.backend is a ceph backend and
+     $c's components[].ceph role applies -- `volumes` (cinder, libvirt) always, `images` (glance) when
+     storage.ceph.glanceStore is rbd. Only then does it receive its provided items and its storage values. */}}
+{{- define "osh.cephConsumes" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- if eq (include "osh.cephActive" (list $top)) "true" -}}
+{{- if eq ($c.ceph | default "") "volumes" -}}true
+{{- else if and (eq ($c.ceph | default "") "images") (eq ((($top.Values.storage | default dict).ceph | default dict).glanceStore | default "pvc") "rbd") -}}true
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* (list $ $c): the values the umbrella sets on component $c for the install's Ceph, as YAML, or nothing (#308). One
+     source -- storage.ceph -- for every value the charts must agree on: the pools, the users, the libvirt secret UUID.
+     cinder: its rbd1 backend; glance: the rbd store; libvirt: the secret it defines; nova: the UUID and user its
+     [libvirt] section names (nova consumes no key in this release). Merged over componentValues, which may not set any
+     of them (osh.requireStorageNotOverridden); hack/validate-ceph-consumer.py (check 29) renders the four charts. */}}
+{{- define "osh.storageValues" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- $ceph := (($top.Values.storage | default dict).ceph | default dict) -}}
+{{- $out := dict -}}
+{{- if eq (include "osh.cephActive" (list $top)) "true" -}}
+  {{- $uuid := $ceph.libvirtSecretUUID -}}{{- $cinderUser := $ceph.clients.cinder -}}
+  {{- if eq $c.name "cinder" -}}
+    {{- $_ := set $out "conf" (dict "backends" (dict "rbd1" (dict "rbd_pool" $ceph.pools.volumes "rbd_user" $cinderUser "rbd_secret_uuid" $uuid))) -}}
+  {{- else if eq $c.name "libvirt" -}}
+    {{- $_ := set $out "conf" (dict "ceph" (dict "enabled" true "cinder" (dict "user" $cinderUser "secret_uuid" $uuid))) -}}
+  {{- else if eq $c.name "nova" -}}
+    {{- $_ := set $out "conf" (dict "ceph" (dict "cinder" (dict "user" $cinderUser "secret_uuid" $uuid)) "nova" (dict "libvirt" (dict "rbd_user" $cinderUser "rbd_secret_uuid" $uuid))) -}}
+  {{- else if and (eq $c.name "glance") (eq (include "osh.cephConsumes" (list $top $c)) "true") -}}
+    {{- $rbd := dict "rbd_store_pool" $ceph.pools.images "rbd_store_user" $ceph.clients.glance -}}
+    {{- $_ := set $out "storage" "rbd" -}}
+    {{- $_ := set $out "conf" (dict "glance" (dict "rbd" $rbd "glance_store" (deepCopy $rbd) "DEFAULT" (dict "show_image_direct_url" true))) -}}
+  {{- end -}}
+{{- end -}}
+{{- if $out -}}{{- toYaml $out -}}{{- end -}}
+{{- end -}}
+
+{{/* (dict "node" <map> "prefix" <path>): every leaf path of a nested map, one per line. */}}
+{{- define "osh.leafPaths" -}}
+{{- $prefix := .prefix -}}
+{{- range $k, $v := .node -}}
+{{- $p := ternary $k (printf "%s.%s" $prefix $k) (eq $prefix "") -}}
+{{- if kindIs "map" $v -}}{{- include "osh.leafPaths" (dict "node" $v "prefix" $p) -}}{{- else -}}{{- $p }}
+{{ end -}}
+{{- end -}}
+{{- end -}}
+
 {{/* storage.backend, `none` when unset. */}}
 {{- define "osh.storageBackend" -}}
 {{- $top := index . 0 -}}
@@ -860,11 +908,31 @@ true
 {{- define "osh.requireStorageNotOverridden" -}}
 {{- $top := index . 0 -}}
 {{- range $c := $top.Values.components -}}
+  {{- $cv := (index ($top.Values.componentValues | default dict) $c.name) | default dict -}}
   {{- if has "block-storage" ($c.requires | default list) -}}
-    {{- $cv := (index ($top.Values.componentValues | default dict) $c.name) | default dict -}}
     {{- if hasKey ($cv.krateo | default dict) "storageBackend" -}}
       {{- fail (printf "\n\ncomponentValues.%s.krateo.storageBackend is set. Set storage.backend instead: it is the one value that says which block-storage backend this install has, and both profile full-strict and %s read it (#196). The umbrella passes it to %s as krateo.storageBackend.\n" $c.name $c.name $c.name) -}}
     {{- end -}}
+  {{- end -}}
+  {{- /* #308: the Ceph values come from storage.ceph alone, so the charts cannot disagree on a pool, a user or the
+         libvirt secret UUID; and Ceph is reached only through the copies of the keys it mints, so a component is not
+         wired to Ceph by hand (that path needs client.admin): componentValues may set none of the paths
+         osh.storageValues sets, nor the references (krateo.ceph), nor glance's storage rbd/radosgw, nor
+         conf.ceph.enabled on libvirt or nova. */ -}}
+  {{- $paths := list "krateo.ceph" -}}
+  {{- with include "osh.storageValues" (list $top $c) -}}{{- $paths = concat $paths (splitList "\n" (include "osh.leafPaths" (dict "node" (fromYaml .) "prefix" "")) | compact) -}}{{- end -}}
+  {{- if has $c.name (list "libvirt" "nova") -}}{{- $paths = append $paths "conf.ceph.enabled" -}}{{- end -}}
+  {{- range $path := $paths -}}
+    {{- $v := $cv -}}{{- $found := true -}}
+    {{- range $p := splitList "." $path -}}
+      {{- if and $found (kindIs "map" $v) (hasKey $v $p) -}}{{- $v = index $v $p -}}{{- else -}}{{- $found = false -}}{{- end -}}
+    {{- end -}}
+    {{- if and $found (or (ne $path "conf.ceph.enabled") $v) -}}
+      {{- fail (printf "\n\ncomponentValues.%s.%s is set. The umbrella sets it from storage.ceph (#308): one value for every chart that must agree on it, and Ceph reached only through the copies of the keys it mints, never through client.admin. Set storage.backend and storage.ceph instead.\n" $c.name $path) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if and (eq $c.name "glance") (has ($cv.storage | default "") (list "rbd" "radosgw")) -}}
+    {{- fail (printf "\n\ncomponentValues.glance.storage is %s. Glance stores images in Ceph only through storage.ceph.glanceStore rbd with a ceph storage.backend (#308): upstream's %s path reaches Ceph with client.admin.\n" $cv.storage $cv.storage) -}}
   {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -1222,7 +1290,7 @@ krateo-openstack-node-reader
 {{- end -}}
 {{- /* A `source: provided` item (#308) has a root only while storage.backend is a ceph backend: otherwise there is
        nothing to copy, and the component gets no reference, exactly as before the item existed. */ -}}
-{{- if or (ne ($item.source | default "") "provided") (eq (include "osh.cephActive" (list $top)) "true") -}}
+{{- if or (ne ($item.source | default "") "provided") (eq (include "osh.cephConsumes" (list $top $c)) "true") -}}
 {{- $ref := dict "store" $creds.store "secret" $item.secret "key" $item.key -}}
 {{- if $item.publicKey -}}{{- $_ := set $ref "publicKey" $item.publicKey -}}{{- end -}}
 {{- $path := $item.path -}}

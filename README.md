@@ -236,10 +236,11 @@ kubectl create namespace openstack-system
 #     plane resizing), core-provider up to 2.13.107 can leave it deployed with its install hooks never
 #     run and its pods waiting forever. Recovery: delete that component's Composition, and the umbrella
 #     re-creates it (core-provider#563; 2.13.108 marks it Ready=False/HooksMayNotHaveRun, #297).
-#   - cinder cannot be installed through the umbrella yet: it needs a block-storage backend, and
-#     storage.backend has only `none` in this release (the Ceph backends are #308). full-strict leaves it
-#     out; selected anyway (profile: full, or enabled:) its Composition reports "cinder needs a volume
-#     backend, and storage.backend is none (#196)" instead of waiting in Init (see the full-strict section).
+#   - cinder needs a block-storage backend: a Ceph cluster, through storage.backend ceph-rook or
+#     ceph-external ("Storage: consuming a Ceph cluster" below; the Ceph path is not yet verified on a
+#     live cluster, #308). With the default none, full-strict leaves it out, and selected anyway
+#     (profile: full, or enabled:) its Composition reports "cinder needs a volume backend, and
+#     storage.backend is none (#196)" instead of waiting in Init (see the full-strict section).
 # NOT verified at this
 # version: the 36-component profile: full, kind, a VNC console in a browser, and the
 # per-component path further down.
@@ -315,9 +316,8 @@ brings up **all 36 components** (needs a large amd64 cluster — see `quickstart
 > `enabled:` — does not install: its Composition reports *cinder needs a volume backend, and
 > storage.backend is none (#196)* instead of `cinder-volume` sitting in `Init` on `ceph-etc`.
 > `full` itself is unchanged and still selects cinder, so a `full` install shows that one
-> component failed rather than stuck. The two Ceph backends, `ceph-rook` and `ceph-external`, are
-> accepted by the schema and refused by cinder until #308 implements them, so **cinder cannot be
-> installed through the umbrella in this release**. Installs that provisioned Ceph by hand for the
+> component failed rather than stuck. With a Ceph backend, `ceph-rook` or `ceph-external`, cinder
+> installs (see "Storage: consuming a Ceph cluster"). Installs that provisioned Ceph by hand for the
 > old `rbd1` precondition lose that path on purpose: it handed OpenStack the Ceph `client.admin`
 > key, which #308 rules out. `componentValues.cinder.krateo.storageBackend` is refused:
 > `storage.backend` is the one place that says which backend the install has. A standalone
@@ -350,7 +350,7 @@ of `openstack-network-node` (see the labelling block above).
 
 | component | needs | symptom when it is absent |
 |---|---|---|
-| `cinder` | `block-storage`: a `storage.backend` other than `none`. Only `none` exists in this release; the Ceph backends are #308 | its Composition reports the render error *cinder needs a volume backend, and storage.backend is none (#196)*. Before the fix: `cinder-storage-init` and `cinder-volume` stayed in `Init` on `FailedMount` for `ceph-etc` |
+| `cinder` | `block-storage`: a `storage.backend` other than `none` — a Ceph cluster, consumed as "Storage: consuming a Ceph cluster" describes | its Composition reports the render error *cinder needs a volume backend, and storage.backend is none (#196)*. Before the fix: `cinder-storage-init` and `cinder-volume` stayed in `Init` on `FailedMount` for `ceph-etc` |
 | `ironic` | an interface named `ironic-pxe` on each conductor node — the bare-metal provisioning NIC | `ironic-conductor-init` exits 1 with `Could not find IP for pxe to bind to`; the pod sits in `Init:CrashLoopBackOff` |
 | `octavia` | `lb-mgmt-net` plus a Neutron port per node, named `octavia-{worker,health-manager}-port-<hostname>` | the `get-port` init containers log `No Port found for octavia-worker-port-…` and never finish |
 | `swift` | a StorageClass offering `ReadWriteMany` (upstream uses an `nfs-provisioner` default this repo does not ship) | `swift-ring-builder` and `swift-storage` stay `Pending`, `swift-proxy` stays in `Init` |
@@ -441,6 +441,97 @@ kubectl apply -f "$EX"
 ```
 
 Full install paths and how to access OpenStack/Horizon: [docs/usage.md](docs/usage.md).
+
+## Storage: consuming a Ceph cluster
+
+cinder's volumes — and, if you choose, glance's images — live in Ceph (#308). The blueprint consumes **any** Ceph
+the same way and never holds the Ceph `client.admin` key: the cluster's side creates the users, their caps and the
+pools, and mints the keys; the umbrella **copies** each key and the monitor addresses into its namespace with
+External Secrets Operator, and the charts project the copies. Nothing here depends on a cloud provider.
+
+```yaml
+spec:
+  profile: full-strict          # now includes cinder
+  storage:
+    backend: ceph-rook          # or ceph-external
+    ceph:
+      sourceNamespace: rook-ceph
+      glanceStore: rbd          # optional: images in Ceph too (default pvc)
+```
+
+**What must exist on Ceph's side** (with Rook: a `CephBlockPool` per pool and a `CephClient` per user; otherwise the
+Ceph admin), with the names in `storage.ceph` (defaults shown):
+
+- pools `cinder.volumes` (and `glance.images` for `glanceStore: rbd`);
+- `client.cinder` with `mon 'profile rbd'`, `osd 'profile rbd pool=cinder.volumes, profile rbd-read-only pool=glance.images'`;
+- `client.glance` with `mon 'profile rbd'`, `osd 'profile rbd pool=glance.images'` (only for `glanceStore: rbd`).
+
+These are the caps the Ceph documentation gives for OpenStack (docs.ceph.com, "Block Devices and OpenStack"). The
+blueprint checks, with each user's own key, that its pool exists and the user can use it: `cinder-storage-init`
+fails with `client.cinder cannot list pool cinder.volumes` when either is missing.
+
+**Where the keys come from:**
+
+- `ceph-rook`: Rook keeps a CephClient's key in Secret `rook-ceph-client-<name>` (key `userKey`) and the monitors in
+  `rook-ceph-config` (key `mon_host`), in the CephCluster's namespace (`storage.ceph.rook` if yours differ).
+- `ceph-external`: the Ceph admin places each user's key and `mon_host` in Secrets and names them under
+  `storage.ceph.keys.{cinder,glance,monHost}` (each `secret` and `key`); the umbrella refuses an empty one.
+
+**The read grant.** The copies are read by the ServiceAccount `openstack-credentials-ceph-reader` in the Openstack
+namespace. If the source Secrets are in that namespace, the umbrella grants it itself. If they are in another (Rook's),
+that namespace's owner grants exactly those Secrets — for example:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openstack-ceph-reader
+  namespace: rook-ceph
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    resourceNames:
+      - rook-ceph-client-cinder
+      - rook-ceph-client-glance
+      - rook-ceph-config
+    verbs:
+      - get
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - selfsubjectrulesreviews
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openstack-ceph-reader
+  namespace: rook-ceph
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: openstack-ceph-reader
+subjects:
+  - kind: ServiceAccount
+    name: openstack-credentials-ceph-reader
+    namespace: openstack
+```
+
+Without it, the root ExternalSecrets `openstack-credential-ceph-*` report `SecretSyncedError` naming the refused
+Secret. Check with `kubectl get externalsecret openstack-credential-ceph-client-cinder openstack-credential-ceph-mon-host`.
+
+**Rotation.** A key Ceph's side rotates (Rook's cephx rotation, or the Ceph admin) reaches the copies within 5 minutes,
+then the projections. Each reader — `cinder-volume`, `glance-api`, `libvirt` — carries a checksum of the key it
+mounts, so the next reconcile restarts it. A cephx user holds one key at a time, so a rotation interrupts that user
+until its readers restart; libvirt defines its secret at start. What a running VM's open connection to an attached
+volume does across a rotation is not measured yet (#308, live test L4): rotate in a maintenance window.
+
+**Not covered yet:** nova's ephemeral disks stay on the hypervisor (Ceph-backed ephemeral disks are a later phase of
+#308); switching an existing install's glance from `pvc` to `rbd` does not migrate its images, so do it on a new
+install or migrate them first; and this path has been rendered and gated, not yet run on a live cluster.
 
 ## swift needs a ReadWriteMany StorageClass
 

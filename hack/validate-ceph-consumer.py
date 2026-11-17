@@ -33,6 +33,16 @@ holds their keys. The umbrella COPIES each key and the monitor addresses into th
       refused, naming the path; one reference without the other, references with a non-ceph backend (cinder), a non-rbd
       store (glance) or conf.ceph.enabled false (libvirt) are refused.
 
+  29. ONE SOURCE, DELIVERED. Through hack/umbrella_spec.py (the umbrella's own spec-building lines), with each ceph
+      backend and storage.ceph set to values no default has: only the Ceph consumers' specs differ from storage.backend
+      none (cinder, libvirt, nova, and glance with glanceStore rbd); exactly the consumers get krateo.ceph references, to
+      the provided roots, and nothing does with none. Each of the four charts, rendered with what it is delivered,
+      renders, holds no client.admin (check 28), and agrees on every value storage.ceph sets: cinder's [rbd1] pool, user
+      and secret UUID, glance's rbd store pool and user (and show_image_direct_url, and rbd as the default backend),
+      libvirt's secret user and UUID, nova's [libvirt] rbd_user and rbd_secret_uuid. componentValues may set none of
+      those, nor the references, nor glance's storage rbd/radosgw, nor conf.ceph.enabled on libvirt or nova: the
+      umbrella refuses each, naming it.
+
 Fails when helm or PyYAML is missing, when the umbrella defines no provided item, and when a render it needs fails.
 """
 import base64
@@ -486,12 +496,183 @@ def restart_check(tmp, chart, cdir, label, values, spec):
             fail("18c: %s: %s's pod template changes with the Ceph key, which it does not read" % (label, owner))
 
 
+def load_umbrella_spec():
+    import importlib.util
+    sp = importlib.util.spec_from_file_location("umbrella_spec", os.path.join(ROOT, "hack", "umbrella_spec.py"))
+    mod = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(mod)
+    return mod
+
+
+def ini_files(docs, name):
+    import configparser
+    out = []
+    for body in scripts(docs).get(name, []):
+        cp = configparser.ConfigParser(strict=False, interpolation=None)
+        try:
+            cp.read_string(body)
+        except configparser.Error as e:
+            fail("29: %s does not parse: %s" % (name, e))
+            continue
+        out.append(cp)
+    return out
+
+
+def no_admin(label, docs, admin_secret):
+    scr = scripts(docs)
+    for owner, pod in pods(docs):
+        for v in (pod.get("spec") or {}).get("volumes") or []:
+            if admin_secret and (v.get("secret") or {}).get("secretName") == admin_secret:
+                fail("28: %s: %s mounts %s, the client.admin keyring" % (label, owner, admin_secret))
+        for c in containers(pod):
+            cmd = " ".join(c.get("command") or []) + " " + " ".join(c.get("args") or [])
+            subs = " ".join(m.get("subPath") or "" for m in c.get("volumeMounts") or [])
+            if "ceph-admin-keyring" in cmd or "ceph-admin-keyring" in subs:
+                fail("28: %s: %s %s runs or mounts ceph-admin-keyring.sh" % (label, owner, c["name"]))
+            for e in c.get("env") or []:
+                if "KEYRING" in e.get("name", "") and e.get("value"):
+                    fail("28: %s: %s %s carries a key in env %s" % (label, owner, c["name"], e["name"]))
+            for tok in (c.get("command") or []):
+                for body in scr.get(os.path.basename(tok), []):
+                    for bad in ("ceph auth", "osd pool create"):
+                        if bad in body:
+                            fail("28: %s: %s %s runs %s, which contains `%s`" % (label, owner, c["name"],
+                                                                               os.path.basename(tok), bad))
+    count("28")
+
+
+def check29(tmp, uv):
+    us = load_umbrella_spec()
+    items = {i["id"]: i for i in uv["credentials"]["items"]}
+    comps = {c["name"]: c for c in uv["components"]}
+    consumers = {n: c.get("ceph") for n, c in comps.items() if c.get("ceph")}
+    if sorted(consumers) != ["cinder", "glance", "libvirt"]:
+        fail("29: the umbrella's Ceph consumers (components[].ceph) are %s, this gate checks cinder, glance and libvirt"
+             % sorted(consumers))
+    try:
+        none = us.specs(ROOT, {})
+    except us.SpecError as e:
+        fail("29: %s" % e)
+        return
+    for n, sp in none.items():
+        if (sp.get("krateo") or {}).get("ceph"):
+            fail("29: with storage.backend none, %s receives krateo.ceph references" % n)
+    custom = {"sourceNamespace": "gate-rook", "clients": {"cinder": "gate-cinder", "glance": "gate-glance"},
+              "pools": {"volumes": "gate-volumes", "images": "gate-images"},
+              "libvirtSecretUUID": "29292929-2929-4292-9292-292929292929", "glanceStore": "rbd"}
+    ext = us.ceph_external_values()
+    cases = [("ceph-rook, custom storage.ceph, glanceStore rbd", {"storage": {"backend": "ceph-rook", "ceph": custom}}),
+             ("ceph-external, defaults, glanceStore pvc", {"storage": ext})]
+    for label, values in cases:
+        try:
+            got = us.specs(ROOT, values)
+        except us.SpecError as e:
+            fail("29: %s: %s" % (label, e))
+            continue
+        ceph = deep_merge(json.loads(json.dumps(uv["storage"]["ceph"])), values["storage"].get("ceph") or {})
+        rbd_glance = ceph.get("glanceStore") == "rbd"
+        want_changed = {"cinder", "libvirt", "nova"} | ({"glance"} if rbd_glance else set())
+        changed = {n for n in got if got[n] != none.get(n)}
+        if changed != want_changed:
+            fail("29: %s: the specs that differ from storage.backend none are %s, want %s" % (
+                label, sorted(changed), sorted(want_changed)))
+        for n, sp in got.items():
+            refs = (sp.get("krateo") or {}).get("ceph")
+            wants = n in consumers and (consumers[n] == "volumes" or rbd_glance)
+            if wants:
+                k = items["ceph-client-glance" if n == "glance" else "ceph-client-cinder"]
+                exp = {"keyringFrom": {"store": uv["credentials"]["store"], "secret": k["secret"], "key": k["key"]},
+                       "monHostFrom": {"store": uv["credentials"]["store"], "secret": items["ceph-mon-host"]["secret"],
+                                       "key": items["ceph-mon-host"]["key"]}}
+                if refs != exp:
+                    fail("29: %s: %s receives krateo.ceph %s, want %s" % (label, n, refs, exp))
+            elif refs:
+                fail("29: %s: %s receives krateo.ceph references and consumes no Ceph here" % (label, n))
+        count("29")
+        uuid, cuser, guser = ceph["libvirtSecretUUID"], ceph["clients"]["cinder"], ceph["clients"]["glance"]
+        for n in sorted(want_changed):
+            cdir = os.path.join(BP, n, "chart")
+            w = stage(cdir, tmp, "%s-29-%d" % (n, cases.index((label, values))))
+            rc, out, err = helm_template(w, n + "-gate1234", got[n])
+            if rc != 0:
+                fail("29: %s: %s does not render with what the umbrella delivers: %s" % (label, n, err.strip()[-300:]))
+                continue
+            docs = docs_of(out)
+            cvals = yaml.safe_load(open(os.path.join(cdir, "values.yaml")))
+            no_admin("%s (%s)" % (n, label), docs, (cvals.get("ceph_client") or {}).get("user_secret_name"))
+            seen = []
+            if n == "cinder":
+                for cp in ini_files(docs, "backends.conf"):
+                    seen.append({k: cp.get("rbd1", k, fallback=None) for k in ("rbd_pool", "rbd_user", "rbd_secret_uuid")})
+                want = [{"rbd_pool": ceph["pools"]["volumes"], "rbd_user": cuser, "rbd_secret_uuid": uuid}]
+            elif n == "glance":
+                for cp in ini_files(docs, "glance-api.conf"):
+                    for sec in ("rbd", "glance_store"):
+                        seen.append({k: cp.get(sec, k, fallback=None) for k in ("rbd_store_pool", "rbd_store_user")})
+                    if cp.get("DEFAULT", "show_image_direct_url", fallback="").lower() != "true":
+                        fail("29: %s: glance does not set show_image_direct_url, so images are not cloned" % label)
+                    if cp.get("glance_store", "default_backend", fallback="") != "rbd":
+                        fail("29: %s: glance's default_backend is %r, want rbd" % (
+                            label, cp.get("glance_store", "default_backend", fallback="")))
+                want = [{"rbd_store_pool": ceph["pools"]["images"], "rbd_store_user": guser}] * 2
+            elif n == "libvirt":
+                for owner, pod in pods(docs):
+                    for c in containers(pod):
+                        env = {e["name"]: e.get("value") for e in c.get("env") or []}
+                        if "LIBVIRT_CEPH_CINDER_SECRET_UUID" in env:
+                            seen.append({"uuid": env["LIBVIRT_CEPH_CINDER_SECRET_UUID"], "user": env.get("CEPH_CINDER_USER")})
+                want = [{"uuid": uuid, "user": cuser}] * 2
+            else:
+                for cp in ini_files(docs, "nova.conf"):
+                    seen.append({k: cp.get("libvirt", k, fallback=None) for k in ("rbd_user", "rbd_secret_uuid")})
+                want = [{"rbd_user": cuser, "rbd_secret_uuid": uuid}]
+            if not seen:
+                fail("29: %s: nothing in %s's render carries the values storage.ceph sets: nothing was measured" % (label, n))
+            for x in seen:
+                if x != want[0]:
+                    fail("29: %s: %s renders %s, want %s (storage.ceph)" % (label, n, x, want[0]))
+            if len(seen) < len(want):
+                fail("29: %s: %s renders those values %d time(s), want %d" % (label, n, len(seen), len(want)))
+            count("29")
+    # componentValues may not set what storage.ceph sets
+    u = stage(UMBRELLA, tmp, "umbrella-29")
+    rook = {"backend": "ceph-rook", "ceph": {"glanceStore": "rbd"}}
+    refused = [
+        ("cinder", "conf.backends.rbd1.rbd_pool", "other", rook),
+        ("cinder", "conf.backends.rbd1.rbd_secret_uuid", "11111111-1111-4111-8111-111111111111", rook),
+        ("cinder", "krateo.ceph", {"keyringFrom": {"secret": "x"}}, rook),
+        ("glance", "conf.glance.rbd.rbd_store_pool", "other", rook),
+        ("libvirt", "conf.ceph.cinder.secret_uuid", "11111111-1111-4111-8111-111111111111", rook),
+        ("nova", "conf.nova.libvirt.rbd_secret_uuid", "11111111-1111-4111-8111-111111111111", rook),
+        ("libvirt", "conf.ceph.enabled", True, {"backend": "none"}),
+        ("nova", "conf.ceph.enabled", True, {"backend": "none"}),
+        ("glance", "storage", "rbd", {"backend": "none"}),
+        ("glance", "storage", "radosgw", {"backend": "none"}),
+    ]
+    for comp, path, val, storage in refused:
+        v = {"profile": "full", "storage": storage, "componentValues": {comp: nested(path, val)}}
+        rc, out, err = helm_template(u, "openstack-gate", v)
+        name = "componentValues.%s.%s" % (comp, path)
+        if rc == 0:
+            fail("29: %s (storage.backend %s) renders; the umbrella must refuse it" % (name, storage["backend"]))
+        elif name not in err:
+            fail("29: %s is refused without naming it: %s" % (name, err.strip()[-250:]))
+        count("29")
+    for comp, path, val in (("libvirt", "conf.ceph.enabled", False), ("glance", "storage", "pvc")):
+        v = {"profile": "full", "componentValues": {comp: nested(path, val)}}
+        rc, out, err = helm_template(u, "openstack-gate", v)
+        if rc != 0:
+            fail("29: componentValues.%s.%s %r is refused; only what reaches Ceph by hand is" % (comp, path, val))
+        count("29")
+
+
 def main():
     uv = yaml.safe_load(open(os.path.join(UMBRELLA, "values.yaml")))
     with tempfile.TemporaryDirectory() as tmp:
         check27(tmp, uv)
         check_charts(tmp, uv)
-    for k in ("27", "P", "22c", "18c", "28"):
+        check29(tmp, uv)
+    for k in ("27", "P", "22c", "18c", "28", "29"):
         if not counts.get(k):
             fail("%s: measured nothing" % k)
     if failures:

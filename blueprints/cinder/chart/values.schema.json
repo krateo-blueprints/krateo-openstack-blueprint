@@ -377,7 +377,7 @@
             "ceph-external"
           ],
           "default": "unmanaged",
-          "description": "Which block-storage backend this cinder renders (#196, #308). The umbrella sets it from its storage.backend and refuses a componentValues override. unmanaged (the default) is the chart as OpenStack-Helm ships it, for a standalone install whose operator provides ceph-etc, pvc-ceph-client-key and cinder-volume-rbd-keyring; none is refused (no backend: cinder-volume would wait in Init forever); ceph-rook and ceph-external are refused until #308 implements them."
+          "description": "Which block-storage backend this cinder renders (#196, #308). The umbrella sets it from its storage.backend and refuses a componentValues override. unmanaged (the default) is the chart as OpenStack-Helm ships it, for a standalone install whose operator provides ceph-etc, pvc-ceph-client-key and cinder-volume-rbd-keyring; none is refused (no backend: cinder-volume would wait in Init forever); ceph-rook and ceph-external render only with krateo.ceph references, the umbrella's copies of the keys Ceph minted, and never use client.admin."
         },
         "ceph": {
           "type": "object",

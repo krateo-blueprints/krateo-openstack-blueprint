@@ -12,8 +12,9 @@ without a backend, naming the value. Each half is checked here, by rendering:
   1. THE UMBRELLA DELIVERS IT. The lines of compositions.yaml that build a component's spec (from `{{- $ov := ` through
      the storageBackend merge) are rendered for every component, once per storage.backend the schema accepts: each
      component whose components[].requires names block-storage receives exactly that value as krateo.storageBackend,
-     none included, and every other component's spec is the same for every backend and carries no storageBackend. The
-     component set must be non-empty and every backend must render, or nothing was measured.
+     none included, and no other component carries one. Which specs a ceph backend changes at all (the Ceph consumers'
+     references and storage values, #308) is hack/validate-ceph-consumer.py's check 29. The component set must be
+     non-empty and every backend must render, or nothing was measured.
   2. ONE PLACE SAYS IT. A componentValues.<component>.krateo.storageBackend is refused for each such component, with a
      message naming storage.backend, whatever its value (unmanaged included: it would install upstream's wiring under a
      full-strict that left cinder out). The umbrella's schema refuses a backend it does not list.
@@ -172,9 +173,6 @@ def main():
                             fail("1: with storage.backend %s, %s receives krateo.storageBackend %r" % (b, n, sb))
                     elif sb is not None:
                         fail("1: %s requires no block-storage and still receives krateo.storageBackend %r" % (n, sb))
-                    elif got.get(n) != specs[backends[0]].get(n):
-                        fail("1: %s's spec changes with storage.backend (%s): only block-storage consumers may move"
-                             % (n, b))
                     count("1")
             os.unlink(probe)
         # 2. one place says it

@@ -154,10 +154,9 @@ def main():
     backends = {
         "none": "no backend (the default): profile full-strict leaves cinder out, and a cinder selected anyway "
                 "refuses to render, naming this value",
-        "ceph-rook": "Ceph run by the rook-ceph blueprint, which mints the client keys (#308); not implemented yet, "
-                     "so cinder refuses it",
-        "ceph-external": "an existing Ceph whose admin provides the client keys (#308); not implemented yet, so cinder "
-                         "refuses it",
+        "ceph-rook": "Ceph run by Rook, whose CephClients mint the client keys (#308); storage.ceph says where",
+        "ceph-external": "an existing Ceph whose admin creates the users and places their keys (#308); "
+                         "storage.ceph.keys names each Secret",
     }
     consumers = [c["name"] for c in vals["components"] if "block-storage" in (c.get("requires") or [])]
     if not consumers:
@@ -182,7 +181,8 @@ def main():
             + ", ".join(consumers) + " only when storage.backend is not none, and the umbrella passes the value to "
             "each as its krateo.storageBackend (a componentValues override of that key is refused). With none, a "
             + ", ".join(consumers) + " selected anyway (profile full, or enabled) refuses to render, naming this "
-            "value. Only none is functional in this release. See hack/provisioning-preconditions.yaml."
+            "value. With a ceph backend the install consumes Ceph through copies of the keys Ceph mints (storage.ceph), never "
+            "client.admin. See hack/provisioning-preconditions.yaml."
         ),
         "additionalProperties": False,
         "properties": {

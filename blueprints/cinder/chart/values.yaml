@@ -1632,7 +1632,8 @@ krateo:
   #                  whoever installs it must provide (hack/provisioning-preconditions.yaml). The umbrella never passes
   #                  it: it refuses a componentValues.cinder.krateo.storageBackend.
   #   none           refused: there is no backend, and cinder-volume would wait in Init forever.
-  #   ceph-rook      refused until #308 implements it.
-  #   ceph-external  refused until #308 implements it.
+  #   ceph-rook      a Ceph run by Rook (#308), and
+  #   ceph-external  an existing Ceph (#308): both render only with krateo.ceph.keyringFrom and monHostFrom, the
+  #                  umbrella's copies of the keys Ceph minted, and never use client.admin.
   storageBackend: unmanaged
 ...
