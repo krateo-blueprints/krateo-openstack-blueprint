@@ -1117,4 +1117,8 @@ volume:
   # mariadb's and rabbitmq's do. Upstream's `standard` exists only on clusters that happen to name
   # a class that way, and glance-images stays Pending everywhere else.
   class_name: default
-  size: 2Gi
+  # Krateo (#295): 10Gi, was upstream's 2Gi. manila's service image alone is 952 MB, and on 2Gi one duplicate upload
+  # filled the store (GKE 2026-11-17). A live glance-images claim smaller than this is raised to it on upgrade, which
+  # needs its StorageClass to allow volume expansion; a larger one keeps its size (a claim cannot shrink). See
+  # templates/_images_volume_size.tpl and the README.
+  size: 10Gi

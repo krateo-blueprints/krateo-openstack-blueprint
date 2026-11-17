@@ -13,6 +13,20 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Bootstrap uploads each image once; glance's store to 10 GiB (0.3.71, #295).**
+  - **What happened** (0.3.68 → 0.3.70 upgrade on GKE): manila's bootstrap ran upstream's `image show || create` while
+    glance-api was rolling, and read "glance unreachable" as "missing". It uploaded a second 952 MB manila-service-image,
+    which filled the 2 GiB store. glance went unready on its free-space floor (#163), and glance, manila and nova
+    stalled.
+  - **Bootstrap fix:** glance's, manila's and ironic's bootstrap, and ironic's cleaning-network Job, now count by name
+    (helm-toolkit `openstack_count`). A failed lookup fails the Job, and nothing is created when one or more already
+    exist.
+  - **Store:** `glance-images` defaults to 10Gi. The chart reads the live claim, expands a smaller one (the StorageClass
+    must allow expansion; kind's `standard` doesn't) and never asks a claim to shrink.
+  - **New gates:** `hack/validate-bootstrap-idempotent.py` (no create after a failed lookup unless the API refuses
+    duplicates; image bootstraps run against a stand-in) and `hack/validate-glance-store.py` (the size each live claim
+    gets).
+
 - **designate-worker's init container reads designate.conf.d (0.3.70, #291).** The 0.3.69 GKE upgrade never got
   designate Ready: `designate-worker-init` runs `designate-manage pool update`, which reaches designate-central over RPC,
   and it mounted `designate.conf` alone. 0.3.69 had moved `transport_url` into `designate.conf.d`, so the `[ -d ]` guard

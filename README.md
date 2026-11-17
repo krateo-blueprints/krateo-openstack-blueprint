@@ -1004,6 +1004,50 @@ glance's (keystone's needs `manifests.secret_rabbitmq: true` as well: its chart 
 reads switched off), and an `endpoints.oslo_messaging.path` override is consumed under its new name. An explicit
 `componentValues.ceilometer.conf.notification_vhosts` still wins.
 
+### Upgrading to 0.3.71 or later: glance's image store grows to 10 GiB, and bootstrap uploads each image once
+
+Measured on GKE (0.3.68 → 0.3.70, #295): manila's bootstrap ran while glance-api was rolling. Its `image show || create`
+read "glance unreachable" as "image missing" and uploaded a second 952 MB `manila-service-image`. glance accepts two
+images with one name. The 2 GiB `glance-images` store filled, glance-api went unready (its free-space floor, #163), and
+glance, manila and nova never became Ready.
+
+**Bootstrap.**
+- glance's, manila's and ironic's bootstrap now count the images of each name with
+  `openstack image list --name <name>`. If glance doesn't answer, the script fails and the Job retries; a failed lookup is
+  never read as "absent". An image is uploaded only when glance answered with none.
+- With two or more already there, nothing is uploaded and the Job logs it. Delete the extras yourself.
+- ironic's cleaning-network Job does the same for its neutron network, which neutron also accepts twice under one name.
+- `hack/validate-bootstrap-idempotent.py` fails any rendered script whose failed lookup leads to creating a resource
+  whose API accepts a duplicate name. It also runs each image bootstrap against a stand-in `openstack`: glance
+  unreachable, no image, one image, two images.
+
+**The store.**
+- `glance-images` now requests 10Gi by default (`componentValues.glance.volume.size`, still overridable).
+- The chart owns the claim (helm renders it, and `keep_pvc` keeps it on uninstall). On upgrade it reads the live claim
+  and asks for `volume.size`, except that it never asks for less than the claim already has, because a claim cannot
+  shrink.
+- So an install created at 2Gi has its claim raised to 10Gi. The API server allows that only when the claim's
+  StorageClass sets `allowVolumeExpansion: true`.
+- The chart cannot check this itself: StorageClasses are cluster-scoped, and a lookup the render identity is refused
+  would fail every render.
+
+**Before upgrading, check your class:**
+
+```sh
+kubectl -n openstack get pvc glance-images -o jsonpath='{.spec.storageClassName}{"\n"}'
+kubectl get storageclass <that class> -o jsonpath='{.allowVolumeExpansion}{"\n"}'   # must print true
+```
+
+- If it prints `true`, the claim is expanded in place.
+- If it doesn't, the API server refuses the change ("only dynamically provisioned pvc can be resized and the
+  storageclass that provisions the pvc must support resize") and glance's upgrade fails. To keep the claim's current
+  size, set `componentValues.glance.volume.size: 2Gi` before upgrading.
+- kind's default class, `standard` (`rancher.io/local-path`), sets no `allowVolumeExpansion`. That was read from its
+  manifest in `kindest/node:v1.36.4`, so a kind install upgrading from an earlier release needs that override. local-path
+  doesn't enforce the size anyway.
+- On GKE the class must allow expansion. This README hasn't verified it on a live cluster; the 0.3.71 GKE upgrade
+  measures it.
+
 ### Components follow the umbrella's version
 
 The orchestrator registers every component `CompositionDefinition` at its own chart version

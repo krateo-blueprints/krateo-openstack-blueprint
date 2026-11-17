@@ -380,6 +380,15 @@ jobs:
       - name: Every pod carries the umbrella's tolerations
         run: python3 hack/validate-tolerations.py .
 
+      # A bootstrap never creates a duplicate (#295): no rendered script creates a resource whose API accepts a
+      # duplicate name after a failed lookup, and every image bootstrap is run against a stand-in openstack.
+      - name: Bootstrap uploads each image once
+        run: python3 hack/validate-bootstrap-idempotent.py .
+
+      # glance's image store: 10Gi by default, a smaller live claim expanded, a claim never asked to shrink (#295).
+      - name: glance's image store size
+        run: python3 hack/validate-glance-store.py .
+
       # The umbrella is not Ready while a selected component does not exist yet (#257): the chart emits
       # ConfigMap openstack-install-pending exactly while it holds a selected component back, and the
       # CompositionDefinition's statusDataTemplate projects Ready=False/Creating from its presence --

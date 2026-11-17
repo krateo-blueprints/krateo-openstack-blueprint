@@ -28,7 +28,7 @@ spec:
   accessModes: {{ .Values.volume.accessModes }}
   resources:
     requests:
-      storage: {{ .Values.volume.size }}
+      storage: {{ include "glance.images_volume_size" . }}
 {{- /* `default` (or unset) takes the cluster's default class, as mariadb and rabbitmq do. */}}
 {{- if and .Values.volume.class_name (ne .Values.volume.class_name "default") }}
   storageClassName: {{ .Values.volume.class_name }}

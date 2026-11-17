@@ -269,6 +269,16 @@ Notable per-component fields:
 
 Set `spec: {}` (or omit `componentValues.<name>`) to use the validated defaults.
 
+### `componentValues.glance.volume.size` — the image store (0.3.71)
+
+The `glance-images` claim requests `10Gi` by default; it was `2Gi` until 0.3.70. One duplicate upload of manila's 952 MB
+service image filled the 2Gi store and stalled an upgrade (#295). Set `volume.size` to change it. On an existing install
+the chart reads the live claim and never asks for less than it already has, since a claim cannot shrink. A larger value
+expands the claim, which the API server accepts only when its StorageClass sets `allowVolumeExpansion: true`. When it
+doesn't (kind's default `standard`, for example), set `volume.size` to the claim's current size, or the upgrade's patch is
+refused. The README section "Upgrading to 0.3.71 or later" has the commands. `volume.class_name` picks the StorageClass
+for a new claim (`default` = the cluster's default class); it cannot change on an existing claim.
+
 ## Upgrading an install that already uses OIDC
 
 Until the keystone chart gained `oidc.clientSecretRef` and `oidc.cryptoPassphraseRef`, the only

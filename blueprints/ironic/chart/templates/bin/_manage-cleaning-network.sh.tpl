@@ -15,13 +15,21 @@ limitations under the License.
 */}}
 
 set -ex
+{{ include "helm-toolkit.scripts.openstack_count" . }}
 
-if ! openstack network show ${neutron_network_name}; then
+{{- /* Krateo (#295): the network is created only when neutron answered and holds none of that name. upstream's
+     `if ! openstack network show <name>` read any failure (neutron unreachable, or "More than one Network exists") as
+     "absent", and neutron accepts two networks with one name. */}}
+n=$(openstack_count "${neutron_network_name}" network list --name "${neutron_network_name}")
+if [ "${n}" -eq 0 ]; then
   IRONIC_NEUTRON_CLEANING_NET_ID=$(openstack network create -f value -c id \
     --share \
     --provider-network-type flat \
     --provider-physical-network ${neutron_provider_network} \
     ${neutron_network_name})
+elif [ "${n}" -gt 1 ]; then
+  echo "neutron holds ${n} networks named ${neutron_network_name}: creating nothing; delete the extra ones (#295)" >&2
+  exit 1
 else
   IRONIC_NEUTRON_CLEANING_NET_ID=$(openstack network show ${neutron_network_name} -f value -c id)
 fi
