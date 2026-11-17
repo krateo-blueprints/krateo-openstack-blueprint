@@ -1,0 +1,16 @@
+# Gating. The render that moves a component's definition to the new chart also wrote its new
+# values, at the OLD apiVersion, because the new one is not served yet in that render. The
+# object kept the old krateo.io/composition-version label, so the old controller ran the OLD
+# chart with the NEW values: measured on GKE 2026-11-15 (0.3.64 → 0.3.65, core-provider
+# 2.13.102; #228), 3 of 33 components, whose old pre-upgrade Job rotated passwords early. The
+# umbrella now writes new values only at the new version once the definition reports it
+# Ready, and until then re-emits the live spec at the version its label says it is at. This
+# asserts the decision with synthetic input, the Ready signal by type and status (never the
+# reason, never ControllerActive), the whole compositions.yaml path with the cluster reads
+# stubbed, the reads as named GETs (structurally: offline `lookup` returns nothing), and an
+# offline render byte-identical to the chart without the hold.
+name: "New component values are written only at the new apiVersion, once it is served"
+job: capability-roles
+order: 300
+run: |
+  python3 hack/validate-two-phase-values.py .

@@ -1,0 +1,6 @@
+# glance's image store: 10Gi by default, a smaller live claim expanded, a claim never asked to shrink (#295).
+name: "glance's image store size"
+job: capability-roles
+order: 150
+run: |
+  python3 hack/validate-glance-store.py .

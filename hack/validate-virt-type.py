@@ -16,7 +16,9 @@ qemu) chooses between software emulation and KVM.
      virt_type "kvm" and, in its DaemonSet, an init container that runs kvm-check.sh from an executable ConfigMap mount
      (mode 0555) with the host /dev mounted.
   3. THE REFUSAL RUNS. kvm-check.sh, as rendered, is RUN: against a path that is not a character device it exits non-zero
-     and names GKE's --enable-nested-virtualization; against a character device it exits 0.
+     and says what to enable on any node (the device, hardware virtualization, nested virtualization on cloud VMs, the
+     qemu fallback) without naming a cloud provider (the blueprint is provider-agnostic; examples live in the README);
+     against a character device it exits 0.
   4. WITH QEMU. nova and libvirt rendered with the qemu spec set virt_type = qemu and cpu_mode = none, and render no
      kvm-check.sh and no such init container.
 
@@ -179,8 +181,17 @@ def run_check(script, tmp):
                        capture_output=True, text=True)
     if r.returncode == 0:
         fail("3: kvm-check.sh exits 0 on a node without the device; it must refuse")
-    elif "--enable-nested-virtualization" not in r.stderr:
-        fail("3: kvm-check.sh refuses without naming GKE's --enable-nested-virtualization: %s" % r.stderr.strip()[:200])
+    else:
+        msg = " ".join(r.stderr.split())
+        missing_terms = [t for t in (missing, "hardware virtualization", "nested virtualization", "compute.virtType: qemu")
+                         if t not in msg]
+        if missing_terms:
+            fail("3: kvm-check.sh refuses without saying %s: %s" % (missing_terms, msg[:300]))
+        provider = re.findall(r"\b(GKE|GCP|gcloud|Google|AWS|EC2|Amazon|Azure|Microsoft|OpenStack-on-\w+)\b|--enable-nested",
+                              msg)
+        if provider:
+            fail("3: kvm-check.sh's refusal names a cloud provider (%s): the blueprint is provider-agnostic, and examples "
+                 "belong in the README" % sorted(set(p for p in provider if p) or {"--enable-nested"}))
     r = subprocess.run(["bash", p], env={"PATH": os.environ.get("PATH", ""), "KVM_DEVICE": "/dev/null"},
                        capture_output=True, text=True)
     if r.returncode != 0:

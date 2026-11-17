@@ -34,6 +34,28 @@ Curated history; release notes live in GitHub Releases.
   - **Also:** nova-compute's `LIBVIRT_CEPH_SECRET_UUID` read the undefined `conf.ceph.secret_uuid` (an upstream defect),
     so it rendered with no value. It now reads `conf.ceph.cinder.secret_uuid`, and the new gate renders it with a
     sentinel.
+
+- **One file per log entry and per gate.** Every pull request edited the top of `docs/log.md` and the step list
+  of `.github/workflows/lint.yaml` in the same places, so branches in flight collided on both (Diego, 2026-11-17).
+  - **Log:** each entry is now `docs/log.d/<yyyy-mm-dd>-<nn>-<slug>.md` with OKF front matter, and
+    `hack/render-log.py` writes `docs/log.md`, which stays checked in. The 14 existing entries were split out in their
+    order, dated from the commit that added each. The rendered file differs from the old one only by two blank lines
+    between entries. `hack/render-log.py --check` fails when `docs/log.md` is stale.
+  - **Gates:** the 76 check steps became `hack/gates.d/<gate>.yaml`, one file each, with name, job, order, the exact
+    command and its comment. Each of the 11 jobs keeps its tools and runs its gates through one step,
+    `hack/run-gates.py --job <job>`. The two GitHub expressions (the job-hooks base commit, the migrate-to-pvc
+    matrix) come in through the runner step's `env`. The commands CI runs, listed per job before and after, are the
+    same and in the same order. The only additions are the two new gates. `hack/validate-gates-registered.py` fails
+    when a `hack/validate-*` script is in no gate file, or a gate file names a script that is missing.
+  - [release.md](release.md) says how to add both. `docs/log.md` and the check steps of `lint.yaml` are never
+    edited by hand.
+
+- **Provider-agnostic KVM guidance.** libvirt's `/dev/kvm` refusal no longer names a cloud provider. It says what to
+  enable on any node: VT-x/AMD-V with the kvm module on bare metal, nested virtualization on cloud VMs, or
+  `compute.virtType: qemu`. `hack/validate-virt-type.py` now asserts those terms, and that no provider is named. The
+  README's "Running guests on KVM" leads with the generic requirement (nodes exposing `/dev/kvm`, labelled
+  `openstack-compute-node=enabled`). Bare metal, GKE (measured), AWS and Azure follow as examples.
+
 - **Image inventory and CVE scan (#316).**
   - **Inventory:** 58 distinct images across the 38 published charts (quay.io 49, docker.io 8, ghcr.io 1). Every
     chart is rendered at its defaults and with every off-by-default manifest on, and each chart's `images.tags` is
@@ -55,6 +77,7 @@ Curated history; release notes live in GitHub Releases.
   - **Pinning, open for Diego** ([supply-chain.md](supply-chain.md)): 35 images use release-series tags, and each
     airshipit one was pushed 27 to 32 times in 30 days. Proposed: dated tags with the digest recorded and verified
     in CI. Mirror the four Kolla gnocchi images, which have no immutable tag. Not `@sha256:` in the charts (#72).
+
 - **KVM guests and KOG credentials (0.3.73, #303).** These are the blueprint's half of the data-plane release stage.
   - **`compute.virtType: kvm`:** sets nova `virt_type=kvm` and `cpu_mode=host-model` and libvirt's `virt_type`. libvirt
     then refuses, in an init container, to start on a node without `/dev/kvm`; the message names GKE's
@@ -70,6 +93,43 @@ Curated history; release notes live in GitHub Releases.
     Cross-namespace is not supported yet. The README gives each KOG's setting for these names, read from the KOG
     charts.
   - **New gates:** `hack/validate-virt-type.py` and `hack/validate-kog-credentials.py`.
+
+- **Every long-running container has a readiness probe (#231, #151).** On a 0.3.47 cold install,
+  watcher-decision-engine exited 1 seven seconds after every start, had no probe, and counted as Ready
+  in each window, so its composition and the umbrella went Ready=True. 32 of 76 long-running containers
+  had no readiness probe.
+  - **RPC workers** (conductors, schedulers, engines, managers, agents: 30 containers in 16 charts) run
+    `worker-health-probe.py`, one script in helm-toolkit (`helm-toolkit.scripts.health_probe`). It is
+    OpenStack-Helm's nova and neutron `health-probe.py` made generic. It finds the program in /proc,
+    limited to its own container's processes, and reads the program's own `--config-file` and
+    `--config-dir` arguments. It requires an ESTABLISHED RabbitMQ connection, then sends an RPC call to
+    the program's own `topic.server` queue, which only a consuming server answers. Each topic, exchange
+    and server name was read from the stable/2026.1 source, including the cases that aren't
+    `CONF.host`: cinder and manila `host@backend`, mistral, trove and blazar `0.0.0.0`, cloudkitty and
+    ironic `getfqdn()`, magnum's random id (topic only). The RPC charts set `rpc_ping_enabled`, so a
+    server answers the probe at DEBUG rather than logging an ERROR every minute.
+  - **Other workers:**
+    - Notification listeners (aodh listener and notifier, ceilometer-notification,
+      ironic-neutron-agent) require their RabbitMQ consumer connection.
+    - octavia-health-manager, octavia-driver-agent and ironic's tftp sidecar require their listening
+      socket, attributed by inode.
+    - mariadb-controller writes a heartbeat after every pass.
+    - skyline's nginx is probed through its proxy.
+    - nova-compute-ironic uses nova's own probe.
+    - tacker-server gets an HTTP probe on its versions document.
+  - **Readiness only for RPC workers** (#146): an RPC failure can't tell a wedged process from a
+    broker outage, and a liveness probe on it restarts every replica at once and repairs nothing.
+    tacker-server is the one new liveness probe. It asks `/`, which needs no dependency, and has a
+    startup probe because its start script installs packages first.
+  - **Exceptions:** 12 containers have no signal a probe can test (pollers, periodic loops, masakari's
+    monitors, designate-sink with no handlers). Each is listed with its reason in
+    `hack/readiness-probe-exceptions.yaml`.
+  - **New gates:** `hack/validate-readiness-probes.py` renders every chart at its defaults and with
+    every workload on (CI, 2026-11-17: 114 long-running containers in 37 charts; 53 without a readiness
+    probe on main, 12 on this change, all listed). It fails when a container has no probe and no exception, when an exception is
+    unneeded, when a probe is `true`, or when a probe's /tmp script isn't mounted (this caught
+    tacker-conductor's). `hack/validate-health-probe.py` runs the rendered script against
+    oslo.messaging's real RPC server and dispatcher, and against real processes and sockets in /proc.
 
 - **Start ordering, and re-running hooks (0.3.72, #297, #298, #299).**
   - **#298:** ceilometer-notification now waits for the rabbit-init Job of every vhost it consumes, as the umbrella
@@ -167,6 +227,7 @@ Curated history; release notes live in GitHub Releases.
 - **Docs standard adopted.** Added the OKF documentation bundle (this `docs/` set +
   `docs/llms.txt` + `examples/identity-profile/README.md`), rewrote `README.md` to the
   six-section shape, and wired the shared `lint-docs` job into `.github/workflows/lint.yaml`.
+
 - **Dead-org sweep.** Eliminated the legacy dead-org references in favour of
   `krateo-blueprints` (part of the krateo-platformops/installer standardization).
 

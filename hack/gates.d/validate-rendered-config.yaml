@@ -1,0 +1,7 @@
+# Helm writes "<no value>" for a missing or null value, and an OpenStack service reads that
+# text literally: magnum-api ran uWSGI with no workers because of it (#202).
+name: "No rendered config carries Helm's <no value> placeholder"
+job: job-hooks
+order: 90
+run: |
+  python3 hack/validate-rendered-config.py .
