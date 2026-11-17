@@ -21,6 +21,8 @@ kind: ConfigMap
 metadata:
   name: masakari-bin
 data:
+  worker-health-probe.py: |
+{{- include "helm-toolkit.scripts.health_probe" . | indent 4 }}
   masakari-engine.sh: |
 {{ tuple "bin/_masakari-engine.sh.tpl" . | include "helm-toolkit.utils.template" | indent 4 }}
   masakari-api.sh: |

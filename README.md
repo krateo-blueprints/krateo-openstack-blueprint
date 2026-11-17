@@ -39,7 +39,8 @@ Composition CRD.
   (+ Glance + Horizon); `openstack token issue` and the Horizon UI login both succeed.
 - **Compute plane** — fully working on an amd64 cluster with the OVS kernel module (e.g.
   Ubuntu GKE nodes): OVS datapath, Neutron (ML2/OVS, VXLAN), Nova, libvirt/QEMU; a CirrOS VM
-  boots to `ACTIVE`. Not possible on kind/Apple-Silicon — use GKE.
+  boots to `ACTIVE`. Not possible on kind/Apple-Silicon: use an amd64 cluster whose nodes load the OVS kernel
+  module (Ubuntu GKE nodes are one example).
 - **Bare-metal plane (`ironic`)** — production-grade blueprint (ipmi/redfish, iPXE/TFTP/HTTP,
   conductor on `hostNetwork`); provisioning a real node needs real hardware. Pairs with the
   [`openstack-ironic-operator-kog`](https://github.com/krateo-blueprints/openstack-ironic-operator-kog)
@@ -437,8 +438,9 @@ PVC swift-shared-storage  accessModes=[ReadWriteMany]  storageClassName=nfs-prov
 -> 4 x swift-storage Pending, swift never Ready
 ```
 
-GKE's default `standard-rwo` cannot be substituted: it is block storage and **cannot do RWX at
-all**. The RWX-capable classes there are Filestore-backed and are not the default.
+A cluster's default class is usually block storage, which **cannot do RWX at all**. For example, GKE's default
+`standard-rwo` can't, and its RWX-capable classes are Filestore-backed and not the default. Other platforms differ in
+names, not in this.
 
 So **before selecting swift, make sure the cluster has an RWX StorageClass, and name it**:
 
@@ -448,7 +450,7 @@ spec:
     swift:
       ring:
         shared_storage:
-          storageClassName: my-filestore-rwx    # whatever your platform calls it
+          storageClassName: <your-rwx-class>    # whatever your platform calls it
 ```
 
 It is a values key, so this needs no change to the chart and no divergence from upstream — only
@@ -1317,8 +1319,11 @@ kubectl -n openstack get compositiondefinitions \
 
 ### Running guests on KVM
 
-By default (`compute.virtType: qemu`) nova runs guests in QEMU software emulation. That works on any node, slowly. With
-hardware virtualization on the compute nodes, set:
+By default (`compute.virtType: qemu`) nova runs guests in QEMU software emulation. That works on any node, slowly.
+To run them on KVM:
+
+**What you need:** compute nodes that expose `/dev/kvm` to their pods, labelled `openstack-compute-node=enabled` and
+`openvswitch=enabled`. Then set:
 
 ```yaml
 compute:
@@ -1329,30 +1334,32 @@ compute:
   - nova gets `[libvirt] virt_type = kvm` and `cpu_mode = host-model`;
   - libvirt gets `virt_type = "kvm"`.
 - **The refusal:** libvirt's DaemonSet gains an init container, `libvirt-kvm-check`, that refuses to start on a node
-  without `/dev/kvm`. The message names GKE's `--enable-nested-virtualization`. The check runs in libvirt, because
+  without `/dev/kvm`. Its message says what to enable, with no provider assumed. The check runs in libvirt, because
   libvirtd's qemu processes are what open `/dev/kvm` when a guest starts. Without the device every boot would otherwise
   fail later, inside nova, far from the cause.
 - **qemu changes nothing:** every chart renders as it always has. `hack/validate-virt-type.py` checks all of this and
   runs the refusal script.
 
-On GKE, run compute on its own node pool created with nested virtualization. Measured 2026-11-17:
-- N2 Ubuntu nodes in such a pool show `vmx` in `/proc/cpuinfo`, `/dev/kvm`, and a working `KVM_CREATE_VM`;
-- a pool without the flag shows none of these.
-
-```sh
-gcloud container node-pools create compute-kvm --cluster <cluster> --region <region> \
-  --machine-type n2-standard-8 --image-type UBUNTU_CONTAINERD --enable-nested-virtualization \
-  --node-labels=openstack-compute-node=enabled,openvswitch=enabled,nested-virtualization=enabled
-```
-
 **How compute pods land there.** nova-compute, libvirt, ceilometer-compute and cyborg-agent schedule only on nodes
 labelled `openstack-compute-node=enabled`, and neutron's OVS agent and openvswitch on `openvswitch=enabled`. The
 umbrella's `nodeLabelPreconditions` and `hack/validate-node-label-preconditions.py` own this. So:
-- give those labels to the KVM pool only;
-- leave `openstack-compute-node` off the control pool;
-- if you taint the KVM pool, add the matching toleration to the umbrella's `tolerations`, which reaches every pod.
+- give those labels to the KVM nodes only;
+- leave `openstack-compute-node` off the other nodes;
+- if you taint the KVM nodes, add the matching toleration to the umbrella's `tolerations`, which reaches every pod.
 
-`nested-virtualization=enabled` is informational; nothing selects on it.
+**Getting `/dev/kvm`: examples.** These are examples, not requirements. Any node that exposes `/dev/kvm` works. Check
+your provider's documentation for the instance types and images that support it.
+- **Bare metal:** enable VT-x (Intel) or AMD-V (AMD) in the firmware and load the `kvm_intel` or `kvm_amd` module.
+- **GKE** (measured 2026-11-17): create a node pool with `--enable-nested-virtualization`. N2 Ubuntu nodes in such a pool
+  show `vmx` in `/proc/cpuinfo`, `/dev/kvm` and a working `KVM_CREATE_VM`; a pool without the flag shows none of these.
+
+  ```sh
+  gcloud container node-pools create compute-kvm --cluster <cluster> --region <region> \
+    --machine-type n2-standard-8 --image-type UBUNTU_CONTAINERD --enable-nested-virtualization \
+    --node-labels=openstack-compute-node=enabled,openvswitch=enabled
+  ```
+- **AWS** (not measured here): `.metal` instance types expose the host's virtualization directly.
+- **Azure** (not measured here): VM sizes that support nested virtualization, such as the Dv3/Ev3 families and later.
 
 ### Driving this OpenStack with Krateo KOG operators
 
@@ -1567,6 +1574,8 @@ Index: [docs/examples.md](docs/examples.md).
   the upstream audit grounding the distribution-layer design.
 - [docs/medium-openstack-as-a-service.md](docs/medium-openstack-as-a-service.md) — the
   narrative write-up.
+- [docs/images.md](docs/images.md) — every container image a chart can run (generated).
+- [docs/supply-chain.md](docs/supply-chain.md) — image inventory, CVE scan, and the pinning decision.
 - [docs/llms.txt](docs/llms.txt) — the version-pinned LLM doc index.
 
 The dashboard (Horizon) logs in as `admin` with the install's generated password (domain `Default`): `kubectl -n openstack get secret openstack-credential-identity-admin -o jsonpath='{.data.password}' | base64 -d`:
@@ -1581,10 +1590,12 @@ The dashboard (Horizon) logs in as `admin` with the install's generated password
 GHCR on a semver tag (`git tag 0.1.0 && git push origin 0.1.0` →
 `oci://ghcr.io/krateo-blueprints/charts/<component>:0.1.0`).
 
-`.github/workflows/lint.yaml` runs on every PR: the `hack/validate-*.py` gates (each states the
-defect it was written for), the umbrella `componentValues` schema-in-sync check
+`.github/workflows/lint.yaml` runs on every PR: the `hack/validate-*.py` gates, one file each in
+`hack/gates.d` (each states the defect it was written for), the umbrella `componentValues` schema-in-sync check
 (`hack/gen-componentvalues-schema.py`), the service-contract SSO deep-link resolution, the
-removed-values refusal, and the shared `lint-docs` documentation-standard job. See [docs/release.md](docs/release.md).
+removed-values refusal, and the shared `lint-docs` documentation-standard job. A change adds a
+`docs/log.d` file and, for a new gate, a `hack/gates.d` file; `docs/log.md` and the check steps
+of `lint.yaml` are never edited by hand. See [docs/release.md](docs/release.md).
 
 ## License
 

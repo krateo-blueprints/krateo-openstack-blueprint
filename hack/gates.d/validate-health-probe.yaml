@@ -1,0 +1,13 @@
+# The presence gate above cannot tell a probe that works from one that always fails (every
+# worker it guards stays out of Ready) or always passes (#231 again). This runs the worker
+# probe's rendered text against oslo.messaging's real RPC server and dispatcher and against
+# real processes and sockets in /proc. Pinned to stable/2026.1's upper-constraints, the
+# versions in the images. Fails when a test is skipped or none ran.
+name: "The worker readiness probe answers ready only for a serving RPC server"
+job: capability-roles
+order: 454
+# Was its own step, "Install the worker readiness probe's test dependencies", just before this gate.
+setup: |
+  pip install "oslo.messaging==17.3.2" "oslo.config==10.3.0" "kombu==5.6.2"
+run: |
+  python3 hack/validate-health-probe.py .

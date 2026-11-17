@@ -1,0 +1,7 @@
+# The umbrella's contract emitter was removed in 0.3.68 (usage and health come from
+# cmp-usage-collector). A removed value must be refused, not silently ignored.
+name: "Removed values are refused, never ignored"
+job: job-hooks
+order: 150
+run: |
+  bash hack/validate-removed-values.sh .

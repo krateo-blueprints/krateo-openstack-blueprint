@@ -57,6 +57,7 @@ spec:
 {{ tuple $envAll "executor" $mounts_mistral_executor_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: mistral-executor
+{{ dict "envAll" $envAll "component" "executor" "container" "default" "args" (list "--process" "mistral-server" "--exchange" "openstack" "--rpc-topic" "mistral_executor" "--rpc-server-opt" "executor.host" "--rpc-server-default" "0.0.0.0") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "mistral_executor" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.executor | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           securityContext:
@@ -64,6 +65,10 @@ spec:
           command:
             - /tmp/mistral-executor.sh
           volumeMounts:
+            - name: mistral-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: pod-tmp
               mountPath: /tmp
             - name: oslo-lock-path
