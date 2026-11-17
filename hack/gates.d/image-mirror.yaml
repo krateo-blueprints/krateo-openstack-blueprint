@@ -1,0 +1,9 @@
+# #316, #334: hack/image-mirror.yaml may copy only a build image-scan measured (the digest hack/images.yaml recorded
+# for the image the chart runs), to a dated tag under ghcr.io/krateo-blueprints/images/. A wrong digest would mirror an
+# unscanned build; an undated or reused tag would make the mirror as mutable as the upstream it replaces.
+name: "Every image mirror copies a recorded digest to an immutable ghcr.io/krateo-blueprints tag"
+job: job-hooks
+order: 205
+run: |
+  python3 hack/image-mirror.py --self-test
+  python3 hack/image-mirror.py . --check
