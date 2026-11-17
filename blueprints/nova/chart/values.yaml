@@ -2583,6 +2583,16 @@ pod:
             periodSeconds: 10
             successThreshold: 1
             timeoutSeconds: 70
+    # nova-compute-ironic: readiness only, with compute's own timing (health-probe.py's RPC call
+    # may take rpc_timeout=60 s) (#231, #146).
+    compute_ironic:
+      default:
+        readiness:
+          enabled: true
+          params:
+            initialDelaySeconds: 20
+            periodSeconds: 90
+            timeoutSeconds: 70
     compute-spice-proxy:
       default:
         liveness:

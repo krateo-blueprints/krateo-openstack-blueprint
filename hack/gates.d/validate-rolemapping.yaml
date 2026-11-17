@@ -1,0 +1,5 @@
+name: "roleMapping must name real CMP roles"
+job: capability-roles
+order: 230
+run: |
+  python3 hack/validate-rolemapping.py .

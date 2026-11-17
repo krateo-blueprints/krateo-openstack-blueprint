@@ -12,6 +12,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
+{{/*
+nova-compute serving ironic: the same RPC ping upstream runs on nova-compute (health-probe.py, ping
+on topic `compute` at this service's host), readiness only (#231). No liveness: the ping cannot
+tell a wedged process from an unreachable RabbitMQ, so a liveness probe on it restarts the service
+during a broker outage and repairs nothing (#146). Same config files as the start script.
+*/}}
+{{- define "novaComputeIronicReadinessProbeTemplate" }}
+exec:
+  command:
+    - python
+    - /tmp/health-probe.py
+    - --config-file
+    - /etc/nova/nova-compute.conf
+    - --config-file
+    - /etc/nova/nova-ironic.conf
+    - --config-dir
+    - /etc/nova/nova.conf.d
+    - --service-queue-name
+    - compute
+{{- end }}
+
 {{- if .Values.manifests.statefulset_compute_ironic }}
 {{- $envAll := . }}
 
@@ -72,6 +93,12 @@ spec:
         - name: nova-compute-ironic
 {{ tuple $envAll "nova_compute_ironic" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.compute_ironic | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "component" "compute_ironic" "container" "default" "type" "readiness" "probeTemplate" (include "novaComputeIronicReadinessProbeTemplate" $envAll | fromYaml) | include "helm-toolkit.snippets.kubernetes_probe" | indent 10 }}
+          env:
+            - name: RPC_PROBE_TIMEOUT
+              value: "{{ .Values.pod.probes.rpc_timeout }}"
+            - name: RPC_PROBE_RETRIES
+              value: "{{ .Values.pod.probes.rpc_retries }}"
           command:
             - /tmp/nova-compute-ironic.sh
           volumeMounts:
@@ -82,6 +109,10 @@ spec:
             - name: nova-bin
               mountPath: /tmp/nova-compute-ironic.sh
               subPath: nova-compute-ironic.sh
+              readOnly: true
+            - name: nova-bin
+              mountPath: /tmp/health-probe.py
+              subPath: health-probe.py
               readOnly: true
             - name: nova-etc
               mountPath: /etc/nova/nova-compute.conf

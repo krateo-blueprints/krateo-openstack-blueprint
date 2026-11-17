@@ -102,6 +102,7 @@ spec:
               mountPath: /run
       containers:
         - name: octavia-health-manager
+{{ dict "envAll" $envAll "component" "health_manager" "container" "default" "args" (list "--process" "octavia-health-manager" "--listen" (printf "udp:%v" $envAll.Values.conf.octavia.health_manager.bind_port)) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "octavia_health_manager" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.health_manager | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "octavia_health_manager" "container" "octavia_health_manager" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
@@ -115,6 +116,10 @@ spec:
                   - /tmp/octavia-health-manager.sh
                   - stop
           volumeMounts:
+            - name: octavia-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: oslo-lock-path
               mountPath: {{ .Values.conf.octavia.oslo_concurrency.lock_path }}
             - name: pod-etc-octavia

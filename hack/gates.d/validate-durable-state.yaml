@@ -1,0 +1,10 @@
+# A hostPath is state that stays on one node. mariadb defaulted to /tmp/mysql-data, so a
+# node restart on kind, where /tmp is tmpfs, emptied every OpenStack database, and the pod
+# crash-looped on a missing grastate.dat. Nothing was misconfigured: the chart defaults
+# did it, and every check passed until a machine rebooted (#177). Rendered rather than
+# read from values, because the template decides what ships.
+name: "State that exists nowhere else must be on a claim, not on a node"
+job: capability-roles
+order: 360
+run: |
+  python3 hack/validate-durable-state.py .

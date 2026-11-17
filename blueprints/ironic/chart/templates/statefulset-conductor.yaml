@@ -169,6 +169,7 @@ spec:
         {{- end }}
       containers:
         - name: ironic-conductor
+{{ dict "envAll" $envAll "component" "conductor" "container" "default" "args" (list "--process" "ironic-conductor" "--exchange" "ironic" "--rpc-topic" "ironic.conductor_manager" "--rpc-server-default" "@fqdn") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "ironic_conductor" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.conductor | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           securityContext:
@@ -176,6 +177,10 @@ spec:
           command:
             - /tmp/ironic-conductor.sh
           volumeMounts:
+            - name: ironic-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: pod-tmp
               mountPath: /tmp
             - name: ironic-bin
@@ -217,6 +222,7 @@ spec:
 {{ if $mounts_ironic_conductor.volumeMounts }}{{ toYaml $mounts_ironic_conductor.volumeMounts | indent 12 }}{{ end }}
 {{- if $envAll.Values.conductor.pxe.enabled }}
         - name: ironic-conductor-pxe
+{{ dict "envAll" $envAll "component" "conductor_pxe" "container" "default" "args" (list "--process" "in.tftpd" "--listen" "udp:69") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "ironic_pxe" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.conductor | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           securityContext:
@@ -227,6 +233,10 @@ spec:
           command:
             - /tmp/ironic-conductor-pxe.sh
           volumeMounts:
+            - name: ironic-bin
+              mountPath: /tmp/worker-health-probe.py
+              subPath: worker-health-probe.py
+              readOnly: true
             - name: pod-tmp
               mountPath: /tmp
             - name: ironic-bin

@@ -1,0 +1,10 @@
+# Gating. Measured on GKE (#179): powerdns's db-init Job mounted a ConfigMap and a Secret
+# its chart never created, because the chart named them after the release and helm-toolkit
+# used fixed names. The two agree only under a release called `powerdns`, which is what
+# every render here used, and a Krateo release never is. This renders every component under
+# a release name unlike its chart's and refuses a pod that names an object nobody renders.
+name: "Every object a pod names must be one its chart renders"
+job: capability-roles
+order: 410
+run: |
+  python3 hack/validate-pod-references.py .
