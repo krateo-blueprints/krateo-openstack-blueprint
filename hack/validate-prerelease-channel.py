@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""A pre-release never reaches the Marketplace index, and a release is never a pre-release version.
+"""A pre-release never reaches the Marketplace index, a release is never a pre-release version,
+and pruning deletes only pre-releases.
 
 Why this exists. Every X.Y.Z tag publishes to the Marketplace index, so a change has to be
 verified on GKE before a tag exists (Diego, 2026-11-17: "batch on main, GKE-verify, then tag").
@@ -24,6 +25,11 @@ repository can change in a one-line edit, so they are checked here on every pull
      shape before anything else, and calls the shared scripts with the `release` channel, which
      refuse a pre-release version before stamping. prerelease.yaml calls them with `prerelease`
      and derives its version with hack/release-version.sh.
+  3. PRUNING DELETES ONLY PRE-RELEASES. prune-prereleases.yaml holds exactly `contents: read`,
+     references no secret but PRERELEASE_PRUNE_TOKEN, refuses to run without it, and a manual run
+     defaults to a dry run. hack/prune-prereleases.py deletes a version only if every tag has the
+     pre-release shape; its table, its keep-the-newest plan and delete_version's own refusal of a
+     release are exercised against a fake API.
 
 Then it proves the checks can fail. The version table runs against hack/release-version.sh, and
 against copies of it with each pattern loosened. hack/publish-charts.sh and
@@ -336,14 +342,152 @@ VERSION_MUTATIONS = [
 CHECK_LINE = '"$(dirname "$0")/release-version.sh" check "$CHANNEL" "$VERSION"'
 
 
+# --- prune-prereleases.yaml and hack/prune-prereleases.py ---------------------------------------
+PRUNE = "prune-prereleases.yaml"
+PRUNE_SECRET = "PRERELEASE_PRUNE_TOKEN"
+
+
+def check_prune(text):
+    doc, problems = load(PRUNE, text)
+    if doc is None:
+        return problems
+    if doc.get("permissions") != {"contents": "read"}:
+        problems.append(f"{PRUNE}: workflow permissions must be exactly contents: read, got "
+                        f"{doc.get('permissions')!r}; deletion goes through {PRUNE_SECRET} only")
+    jobs = doc.get("jobs") or {}
+    if not jobs:
+        problems.append(f"{PRUNE}: has no jobs")
+    for name, job in jobs.items():
+        job = job or {}
+        for key in ("permissions", "uses", "secrets"):
+            if key in job:
+                problems.append(f"{PRUNE}: job {name} sets `{key}`")
+    for s in strings(doc):
+        for expr in EXPR.findall(s):
+            for m in re.finditer(r"\bsecrets\b(\.\w+)?", expr):
+                if m.group(1) != "." + PRUNE_SECRET:
+                    problems.append(f"{PRUNE}: references `{m.group(0)}`; only secrets.{PRUNE_SECRET} "
+                                    "may appear")
+    on = triggers(doc)
+    inputs = ((on.get("workflow_dispatch") or {}).get("inputs") or {})
+    if (inputs.get("dry-run") or {}).get("default") is not True:
+        problems.append(f"{PRUNE}: a manual run must default to dry-run (input `dry-run`, default true)")
+    steps = [s for job in jobs.values() for s in ((job or {}).get("steps") or [])
+             if isinstance(s, dict)]
+    texts = [s.get("run", "") for s in steps]
+    guard = [i for i, t in enumerate(texts) if re.search(r'-z "\$\{PRUNE_TOKEN\}"', t)]
+    prune = [i for i, t in enumerate(texts) if "hack/prune-prereleases.py" in t]
+    if not prune:
+        problems.append(f"{PRUNE}: never runs hack/prune-prereleases.py")
+    if not guard or (prune and guard[0] > prune[0]):
+        problems.append(f"{PRUNE}: does not refuse to run without {PRUNE_SECRET} before pruning")
+    for i in prune:
+        dry = str((steps[i].get("env") or {}).get("DRY_RUN", ""))
+        if "workflow_dispatch" not in dry or "dry-run" not in dry:
+            problems.append(f"{PRUNE}: the prune step's DRY_RUN does not follow the manual dry-run input")
+    return problems
+
+
+def load_prune(source):
+    ns = {"__name__": "prune_prereleases", "__file__": os.path.join(ROOT, "hack", "prune-prereleases.py")}
+    exec(compile(source, "prune-prereleases.py", "exec"), ns)
+    return ns
+
+
+DELETABLE = [
+    (["0.3.74-main.gabc1234"], True),
+    (["0.3.74-dev.g0123abc"], True),
+    (["0.3.74-main.gabc1234", "0.3.74-main.gdef5678"], True),
+    (["0.3.73"], False),
+    (["0.3.74-main.gabc1234", "0.3.74"], False),
+    ([], False),
+    (["latest"], False),
+    (["0.3.74-rc.1"], False),
+    (["sha256-0123abcd"], False),
+]
+
+
+class FakeGitHub:
+    def __init__(self):
+        self.deleted = []
+
+    def delete(self, name, version_id):
+        self.deleted.append((name, version_id))
+
+
+def prune_behaviour(ns):
+    problems = []
+    for tags, want in DELETABLE:
+        if bool(ns["deletable"](tags)) != want:
+            problems.append(f"prune-prereleases.py: deletable({tags}) is {not want}, expected {want}")
+    # Six pre-releases and two releases, in two packages; keep 2.
+    def v(i, tag, day):
+        return {"id": i, "created_at": f"2026-11-{day:02d}T00:00:00Z",
+                "metadata": {"container": {"tags": [tag]}}}
+    pre = [f"0.3.74-main.g{n:07x}" for n in range(1, 7)]
+    packages = {
+        "openstack": [v(1, "0.3.72", 1), v(2, "0.3.73", 2)] + [v(10 + k, t, 3 + k) for k, t in enumerate(pre)],
+        "keystone": [v(3, "0.3.73", 2)] + [v(20 + k, t, 3 + k) for k, t in enumerate(pre)],
+    }
+    kept, doomed = ns["plan"](packages, 2)
+    if kept != set(pre[-2:]):
+        problems.append(f"prune-prereleases.py: plan keeps {sorted(kept)}, expected the newest two")
+    doomed_tags = {t for _, ver in doomed for t in ns["tags_of"](ver)}
+    if doomed_tags != set(pre[:-2]) or len(doomed) != 8:
+        problems.append(f"prune-prereleases.py: plan deletes {sorted(doomed_tags)} ({len(doomed)} "
+                        "versions), expected the four oldest pre-releases in both packages")
+    gh = FakeGitHub()
+    try:
+        ns["delete_version"](gh, "openstack", v(2, "0.3.73", 2))
+        problems.append("prune-prereleases.py: delete_version accepted a release version")
+    except RuntimeError:
+        pass
+    if gh.deleted:
+        problems.append(f"prune-prereleases.py: delete_version deleted {gh.deleted} for a release")
+    ns["delete_version"](gh, "openstack", v(10, pre[0], 3))
+    if gh.deleted != [("openstack", 10)]:
+        problems.append("prune-prereleases.py: delete_version did not delete a pre-release (the "
+                        "positive control: without it, its refusal above proves nothing)")
+    return problems
+
+
+PRUNE_MUTATIONS = [
+    ("contents: write", "  contents: read\n", "  contents: write\n"),
+    ("packages: write added", "  contents: read\n", "  contents: read\n  packages: write\n"),
+    ("another secret", "          KEEP: ${{ github.event.inputs.keep || '5' }}\n",
+     "          KEEP: ${{ github.event.inputs.keep || '5' }}\n"
+     "          T: ${{ secrets.CHARTS_PUBLISH_TOKEN }}\n"),
+    ("dry-run defaults off", "        type: boolean\n        required: true\n        default: true\n",
+     "        type: boolean\n        required: true\n        default: false\n"),
+    ("no token refusal", 'if [ -z "${PRUNE_TOKEN}" ]; then', "if false; then"),
+    ("DRY_RUN ignores the input",
+     "DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run != 'false' }}",
+     "DRY_RUN: false"),
+    ("a reusable job", "\njobs:\n", "\njobs:\n  other:\n    uses: ./.github/workflows/lint.yaml\n"),
+]
+PRUNE_SCRIPT_MUTATIONS = [
+    ("any pre-release tag suffices", 'return all(shape("prerelease", t) for t in tags)',
+     'return any(shape("prerelease", t) for t in tags)'),
+    ("untagged is deletable", "    if not tags:\n        return False\n", ""),
+    ("delete_version trusts the plan", "    if not deletable(tags):\n        raise RuntimeError(",
+     "    if False:\n        raise RuntimeError("),
+    ("plan keeps the oldest", "key=lambda t: (newest[t], t), reverse=True)",
+     "key=lambda t: (newest[t], t))"),
+]
+
+
 def main():
     workflows = {}
     for name in sorted(os.listdir(WF)) if os.path.isdir(WF) else []:
         if name.endswith((".yaml", ".yml")):
             workflows[name] = open(os.path.join(WF, name)).read()
-    for need in (PRE, REL):
+    for need in (PRE, REL, PRUNE):
         if need not in workflows:
             measurement_failed(f"no .github/workflows/{need}")
+    prune_py = os.path.join(ROOT, "hack", "prune-prereleases.py")
+    if not os.path.isfile(prune_py):
+        measurement_failed("no hack/prune-prereleases.py")
+    prune_src = open(prune_py).read()
     scripts = {}
     for s in SCRIPTS:
         p = os.path.join(ROOT, "hack", s)
@@ -361,8 +505,16 @@ def main():
             f.write(scripts["release-version.sh"])
         problems += version_table(vs)
     problems += scripts_check_first(scripts)
+    problems += check_prune(workflows[PRUNE])
+    problems += prune_behaviour(load_prune(prune_src))
 
     survived = []
+    for label, old, new in PRUNE_MUTATIONS:
+        if not check_prune(mutate(workflows[PRUNE], old, new, label)):
+            survived.append(f"{PRUNE}: {label}")
+    for label, old, new in PRUNE_SCRIPT_MUTATIONS:
+        if not prune_behaviour(load_prune(mutate(prune_src, old, new, label))):
+            survived.append(f"prune-prereleases.py: {label}")
     for label, old, new in PRE_MUTATIONS:
         if not check_prerelease(mutate(workflows[PRE], old, new, label)):
             survived.append(f"{PRE}: {label}")
@@ -390,7 +542,8 @@ def main():
         if not scripts_check_first(m):
             survived.append(f"{s}: version check removed")
 
-    n_mut = (len(PRE_MUTATIONS) + len(REL_MUTATIONS) + 1 + len(VERSION_MUTATIONS) + 2)
+    n_mut = (len(PRE_MUTATIONS) + len(REL_MUTATIONS) + 1 + len(VERSION_MUTATIONS) + 2
+             + len(PRUNE_MUTATIONS) + len(PRUNE_SCRIPT_MUTATIONS))
     for p in problems:
         print(f"  - {p}")
     for s in survived:

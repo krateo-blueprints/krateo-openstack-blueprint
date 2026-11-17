@@ -158,6 +158,33 @@ Names have room for the longer version. core-provider names each controller obje
 45 of the 63 characters Kubernetes allows. `hack/release-version.sh derive` refuses any version
 that would exceed 63.
 
+### Pruning old pre-releases
+
+Each pre-release adds about 39 package versions to GHCR. `.github/workflows/prune-prereleases.yaml`
+deletes the old ones. It runs every Monday and keeps the newest 5 pre-releases. The count is taken
+across all packages, so each kept pre-release stays installable as a whole. `hack/prune-prereleases.py`
+deletes a package version only when it is tagged and every tag has the pre-release shape that
+`hack/release-version.sh` defines. A plain `X.Y.Z` never has that shape, so **a release is never
+deleted**. The delete function re-checks the shape before each request.
+`hack/validate-prerelease-channel.py` gates the workflow (exact permissions, its one secret, the
+dry-run default) and the script (the deletable table, the plan, the refusal), with mutations.
+
+You can also run it by hand from Actions. The inputs are `keep` (default 5) and `dry-run`, which is
+ticked by default: a manual run prints the plan and changes nothing until you untick it. A
+scheduled run deletes.
+
+**One-time setup (an org owner):** create a classic personal access token with `read:packages`
+and `delete:packages`. The account must administer the `charts/*` packages of krateo-blueprints.
+Save the token as the **repository** secret `PRERELEASE_PRUNE_TOKEN`, so it does not reach every
+repository in the org:
+
+```console
+$ gh secret set PRERELEASE_PRUNE_TOKEN -R krateo-blueprints/krateo-openstack-blueprint
+```
+
+Paste the token at the prompt rather than piping it, so it gets no trailing newline. Without the
+secret, the workflow refuses at its first step instead of skipping.
+
 ## What a tag ships
 
 `.github/workflows/release-tag.yaml` triggers on a semver tag (`[0-9]+.[0-9]+.[0-9]+`; GitHub
