@@ -132,6 +132,12 @@ spec:
 {{- /* The install namespace's ingress policy. Deny by default; everything allowed is one of the five rules below, and
        nothing else crosses into the namespace (hack/validate-public-endpoints.py asserts exactly that set of peers).
 
+       "Every pod" is written as a selector on the label krateo.io/networkpolicy-exempt: the policies select every pod
+       WITHOUT it (DoesNotExist), which is every pod, in block style (an empty selector can only be written `{}`), and
+       a pod given the label is selected by none of them, so it is left unrestricted: an explicit, visible opt-out
+       (who can label pods here can already run any workload here). The same-namespace PEER is that selector OR its
+       complement (Exists), i.e. every pod of the namespace, exempt or not.
+
        Same namespace: every component talks to every other one by Service name, and OpenStack-Helm's per-application
        policies would be a 36-component matrix to keep in step with the charts.
        Nodes: neutron's agents, nova-compute, libvirt and openvswitch are hostNetwork pods; their traffic carries the
@@ -145,7 +151,10 @@ metadata:
   name: openstack-default-deny-ingress
   namespace: {{ .Release.Namespace }}
 spec:
-  podSelector: {}
+  podSelector:
+    matchExpressions:
+      - key: krateo.io/networkpolicy-exempt
+        operator: DoesNotExist
   policyTypes:
     - Ingress
 ---
@@ -155,12 +164,22 @@ metadata:
   name: openstack-allow-same-namespace
   namespace: {{ .Release.Namespace }}
 spec:
-  podSelector: {}
+  podSelector:
+    matchExpressions:
+      - key: krateo.io/networkpolicy-exempt
+        operator: DoesNotExist
   policyTypes:
     - Ingress
   ingress:
     - from:
-        - podSelector: {}
+        - podSelector:
+            matchExpressions:
+              - key: krateo.io/networkpolicy-exempt
+                operator: DoesNotExist
+        - podSelector:
+            matchExpressions:
+              - key: krateo.io/networkpolicy-exempt
+                operator: Exists
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -168,7 +187,10 @@ metadata:
   name: openstack-allow-nodes
   namespace: {{ .Release.Namespace }}
 spec:
-  podSelector: {}
+  podSelector:
+    matchExpressions:
+      - key: krateo.io/networkpolicy-exempt
+        operator: DoesNotExist
   policyTypes:
     - Ingress
   ingress:
@@ -184,7 +206,10 @@ metadata:
   name: openstack-allow-gateway
   namespace: {{ .Release.Namespace }}
 spec:
-  podSelector: {}
+  podSelector:
+    matchExpressions:
+      - key: krateo.io/networkpolicy-exempt
+        operator: DoesNotExist
   policyTypes:
     - Ingress
   ingress:
@@ -230,7 +255,10 @@ metadata:
   name: openstack-allow-namespaces
   namespace: {{ $.Release.Namespace }}
 spec:
-  podSelector: {}
+  podSelector:
+    matchExpressions:
+      - key: krateo.io/networkpolicy-exempt
+        operator: DoesNotExist
   policyTypes:
     - Ingress
   ingress:

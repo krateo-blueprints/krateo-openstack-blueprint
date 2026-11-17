@@ -710,6 +710,9 @@ chart renders no load-balancer annotations and assumes no DNS provider. How the 
   Nothing else crosses into the namespace. That includes the OpenStack KOG operators, unless you list their
   namespace. Set `networkPolicy.enabled: false` to leave policy to yourself.
 
+  The policies select every pod that lacks the label `krateo.io/networkpolicy-exempt`. A pod given that label is
+  selected by none of them and is left unrestricted: an explicit, visible opt-out.
+
 **Turning it on for an existing install** changes the values of every component it touches once, so each runs a helm
 upgrade. The ks-endpoints hooks then re-register the public catalog URLs. Anyone using `:31000` must move to
 `https://horizon.<baseDomain>`.

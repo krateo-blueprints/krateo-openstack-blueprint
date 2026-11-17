@@ -45,7 +45,7 @@ refused while their CRDs are absent. The README's "Public endpoints" section has
 | `gateway.addresses` | array of string \| null | `null` | Reserved IP addresses for the Gateway. |
 | `tls.issuerRef.{group,kind,name}` | strings | `cert-manager.io`, `ClusterIssuer`, `""` | The cert-manager issuer of the Gateway's certificate. `name` is required when enabled. |
 | `hsts.maxAge` | integer | `31536000` | `Strict-Transport-Security` max-age on every HTTPS response (no `includeSubDomains`, no `preload`). |
-| `networkPolicy.enabled` | boolean | `true` | Deny ingress to the install namespace by default; allow the namespace itself, `nodeCIDRs`, the Gateway's proxy pods (to the routed ports), the internet to the proxy pods only, and `allowNamespaces`. |
+| `networkPolicy.enabled` | boolean | `true` | Deny ingress to the install namespace by default; allow the namespace itself, `nodeCIDRs`, the Gateway's proxy pods (to the routed ports), the internet to the proxy pods only, and `allowNamespaces`. A pod labelled `krateo.io/networkpolicy-exempt` is selected by no policy (opt-out). |
 | `networkPolicy.nodeCIDRs` | array of string \| null | `null` | The CIDRs of the nodes' own addresses. Required with the policy on: the host-network data-plane pods reach RabbitMQ and the APIs from them. |
 | `networkPolicy.allowNamespaces` | array of string \| null | `null` | Namespaces whose pods may reach the install namespace, e.g. the OpenStack KOG operators'. |
 | `proxyNamespace` | string | `""` | Where the implementation runs the Gateway's proxy pods (label `gateway.networking.k8s.io/gateway-name`). Empty: the install namespace. |

@@ -105,6 +105,8 @@ publicEndpoints:
     # (2) the cluster's nodes, (3) the Gateway's proxy pods to the routed backends, (4) the internet to the Gateway's
     # proxy pods, and (5) the namespaces listed in allowNamespaces. Nothing else crosses into the namespace.
     # Only enforced on a cluster whose network plugin enforces NetworkPolicy; the live check must prove it does.
+    # The policies select every pod WITHOUT the label krateo.io/networkpolicy-exempt; a pod given that label is
+    # selected by none of them, so it is left unrestricted (an explicit opt-out).
     enabled: true
     # REQUIRED when enabled: the CIDRs the nodes' own addresses come from. neutron's agents, nova-compute, libvirt and
     # openvswitch run on the host network, so their traffic to RabbitMQ, placement and the APIs arrives from node

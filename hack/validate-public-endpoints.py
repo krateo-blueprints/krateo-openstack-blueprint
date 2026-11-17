@@ -23,7 +23,9 @@ charts, so they are checked against the charts here, not trusted.
         Certificate's Secret, and that Certificate names every routed hostname;
      d. the NetworkPolicy set denies ingress by default and allows exactly: this namespace, the node CIDRs, the
         Gateway's proxy pods (to the routed backends' target ports), the internet to those proxy pods only, and
-        allowNamespaces. Any other peer that crosses into the namespace fails;
+        allowNamespaces. Any other peer that crosses into the namespace fails. "Every pod" must be the block-style
+        selector on krateo.io/networkpolicy-exempt (DoesNotExist; a same-namespace peer may add its Exists
+        complement); an empty selector `{}`, or any flow collection in the rendered file, fails;
      e. the render is refused, naming the reason, when baseDomain, the issuer or (with the policy on) nodeCIDRs is
         missing, and, on a live cluster (cluster reads stubbed), when the Gateway API or cert-manager CRDs are absent.
   3. THE COMPONENTS: each component chart rendered with the spec the umbrella gives it:
@@ -42,7 +44,8 @@ charts, so they are checked against the charts here, not trusted.
      routed public endpoint lists it in referencedEndpoints; every routed oslo component sets proxyHeaders.
   M. THE CHECKS SEE WHAT THEY GUARD: each check of 2 and 3e is run again on a mutated copy of the rendered objects
      (a route dropped, a metadata route added, HSTS removed, Horizon given a NodePort, a namespaceSelector peer added,
-     the node or gateway rule removed, the internet allowed to every pod, a plain-http catalog URL), and must report
+     the node or gateway rule removed, the internet allowed to every pod, a plain-http catalog URL, an empty `{}`
+     selector restored on the default deny and on the same-namespace peer), and must report
      THAT defect, not merely something.
 
 --components limits part 3 to the named components, to keep a local run light; CI runs it whole. Fails when helm
@@ -90,6 +93,11 @@ NOT_OSLO = {
 }
 INTERNET = {"0.0.0.0/0", "::/0"}
 GW_LABEL = "gateway.networking.k8s.io/gateway-name"
+# "Every pod", in block style: every pod without the opt-out label. Its complement (Exists) completes a peer that must
+# admit every pod of the namespace. An empty selector `{}` is refused: the repo writes YAML in block style only.
+EXEMPT = "krateo.io/networkpolicy-exempt"
+ALL_PODS = {"matchExpressions": [{"key": EXEMPT, "operator": "DoesNotExist"}]}
+EXEMPT_PODS = {"matchExpressions": [{"key": EXEMPT, "operator": "Exists"}]}
 
 failures = []
 counts = {}
@@ -258,15 +266,22 @@ def check_netpol(docs, node_cidrs, proxy_ns, allow_ns, gw_name, target_ports):
     """2d: default deny, and exactly the allowed peers."""
     out = []
     pols = [d for d in docs if d.get("kind") == "NetworkPolicy"]
-    deny = [p for p in pols if p["spec"].get("podSelector") == {} and "Ingress" in p["spec"].get("policyTypes", [])
+    deny = [p for p in pols if p["spec"].get("podSelector") == ALL_PODS and "Ingress" in p["spec"].get("policyTypes", [])
             and not p["spec"].get("ingress")]
     if not deny:
         out.append(("np-no-default-deny", "no policy denies ingress to every pod by default"))
     seen_nodes, seen_gw, seen_internet = set(), False, False
     for p in pols:
         name = p["metadata"]["name"]
-        sel = p["spec"].get("podSelector") or {}
-        selects_gw = (sel.get("matchLabels") or {}) == {GW_LABEL: gw_name}
+        sel = p["spec"].get("podSelector")
+        if sel is None or sel == {}:
+            out.append(("np-empty-selector", "%s selects its pods with an empty selector; write every pod as %s"
+                        % (name, json.dumps(ALL_PODS))))
+            sel = {}
+        selects_gw = sel == {"matchLabels": {GW_LABEL: gw_name}}
+        if sel and sel != ALL_PODS and not selects_gw:
+            out.append(("np-selector", "%s selects %s, neither every pod nor the Gateway's proxy pods"
+                        % (name, json.dumps(sel, sort_keys=True))))
         if "Egress" in p["spec"].get("policyTypes", []):
             out.append(("np-egress", "%s restricts egress; the phase-1 policy is ingress only" % name))
         for rule in p["spec"].get("ingress") or []:
@@ -309,8 +324,10 @@ def check_netpol(docs, node_cidrs, proxy_ns, allow_ns, gw_name, target_ports):
                         out.append(("np-cross-namespace", "%s admits namespace %s, which is not the Gateway's and "
                                     "not in allowNamespaces" % (name, ns)))
                 elif pods is not None:
-                    if pods != {} and not selects_gw:
-                        pass  # a narrower same-namespace peer is still same-namespace
+                    if pods == {}:
+                        out.append(("np-empty-selector", "%s admits a peer with an empty podSelector; write every pod "
+                                    "as %s or its complement" % (name, json.dumps(ALL_PODS))))
+                    # any other podSelector-only peer is a same-namespace peer
                 else:
                     out.append(("np-peer", "%s has a peer of no known shape: %s" % (name, peer)))
     if seen_nodes != set(node_cidrs):
@@ -506,6 +523,13 @@ def main():
             measurement_failed("the umbrella does not render with publicEndpoints on: %s" % err.strip()[-400:])
         on_docs = docs_of(out)
         edge = [d for d in on_docs if d.get("kind") in ("Gateway", "HTTPRoute", "Certificate", "NetworkPolicy")]
+        rc, edge_text, err = helm_template(u, "openstack-gate", ON, "--show-only", "templates/public-endpoints.yaml")
+        for i, line in enumerate(edge_text.splitlines(), 1):
+            code = line.split("#", 1)[0]
+            if re.search(r":\s*(\{\}|\[\])\s*$", code) or re.search(r"^\s*-\s*(\{|\[)", code):
+                fail("2d [flow-style]: templates/public-endpoints.yaml renders a flow collection at line %d: %s"
+                     % (i, line.strip()))
+        count("2f")
         if not any(d["kind"] == "HTTPRoute" for d in edge):
             measurement_failed("publicEndpoints on rendered no HTTPRoute at all")
         r_out = check_routes(edge, table, expected)
@@ -719,7 +743,16 @@ def main():
     def internet_everywhere(d):
         policy(d, "openstack-allow-nodes")["spec"]["ingress"][0]["from"].append({"ipBlock": {"cidr": "0.0.0.0/0"}})
 
+    def empty_selector(d):
+        policy(d, "openstack-default-deny-ingress")["spec"]["podSelector"] = {}
+
+    def empty_peer(d):
+        policy(d, "openstack-allow-same-namespace")["spec"]["ingress"][0]["from"] = [{"podSelector": {}}]
+
     tp = sorted(target_ports) if not only else None
+    expect("M", "np-empty-selector", check_netpol(mutated(empty_selector), NODE_CIDRS, NS, [], "openstack-gateway", tp))
+    expect("M", "np-no-default-deny", check_netpol(mutated(empty_selector), NODE_CIDRS, NS, [], "openstack-gateway", tp))
+    expect("M", "np-empty-selector", check_netpol(mutated(empty_peer), NODE_CIDRS, NS, [], "openstack-gateway", tp))
     expect("M", "route-missing", check_routes(mutated(drop_keystone), table, expected))
     expect("M", "route-denied", check_routes(mutated(add_metadata), table, expected))
     expect("M", "hsts", check_tls(mutated(drop_hsts)))
@@ -745,7 +778,7 @@ def main():
                 x["data"]["local_settings"] = base64.b64encode(txt.encode()).decode() if x["kind"] == "Secret" else txt
         expect("M", "horizon-settings", check_horizon(hd2))
 
-    for part in ("1", "2a", "2c", "2d", "2e", "4", "M"):
+    for part in ("1", "2a", "2c", "2d", "2e", "2f", "4", "M"):
         if not counts.get(part):
             failures.append("%s: checked nothing" % part)
     if not only:
