@@ -3,6 +3,6 @@
 # The rendered fallback is run against a stand-in `ip`.
 name: "neutron's tunnel interface is detected, not assumed"
 job: capability-roles
-order: 145
+order: 146
 run: |
   python3 hack/validate-neutron-tunnel-interface.py .
