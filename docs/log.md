@@ -27,7 +27,9 @@ Curated history; release notes live in GitHub Releases.
   `hack/validate-hook-cleanup.py` renders each chart at defaults and with every Job on. For every render with a hook
   Job, it requires exactly one cleanup, last among pre-delete hooks, with that RBAC and a selector matching every hook
   Job but not itself. It also runs the script against a stand-in API, with another release's Job and a non-hook Job
-  next to the render's, and against a failing API. libvirt, memcached, openvswitch and redis render no hook Job unless
+  next to the render's, and against a failing API. Its first CI run found four hook Jobs with no labels at all
+  (cloudkitty-storage-init, ironic-manage-cleaning-network, magnum-domain-ks-user, masakari-db-sync), which no
+  selector can reach. They now carry helm-toolkit's labels; their pod templates are unchanged. libvirt, memcached, openvswitch and redis render no hook Job unless
   `images.local_registry.active` turns on image-repo-sync, and have no python image, so they get no cleanup.
 
 - **Start ordering, and re-running hooks (0.3.72, #297, #298, #299).**
