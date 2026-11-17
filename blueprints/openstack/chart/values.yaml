@@ -75,7 +75,7 @@ rerunHooks:
 #         name: krateo-selfsigned-ca
 #     networkPolicy:
 #       nodeCIDRs:
-#         - 10.128.0.0/20
+#         - 192.168.10.0/24
 publicEndpoints:
   enabled: false
   # Every public hostname is <service>.<baseDomain>, e.g. keystone.cloud.example.com. Required when enabled.

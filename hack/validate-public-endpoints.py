@@ -34,7 +34,9 @@ charts, so they are checked against the charts here, not trusted.
         enable_proxy_headers_parsing = true in its rendered <name>.conf);
      e. Horizon renders no NodePort or LoadBalancer Service, and its settings are Secure and trust only
         https://horizon.<baseDomain>; nova's noVNC base URL is https://novncproxy.<baseDomain>/...; glance's CORS
-        origin is Horizon's public hostname.
+        origin is Horizon's public hostname; ironic's swift endpoint is swift's;
+     f. publicEndpoints sets no client interface/endpoint_type option in any component, so in-cluster clients stay
+        on the internal endpoint (hack/validate-client-endpoint-interface.py, #222).
   4. THE TABLES AGAINST THE CHARTS (static): publicEndpointComponents.<c>.ingressManifests is exactly every
      manifests.* switch of chart <c> that names an ingress; every chart template that renders another component's
      routed public endpoint lists it in referencedEndpoints; every routed oslo component sets proxyHeaders.
@@ -66,7 +68,7 @@ except ImportError:
 
 DOMAIN = "cloud.example.test"
 ISSUER = "gate-ca"
-NODE_CIDRS = ["10.128.0.0/20", "fd00:10::/64"]
+NODE_CIDRS = ["192.168.10.0/24", "fd00:10::/64"]
 NS = "openstack"
 ON = {
     "profile": "full",
@@ -488,6 +490,16 @@ def main():
                 fail("1: with publicEndpoints off, %s's spec differs from the spec built without the merge" % n)
             count("1")
 
+        # 3f: publicEndpoints sets no client endpoint-interface option, so hack/validate-client-endpoint-interface.py's
+        # guarantee (in-cluster clients use the internal endpoint, #222) holds with it on.
+        for n in names:
+            on_s, off_s = specs["on"].get(n) or "", specs["off-with"].get(n) or ""
+            for opt in ("interface", "endpoint_type", "valid_interfaces", "os_endpoint_type"):
+                if on_s.count('"%s"' % opt) != off_s.count('"%s"' % opt):
+                    fail("3f: publicEndpoints changes %s's client option %s; in-cluster clients must stay internal"
+                         % (n, opt))
+            count("3f")
+
         # ---------------- part 2: the edge
         rc, out, err = helm_template(u, "openstack-gate", ON)
         if rc != 0:
@@ -615,6 +627,10 @@ def main():
                 want = "novncproxy_base_url = https://novncproxy.%s/" % DOMAIN
                 if not any(want in t for k, ts in conf_files(docs).items() if k == "nova.conf" for t in ts):
                     fail("3e: nova.conf does not carry `%s...`" % want)
+            if n == "ironic" and "swift" in names:
+                want = "swift_endpoint_url = https://swift.%s" % DOMAIN
+                if not any(want in t for t in conf_files(docs).get("ironic.conf", [])):
+                    fail("3e: ironic.conf does not carry `%s`" % want)
             if n == "glance" and "horizon" in names:
                 if not any("https://horizon.%s" % DOMAIN in t for t in conf_files(docs).get("glance-api.conf", [])):
                     fail("3e: glance-api.conf's CORS allowed_origin does not name https://horizon.%s" % DOMAIN)

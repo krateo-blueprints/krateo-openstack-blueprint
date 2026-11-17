@@ -664,7 +664,7 @@ spec:
         name: krateo-selfsigned-ca         # any cert-manager ClusterIssuer (or kind: Issuer)
     networkPolicy:
       nodeCIDRs:
-        - 10.128.0.0/20                    # where the nodes' own addresses come from
+        - 192.168.10.0/24                  # your nodes' address range (example)
       allowNamespaces:
         - krateo-system                    # e.g. where the OpenStack KOG operators run
 ```
@@ -675,6 +675,10 @@ orchestrator refuses to render, with the reason on its status, while the Gateway
 Then point DNS for the hostnames, or a wildcard `*.<baseDomain>`, at the Gateway's address
 (`kubectl -n openstack get gateway openstack-gateway`). Krateo's `features.externalDns` does that from the HTTPRoutes.
 Set `gateway.addresses` to a reserved IP so a rebuild keeps the records valid.
+
+Nothing here is specific to a cloud. The class, the issuer, the domain and the node CIDRs are all inputs, and the
+chart renders no load-balancer annotations and assumes no DNS provider. How the Gateway gets an external address
+(a cloud load balancer, MetalLB, or something else) is up to the Gateway API implementation.
 
 **What it renders and changes:**
 
