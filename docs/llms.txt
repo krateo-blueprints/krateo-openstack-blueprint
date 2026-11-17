@@ -13,6 +13,8 @@ docs/log.md: curated history
 docs/quickstart.md: deploy the umbrella, reconfigure a component via spec.componentValues, then install the kagent SME
 docs/kolla-ansible-audit-and-helm-plan.md: the upstream kolla-ansible audit that grounds the distribution-layer design
 docs/medium-openstack-as-a-service.md: the narrative write-up, incl. the two determinism fixes for the Krateo CDC path
+docs/images.md: every container image a published chart can run, with its publisher and anonymous pullability (generated from hack/images.yaml)
+docs/supply-chain.md: the image inventory and CVE-scan gates, the allowlist rules, and the open pinning decision with measurements
 examples/identity-profile/README.md: one Openstack Composition (profile identity) rolling out the identity plane in order, with verify steps
 examples/openstack.yaml: a single Openstack orchestrator Composition (profile identity | full, or spec.enabled)
 examples/01-identity.yaml: the identity plane as one Composition per component

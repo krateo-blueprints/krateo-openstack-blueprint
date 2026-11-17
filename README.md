@@ -1315,6 +1315,103 @@ kubectl -n openstack get compositiondefinitions \
   -o custom-columns='NAME:.metadata.name,API:.status.apiVersion,READY:.status.conditions[?(@.type=="Ready")].status'
 ```
 
+### Running guests on KVM
+
+By default (`compute.virtType: qemu`) nova runs guests in QEMU software emulation. That works on any node, slowly. With
+hardware virtualization on the compute nodes, set:
+
+```yaml
+compute:
+  virtType: kvm
+```
+
+- **What kvm sets:**
+  - nova gets `[libvirt] virt_type = kvm` and `cpu_mode = host-model`;
+  - libvirt gets `virt_type = "kvm"`.
+- **The refusal:** libvirt's DaemonSet gains an init container, `libvirt-kvm-check`, that refuses to start on a node
+  without `/dev/kvm`. The message names GKE's `--enable-nested-virtualization`. The check runs in libvirt, because
+  libvirtd's qemu processes are what open `/dev/kvm` when a guest starts. Without the device every boot would otherwise
+  fail later, inside nova, far from the cause.
+- **qemu changes nothing:** every chart renders as it always has. `hack/validate-virt-type.py` checks all of this and
+  runs the refusal script.
+
+On GKE, run compute on its own node pool created with nested virtualization. Measured 2026-11-17:
+- N2 Ubuntu nodes in such a pool show `vmx` in `/proc/cpuinfo`, `/dev/kvm`, and a working `KVM_CREATE_VM`;
+- a pool without the flag shows none of these.
+
+```sh
+gcloud container node-pools create compute-kvm --cluster <cluster> --region <region> \
+  --machine-type n2-standard-8 --image-type UBUNTU_CONTAINERD --enable-nested-virtualization \
+  --node-labels=openstack-compute-node=enabled,openvswitch=enabled,nested-virtualization=enabled
+```
+
+**How compute pods land there.** nova-compute, libvirt, ceilometer-compute and cyborg-agent schedule only on nodes
+labelled `openstack-compute-node=enabled`, and neutron's OVS agent and openvswitch on `openvswitch=enabled`. The
+umbrella's `nodeLabelPreconditions` and `hack/validate-node-label-preconditions.py` own this. So:
+- give those labels to the KVM pool only;
+- leave `openstack-compute-node` off the control pool;
+- if you taint the KVM pool, add the matching toleration to the umbrella's `tolerations`, which reaches every pod.
+
+`nested-virtualization=enabled` is informational; nothing selects on it.
+
+### Driving this OpenStack with Krateo KOG operators
+
+The KOG operators (keystone-, neutron-, glance- and nova-kog) need credentials. Never copy the admin password by hand
+(#228). Opt in, and keystone renders them from the install's own generated admin root:
+
+```yaml
+kogCredentials:
+  enabled: true
+```
+
+Everything lands in the Openstack release's namespace. Install the KOGs there too: the auth proxies mount
+`openstack-kog-clouds`, and a Pod can mount only a Secret in its own namespace. Other namespaces aren't supported yet,
+and the schema refuses `kogCredentials.namespace`.
+
+| Object | Consumed by | What it is |
+|---|---|---|
+| Secret `openstack-kog-clouds` (key `clouds.yaml`) | the auth proxies of keystone-, neutron- and glance-kog | rendered by an ExternalSecret from the identity-admin root. Cloud `openstack`: keystone's internal endpoint, the admin user and project, interface `internal`, the region. |
+| Secret `openstack-kog-token` (key `token`) | nova-kog (apiKey auth, no proxy) | an admin token. Keystone tokens here last 12 hours (`token.expiration: 43200`), so a CronJob, `keystone-kog-token`, re-mints it every 6 hours. A post-install,post-upgrade hook Job mints it when keystone installs or upgrades. |
+| ConfigMap `openstack-kog-endpoints` (no secret) | you, when you install nova-kog | `nova_url`: nova's internal endpoint from keystone's catalog, with the admin project id from the token response appended (`.../v2.1/<project id>`). `keystone_url`: keystone's internal endpoint. `region_name`. keystone's runs write `keystone_url` and `region_name`; nova's own hook writes `nova_url` when nova installs or upgrades. |
+
+Set each KOG to these names (read from each KOG chart's default branch, 2026-11-17):
+
+| KOG | Setting | Its default | Set it to |
+|---|---|---|---|
+| keystone-kog | `authBridge.cloudsSecret` | `keystone-clouds` | `openstack-kog-clouds`. Or skip the clouds file: `authBridge.openrcSecret: keystone-keystone-admin` (0.4.1 and later). |
+| neutron-kog | `authBridge.cloudsSecret` | `neutron-clouds` | `openstack-kog-clouds` |
+| glance-kog | `authBridge.cloudsSecret` | `glance-clouds` | `openstack-kog-clouds` |
+| all three proxies | `authBridge.osCloud` | `openstack` | leave the default. The key `clouds.yaml` is fixed: the proxy mounts the Secret at `/etc/openstack` and reads that file. |
+| nova-kog | `nova.url` (chart value, required) | empty | the `nova_url` of `openstack-kog-endpoints`: `kubectl -n openstack get configmap openstack-kog-endpoints -o jsonpath='{.data.nova_url}'` |
+| nova-kog | `spec.authentication.apiKey.tokenRef` on each `<Kind>Configuration` | sample: `nova-token` / `krateo-system` / `token` | name `openstack-kog-token`, namespace the Openstack release's, key `token` |
+
+How the token and the endpoints are written:
+- **A failed mint fails keystone's release, on purpose.** Each run tries at most 4 times, because keystone locks a user
+  after 5 failures. When the hook Job gives up, keystone's install or upgrade fails, and so does every KOG that would
+  have used a stale token. Fix the cause, then re-run the hook with `rerunHooks.keystone` (below).
+- **nova writes `nova_url` itself.** Keystone installs before nova, when keystone's catalog has no compute entry yet.
+  nova's chart runs a post-install,post-upgrade hook Job, `nova-kog-endpoints`. It waits for `nova-ks-endpoints` and
+  nova's API, then writes `nova_url`. It runs the same program as keystone's Job, so both resolve the same URL, and
+  it fails nova's release after 4 tries, as keystone's does. Once nova is in the catalog, keystone's runs write the
+  same `nova_url` too.
+- Only the mint step holds the admin password. keystone's writer may patch `openstack-kog-token` and
+  `openstack-kog-endpoints`; nova's may patch `openstack-kog-endpoints` only. nova's step reads nova's own admin openrc
+  (`nova-keystone-admin`, which nova's other keystone Jobs already read).
+- Each writer sends a JSON merge patch of only its own keys: nova's names `nova_url` alone, and keystone's names
+  `nova_url` only once it resolved one. So neither clears what the other wrote.
+- Both objects are read back from the live cluster on every render, so a reconcile never resets them.
+- `hack/validate-kog-credentials.py` checks the clouds file, the jobs and the writers' permissions. It runs the mint
+  program against a stand-in keystone, and runs both writers against each other in both orders, against a stand-in
+  Kubernetes API. It also checks that nothing else in the blueprint reads these objects.
+- **neutron- and glance-kog read `clouds.yaml` only when their proxy starts.** After the admin password rotates,
+  restart them: `kubectl -n openstack rollout restart deployment <their auth-bridge deployment>`. Until then they log
+  in with the old password, and keystone locks the account after five failures. keystone-kog re-reads its Secret and
+  backs off after a rejection.
+
+**Install oasgen-provider 0.80.0 from OCI**, with its chart and CRDs in step, once per cluster, before the KOGs. Some KOG
+READMEs show an unpinned install from `charts.krateo.io`, which serves 0.10.0; don't use it. nova-kog's owner measured
+all 6 nova Kinds reconciling on 0.80.0.
+
 ### A component reads Ready=False/HooksMayNotHaveRun
 
 core-provider (#563, fixed in 2.13.108 by #569) can leave a component's first install `deployed` with its post-install
@@ -1438,6 +1535,8 @@ Index: [docs/examples.md](docs/examples.md).
   the upstream audit grounding the distribution-layer design.
 - [docs/medium-openstack-as-a-service.md](docs/medium-openstack-as-a-service.md) — the
   narrative write-up.
+- [docs/images.md](docs/images.md) — every container image a chart can run (generated).
+- [docs/supply-chain.md](docs/supply-chain.md) — image inventory, CVE scan, and the pinning decision.
 - [docs/llms.txt](docs/llms.txt) — the version-pinned LLM doc index.
 
 The dashboard (Horizon) logs in as `admin` with the install's generated password (domain `Default`): `kubectl -n openstack get secret openstack-credential-identity-admin -o jsonpath='{.data.password}' | base64 -d`:

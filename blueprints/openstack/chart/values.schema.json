@@ -940,6 +940,38 @@
           "description": "Token for swift: any change re-runs swift's hooks."
         }
       }
+    },
+    "compute": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "Compute",
+      "description": "virtType: qemu (software emulation, the default) or kvm (hardware virtualization: nova virt_type kvm and cpu_mode host-model, libvirt to match, and libvirt refuses to start on a node without /dev/kvm). README \"Running guests on KVM\" (#303).",
+      "additionalProperties": false,
+      "properties": {
+        "virtType": {
+          "type": "string",
+          "enum": [
+            "qemu",
+            "kvm"
+          ]
+        }
+      }
+    },
+    "kogCredentials": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "Credentials for Krateo KOG operators",
+      "description": "Opt-in. enabled renders, in the release's namespace (cross-namespace is not supported yet), openstack-kog-clouds (a clouds.yaml for the keystone-, neutron- and glance-kog auth proxies), openstack-kog-token (an admin token for nova-kog, re-minted every 6 h) and openstack-kog-endpoints (nova's and keystone's internal URLs and the region, no secret), all from the install's generated admin root. README \"Driving this OpenStack with Krateo KOG operators\" (#303).",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "definitions": {

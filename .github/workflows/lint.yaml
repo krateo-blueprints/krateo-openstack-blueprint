@@ -264,6 +264,12 @@ jobs:
       # agent there resolves the wrong FQDN (#200).
       - name: No Service selects a hostNetwork pod
         run: python3 hack/validate-hostnetwork-services.py .
+      # #316: image-scan.yaml scans the images hack/images.yaml lists, so an image a chart can run and the inventory
+      # omits would never be scanned. Offline: the registry half is re-measured by image-scan.yaml, not here.
+      - name: Every image a chart can run is in the generated inventory, with a named publisher
+        run: python3 hack/gen-image-inventory.py .
+      - name: The image scan judges CRITICAL findings and exceptions as specified
+        run: python3 hack/check-image-cves.py --self-test
 
   capability-roles:
     # Gating. A capability aggregates into a predefined role via a
@@ -394,6 +400,16 @@ jobs:
       # install hook is also an upgrade hook (#297).
       - name: Hooks can be re-run by a value
         run: python3 hack/validate-rerun-hooks.py .
+
+      # compute.virtType: qemu changes nothing; kvm sets nova and libvirt, and libvirt refuses a node without /dev/kvm,
+      # the refusal script run here (#303).
+      - name: KVM guests and the /dev/kvm refusal
+        run: python3 hack/validate-virt-type.py .
+
+      # KOG credentials from the generated admin root: the clouds file, the token Jobs (password only in the mint step,
+      # at most 4 tries), and no other reader (#303).
+      - name: KOG credentials from the admin root
+        run: python3 hack/validate-kog-credentials.py .
 
       # glance's image store: 10Gi by default, a smaller live claim expanded, a claim never asked to shrink (#295).
       - name: glance's image store size
