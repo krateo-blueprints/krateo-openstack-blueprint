@@ -239,47 +239,55 @@ def pick_token(tokens, counts):
     return None, False
 
 
-def census(corpus):
-    """(counts, supersets) -- the token census, and the documents left out of it.
+def supersets_of(f, corpus):
+    """The other documents that contain f's whole token set -- concatenations of f."""
+    toks = corpus[f]
+    return [g for g in corpus if g != f and toks and toks <= corpus[g]]
 
-    A document whose token set CONTAINS another document's whole token set is a
-    concatenation of it: docs/log.md in openstack-as-a-service is rendered from
-    every docs/log.d entry, so it repeats every token they have, and counted in
-    the census it made all 37 of its sources "shared" -- 40 of 71 documents
-    there, the strong identifier lost for exactly the files a concatenation
-    copies. A superset is therefore left out of the CENSUS only: its sources
-    regain their corpus-unique tokens. It is still CHECKED, identified against
-    the full count, where everything it holds is shared at best -- which is the
-    honest strength of an identifier for a document that is a copy.
+
+def identify(f, corpus, full):
+    """(token, unique, tier) for one document, the first tier that yields a token.
+
+      1  the longest token unique across ALL documents (no exclusion);
+      2  else the longest token unique once the documents that contain this one's
+         whole token set are excluded -- its concatenations, such as
+         openstack-as-a-service's docs/log.md over each docs/log.d entry, which
+         repeat every token a source has and would leave it only shared ones;
+      3  else the longest shared token, reported as shared;
+      4  else none: the caller falls back to any block-level element.
+
+    Tier 2 excludes the supersets OF THIS DOCUMENT, not every document that is a
+    superset of some other one. Excluding those globally (the rule's first form)
+    let a document that merely QUOTES a small one -- a README containing every
+    token of a four-line changelog entry -- drop out of the census for everyone,
+    so any third document sharing a token with that README could claim it as
+    unique while the README's render contains it too.
     """
-    supersets = {
-        f for f, ts in corpus.items()
-        if any(g != f and corpus[g] and corpus[g] <= ts for g in corpus)}
-    counts = {}
-    for f, ts in corpus.items():
-        if f in supersets:
-            continue
-        for tok in ts:
-            counts[tok] = counts.get(tok, 0) + 1
-    return counts, supersets
+    token, unique = pick_token(corpus[f], full)
+    if token is not None and unique:
+        return token, True, 1
+    sups = supersets_of(f, corpus)
+    if sups:
+        local = dict(full)
+        for g in sups:
+            for tok in corpus[g]:
+                local[tok] -= 1
+        token, unique = pick_token(corpus[f], local)
+        if token is not None and unique:
+            return token, True, 2
+    token, unique = pick_token(corpus[f], full)
+    if token is not None:
+        return token, False, 3
+    return None, False, 4
 
 
 def plan(corpus):
-    """[(document, token, unique)] for EVERY document, in order -- the check list.
-
-    A superset is identified against the full count (its own tokens included),
-    so it can never claim a token its sources hold as unique to itself.
-    """
-    census_counts, supersets = census(corpus)
+    """[(document, token, unique, tier)] for EVERY document, in order -- the check list."""
     full = {}
     for ts in corpus.values():
         for tok in ts:
             full[tok] = full.get(tok, 0) + 1
-    out = []
-    for f in sorted(corpus):
-        token, unique = pick_token(corpus[f], full if f in supersets else census_counts)
-        out.append((f, token, unique))
-    return out
+    return [(f,) + identify(f, corpus, full) for f in sorted(corpus)]
 
 
 def instrument_controls():
@@ -415,30 +423,57 @@ def self_test():
     render_of_b = "<h1>B</h1><p>it discusses theUniqueTokenOfB at length</p>"
     assert pa not in render_of_b, "doc A's token must be absent from doc B's render"
 
-    # 9. The superset census rule. C is A plus B, as a concatenation is: left in
-    #    the census, it makes A's and B's every token shared. Out of the census,
-    #    A and B are identified by unique tokens again -- and C is still CHECKED,
-    #    by a shared token. Excluding C from the check instead of the census
-    #    would lose the one document that copies the others; that is asserted,
-    #    not left to a comment.
+    # 9. The superset rule. C is A plus B, as a concatenation is. Counted
+    #    against everything, A's and B's every token is shared with C. With
+    #    each document's OWN supersets excluded (tier 2), A and B are
+    #    identified by unique tokens again -- and C is still CHECKED, by a
+    #    shared token (tier 3). Excluding C from the check instead would lose
+    #    the one document that copies the others; that is asserted.
     corp = {"a.md": {"alphaOnlyInA", "commonToAllThree"},
             "b.md": {"bravoOnlyInB", "commonToAllThree"},
             "c.md": {"alphaOnlyInA", "bravoOnlyInB", "commonToAllThree"}}
-    cc, sup = census(corp)
-    assert sup == {"c.md"}, sup
-    got = {f: (tok, uniq) for f, tok, uniq in plan(corp)}
+    got = {f: (tok, uniq, tier) for f, tok, uniq, tier in plan(corp)}
     assert set(got) == set(corp), "every document must be checked, the superset included: %s" % sorted(got)
-    assert got["a.md"] == ("alphaOnlyInA", True), got["a.md"]
-    assert got["b.md"] == ("bravoOnlyInB", True), got["b.md"]
-    assert got["c.md"][1] is False and got["c.md"][0] is not None, got["c.md"]
-    legacy = {}
-    for ts in corp.values():
-        for tok in ts:
-            legacy[tok] = legacy.get(tok, 0) + 1
-    assert pick_token(corp["a.md"], legacy)[1] is False, \
-        "without the rule A is shared: the fixture must express the defect it fixes"
+    assert got["a.md"] == ("alphaOnlyInA", True, 2), got["a.md"]
+    assert got["b.md"] == ("bravoOnlyInB", True, 2), got["b.md"]
+    assert got["c.md"][1:] == (False, 3) and got["c.md"][0] is not None, got["c.md"]
 
-    print("check-doc-rendering.py: self-test passed (11 arms)")
+    # 10. A quoting document is not a concatenation of everyone. Q contains all
+    #     of the small entry E (so Q is a superset, of E alone) and shares one
+    #     long token with S. S also has a token no other document has, and must
+    #     pick it at tier 1. Under the rule's first form -- every superset left
+    #     out of one global census -- S picked the long token it shares with Q,
+    #     reported as unique, and a render of Q would have passed S's check.
+    corp = {"e.md": {"entryTokenOfE"},
+            "q.md": {"entryTokenOfE", "aVeryLongTokenSharedByQandS", "quoteOwnToken"},
+            "s.md": {"aVeryLongTokenSharedByQandS", "sOwnToken12"}}
+    got = {f: (tok, uniq, tier) for f, tok, uniq, tier in plan(corp)}
+    assert got["s.md"] == ("sOwnToken12", True, 1), got["s.md"]
+    assert got["e.md"] == ("entryTokenOfE", True, 2), got["e.md"]
+    assert got["q.md"][2] == 1, got["q.md"]
+    global_census = {}
+    for f, ts in corp.items():
+        if not any(g != f and corp[g] and corp[g] <= ts for g in corp):
+            for tok in ts:
+                global_census[tok] = global_census.get(tok, 0) + 1
+    assert pick_token(corp["s.md"], global_census) == ("aVeryLongTokenSharedByQandS", True), \
+        "the fixture must express the defect: a global census hands S the token Q's render also holds"
+
+    # 11. Tier 2 excludes THIS document's supersets only. X has no globally unique
+    #     token (L, a concatenation, holds all of it). Without L, X's own token is
+    #     unique -- but the longer token X shares with the quoting document Q
+    #     must stay shared, because Q is not a concatenation of X. Excluding
+    #     every superset at once (Q too, as a superset of E) would hand X that
+    #     longer token as "unique", and a render of Q would pass X's check.
+    corp = {"e.md": {"entryTokenOfE"},
+            "q.md": {"entryTokenOfE", "aVeryLongTokenSharedByQandX", "quoteOwnToken"},
+            "x.md": {"aVeryLongTokenSharedByQandX", "xOwnToken12"},
+            "l.md": {"aVeryLongTokenSharedByQandX", "xOwnToken12", "logOwnToken1"}}
+    got = {f: (tok, uniq, tier) for f, tok, uniq, tier in plan(corp)}
+    assert got["x.md"] == ("xOwnToken12", True, 2), got["x.md"]
+    assert got["l.md"][2] == 1, got["l.md"]
+
+    print("check-doc-rendering.py: self-test passed (13 arms)")
     return OK
 
 
@@ -457,18 +492,19 @@ def main():
             print("  - " + b)
         return VOID
 
-    # Corpus pass first: a token is only an identifier if no other file has it,
-    # counting every file except the concatenations (census()).
+    # Corpus pass first: a token is only an identifier if no other file has it
+    # (identify() says when a concatenation of this file is left out).
     corpus = {}
     for f in docs():
         lines = open(f, encoding="utf-8", errors="replace").read().split("\n")
         inside, _, _, _ = fence_scan(lines)
         corpus[f] = tokens_of(lines, inside)
-    _, supersets = census(corpus)
-    shared = 0
+    supersets = sorted({g for f in corpus for g in supersets_of(f, corpus)})
+    shared, tiers = 0, {1: 0, 2: 0, 3: 0, 4: 0}
 
     void, mismatched, clean = [], [], 0
-    for f, token, unique in plan(corpus):
+    for f, token, unique, tier in plan(corpus):
+        tiers[tier] += 1
         lines = open(f, encoding="utf-8", errors="replace").read().split("\n")
         declared = markers(lines)
         html, why = render("\n".join(lines))
@@ -512,9 +548,12 @@ def main():
         print("%d document(s) had no corpus-unique token and were identified by "
               "a shared one -- still proof against a truncated response, not "
               "against a response for a different document." % shared)
+    print("identified at tier 1 (unique everywhere): %d, tier 2 (unique without this document's "
+          "concatenations): %d, tier 3 (shared): %d, tier 4 (block element): %d"
+          % (tiers[1], tiers[2], tiers[3], tiers[4]))
     if supersets:
-        print("%d document(s) contain another document's whole token set and were left out of "
-              "the census (still checked): %s" % (len(supersets), ", ".join(sorted(supersets))))
+        print("%d document(s) contain another document's whole token set (still checked): %s"
+              % (len(supersets), ", ".join(supersets)))
     if void:
         return VOID
     return MISMATCH if mismatched else OK
