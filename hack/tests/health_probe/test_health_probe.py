@@ -9,7 +9,8 @@ rendered ConfigMap: the text the interpreter in the pod runs, not the template.
     answer UnsupportedVersion, and the rpc_ping_enabled case.
   * reached() on the exception as it crosses RabbitMQ: serialized by the server and rebuilt by a
     client whose allowed_remote_exmods does not include the dispatcher, so it is a RemoteError.
-  * find_program, config_args and established_to against real processes and sockets in /proc.
+  * container_processes, config_args and established_to against real processes and sockets in /proc;
+    test_titled_processes.py starts them through the real launchers, titled and untitled.
 """
 import importlib.util
 import io
@@ -131,11 +132,22 @@ class OverTheWire(unittest.TestCase):
 
 
 class ConfigArgs(unittest.TestCase):
-    def test_both_spellings_in_order(self):
-        argv = ["--config-file", "/etc/x/x.conf", "--config-dir=/etc/x/x.conf.d", "--server", "engine",
-                "--config-file=/etc/x/extra.conf"]
-        self.assertEqual(hp.config_args(argv), ["--config-file", "/etc/x/x.conf", "--config-dir", "/etc/x/x.conf.d",
-                                                "--config-file", "/etc/x/extra.conf"])
+    """The configuration comes from the probe's own arguments (the chart's list), in the order given."""
+
+    def test_order_is_kept_across_flags(self):
+        args = hp_args("--process", "svc", "--broker", "--config-file", "/etc/x/x.conf", "--config-dir", "/etc/x/x.conf.d",
+                       "--config-file", "/etc/x/extra.conf")
+        self.assertEqual(hp.config_args(args.config), ["--config-file", "/etc/x/x.conf", "--config-dir", "/etc/x/x.conf.d",
+                                                       "--config-file", "/etc/x/extra.conf"])
+
+    def test_dir_if_present(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            args = hp_args("--process", "svc", "--broker", "--config-file", "/etc/x/x.conf",
+                           "--config-dir-if-present", tmp, "--config-dir-if-present", os.path.join(tmp, "absent"))
+            self.assertEqual(hp.config_args(args.config), ["--config-file", "/etc/x/x.conf", "--config-dir", tmp])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 class ServerNames(unittest.TestCase):
@@ -213,13 +225,15 @@ class Proc(unittest.TestCase):
         self.listener.close()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_found_by_name_with_its_arguments(self):
-        found = hp.find_program("gate-worker")
-        self.assertEqual([pid for pid, _ in found], [self.child.pid])
-        self.assertEqual(found[0][1], [str(self.port), "--config-file", "/etc/gate.conf"])
+    def test_container_processes_include_the_program_and_not_the_probe(self):
+        # The probe's mount namespace: here, the test's. Identity by namespace, never by name.
+        found = hp.container_processes()
+        self.assertIn(self.child.pid, found)
+        self.assertNotIn(os.getpid(), found)
 
-    def test_absent_program_is_not_found(self):
-        self.assertEqual(hp.find_program("gate-absent-worker"), [])
+    def test_an_earlier_probe_run_is_not_the_program(self):
+        self.assertTrue(hp.is_probe(["python", "/tmp/" + hp.SELF, "--process", "x"]))
+        self.assertFalse(hp.is_probe(["gate-worker: master process [/x/gate-worker --config-file /c]"]))
 
     def test_established_to_the_port(self):
         self.assertTrue(hp.established_to([self.child.pid], {self.port}))

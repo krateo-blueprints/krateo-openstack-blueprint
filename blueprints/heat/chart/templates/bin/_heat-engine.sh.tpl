@@ -19,8 +19,7 @@ COMMAND="${@:-start}"
 
 function start () {
     exec heat-engine \
-          --config-file /etc/heat/heat.conf \
-          --config-dir /etc/heat/heat.conf.d
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "heat.config_args.engine" . | fromYamlArray) "format" "shell" "indent" 10) }}
 }
 
 function stop () {

@@ -104,7 +104,7 @@ spec:
 {{ if $mounts_designate_worker.volumeMounts }}{{ toYaml $mounts_designate_worker.volumeMounts | indent 12 }}{{ end }}
       containers:
         - name: designate-worker
-{{ dict "envAll" $envAll "component" "worker" "container" "default" "args" (list "--process" "designate-worker" "--exchange" "designate" "--rpc-topic" "worker") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "worker" "container" "default" "args" (list "--process" "designate-worker" "--exchange" "designate" "--rpc-topic" "worker") "config" (include "designate.config_args.worker" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "designate_worker" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.worker | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "designate" "container" "designate_worker" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}

@@ -3,6 +3,7 @@
 
     hack/validate-no-skip-markers.py [repo-root]
     hack/validate-no-skip-markers.py [repo-root] --self-test
+    hack/validate-no-skip-markers.py [repo-root] --base REF       (by hand)
 
 GitHub skips every push and pull_request workflow for a commit whose message contains one of its skip markers, the
 bracketed "skip ci" family or a "skip-checks: true" trailer, wherever it appears in the message, even quoted. #347's
@@ -12,22 +13,29 @@ and body, or its commit messages, so all of them are read. The render-log bot no
 loop guard is render-log.yaml's paths filter), so nothing is exempt.
 
 What is read, from the environment lint.yaml's job-hooks runner step sets:
-  - EVENT_NAME pull_request: PR_TITLE, PR_BODY, and every commit message the pull request adds: from the merge
-    ref's first parent (or the merge base of BASE and HEAD) to HEAD, never BASE..HEAD, which reads main's commits
-    since a stale base;
+  - EVENT_NAME pull_request: PR_TITLE, PR_BODY, and every commit message the pull request adds: from the merge base
+    of HEAD and origin/$GITHUB_BASE_REF (hack/pr_range.py: an explicit base, never inferred from HEAD's shape), never
+    BASE..HEAD, which reads main's commits since a stale base;
   - EVENT_NAME push or merge_group: every commit message between BASE (the previous head, or the merge group's
     base) and HEAD. In a merge group each queued pull request is its squash commit, whose message is the final one,
     so this is where a marker in the message that would land is seen;
-  - anything else (workflow_dispatch on a branch): every commit message since the branch left origin/main.
+  - EVENT_NAME workflow_dispatch: every commit message since the branch left origin/main, its declared base;
+  - run by hand: `--base <ref>` is required; without it the gate fails rather than guess.
 Markers are matched as GitHub matches them, ignoring case and the space inside the brackets. To name one in prose, say
 "the skip marker" instead. The matcher is checked case by case first (--self-test runs only that).
 """
+import importlib.util
 import os
 import re
 import subprocess
 import sys
 import tempfile
 
+_spec = importlib.util.spec_from_file_location("pr_range", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                                        "pr_range.py"))
+pr_range = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(pr_range)
+change_base = pr_range.change_base
 ZERO = "0" * 40
 # GitHub's markers ([skip ci], [ci skip], [no ci], [skip actions], [actions skip]) and the skip-checks trailer.
 MARKER = re.compile(r"\[\s*(?:skip\s+ci|ci\s+skip|no\s+ci|skip\s+actions|actions\s+skip)\s*\]"
@@ -59,17 +67,6 @@ def git(root, *a):
     return r.stdout
 
 
-def pr_change_base(root, base):
-    """Where a pull request's own commits start: the merge ref's first parent (main's tip as GitHub merged it), or the
-    merge base of BASE and HEAD when HEAD is not a merge commit. Not BASE: pull_request.base.sha can be older than
-    main's tip, and BASE..HEAD then reads main's commits since, the old bot renders' skip markers among them, as the
-    pull request's (the same defect validate-log-untouched.py had, #376)."""
-    parents = git(root, "rev-list", "--parents", "-n", "1", "HEAD").split()[1:]
-    if len(parents) == 2:
-        return parents[0]
-    return git(root, "merge-base", base, "HEAD").strip()
-
-
 def range_case():
     """A main-side commit carrying a marker, after the fork, is not the pull request's; the branch's own is."""
     def g(cwd, *a):
@@ -92,18 +89,28 @@ def range_case():
             head = g(r, "rev-parse", "HEAD")
             g(r, "checkout", "-q", "main")
             g(r, "commit", "-q", "--allow-empty", "-m", "docs(log): render docs/log.md [skip ci]")
-            g(r, "checkout", "-q", "--detach")
+            tip = g(r, "rev-parse", "HEAD")
+
+            def found():
+                frm = change_base(r, "main")
+                return any(MARKER.search(g(r, "show", "-s", "--format=%B", c))
+                           for c in g(r, "rev-list", "%s..HEAD" % frm).split())
+            what = "carries" if branch_marker else "carries no such"
+            # the merge ref GitHub checks out: main's tip, then the pull request's head
+            g(r, "checkout", "-q", "--detach", tip)
             g(r, "merge", "--no-ff", "-q", "-m", "Merge", head)
-            frm = pr_change_base(r, fork)
-            found = any(MARKER.search(g(r, "show", "-s", "--format=%B", c))
-                        for c in g(r, "rev-list", "%s..HEAD" % frm).split())
-            out.append(("merge ref, main gained a marked commit after the fork, the branch %s one"
-                        % ("carries" if branch_marker else "carries no such"), found == branch_marker))
+            out.append(("merge ref, main gained a marked commit after the fork, the branch %s one" % what,
+                        found() == branch_marker))
+            # a branch head that is itself a merge of main into the branch: two parents, the BRANCH first
+            g(r, "checkout", "-q", "-B", "fix/x-merged", head)
+            g(r, "merge", "--no-ff", "-q", "-m", "Merge main", tip)
+            out.append(("a branch head that merged main's marked commit, the branch %s one" % what,
+                        found() == branch_marker))
     return out
 
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    args = pr_range.positional(sys.argv[1:])
     root = os.path.abspath(args[0] if args else ".")
     bad = self_test()
     for b in bad:
@@ -127,15 +134,21 @@ def main():
     event, base = os.environ.get("EVENT_NAME", ""), os.environ.get("BASE", "")
     texts = []
     try:
-        if event == "pull_request":
-            if not base:
-                print("FAILED MEASUREMENT: a pull request with no BASE commit; nothing to read")
+        if event in ("push", "merge_group"):
+            if not base or base == ZERO:
+                print("FAILED MEASUREMENT: %s with no BASE (merge_group.base_sha or the previous head); nothing to "
+                      "read from, and the gate does not guess one" % event)
                 return 2
-            texts += [("the pull request's title", os.environ.get("PR_TITLE", "")),
-                      ("the pull request's body", os.environ.get("PR_BODY", ""))]
-            base = pr_change_base(root, base)
-        elif event not in ("push", "merge_group") or not base or base == ZERO:
-            base = git(root, "merge-base", "origin/main", "HEAD").strip()
+        else:
+            try:
+                ref, _ = pr_range.base_ref(event, sys.argv[1:])
+            except pr_range.NoBase as e:
+                print("FAILED MEASUREMENT: %s" % e)
+                return 2
+            if event == "pull_request":
+                texts += [("the pull request's title", os.environ.get("PR_TITLE", "")),
+                          ("the pull request's body", os.environ.get("PR_BODY", ""))]
+            base = change_base(root, ref)
         for c in git(root, "rev-list", "%s..HEAD" % base).split():
             texts.append(("commit %s" % c[:7], git(root, "show", "-s", "--format=%B", c)))
     except RuntimeError as e:

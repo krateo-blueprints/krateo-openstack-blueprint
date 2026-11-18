@@ -20,4 +20,5 @@ apt update
 apt install curl -y -f --install-suggests
 curl -o /tmp/helm.tar.gz https://get.helm.sh/helm-v3.11.2-linux-amd64.tar.gz
 tar zxf /tmp/helm.tar.gz -C /tmp/;mv /tmp/linux-amd64/helm /usr/local/bin/helm
-tacker-conductor --config-file /etc/tacker/tacker.conf $([ -d /etc/tacker/tacker.conf.d ] && echo --config-dir /etc/tacker/tacker.conf.d)
+tacker-conductor \
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "tacker.config_args.conductor" . | fromYamlArray) "format" "shell" "indent" 2) }}

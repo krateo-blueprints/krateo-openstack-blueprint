@@ -56,7 +56,7 @@ spec:
 {{ tuple $envAll "decision_engine" $mounts_watcher_decision_engine_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: watcher-decision-engine
-{{ dict "envAll" $envAll "component" "decision_engine" "container" "default" "args" (list "--process" "watcher-decision-engine" "--exchange" "watcher" "--rpc-topic" "watcher.decision.control") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "decision_engine" "container" "default" "args" (list "--process" "watcher-decision-engine" "--exchange" "watcher" "--rpc-topic" "watcher.decision.control") "config" (include "watcher.config_args.decision_engine" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "watcher_decision_engine" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.decision_engine | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           securityContext:

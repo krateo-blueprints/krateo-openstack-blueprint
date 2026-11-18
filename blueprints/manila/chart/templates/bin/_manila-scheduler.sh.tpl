@@ -16,5 +16,4 @@ limitations under the License.
 
 set -ex
 exec manila-scheduler \
-     --config-file /etc/manila/manila.conf \
-     --config-dir /etc/manila/manila.conf.d
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "manila.config_args.scheduler" . | fromYamlArray) "format" "shell" "indent" 5) }}

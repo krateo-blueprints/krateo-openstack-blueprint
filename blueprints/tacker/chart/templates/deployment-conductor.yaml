@@ -66,7 +66,7 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.conductor.timeout | default "30" }}
       containers:
         - name: tacker-conductor
-{{ dict "envAll" $envAll "component" "conductor" "container" "default" "args" (list "--process" "tacker-conductor" "--exchange" "tacker" "--rpc-topic" "TACKER_CONDUCTOR") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "conductor" "container" "default" "args" (list "--process" "tacker-conductor" "--exchange" "tacker" "--rpc-topic" "TACKER_CONDUCTOR") "config" (include "tacker.config_args.conductor" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
           image: {{ .Values.images.tags.tacker_conductor }}
           imagePullPolicy: {{ .Values.images.pull_policy }}
           command:

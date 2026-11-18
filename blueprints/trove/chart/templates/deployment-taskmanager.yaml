@@ -61,7 +61,7 @@ spec:
 {{ tuple $envAll "taskmanager" $mounts_trove_taskmanager_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: trove-taskmanager
-{{ dict "envAll" $envAll "component" "taskmanager" "container" "default" "args" (list "--process" "trove-taskmanager" "--exchange" "openstack" "--rpc-topic" "taskmanager" "--rpc-server-default" "0.0.0.0") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "taskmanager" "container" "default" "args" (list "--process" "trove-taskmanager" "--exchange" "openstack" "--rpc-topic" "taskmanager" "--rpc-server-default" "0.0.0.0") "config" (include "trove.config_args.taskmanager" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "trove_taskmanager" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.taskmanager | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "trove_taskmanager" "container" "trove_taskmanager" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}

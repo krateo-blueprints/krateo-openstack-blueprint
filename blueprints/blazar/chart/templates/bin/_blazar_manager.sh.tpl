@@ -17,4 +17,4 @@ limitations under the License.
 set -ex
 
 exec blazar-manager \
-  --config-file /etc/blazar/blazar.conf $([ -d /etc/blazar/blazar.conf.d ] && echo --config-dir /etc/blazar/blazar.conf.d)
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "blazar.config_args.manager" . | fromYamlArray) "format" "shell" "indent" 2) }}
