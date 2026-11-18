@@ -9,7 +9,7 @@ timestamp: 2026-11-17T00:00:00Z
 
 # A Nova service or Neutron agent is down
 
-**Alerts:** `openstack-nova-service-down`, `openstack-neutron-agent-down` (namespace `krateo-system`), grouped by
+**Alerts:** `openstack-nova-service-down`, `openstack-neutron-agent-down` (in the OpenStack release namespace), grouped by
 `hostname` and `service`.
 
 **What fired:** `openstack_nova_agent_state` (Nova reports the service down) or `openstack_neutron_agent_state` (the

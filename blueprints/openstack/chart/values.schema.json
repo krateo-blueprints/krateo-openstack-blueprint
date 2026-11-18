@@ -954,7 +954,7 @@
     "monitoring": {
       "type": "object",
       "title": "Monitoring",
-      "description": "The openstack-monitoring component (#312): openstack-exporter, a standalone mysqld-exporter and RabbitMQ's /metrics/detailed, scraped by an OpenTelemetry collector that forwards OTLP to the Krateo observability stack, and alert-provider Alert CRs. Off, the render is byte-identical to a release without it. README: \"Monitoring\".",
+      "description": "The openstack-monitoring component (#312): openstack-exporter, a standalone mysqld-exporter and RabbitMQ's /metrics/detailed, scraped by an OpenTelemetry collector that forwards OTLP to the Krateo observability stack, and alert-provider Alert CRs in the release namespace. Off (unset or false), the render is byte-identical to a release without it. README: \"Monitoring\".",
       "additionalProperties": false,
       "properties": {
         "enabled": {
@@ -963,7 +963,7 @@
             "null"
           ],
           "title": "Enabled",
-          "description": "Unset (null): on exactly when the cluster serves observability.krateo.io/v1alpha1 Alert and Metric. true: always on. false: never."
+          "description": "Explicit opt-in. true: on (refused where alert-provider's observability.krateo.io/v1alpha1 Alert and Metric CRDs are not served). Unset (null) or false: off."
         },
         "otlpEndpoint": {
           "type": "string",
@@ -971,13 +971,6 @@
           "pattern": "^https?://",
           "default": "http://otel-collector-daemonset-local.krateo-system.svc:4318",
           "description": "Where the collector exports metrics. The default is the Krateo node agent's node-local Service, which drops traffic from a node with no agent."
-        },
-        "alertsNamespace": {
-          "type": "string",
-          "title": "Alerts namespace",
-          "minLength": 1,
-          "default": "krateo-system",
-          "description": "Where the Alert and Metric CRs go. alert-provider opens Incidents only for Alerts in its home namespace."
         }
       }
     },

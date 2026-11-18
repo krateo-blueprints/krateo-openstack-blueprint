@@ -10,7 +10,7 @@ timestamp: 2026-11-17T00:00:00Z
 # An OpenStack API is down
 
 **Alerts:** `openstack-api-down-keystone`, `-glance`, `-nova`, `-neutron`, `-cinder`, `-placement`
-(namespace `krateo-system`).
+(in the OpenStack release namespace).
 
 **What fired:** `openstack_<service>_up` stayed below 1 for two consecutive 5-minute windows. openstack-exporter sets it
 to 0 when every metric collection for that service failed, and the series is absent (HyperDX reads 0) when the exporter

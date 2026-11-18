@@ -9,7 +9,7 @@ timestamp: 2026-11-17T00:00:00Z
 
 # MariaDB is unreachable
 
-**Alert:** `openstack-mariadb-down` (namespace `krateo-system`).
+**Alert:** `openstack-mariadb-down` (in the OpenStack release namespace).
 
 **What fired:** `mysql_up` stayed below 1 for two consecutive 5-minute windows: the standalone mysqld-exporter could not
 log in to the `mariadb` Service as the `exporter` user and run its scrape.

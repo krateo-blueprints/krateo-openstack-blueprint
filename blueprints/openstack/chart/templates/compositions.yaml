@@ -197,15 +197,16 @@
 {{- end }}
 {{- /* Monitoring (#312), only while osh.monitoringOn: mariadb gets krateo.exporterUser (its Job creates the exporter's
        MariaDB user; the StatefulSet does not change), and the `monitoring: true` component gets the selection (its alerts
-       and scrapes follow it), the OTLP endpoint, the Alerts' namespace, and whether the cluster serves the Alert and
-       Metric CRDs it renders. Merged UNDER componentValues: an explicit entry wins. Off, no spec changes.
+       and scrapes follow it) and the OTLP endpoint. Its Alert and Metric CRs go to the release namespace, and only on a
+       cluster that serves them (monitoring-precondition.yaml refuses otherwise). Merged UNDER componentValues: an
+       explicit entry wins. Off, no spec changes.
        hack/validate-openstack-monitoring.py renders this span on and off. */ -}}
 {{- if include "osh.monitoringOn" (list $) }}
 {{- if eq $c.name "mariadb" }}
 {{- $ov = mergeOverwrite (dict "krateo" (dict "exporterUser" true)) (deepCopy $ov) }}
 {{- end }}
 {{- if $c.monitoring }}
-{{- $mv := dict "openstack" (dict "components" $sel) "collector" (dict "otlpEndpoint" $.Values.monitoring.otlpEndpoint) "alerts" (dict "namespace" $.Values.monitoring.alertsNamespace "enabled" (eq (include "osh.observabilityServed" (list $)) "true")) }}
+{{- $mv := dict "openstack" (dict "components" $sel) "collector" (dict "otlpEndpoint" $.Values.monitoring.otlpEndpoint) }}
 {{- $ov = mergeOverwrite $mv (deepCopy $ov) }}
 {{- end }}
 {{- end }}

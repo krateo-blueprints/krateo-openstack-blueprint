@@ -68,13 +68,7 @@
         "enabled": {
           "type": "boolean",
           "title": "Render the Metric and Alert CRs",
-          "description": "The umbrella sets it false when the cluster does not serve observability.krateo.io/v1alpha1 Alert and Metric."
-        },
-        "namespace": {
-          "type": "string",
-          "title": "Alert namespace",
-          "minLength": 1,
-          "description": "alert-provider opens Incidents only for Alerts in its home namespace (krateo-system by default)."
+          "description": "Render the Metric and Alert CRs in the release namespace. false only for a standalone install without alert-provider's CRDs."
         },
         "runbookBase": {
           "type": "string",

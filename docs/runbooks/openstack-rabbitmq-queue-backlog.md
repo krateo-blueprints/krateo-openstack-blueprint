@@ -9,7 +9,7 @@ timestamp: 2026-11-17T00:00:00Z
 
 # A RabbitMQ queue is not being drained
 
-**Alert:** `openstack-rabbitmq-queue-backlog` (namespace `krateo-system`), grouped by `vhost` and `queue`.
+**Alert:** `openstack-rabbitmq-queue-backlog` (in the OpenStack release namespace), grouped by `vhost` and `queue`.
 
 **What fired:** `rabbitmq_detailed_queue_messages` (ready plus unacknowledged) stayed above 1000 for a whole 30-minute
 window: its minimum over the window was above the threshold, so the queue is not consumed, or not fast enough.

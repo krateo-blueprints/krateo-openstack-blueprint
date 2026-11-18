@@ -58,11 +58,11 @@ kogCredentials:
 
 # monitoring (issue #312): the openstack-monitoring component, metrics and alerts for the Krateo observability stack
 # (README "Monitoring"). An OpenTelemetry collector scrapes openstack-exporter, a standalone mysqld-exporter and RabbitMQ's
-# /metrics/detailed, and forwards OTLP to `otlpEndpoint`; the alerts are alert-provider Alert CRs in `alertsNamespace`.
-#   enabled: unset (null, the default): on exactly when the cluster serves alert-provider's
-#            observability.krateo.io/v1alpha1 Alert and Metric (.Capabilities.APIVersions), i.e. where the Krateo
-#            observability stack runs. true: always on (the Alert CRs are still rendered only where those CRDs are
-#            served). false: never, whatever the cluster serves.
+# /metrics/detailed, and forwards OTLP to `otlpEndpoint`; the alerts are alert-provider Alert CRs in the release
+# namespace.
+#   enabled: explicit opt-in (Diego, 2026-11-18). true turns it on; unset (null, the default) and false are off. With
+#            true on a cluster that does not serve alert-provider's Alert and Metric CRDs the render is refused, naming
+#            alert-provider (templates/monitoring-precondition.yaml).
 # Off, the render is byte-identical to a release without this value: no component, no CompositionDefinition, no
 # credential root, and mariadb's spec unchanged. On, it adds the openstack-monitoring component (after keystone and
 # mariadb), its credential root identity-user-openstack-exporter, and krateo.exporterUser on mariadb, which creates the
@@ -73,8 +73,6 @@ monitoring:
   # OTLP/HTTP endpoint the collector exports to. The default is the Krateo node agent's node-local Service (the
   # installer's own default for core-provider), which drops traffic from a node with no agent on it.
   otlpEndpoint: http://otel-collector-daemonset-local.krateo-system.svc:4318
-  # alert-provider opens Incidents only for Alerts in its home namespace.
-  alertsNamespace: krateo-system
 
 # componentValues: per-component spec passed through to that component's Composition, keyed by
 # component name. Each value is exactly that component's own spec (its curated schema),

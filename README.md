@@ -368,6 +368,11 @@ enabled:
   - swift
 ```
 
+#### Monitoring: recommended when alert-provider is installed
+
+Add `monitoring.enabled: true` to the `Openstack` spec above. It is off unless you ask, and the umbrella refuses it on
+a cluster without alert-provider's CRDs. See "Monitoring" below.
+
 #### The install unlocks over several reconciles, and that is normal
 
 The orchestrator emits a component's Composition only once its CRD exists *and* its dependencies
@@ -1535,15 +1540,20 @@ CRD/schema in [docs/api.md](docs/api.md).
 ### Monitoring
 
 `spec.monitoring` adds the **openstack-monitoring** component (#312), which sends the install's metrics and alerts to
-the Krateo observability stack:
+the Krateo observability stack. It is explicit opt-in: only `enabled: true` turns it on. Unset (the default) is off,
+exactly like `false`.
+
+**Recommended when alert-provider is installed** (the Krateo installer's portal feature ships it):
 
 ```yaml
 spec:
   monitoring:
-    enabled: true          # unset (the default): on where the cluster serves alert-provider's CRDs; false: never
-    otlpEndpoint: http://otel-collector-daemonset-local.krateo-system.svc:4318
-    alertsNamespace: krateo-system
+    enabled: true
+    otlpEndpoint: http://otel-collector-daemonset-local.krateo-system.svc:4318   # the default; any OTLP/HTTP endpoint
 ```
+
+With `enabled: true` on a cluster that does not serve alert-provider's `Alert` and `Metric` CRDs, the umbrella refuses
+to render and says why on its status, naming alert-provider. Its CRs would otherwise fail to apply.
 
 - **What it scrapes.** One OpenTelemetry collector Deployment scrapes three sources and forwards them as OTLP to
   `otlpEndpoint`:
@@ -1566,7 +1576,8 @@ spec:
   collector should become a CR.
 - **Cloud-agnostic.** Nothing in the defaults is cloud-specific. The endpoint is an input, and the credentials come from
   the install's generated roots through ESO.
-- **The alerts.** These are alert-provider `Alert` CRs in `alertsNamespace`. They are defined in one file,
+- **The alerts.** These are alert-provider `Alert` CRs in the release namespace, the only namespace the install writes
+  to. alert-provider reconciles Alerts in every namespace. They are defined in one file,
   `blueprints/openstack-monitoring/chart/files/alerts.yaml`:
   - an API down for Keystone, Glance, Nova, Neutron, Cinder or Placement;
   - a Nova service or Neutron agent down;
@@ -1577,16 +1588,17 @@ spec:
   - Every scrape job has a companion alert, `openstack-scrape-down-<job>`. HyperDX reads a window with no data as 0,
     so without the companion a dead scrape would silence the alerts that fire on high values.
   - These are metric alerts, so a firing notifies and shows on the portal's alerts page. It opens no Incident:
-    alert-provider opens Incidents only for counted log records.
-- **Off, nothing changes.** The render is byte-identical to a release without this value: no component, no definition,
-  no credential root. `enabled: [openstack-monitoring]` is refused, because this value is the one switch.
-- **Not measured yet, as of 2026-11-17.** No cluster has run this component. These are open:
-  - whether composition-dynamic-controller fills `.Capabilities.APIVersions` from the cluster, which the unset default
-    relies on;
-  - whether it may create the Alert CRs in `krateo-system`, another namespace than the release's;
-  - the metric names, which are cited against each exporter's source at the pinned tag rather than scraped.
+    alert-provider opens Incidents only for counted log records, and only in its home namespace. Putting them in
+    `krateo-system` would gain nothing.
+- **Off, nothing changes.** Unset or `false`, the render is byte-identical to a release without this value: no
+  component, no definition, no credential root. `enabled: [openstack-monitoring]` is refused, because this value is the
+  one switch.
+- **Not measured yet, as of 2026-11-18.** No cluster has run this component. Phase 2 measures the rest:
+  - the metric names, which are cited against each exporter's source at the pinned tag rather than scraped;
+  - the default endpoint drops traffic from a node with no Krateo node agent (a tainted node, for instance);
+  - how HyperDX evaluates the gauges and the grouping.
 
-  Set `enabled: true` explicitly to avoid the first. `hack/validate-openstack-monitoring.py` is the gate.
+  `hack/validate-openstack-monitoring.py` is the gate.
 - **Never delete** `openstack-credential-identity-user-openstack-exporter`. Like every root, it holds the only copy of
   the password, and it is kept when monitoring is switched off.
 

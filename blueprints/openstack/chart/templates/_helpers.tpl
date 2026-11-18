@@ -875,27 +875,14 @@ true
 {{- keys $sel | sortAlpha | join " " -}}
 {{- end -}}
 
-{{/* osh.observabilityServed (list $): "true" when the cluster serves alert-provider's Alert and Metric
-     (observability.krateo.io/v1alpha1), i.e. where the Krateo observability stack runs (#312). Read from
-     .Capabilities.APIVersions, which costs no API call; offline (helm template without --api-versions) it is false.
-     NOT MEASURED under composition-dynamic-controller: whether its render fills Capabilities from the cluster's
-     discovery. If it does not, the default (monitoring.enabled unset) stays off there; set monitoring.enabled: true to
-     be sure. */}}
-{{- define "osh.observabilityServed" -}}
-{{- $top := index . 0 -}}
-{{- if and ($top.Capabilities.APIVersions.Has "observability.krateo.io/v1alpha1/Alert") ($top.Capabilities.APIVersions.Has "observability.krateo.io/v1alpha1/Metric") }}true{{ end -}}
-{{- end -}}
-
-{{/* osh.monitoringOn (list $): "true" when the openstack-monitoring component is on (#312). monitoring.enabled true
-     or false decides; unset (null), it follows osh.observabilityServed. */}}
+{{/* osh.monitoringOn (list $): "true" when the openstack-monitoring component is on (#312). Explicit opt-in (Diego,
+     2026-11-18): only monitoring.enabled true turns it on; unset (null) is off, exactly like false. Nothing about the
+     cluster switches it on. templates/monitoring-precondition.yaml refuses `true` where alert-provider's CRDs are not
+     served. */}}
 {{- define "osh.monitoringOn" -}}
 {{- $top := index . 0 -}}
 {{- $m := $top.Values.monitoring | default dict -}}
-{{- if kindIs "bool" $m.enabled -}}
-{{- if $m.enabled }}true{{ end -}}
-{{- else if include "osh.observabilityServed" (list $top) -}}
-true
-{{- end -}}
+{{- if and (kindIs "bool" $m.enabled) $m.enabled }}true{{ end -}}
 {{- end -}}
 
 {{/* The name of the ClusterRole and ClusterRoleBinding that let this release read the cluster's

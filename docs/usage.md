@@ -48,6 +48,19 @@ spec:
 Per-component overrides go under `spec.componentValues.<name>`; the umbrella passes them through
 and each component's own CRD types them against its chart schema. See [configuration](./configuration.md) for the whole surface.
 
+**Recommended when alert-provider is installed** (the Krateo installer's portal feature ships it): turn on monitoring,
+which is off unless you ask (#312). It adds the openstack-monitoring component (an OpenTelemetry collector and two
+exporters) and alert-provider Alert CRs in the install's namespace, each linking a runbook:
+
+```yaml
+spec:
+  monitoring:
+    enabled: true
+```
+
+Without alert-provider's CRDs the umbrella refuses `enabled: true` and names alert-provider on its status. See
+[configuration](./configuration.md) and the README's "Monitoring" section.
+
 ## Or drive the per-component blueprints directly
 
 Register the component `CompositionDefinition`s you want, then apply one Composition per

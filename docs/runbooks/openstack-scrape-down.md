@@ -10,7 +10,7 @@ timestamp: 2026-11-17T00:00:00Z
 # An openstack-monitoring scrape is down
 
 **Alerts:** `openstack-scrape-down-openstack-exporter`, `-openstack-mysqld-exporter`, `-openstack-rabbitmq`
-(namespace `krateo-system`), one per scrape job.
+(in the OpenStack release namespace), one per scrape job.
 
 **What fired:** the prometheus receiver's own `up` for that job (`service.name` = the job) stayed below 1 for two
 consecutive 5-minute windows, or no point arrived at all. Every alert on that job's metrics is blind meanwhile:

@@ -7,9 +7,11 @@
        Every Alert keeps only points carrying openstack.namespace = this release's namespace (the collector's resource
        processor sets it), and links docs/runbooks/<runbook>.md at this chart's release tag.
 
-       In alerts.namespace, krateo-system by default: alert-provider opens Incidents (with incident-agent's analysis)
-       only for Alerts in its home namespace, and only for counted log records. These are metric Alerts, so a firing
-       notifies and shows in the portal's alerts page, and opens no Incident (alert-provider docs/api.md). */ -}}
+       In the release namespace, which is the only namespace this release writes to. alert-provider 0.2.85 reconciles
+       Alerts and Metrics in every namespace (main.go cacheOptions, #L249-L264) and pushes one outside its home namespace
+       to HyperDX as <namespace>/<name>. It opens Incidents only for counted log records in its home namespace, and these
+       are metric Alerts (OpensIncidents False/AggregatedValue in any namespace), so the namespace costs nothing: a firing
+       notifies and shows in the portal's alerts page either way. */ -}}
 {{- if and .Values.manifests.observability .Values.alerts.enabled }}
 {{- $envAll := . }}
 {{- $src := include "osm.alertSource" . | fromYaml }}
@@ -37,7 +39,7 @@ apiVersion: observability.krateo.io/v1alpha1
 kind: Metric
 metadata:
   name: {{ $m.name }}
-  namespace: {{ $envAll.Values.alerts.namespace }}
+  namespace: {{ $ns }}
   labels:
     app.kubernetes.io/part-of: openstack-monitoring
     openstack.krateo.io/install-namespace: {{ $ns }}
@@ -53,7 +55,7 @@ apiVersion: observability.krateo.io/v1alpha1
 kind: Metric
 metadata:
   name: {{ $src.scrapeUp.name }}
-  namespace: {{ $envAll.Values.alerts.namespace }}
+  namespace: {{ $ns }}
   labels:
     app.kubernetes.io/part-of: openstack-monitoring
     openstack.krateo.io/install-namespace: {{ $ns }}
@@ -70,7 +72,7 @@ apiVersion: observability.krateo.io/v1alpha1
 kind: Alert
 metadata:
   name: {{ $a.name }}
-  namespace: {{ $envAll.Values.alerts.namespace }}
+  namespace: {{ $ns }}
   labels:
     app.kubernetes.io/part-of: openstack-monitoring
     openstack.krateo.io/install-namespace: {{ $ns }}
@@ -105,7 +107,7 @@ apiVersion: observability.krateo.io/v1alpha1
 kind: Alert
 metadata:
   name: openstack-scrape-down-{{ $j.name }}
-  namespace: {{ $envAll.Values.alerts.namespace }}
+  namespace: {{ $ns }}
   labels:
     app.kubernetes.io/part-of: openstack-monitoring
     openstack.krateo.io/install-namespace: {{ $ns }}

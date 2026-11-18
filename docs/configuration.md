@@ -27,7 +27,7 @@ own, smaller schemas; the orchestrator's `componentValues` mirrors them.
 | `compute.virtType` | string (`qemu` \| `kvm`) | `qemu` | `kvm` sets nova `[libvirt] virt_type=kvm` and `cpu_mode=host-model` and libvirt's `virt_type`, and libvirt refuses to start on a node without `/dev/kvm` (hardware virtualization: VT-x/AMD-V on bare metal, nested virtualization on cloud VMs). `qemu` changes nothing. README "Running guests on KVM" (#303). |
 | `kogCredentials.enabled` | boolean | `false` | Opt-in: keystone renders, in the release's namespace, `openstack-kog-clouds` (a clouds.yaml for the keystone-, neutron- and glance-kog auth proxies), `openstack-kog-token` (an admin token for nova-kog, re-minted every 6 h) and `openstack-kog-endpoints` (nova's and keystone's internal URLs and the region, no secret), all from the generated admin root; nova's own hook writes `nova_url` once nova registered its endpoint. A failed mint fails keystone's (or nova's) release. Cross-namespace isn't supported: `kogCredentials` takes no `namespace`. README "Driving this OpenStack with Krateo KOG operators" (#303). |
 | `rerunHooks` | object \| null | `null` | A token per component name (non-empty string; an unknown name is rejected). Setting or changing `rerunHooks.<component>` passes it to that component alone, as its `krateo.rerunHooksToken`, which every component schema declares and no template renders. Its values change, so core-provider runs a helm upgrade and every hook runs again. Use the current time. The recovery for `Ready=False/HooksMayNotHaveRun` (README, #297). |
-| `monitoring` | object | `enabled` unset | The openstack-monitoring component (#312). `enabled`: unset = on exactly where the cluster serves alert-provider's `observability.krateo.io/v1alpha1` Alert and Metric; `true` / `false` decide. `otlpEndpoint`: where its collector sends OTLP (default the Krateo node agent's node-local Service). `alertsNamespace`: where its Alert CRs go (default `krateo-system`, where alert-provider opens Incidents). Off, the render is byte-identical; listing `openstack-monitoring` in `enabled` is refused. See below. |
+| `monitoring` | object | `enabled` unset (off) | The openstack-monitoring component (#312), explicit opt-in. `enabled`: only `true` turns it on, and is refused where alert-provider's `observability.krateo.io/v1alpha1` Alert and Metric CRDs are not served; unset and `false` are off. `otlpEndpoint`: where its collector sends OTLP (default the Krateo node agent's node-local Service). Off, the render is byte-identical; listing `openstack-monitoring` in `enabled` is refused. See below. |
 | `serviceContract` | object | chart default | Service integration descriptor, contract v1 (see below). |
 | `contractEmitter` | object | absent | Removed in 0.3.68 (see below). |
 
@@ -401,7 +401,7 @@ The component runs:
   selected, and exports OTLP to `otlpEndpoint`.
 
 Its alert-provider `Alert` CRs:
-- go to `alertsNamespace`;
+- go to the release namespace (alert-provider reconciles Alerts in every namespace);
 - are rendered only for selected components;
 - are defined in `blueprints/openstack-monitoring/chart/files/alerts.yaml`;
 - each link a runbook under `docs/runbooks/` and have a scrape-down companion.
@@ -412,11 +412,10 @@ Values the umbrella sets on the component (an explicit `componentValues.openstac
 | --- | --- |
 | `openstack.components` | the umbrella's selection |
 | `collector.otlpEndpoint` | `monitoring.otlpEndpoint` |
-| `alerts.namespace` | `monitoring.alertsNamespace` |
-| `alerts.enabled` | whether the cluster serves the Alert and Metric CRDs |
 
-`hack/validate-openstack-monitoring.py` is the gate. Not measured on a cluster yet (2026-11-17): see the README's
-"Monitoring" section for what that leaves open.
+With `enabled: true` on a cluster that does not serve alert-provider's Alert and Metric CRDs, the umbrella refuses,
+naming alert-provider (`templates/monitoring-precondition.yaml`). `hack/validate-openstack-monitoring.py` is the gate.
+Not measured on a cluster yet (2026-11-18): see the README's "Monitoring" section for what that leaves open.
 
 ## `serviceContract` (contract v1)
 

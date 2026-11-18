@@ -9,10 +9,10 @@
 #   - RabbitMQ's /metrics/detailed (per-queue depth and consumers), served by the rabbitmq_prometheus plugin the
 #     rabbitmq chart already enables.
 # The alerts are alert-provider Alert CRs (observability.krateo.io/v1alpha1), rendered from ONE source,
-# files/alerts.yaml, into alerts.namespace. hack/validate-openstack-monitoring.py is the gate.
+# files/alerts.yaml, into the release namespace. hack/validate-openstack-monitoring.py is the gate.
 #
 # Installed through the umbrella's `monitoring` value (README "Monitoring"), which passes the selected components, the
-# collector's OTLP endpoint and whether the observability CRDs exist.
+# collector's OTLP endpoint.
 
 images:
   pull_policy: IfNotPresent
@@ -85,12 +85,11 @@ rabbitmq:
   metrics_port: 15692
 
 alerts:
-  # Render the Metric and Alert CRs. The umbrella sets it false when the cluster does not serve
-  # observability.krateo.io/v1alpha1 Alert and Metric.
+  # Render the Metric and Alert CRs, in the release namespace. alert-provider reconciles Alerts and Metrics in every
+  # namespace (its main.go cacheOptions, 0.2.85). Outside its home namespace an Alert opens no Incident, and these
+  # metric Alerts open none anywhere. The umbrella refuses monitoring where those CRDs are not served; set false only
+  # for a standalone install without alert-provider.
   enabled: true
-  # alert-provider opens an Incident (with incident-agent's root-cause analysis) only for an Alert in its own home
-  # namespace, krateo-system by default.
-  namespace: krateo-system
   # Where each Alert's runbook link points: <runbookBase>/<this chart's version, the release tag>/docs/runbooks/<name>.md.
   runbookBase: https://github.com/krateo-blueprints/krateo-openstack-blueprint/blob
 

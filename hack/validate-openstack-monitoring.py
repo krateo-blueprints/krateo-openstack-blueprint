@@ -8,7 +8,7 @@ The alerts are defined in ONE file, blueprints/openstack-monitoring/chart/files/
 alert-provider CRs. Everything below is checked on what the charts RENDER, not on that file's intent.
 
   1. ALERTS (the chart rendered at defaults, which select every component an alert names):
-     a. every alert in the source renders, in alerts.namespace (krateo-system), and every rendered Alert comes from the
+     a. every alert in the source renders, in the release namespace (the only one it writes), and every rendered Alert comes from the
         source or is a companion;
      b. RUNBOOK: every Alert's spec.runbook ends with a link to docs/runbooks/<name>.md at the chart's version, and that
         file exists with frontmatter type Runbook; the text holds no `{{` and no `@word` (HyperDX renders it as a
@@ -37,17 +37,19 @@ alert-provider CRs. Everything below is checked on what the charts RENDER, not o
         restart the database);
      e. the umbrella lists identity-user-openstack-exporter for openstack-monitoring alone, and oslo-db-exporter for
         mariadb and openstack-monitoring alone.
-  3. SWITCH (the umbrella):
-     a. the default render (monitoring.enabled unset, no observability CRDs served) equals monitoring.enabled false,
-        equals the render serving only one of the two CRDs, and names neither openstack-monitoring nor openstack-exporter
-        anywhere -- no component, definition, root or reader-Role entry;
-     b. serving both CRDs equals monitoring.enabled true, and that render adds the openstack-monitoring definition, the
-        identity-user-openstack-exporter root and its reader-Role entry; with both CRDs served, false still wins;
+  3. SWITCH (the umbrella), explicit opt-in (Diego, 2026-11-18):
+     a. the default render (monitoring.enabled unset) equals null, false, and the renders with alert-provider's CRDs
+        served (--api-versions) with the value unset or false, and names neither openstack-monitoring nor
+        openstack-exporter anywhere -- no component, definition, root or reader-Role entry;
+     b. monitoring.enabled true adds the openstack-monitoring definition, the identity-user-openstack-exporter root and
+        its reader-Role entry;
      c. `enabled:` listing openstack-monitoring is refused, naming monitoring.enabled;
+     e. PRECONDITION, its reads replaced by stand-ins: on a live cluster without alert-provider's CRDs, true is refused
+        naming alert-provider and the missing CRD; with them served, or unset, or offline, it renders;
      d. SPAN: the lines of compositions.yaml from `$ov :=` to the end of the monitoring span, rendered for every
-        component: off, every spec equals the spec with monitoring false; on, only mariadb (gains exactly
-        krateo.exporterUser) and openstack-monitoring (gains the selection, the OTLP endpoint, the alerts namespace,
-        alerts.enabled) change, and an explicit componentValues entry wins.
+        component: unset (with or without the CRDs served) and false give the same specs; on, only mariadb (gains exactly
+        krateo.exporterUser) and openstack-monitoring (gains the selection and the OTLP endpoint) change, and an explicit
+        componentValues entry wins.
   4. MUTATIONS: each part above is run against a copy with one defect planted, and must fail. A gate that cannot see
      its defect is not a gate.
 
@@ -221,7 +223,6 @@ def part_alerts(root, tmp, counts):
     fails = []
     src = yaml.safe_load(open(P(root, "blueprints", CHART, "chart", "files", "alerts.yaml"))) or {}
     vals = yaml.safe_load(open(P(root, "blueprints", CHART, "chart", "values.yaml"))) or {}
-    alerts_ns = (vals.get("alerts") or {}).get("namespace")
     base = ((vals.get("alerts") or {}).get("runbookBase") or "").rstrip("/")
     w = stage(root, CHART, tmp, "alerts")
     rc, out, err = helm_template(w, CHART + "-gate1234")
@@ -255,13 +256,13 @@ def part_alerts(root, tmp, counts):
     for n, a in alerts.items():
         if n not in src_alerts and n not in companions:
             fails.append("1a: Alert %s is rendered but defined nowhere in files/alerts.yaml" % n)
-        if a["metadata"].get("namespace") != alerts_ns or alerts_ns != "krateo-system":
-            fails.append("1a: Alert %s is in namespace %r; alert-provider opens Incidents only in its home namespace, "
-                         "krateo-system" % (n, a["metadata"].get("namespace")))
+        if a["metadata"].get("namespace") != NS:
+            fails.append("1a: Alert %s is in namespace %r, not the release namespace %s: the release writes nowhere else"
+                         % (n, a["metadata"].get("namespace"), NS))
     for n, m in metrics.items():
-        if m["metadata"].get("namespace") != alerts_ns:
-            fails.append("1a: Metric %s is not in the Alerts' namespace %s: a metricRef resolves in its own namespace"
-                         % (n, alerts_ns))
+        if m["metadata"].get("namespace") != NS:
+            fails.append("1a: Metric %s is not in the release namespace %s, where its Alerts' metricRef resolves"
+                         % (n, NS))
     counts["1a"] = len(alerts)
     # b. runbooks
     link = re.compile(r"Runbook: (\S+)$")
@@ -497,16 +498,33 @@ def part_readers(root, tmp, counts):
 
 
 # ---------------------------------------------------------------------------------------------------------------- 3
+PRECOND = "monitoring-precondition.yaml"
+LIVE_LOOKUP = 'lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "compositiondefinitions.core.krateo.io"'
+CRD_LOOKUP = 'lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" $crd'
+
+
+def stub_precondition(chart_dir, live, served):
+    """Replace the precondition's two reads with stand-ins: a live cluster (core-provider's CRD found) or not, and
+    alert-provider's CRDs served or not. Returns the number of reads replaced (2, or the template changed)."""
+    p = os.path.join(chart_dir, "templates", PRECOND)
+    t = open(p).read()
+    n = t.count(LIVE_LOOKUP) + t.count(CRD_LOOKUP)
+    t = t.replace(LIVE_LOOKUP, '(dict "kind" "CustomResourceDefinition")' if live else "(dict)")
+    t = t.replace(CRD_LOOKUP, '(dict "kind" "CustomResourceDefinition")' if served else "(dict)")
+    open(p, "w").write(t)
+    return n
+
+
 def part_switch(root, tmp, counts):
     fails = []
     u = stage(root, "openstack", tmp, "switch")
     cases = {
         "default": ({}, ()),
         "false": ({"monitoring": {"enabled": False}}, ()),
-        "one-crd": ({}, (CAPS[0],)),
+        "null": ({"monitoring": {"enabled": None}}, ()),
+        "caps": ({}, tuple(CAPS)),
         "caps-false": ({"monitoring": {"enabled": False}}, tuple(CAPS)),
         "true": ({"monitoring": {"enabled": True}}, ()),
-        "caps": ({}, tuple(CAPS)),
     }
     out = {}
     for k, (vals, caps) in cases.items():
@@ -516,15 +534,15 @@ def part_switch(root, tmp, counts):
         else:
             out[k] = o
     if len(out) == len(cases):
-        for k in ("false", "one-crd", "caps-false"):
+        # a. explicit opt-in: unset, null and false are one render whatever the cluster serves
+        for k in ("false", "null", "caps", "caps-false"):
             if out[k] != out["default"]:
-                fails.append("3a: the %s render differs from the default: monitoring off must be one render" % k)
+                fails.append("3a: the %s render differs from the default: only monitoring.enabled true may turn "
+                             "monitoring on (explicit opt-in)" % k)
         for word in ("openstack-monitoring", "openstack-exporter"):
             if word in out["default"]:
                 fails.append("3a: the default render names %s: off must add nothing (byte-identical to a release "
                              "without monitoring)" % word)
-        if out["caps"] != out["true"]:
-            fails.append("3b: serving both CRDs does not render what monitoring.enabled true renders")
         on = docs_of(out["true"])
         if not [d for d in by_kind(on, "CompositionDefinition") if d["metadata"]["name"] == CHART]:
             fails.append("3b: monitoring on registers no openstack-monitoring CompositionDefinition")
@@ -538,6 +556,27 @@ def part_switch(root, tmp, counts):
     if rc == 0 or "monitoring.enabled" not in err:
         fails.append("3c: `enabled:` listing openstack-monitoring is not refused naming monitoring.enabled")
     counts["3c"] = 1
+    # e. the precondition: on a live cluster without alert-provider's CRDs, true is refused naming alert-provider
+    pre = {}
+    for k, live, served, vals in (("live-absent-true", True, False, {"monitoring": {"enabled": True}}),
+                                  ("live-served-true", True, True, {"monitoring": {"enabled": True}}),
+                                  ("live-absent-unset", True, False, {}),
+                                  ("offline-true", False, False, {"monitoring": {"enabled": True}})):
+        w = stage(root, "openstack", tmp, "pre-" + k)
+        if stub_precondition(w, live, served) != 2:
+            fails.append("3e: templates/%s no longer reads exactly core-provider's CRD and each alert-provider CRD by "
+                         "name; the stand-ins this check uses would test nothing" % PRECOND)
+            break
+        pre[k] = helm_template(w, "openstack", vals)
+    if len(pre) == 4:
+        rc, o, err = pre["live-absent-true"]
+        if rc == 0 or "alert-provider" not in err or "alerts.observability.krateo.io" not in err:
+            fails.append("3e: monitoring.enabled true on a live cluster without alert-provider's CRDs renders (or is "
+                         "refused without naming alert-provider and the missing CRD): its Alert CRs would fail to apply")
+        for k in ("live-served-true", "live-absent-unset", "offline-true"):
+            if pre[k][0] != 0:
+                fails.append("3e: the %s render is refused: %s" % (k, pre[k][2].strip()[:200]))
+        counts["3e"] = len(pre)
     # d. the span
     comp = open(P(root, "blueprints", "openstack", "chart", "templates", "compositions.yaml")).read()
     start = comp.find("{{- $ov := ")
@@ -551,10 +590,10 @@ def part_switch(root, tmp, counts):
         '# MONSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n'
         '# MONSEL {{ $sel | toJson }}\n')
     specs, sels = {}, {}
-    probe = {"off": ({"monitoring": {"enabled": False}}, ()), "default": ({}, ()),
-             "on": ({"monitoring": {"enabled": True}}, ()), "caps": ({}, tuple(CAPS)),
+    probe = {"off": ({"monitoring": {"enabled": False}}, ()), "default": ({}, ()), "caps": ({}, tuple(CAPS)),
+             "on": ({"monitoring": {"enabled": True}}, ()),
              "override": ({"monitoring": {"enabled": True},
-                           "componentValues": {CHART: {"alerts": {"namespace": "gate-elsewhere"}}}}, ())}
+                           "componentValues": {CHART: {"collector": {"otlpEndpoint": "http://gate-elsewhere:4318"}}}}, ())}
     for k, (vals, caps) in probe.items():
         rc, o, err = helm_template(u, "openstack", vals, caps)
         if rc != 0:
@@ -567,8 +606,10 @@ def part_switch(root, tmp, counts):
         if not names:
             fails.append("3d: the probe rendered no component spec; the check had no input")
         for n in names:
-            if specs["default"].get(n) != specs["off"].get(n):
-                fails.append("3d: monitoring unset (no CRDs) changes %s's spec" % n)
+            for k in ("default", "caps"):
+                if specs[k].get(n) != specs["off"].get(n):
+                    fails.append("3d: monitoring %s changes %s's spec" % ("unset" if k == "default" else
+                                                                         "unset with the CRDs served", n))
             a, b = specs["off"].get(n), specs["on"].get(n)
             if n == "mariadb":
                 if "exporterUser" in ((a or {}).get("krateo") or {}):
@@ -580,21 +621,18 @@ def part_switch(root, tmp, counts):
             elif n == CHART:
                 ok = (b.get("openstack", {}).get("components") == sels["on"]
                       and b.get("collector", {}).get("otlpEndpoint", "").startswith("http")
-                      and b.get("alerts", {}).get("namespace") == "krateo-system"
-                      and b.get("alerts", {}).get("enabled") is False
-                      and specs["caps"].get(n, {}).get("alerts", {}).get("enabled") is True
-                      and specs["override"].get(n, {}).get("alerts", {}).get("namespace") == "gate-elsewhere")
+                      and "alerts" not in b
+                      and specs["override"].get(n, {}).get("collector", {}).get("otlpEndpoint") == "http://gate-elsewhere:4318")
                 if not ok:
-                    fails.append("3d: with monitoring on, openstack-monitoring's spec does not carry the selection, the "
-                                 "OTLP endpoint, the alerts namespace and alerts.enabled (CRDs served or not), or an "
-                                 "explicit componentValues entry does not win")
+                    fails.append("3d: with monitoring on, openstack-monitoring's spec does not carry the selection and "
+                                 "the OTLP endpoint (and nothing about alerts), or an explicit componentValues entry "
+                                 "does not win")
                 if any(k in (a or {}) for k in ("openstack", "collector", "alerts")):
                     fails.append("3d: with monitoring off, openstack-monitoring's spec still carries monitoring values")
             elif a != b:
                 fails.append("3d: monitoring on changes %s's spec; only mariadb and openstack-monitoring may move" % n)
-        if CHART not in sels["on"] or CHART in sels["off"]:
-            fails.append("3d: the selection does not follow the monitoring value (on: %s, off: %s)"
-                         % (CHART in sels["on"], CHART in sels["off"]))
+        if CHART not in sels["on"] or CHART in sels["off"] or CHART in sels["default"] or CHART in sels["caps"]:
+            fails.append("3d: the selection does not follow the monitoring value alone")
         counts["3d"] = len(names)
     return fails
 
@@ -649,6 +687,11 @@ def mutations(r):
          lambda: sub(P(umb, "templates", "compositions.yaml"),
                      '{{- if include "osh.monitoringOn" (list $) }}\n{{- if eq $c.name "mariadb" }}',
                      '{{- if true }}\n{{- if eq $c.name "mariadb" }}')),
+        ("unset turns monitoring on", part_switch,
+         lambda: sub(P(umb, "templates", "_helpers.tpl"), "{{- if and (kindIs \"bool\" $m.enabled) $m.enabled }}true{{ end -}}",
+                     "{{- if or (not (kindIs \"bool\" $m.enabled)) $m.enabled }}true{{ end -}}")),
+        ("enabled true renders where alert-provider's CRDs are missing", part_switch,
+         lambda: sub(P(umb, "templates", "monitoring-precondition.yaml"), "{{- if $absent }}", "{{- if and false $absent }}")),
         ("the enabled: refusal is dropped", part_switch,
          lambda: sub(P(umb, "templates", "_helpers.tpl"), "    {{- if and $c.monitoring (has $c.name $enabled) -}}",
                      "    {{- if and false $c.monitoring (has $c.name $enabled) -}}")),
@@ -685,7 +728,7 @@ def main():
                 failures.append("4: mutation %r passed %s: the part cannot see its own defect" % (name, part.__name__))
             shutil.rmtree(mroot, ignore_errors=True)
         counts["4"] = caught
-    for k in ("1a", "1b", "1c", "1d", "1e", "2a", "2c", "2d", "3ab", "3d", "4"):
+    for k in ("1a", "1b", "1c", "1d", "1e", "2a", "2c", "2d", "3ab", "3d", "3e", "4"):
         if not counts.get(k):
             failures.append("%s: nothing was checked" % k)
     if failures:
