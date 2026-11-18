@@ -123,7 +123,8 @@ KINDS = ("Secret", "ConfigMap", "PersistentVolumeClaim", "ServiceAccount")
 
 # The planted case of the completeness check (hack/gates.d/validate-pod-references.yaml runs it): with
 # GATE_PLANT_DROP_DELIVERED=<component> the delivered renders of that component are skipped, as a future change to the
-# modes could skip them, and the gate must fail naming it.
+# modes could skip them, and the gate must fail naming it. A mutant, not a bypass: while it is set the gate exits non-zero
+# whatever it found (see the end of main), so setting it by mistake fails CI instead of measuring less.
 PLANT_DROP = os.environ.get("GATE_PLANT_DROP_DELIVERED", "")
 
 
@@ -377,6 +378,12 @@ def main() -> int:
         identity.append("no successful render as the umbrella delivers it for %s" % missing)
     if not want:
         identity.append("completeness: no profile selects any component, so nothing was checked")
+    if PLANT_DROP:
+        # A mutant, never a bypass: with the plant set this run measured less than the gate requires, so it cannot pass
+        # whatever it found. The planted run in hack/gates.d/validate-pod-references.yaml requires the failure above
+        # naming the dropped component, not merely a failure.
+        identity.append("PLANTED MODE (GATE_PLANT_DROP_DELIVERED=%s): this run skipped that component's delivered "
+                        "renders and can never pass; unset the variable for a real run" % PLANT_DROP)
     for f in identity:
         print(f"FAIL {f}")
     if failures or unrendered or not_refused or identity:
