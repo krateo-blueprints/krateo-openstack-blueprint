@@ -341,6 +341,11 @@ The bot checks out main with its full history. When a bot pull request is alread
 main into that pull request's branch, and from a depth-1 checkout git refuses that merge as
 unrelated histories.
 
+GitHub refuses a push to the branch of a pull request in the merge queue (GH006). If the open bot
+pull request is in the queue, the bot first takes it out (`dequeuePullRequest`), then pushes,
+waits for the required checks on the new commit, and enqueues it again. This is also what happens
+if the pull request entered the queue after the bot looked and before it pushed (#387).
+
 To apply the ruleset, once the App is in place (an admin, with Diego's OK):
 
 ```console
