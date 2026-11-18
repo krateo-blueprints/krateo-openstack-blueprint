@@ -100,10 +100,23 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
 
+      # The organisation's one chart push (krateo-blueprints/charts PUBLISHING.md rule 14), in locate mode: it only
+      # outputs the path of its push.sh, which publish-charts.sh runs once per chart. Pinned like a reusable workflow
+      # (rule 9); 1.0.0's chart-push directory is byte-identical to 653ac1e's, whose push.sh hashes to
+      # e291264346502fac37f1df85d7c48d8794193b489c5d3ef84c7c7f583f317b03.
+      - name: Locate the shared chart push
+        id: chart-push
+        uses: krateo-platformops/.github/.github/actions/chart-push@e1d3e99215e80ae56eca4a67e9e061b2c73168b8 # 1.0.0
+
       # Stamp, package, assert and push every chart, then keep the blueprint tarballs for the index.
       # The logic and the history behind each of its checks live in the script, the one copy that
-      # prerelease.yaml runs too, so a pre-release is built the way this release will be.
+      # prerelease.yaml runs too, so a pre-release is built the way this release will be. The registry credentials are
+      # for push.sh's read-back of each manifest, the same identity as the login above.
       - name: Package and push every chart
+        env:
+          CHART_PUSH: ${{ steps.chart-push.outputs.path }}
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: hack/publish-charts.sh release "${VERSION}" "${OCI_REPO}" charts-dist
 
       - name: Hand the blueprint tarballs to the index job
