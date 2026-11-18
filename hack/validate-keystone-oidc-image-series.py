@@ -10,8 +10,10 @@ example and the docs still named keystone-oidc:2025.1-ubuntu_jammy. Following th
 Nothing refused it.
 
 One source: images.tags.keystone_api in blueprints/keystone/chart/values.yaml, whose tag is
-<series>-ubuntu_<distro> (e.g. 2026.1-ubuntu_noble). Every `keystone-oidc:<tag>` reference in the
-chart, its schema, the docs, the README and the examples must carry that exact tag. A line that
+<series>-ubuntu_<distro>, or the dated build of it that the charts pin since #316
+(2026.1-ubuntu_noble-20261117). Every `keystone-oidc:<tag>` reference in the chart, its schema, the
+docs, the README and the examples must carry that series (a dated keystone-oidc tag is compared by
+its series too): the property is "same OpenStack release", and a build date is not a release. A line that
 records a MEASUREMENT ("Measured", "measured") is history and is left alone.
 
 It fails, rather than passing, when it finds no keystone-oidc reference at all: the docs must name
@@ -26,15 +28,15 @@ import yaml
 ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 VALUES = ROOT / "blueprints/keystone/chart/values.yaml"
 SCAN = ["README.md", "docs", "examples", "blueprints/keystone/chart"]
-REF = re.compile(r"keystone-oidc:([0-9]{4}\.[12]-ubuntu_[a-z]+)")
+REF = re.compile(r"keystone-oidc:([0-9]{4}\.[12]-ubuntu_[a-z]+)(?:-20[0-9]{6})?")
 MEASURED = re.compile(r"\bmeasured\b", re.I)
 
 
 def main():
     tag = ((yaml.safe_load(VALUES.read_text()) or {}).get("images") or {}).get("tags", {}).get("keystone_api", "")
-    m = re.search(r":([0-9]{4}\.[12]-ubuntu_[a-z]+)$", tag)
+    m = re.search(r":([0-9]{4}\.[12]-ubuntu_[a-z]+)(?:-20[0-9]{6})?$", tag)
     if not m:
-        print(f"FAIL: images.tags.keystone_api is {tag!r}; expected <repo>:<series>-ubuntu_<distro>")
+        print(f"FAIL: images.tags.keystone_api is {tag!r}; expected <repo>:<series>-ubuntu_<distro>[-YYYYMMDD]")
         return 1
     want = m.group(1)
     files = []

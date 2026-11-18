@@ -31,8 +31,7 @@
             "tunnel": {
               "type": "string",
               "title": "Tunnel interface",
-              "description": "Host NIC used as the VXLAN tunnel endpoint (e.g. ens4 on GKE/GCE).",
-              "default": "ens4"
+              "description": "Host NIC used as the VXLAN tunnel endpoint. Empty: the interface of the route to network.interface.tunnel_network_cidr (the default route)."
             }
           },
           "x-kubernetes-preserve-unknown-fields": true
