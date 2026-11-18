@@ -1,6 +1,7 @@
-# docs/log.md is generated from docs/log.d, one file per change, so branches in flight stop colliding at its top.
-# It stays checked in because people read it on GitHub; it must be what docs/log.d renders.
-name: "docs/log.md is the render of docs/log.d"
+# docs/log.md is rendered on main (the render-log workflow), so a pull request carries only its docs/log.d entry. This
+# checks those entries: names with a real date, front matter, the bullet, and links that resolve from docs/log.d and so
+# after rebasing into docs/log.md. It does not read docs/log.md, which on a pull request is main's.
+name: "Every docs/log.d entry is well formed"
 job: capability-roles
 order: 470
 run: |
