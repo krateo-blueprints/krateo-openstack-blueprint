@@ -77,6 +77,7 @@
 {{- $nodes = ((lookup "v1" "Node" "" "").items | default list) }}
 {{- end }}
 {{- include "osh.requireNodeLabels" (list $ $sel $nodes) -}}
+{{- include "osh.requireStorageNotOverridden" (list $) -}}
 {{- /* Selected components this render does NOT emit (their dependencies are not Ready yet, or their CRD
        is not served yet). While any remain, the ConfigMap openstack-install-pending below is emitted,
        and the CompositionDefinition's statusDataTemplate projects health Ready=False/Creating from its
@@ -194,6 +195,14 @@
        componentValues. hack/validate-kog-credentials.py renders this span. */ -}}
 {{- if and (has $c.name (list "keystone" "nova")) ($.Values.kogCredentials | default dict).enabled }}
 {{- $ov = mergeOverwrite (dict "kog_credentials" (dict "enabled" true)) (deepCopy $ov) }}
+{{- end }}
+{{- /* Storage backend (#196, #308): a component that requires block-storage receives storage.backend as its
+       krateo.storageBackend, always, `none` included: with none, cinder refuses to render and names the value, rather
+       than waiting in Init on Ceph objects nothing creates. Not overridable (osh.requireStorageNotOverridden refuses a
+       componentValues entry), so the backend full-strict selects by is the one the component renders.
+       hack/validate-storage-backend.py renders this span for each backend. */ -}}
+{{- if has "block-storage" ($c.requires | default list) }}
+{{- $ov = mergeOverwrite (deepCopy $ov) (dict "krateo" (dict "storageBackend" (include "osh.storageBackend" (list $)))) }}
 {{- end }}
 {{- /* TWO PHASES: a live component's NEW values are written only at the new apiVersion, and only
        once its CompositionDefinition serves it (status.apiVersion at the current version, Ready
