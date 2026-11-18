@@ -1,0 +1,9 @@
+# oslo.service 4.9.0 reached PyPI on 2026-11-18 and the worker-probe gate, installing it unpinned, failed on every pull
+# request; two other gates pinned library versions the images do not ship. Every gate that pip-installs an image
+# library installs it against the images' upper-constraints (hack/openstack-constraints.yaml, a commit SHA) and checks
+# the installed versions before its tests run.
+name: "Every gate installs image libraries at the images' versions"
+job: capability-roles
+order: 15
+run: |
+  python3 hack/validate-pip-constrained.py .

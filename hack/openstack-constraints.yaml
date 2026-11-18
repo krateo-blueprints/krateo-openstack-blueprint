@@ -1,0 +1,16 @@
+# The upper-constraints the 2026.1 images are built against: every gate that pip-installs a library the images ship
+# installs it with `pip install -c "$(python3 hack/constraints.py url)" <names>` and then checks it with
+# `python3 hack/constraints.py check <names>` (hack/validate-pip-constrained.py enforces both). So each package, and
+# every transitive dependency it pulls, is the images' own version, and a new PyPI release cannot change what a gate
+# tests against: on 2026-11-18 oslo.service 4.9.0 reached PyPI, an unpinned install picked it up, and every PR's
+# worker-probe gate failed (it initialises the eventlet backend on import).
+#
+# Pinned by commit SHA, with what it is and how it was resolved (krateo-blueprints/charts PUBLISHING.md rule 9's form).
+# Resolved 2026-11-18 with:
+#   git ls-remote https://opendev.org/openstack/requirements refs/heads/stable/2026.1
+# Measured against the images (quay.io/airshipit/*:2026.1-ubuntu_noble-20261117): oslo.service 4.5.1, cotyledon
+# 2.2.0, setproctitle 1.3.7, oslo.messaging 17.3.2, eventlet 0.40.4, oslo.config 10.3.0, kombu 5.6.2, Django 4.2.28,
+# cryptography 43.0.3, psutil 7.2.2: each equals this file's constraint.
+repository: openstack/requirements
+branch: stable/2026.1
+sha: ecafdea78076c35b114c934dd1d6457230f71dbb
