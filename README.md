@@ -1285,6 +1285,17 @@ Two costs, both measured:
 On a cluster still on 0.3.40 or earlier, a hook Job of the same name replaces the plain Job on
 the first upgrade. Nothing has to be deleted by hand.
 
+Helm never deletes hook resources when it uninstalls a release, and a completed hook Job can't
+delete itself (`hook-succeeded`), because kubernetes-entrypoint waits on dependency Jobs by name
+for as long as the component is installed. So each chart also renders `<component>-hook-cleanup`,
+a `pre-delete` hook that runs last at uninstall and deletes that release's install/upgrade hook
+Jobs and their pods (#206). It runs in an image the chart's own Jobs already use, with a Role
+limited to listing and deleting Jobs in the namespace. It always exits 0, so a failed cleanup
+leaves the Jobs behind rather than blocking the uninstall. Jobs left by uninstalls before this
+version stay: `kubectl -n <ns> delete jobs -l release_group=<release>` removes them.
+`hack/validate-hook-cleanup.py` checks every chart that renders a hook Job, and runs the cleanup
+against a stand-in API.
+
 ### Horizon sessions move to the database: every Horizon user is logged out once
 
 Horizon now keeps sessions in its MariaDB (`session_engine: django.contrib.sessions.backends.db`)
