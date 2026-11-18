@@ -117,6 +117,17 @@
 {{- $approved := include "osh.migrationApprovedFor" (list $ $cd) }}
 {{- $emitVer := include "osh.emitVersion" (list $ $c.kind $c.name $crds $exists $approved) }}
 {{- $crd := include "osh.crdExists" (list $c.kind $emitVer $crds) }}
+{{- /* #309 C: a component's RabbitMQ user rotation (osh.messagingRotation), derived from the live Composition and the
+       target root's stamps. A token that cannot be honoured refuses the render, naming why, on the umbrella's status. */ -}}
+{{- if (include "osh.messagingProjection" (list $ $c) | fromJson).secret }}
+{{- $rotLive := dict }}
+{{- if eq $exists "true" }}{{- with include "osh.liveState" (list $ $c.kind $c.name $emitVer $crds) }}{{- $rotLive = (fromJson .).spec | default dict }}{{- end }}{{- end }}
+{{- $rot := include "osh.messagingRotation" (list $ $c $rotLive) | fromJson }}
+{{- if $rot.refuse }}{{- fail (printf "\n\n%s\n" $rot.refuse) }}{{- end }}
+{{- if ne $rot.target $rot.base }}
+{{- include "osh.generationRoot" (list $ $rot) }}
+{{- end }}
+{{- end }}
 {{- /* Partition this component's dependencies by the gate each edge is in, so that which
        semantics applies to which dependency is visible here and not buried in a helper. */ -}}
 {{- $relaxed := splitList " " (include "osh.depsRelaxed" (list $ $c.name $c.deps)) | compact }}
