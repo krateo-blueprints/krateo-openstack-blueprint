@@ -41,6 +41,16 @@ if shutil.which("helm") is None:
     sys.exit(2)
 
 
+# What the umbrella delivers for a chart's storage (#308): cinder's default refuses, so a chart render carries
+# hack/gate_values.py's arguments (nothing for every other chart).
+import importlib.util as _gv_util
+import os as _gv_os
+_gv_spec = _gv_util.spec_from_file_location(
+    "gate_values", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "gate_values.py"))
+gate_values = _gv_util.module_from_spec(_gv_spec)
+_gv_spec.loader.exec_module(gate_values)
+
+
 def render(chart, tmp):
     w = os.path.join(tmp, chart)
     shutil.copytree(os.path.join(BP, chart, "chart"), w)
@@ -49,7 +59,7 @@ def render(chart, tmp):
     open(cy, "w").write(txt.replace("CHART_VERSION", "0.0.0-gate"))
     os.makedirs(os.path.join(w, "charts"), exist_ok=True)
     shutil.copytree(TOOLKIT, os.path.join(w, "charts", "helm-toolkit"))
-    r = subprocess.run(["helm", "template", chart + "-gate", w, "--namespace", "openstack"],
+    r = subprocess.run(["helm", "template", chart + "-gate", w, "--namespace", "openstack", *gate_values.helm_args(w)],
                        capture_output=True, text=True)
     if r.returncode:
         return None, r.stderr.strip()[-300:]

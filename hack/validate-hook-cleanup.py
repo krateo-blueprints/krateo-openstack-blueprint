@@ -49,6 +49,16 @@ ALLOWED_VERBS = {"get", "list", "delete"}
 NEEDED_VERBS = {"list", "delete"}
 
 
+# What the umbrella delivers for a chart's storage (#308): cinder's default refuses, so a chart render carries
+# hack/gate_values.py's arguments (nothing for every other chart).
+import importlib.util as _gv_util
+import os as _gv_os
+_gv_spec = _gv_util.spec_from_file_location(
+    "gate_values", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "gate_values.py"))
+gate_values = _gv_util.module_from_spec(_gv_spec)
+_gv_spec.loader.exec_module(gate_values)
+
+
 def hooks_of(d):
     a = (d.get("metadata") or {}).get("annotations") or {}
     return {h.strip() for h in str(a.get("helm.sh/hook", "")).split(",") if h.strip()}
@@ -107,7 +117,7 @@ def render(chart, toolkit, component, workdir, extra):
     if not (staged / "charts" / "helm-toolkit").exists():
         shutil.copytree(toolkit, staged / "charts" / "helm-toolkit")
     r = subprocess.run(["helm", "template", f"{component}-{RELEASE_SUFFIX}", str(staged), "--namespace", NAMESPACE,
-                        "--kube-version", "1.36.0", *extra], capture_output=True, text=True)
+                        "--kube-version", "1.36.0", *gate_values.helm_args(staged), *extra], capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(r.stderr.strip()[-600:])
     return [d for d in yaml.safe_load_all(r.stdout) if isinstance(d, dict)]

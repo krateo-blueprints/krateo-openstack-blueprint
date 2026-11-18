@@ -1656,14 +1656,15 @@ krateo:
   # (Ready=False/HooksMayNotHaveRun, README).
   rerunHooksToken: ""
   # storageBackend (#196, #308): which block-storage backend this cinder renders, set by the umbrella from its
-  # storage.backend for every install it makes (templates/krateo-storage-backend.yaml).
-  #   unmanaged      this default: the chart as OpenStack-Helm ships it, outside the umbrella. Its rbd1 backend names
-  #                  the ConfigMap ceph-etc and the Secrets pvc-ceph-client-key and cinder-volume-rbd-keyring, which
-  #                  whoever installs it must provide (hack/provisioning-preconditions.yaml). The umbrella never passes
-  #                  it: it refuses a componentValues.cinder.krateo.storageBackend.
-  #   none           refused: there is no backend, and cinder-volume would wait in Init forever.
+  # storage.backend for every install it makes (templates/krateo-storage-backend.yaml). A standalone Cinder Composition
+  # must choose one: this default refuses.
+  #   none           this default, refused: there is no backend, and cinder-volume would wait in Init forever (#196).
+  #   unmanaged      an explicit opt-in to the chart as OpenStack-Helm ships it, outside the umbrella. Its rbd1 backend
+  #                  names the ConfigMap ceph-etc and the Secrets pvc-ceph-client-key (client.admin) and
+  #                  cinder-volume-rbd-keyring, which whoever installs it must provide. The umbrella never passes it:
+  #                  it refuses a componentValues.cinder.krateo.storageBackend.
   #   ceph-rook      a Ceph run by Rook (#308), and
   #   ceph-external  an existing Ceph (#308): both render only with krateo.ceph.keyringFrom and monHostFrom, the
   #                  umbrella's copies of the keys Ceph minted, and never use client.admin.
-  storageBackend: unmanaged
+  storageBackend: none
 ...

@@ -26,8 +26,9 @@ preconditions:
       client.<storage.ceph.clients.cinder> with `profile rbd` on that pool must exist, and the Secrets holding the user's
       key and mon_host must be readable by the umbrella's copy store (in another namespace, its owner grants the
       ServiceAccount <credentials.store>-ceph-reader get on exactly those Secrets; see the README). No client.admin key
-      is used. A standalone Cinder Composition at its own default (krateo.storageBackend: unmanaged) still renders
-      upstream's rbd1 backend, with its ceph-etc, pvc-ceph-client-key and cinder-volume-rbd-keyring precondition.
+      is used. A standalone Cinder Composition has no default backend: it refuses until krateo.storageBackend is set,
+      to unmanaged (upstream's rbd1 backend, with its ceph-etc, pvc-ceph-client-key and cinder-volume-rbd-keyring
+      precondition) or ceph-external (references to the user's key and mon_host).
     symptom: >-
       With storage.backend none, profile full-strict leaves cinder out, and a cinder selected anyway (profile full, or
       enabled:) does not install: its Composition reports the render error "cinder needs a volume backend, and

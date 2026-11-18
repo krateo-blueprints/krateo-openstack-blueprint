@@ -60,6 +60,16 @@ class UniqueKeyLoader(yaml.SafeLoader):
     pass
 
 
+# What the umbrella delivers for a chart's storage (#308): cinder's default refuses, so a chart render carries
+# hack/gate_values.py's arguments (nothing for every other chart).
+import importlib.util as _gv_util
+import os as _gv_os
+_gv_spec = _gv_util.spec_from_file_location(
+    "gate_values", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "gate_values.py"))
+gate_values = _gv_util.module_from_spec(_gv_spec)
+_gv_spec.loader.exec_module(gate_values)
+
+
 def _no_duplicates(loader, node, deep=False):
     seen = set()
     for key_node, _ in node.value:
@@ -92,7 +102,7 @@ def render(chart: Path, toolkit: Path, component: str, workdir: Path, extra):
         if not (staged / "charts" / "helm-toolkit").exists():
             shutil.copytree(toolkit, staged / "charts" / "helm-toolkit")
     r = subprocess.run(["helm", "template", f"{component}-{RELEASE_SUFFIX}", str(staged),
-                        "--namespace", "openstack", *extra], capture_output=True, text=True)
+                        "--namespace", "openstack", *gate_values.helm_args(staged), *extra], capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(r.stderr.strip()[-1500:])
     return [d for d in yaml.load_all(r.stdout, Loader=UniqueKeyLoader) if isinstance(d, dict)]
