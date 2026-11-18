@@ -41,10 +41,37 @@ CONTROLS, and why there are two kinds.
   passing every file.
 
   PER DOCUMENT, because one control per sweep is how 63 rate-limited fetches
-  once read in this repo as "symbol absent". Each render must come back with at
-  least one heading element if the source has a heading outside a fence. A
-  rate-limited, truncated or empty response then VOIDs that one file. A single
-  "the API answered once" check at the top of an 18-file loop cannot do that.
+  once read in this repo as "symbol absent". A rate-limited, truncated or wrong
+  response must VOID that one file rather than read as "declares 0, rendered 0,
+  agreed". A single "the API answered once" check at the top of an 18-file loop
+  cannot do that.
+
+  The control asks the strongest available question: does the returned HTML
+  contain a token that is distinctive to this document -- the longest
+  `[A-Za-z0-9_-]{12,}` run, containing a letter, that occurs outside this
+  document's fences and in NO OTHER document of the corpus? That character class
+  cannot be altered by HTML escaping or split by syntax-highlight spans, and
+  unlike "has a heading" a corpus-unique token also fails when the response is a
+  real render of a different document.
+
+  Uniqueness is computed, not assumed, and the output says which kind of token a
+  file got. Four of this repo's documents share
+  `installing-this-pin-onto-a-cluster-that-already-has-a-provider` as their
+  longest token, so picking "longest" alone would have given four files an
+  identifier that cannot tell them apart -- a control that reads as strong and
+  is not. A file with no unique token keeps the longest shared one (still good
+  against truncation, stated as weaker); a file with no token at all falls back
+  to "contains any block-level element".
+
+  The earlier version of this control required a heading element, or a `<p>`
+  when the source had no ATX heading. The openstack-as-a-service session hit its
+  limit while porting this screen: 35 of their documents are front matter plus a
+  single list item, which GitHub renders as `<hr>`, a setext `<h2>` and a
+  `<ul><li>` -- no `<p>` anywhere, so all 35 VOIDed. Their fix was to accept
+  `<li>` too, which is correct and narrower than this one. The lesson is the
+  reason for the change: a control built from the documents in front of me
+  mistook "the shape my repo happens to have" for "evidence the response is this
+  document".
 
 MEASURED FACTS THIS DEPENDS ON, 2026-11-18, from real responses:
 
@@ -79,6 +106,14 @@ from mdfence import ADMONITION, fence_scan  # noqa: E402
 ALERT = "markdown-alert-title"
 HEADING = re.compile(r"<h[1-6][\s>]")
 SRC_HEADING = re.compile(r"#{1,6} \S")
+# Any block-level element, used only when a document has no distinctive token.
+BLOCK = re.compile(r"<(?:p|li|h[1-6]|table|pre|blockquote)[\s>]")
+# A token that cannot be altered by HTML escaping or by syntax-highlight spans:
+# letters, digits, underscore and hyphen only, long enough to be specific. It
+# must contain a LETTER -- without that rule kagent/README.md identified itself
+# by a table rule, `--------------------------------`, which every table in the
+# repo contains.
+TOKEN = re.compile(r"[A-Za-z0-9_-]{12,}")
 
 GOOD_FIXTURE = "# H\n\n> [!NOTE]\n> rendered\n"
 BAD_FIXTURE = "# H\n\n```console\n> [!NOTE]\n> swallowed\n```\n"
@@ -123,6 +158,64 @@ def markers(lines):
         if m:
             out.append((n + 1, m.group(1), inside[n]))
     return out
+
+
+def comment_mask(lines, inside):
+    """True where a line is inside an HTML comment (fences excluded).
+
+    GitHub's renderer STRIPS HTML comments, so a token that only occurs in one
+    is absent from the output by design. README.md declares this repo's provider
+    floor in a machine-readable `<!-- ... -->` block, and its longest unique
+    token lived there: the control VOIDed the file on its first run, correctly
+    reporting that the response did not contain the token, and wrongly implying
+    the response was not this document. A comment is as invisible to the
+    renderer as a fence makes a token unmatchable, so both are excluded here.
+    """
+    mask = [False] * len(lines)
+    open_comment = False
+    for n, line in enumerate(lines):
+        if inside[n]:
+            continue
+        if open_comment:
+            mask[n] = True
+            if "-->" in line:
+                open_comment = False
+            continue
+        if "<!--" in line:
+            mask[n] = True
+            # A comment that also closes on this line leaves the state clean.
+            if "-->" not in line.split("<!--", 1)[1]:
+                open_comment = True
+    return mask
+
+
+def tokens_of(lines, inside):
+    """Identifying tokens outside this document's fences and HTML comments.
+
+    Outside the fences deliberately: inside a highlighted block GitHub wraps
+    pieces of a line in <span>s, which can split a token and make a present
+    document look absent. Outside comments because the renderer drops them.
+    """
+    commented = comment_mask(lines, inside)
+    out = set()
+    for n, line in enumerate(lines):
+        if inside[n] or commented[n]:
+            continue
+        for m in TOKEN.finditer(line):
+            t = m.group(0)
+            if re.search(r"[A-Za-z]", t):
+                out.add(t)
+    return out
+
+
+def pick_token(tokens, counts):
+    """(token, unique) -- longest corpus-unique token, else longest, else None."""
+    uniq = [t for t in tokens if counts.get(t, 0) == 1]
+    if uniq:
+        return max(uniq, key=len), True
+    if tokens:
+        return max(tokens, key=len), False
+    return None, False
 
 
 def instrument_controls():
@@ -185,7 +278,62 @@ def self_test():
     assert not SRC_HEADING.search("no heading in this source line")
     assert SRC_HEADING.search("## Install the chart")
 
-    print("check-doc-rendering.py: self-test passed (5 arms)")
+    # 6. The per-document control. A token must bear a letter: without that
+    #    rule kagent/README.md identified itself by a table rule.
+    ins, _, _, _ = fence_scan(["--------------------------------",
+                               "about configurationFields here",
+                               "```", "insideTheFenceToken", "```"])
+    toks = tokens_of(["--------------------------------",
+                      "about configurationFields here",
+                      "```", "insideTheFenceToken", "```"], ins)
+    assert "--------------------------------" not in toks, toks
+    assert "configurationFields" in toks, toks
+    assert "insideTheFenceToken" not in toks, "fenced tokens must be excluded"
+
+    # 6b. HTML comments are stripped by the renderer, so a token that only
+    #     occurs inside one is absent from the output BY DESIGN. README.md's
+    #     longest unique token lives in its machine-readable floor comment and
+    #     VOIDed the file on the first live run.
+    doc = ["before the comment", "<!-- a note about tokenOnlyInComment",
+           "   spanning two lines -->", "after tokenAfterComment ends"]
+    i2, _, _, _ = fence_scan(doc)
+    cm = comment_mask(doc, i2)
+    assert cm == [False, True, True, False], cm
+    t2 = tokens_of(doc, i2)
+    assert "tokenOnlyInComment" not in t2, t2
+    assert "tokenAfterComment" in t2, t2
+    one = ["x <!-- shortLivedComment --> y", "tokenAfterOneLiner here"]
+    i3, _, _, _ = fence_scan(one)
+    assert comment_mask(one, i3) == [True, False], "a one-line comment must not latch"
+    assert "tokenAfterOneLiner" in tokens_of(one, i3)
+
+    # 7. Corpus-uniqueness must beat length, or four files in this repo would
+    #    share one identifier and the control would read as strong while being
+    #    unable to tell them apart.
+    counts = {"sharedLongerToken": 2, "uniqueShorter": 1}
+    tok, uniq = pick_token({"sharedLongerToken", "uniqueShorter"}, counts)
+    assert (tok, uniq) == ("uniqueShorter", True), (tok, uniq)
+    tok, uniq = pick_token({"sharedLongerToken"}, counts)
+    assert (tok, uniq) == ("sharedLongerToken", False), (tok, uniq)
+    assert pick_token(set(), counts) == (None, False)
+
+    # 8. THE ARM THAT MAKES THE CONTROL WORTH HAVING: a real render of the
+    #    WRONG document must fail it. Without corpus-uniqueness this arm passes
+    #    on a broken control, which is why it is asserted and not commented.
+    doc_a = ["# A", "", "it discusses theUniqueTokenOfA at length"]
+    doc_b = ["# B", "", "it discusses theUniqueTokenOfB at length"]
+    ia, _, _, _ = fence_scan(doc_a)
+    ib, _, _, _ = fence_scan(doc_b)
+    ta, tb = tokens_of(doc_a, ia), tokens_of(doc_b, ib)
+    cnt = {}
+    for t in list(ta) + list(tb):
+        cnt[t] = cnt.get(t, 0) + 1
+    pa, ua = pick_token(ta, cnt)
+    assert ua and pa == "theUniqueTokenOfA", (pa, ua)
+    render_of_b = "<h1>B</h1><p>it discusses theUniqueTokenOfB at length</p>"
+    assert pa not in render_of_b, "doc A's token must be absent from doc B's render"
+
+    print("check-doc-rendering.py: self-test passed (9 arms)")
     return OK
 
 
@@ -204,6 +352,16 @@ def main():
             print("  - " + b)
         return VOID
 
+    # Corpus pass first: a token is only an identifier if no other file has it.
+    corpus, counts = {}, {}
+    for f in docs():
+        lines = open(f, encoding="utf-8", errors="replace").read().split("\n")
+        inside, _, _, _ = fence_scan(lines)
+        corpus[f] = tokens_of(lines, inside)
+        for t in corpus[f]:
+            counts[t] = counts.get(t, 0) + 1
+    shared = 0
+
     void, mismatched, clean = [], [], 0
     for f in docs():
         lines = open(f, encoding="utf-8", errors="replace").read().split("\n")
@@ -212,22 +370,22 @@ def main():
         if html is None:
             void.append("%s: %s" % (f, why))
             continue
-        inside, _, _, _ = fence_scan(lines)
-        src_headings = sum(
-            1 for n, l in enumerate(lines) if not inside[n] and SRC_HEADING.match(l))
-        if src_headings and not HEADING.search(html):
+        token, unique = pick_token(corpus[f], counts)
+        if token is not None:
+            if not unique:
+                shared += 1
+            if token not in html:
+                void.append(
+                    "%s: the render does not contain %r, this document's "
+                    "%s identifying token, so this response is not this "
+                    "document" % (f, token,
+                                  "corpus-unique" if unique else "longest (SHARED)"))
+                continue
+        elif not BLOCK.search(html):
             void.append(
-                "%s: source has %d heading(s) and the render came back with "
-                "none, so this response is not this document" % (f, src_headings))
-            continue
-        # Adapted for krateo-openstack-blueprint (the only change from the source,
-        # openstack-nova-operator-kog f96b173): a docs/log.d entry is front matter
-        # plus one list item, so GitHub renders it with no <p> at all. Its <li> is
-        # the same evidence a paragraph is that the response is this document.
-        if not src_headings and "<p" not in html and "<li" not in html:
-            void.append(
-                "%s: no heading to check and no paragraph or list item in the "
-                "render, so nothing confirms the response is this document" % f)
+                "%s: no token long enough to identify it and no block-level "
+                "element in the render, so nothing confirms the response is "
+                "this document" % f)
             continue
         rendered = html.count(ALERT)
         if rendered != len(declared):
@@ -246,6 +404,10 @@ def main():
 
     print("\n%d document(s) agreed, %d disagreed, %d VOID" % (
         clean, len(mismatched), len(void)))
+    if shared:
+        print("%d document(s) had no corpus-unique token and were identified by "
+              "a shared one -- still proof against a truncated response, not "
+              "against a response for a different document." % shared)
     if void:
         return VOID
     return MISMATCH if mismatched else OK

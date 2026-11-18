@@ -1,9 +1,8 @@
 # Ask GitHub's renderer, not a model of markdown, whether every admonition renders as an alert box. Each document is
 # POSTed to /markdown (gfm), and its count of `markdown-alert-title` must equal ALL its admonition markers, fenced or
 # not. A known-good fixture (1 alert) and a known-bad fenced one (0) are rendered first; if either is wrong the run is
-# VOID (exit 2), as it is for a document whose render cannot be confirmed as that document. Exit 1 names the file.
-# Ported from krateo-blueprints/openstack-nova-operator-kog f96b173 (#177): scripts/mdfence.py byte-for-byte, and
-# hack/check-doc-rendering.py with one change, marked at its line (a log.d entry renders with no <p>, only an <li>).
+# VOID (exit 2), as it is for a document whose render lacks its identifying token. Exit 1 names the file.
+# Ported byte-for-byte from krateo-blueprints/openstack-nova-operator-kog ed871ad (#177, #179): both files.
 # A document that deliberately shows an admonition as example code gets a path exemption with the reason at the
 # line, never a looser count.
 name: "Every admonition the docs declare renders as an alert box (GitHub's /markdown)"
