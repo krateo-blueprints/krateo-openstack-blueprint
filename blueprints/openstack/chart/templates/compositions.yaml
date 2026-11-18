@@ -117,11 +117,25 @@
 {{- $approved := include "osh.migrationApprovedFor" (list $ $cd) }}
 {{- $emitVer := include "osh.emitVersion" (list $ $c.kind $c.name $crds $exists $approved) }}
 {{- $crd := include "osh.crdExists" (list $c.kind $emitVer $crds) }}
+{{- /* Whether this component's values are HELD (TWO PHASES, below, where the decision is consumed; osh.holdValues). A pure
+       function of the reads above, decided here because it is one of the two reasons to read the live object. */ -}}
+{{- $hold := include "osh.holdValues" (list (include "osh.version" (list $)) $emitVer $approved $exists (include "osh.definitionApiVersion" (list $cd)) (include "osh.definitionReady" (list $cd))) }}
+{{- /* THE LIVE READ: the component's live Composition (osh.liveState: spec, composition-version label, status.managed),
+       read ONCE, here, and only when something needs it: the hold re-emits its spec, and a RabbitMQ user rotation (#309 C)
+       derives the active generation from it. A rotation is in progress or has happened exactly while its
+       rotate.<id> token is set: a used token must stay set (osh.messagingRotation refuses a removed one, which C2
+       extends to a token removed without a live read). So a render that holds nothing and rotates nothing reads
+       nothing (hack/validate-two-phase-values.py counts these reads: 0 plain, 1 holding, 1 rotating, 1 both). */ -}}
+{{- $rotTok := toString (index ($.Values.rotate | default dict) (printf "oslo-messaging-%s" $c.name) | default "") }}
+{{- $live := "" }}
+{{- if or (eq $hold "true") (and $rotTok (eq $exists "true")) }}
+{{- $live = include "osh.liveState" (list $ $c.kind $c.name $emitVer $crds) }}
+{{- end }}
 {{- /* #309 C: a component's RabbitMQ user rotation (osh.messagingRotation), derived from the live Composition and the
        target root's stamps. A token that cannot be honoured refuses the render, naming why, on the umbrella's status. */ -}}
 {{- if (include "osh.messagingProjection" (list $ $c) | fromJson).secret }}
 {{- $rotLive := dict }}
-{{- if eq $exists "true" }}{{- with include "osh.liveMessaging" (list $ $c.kind $c.name $emitVer $crds) }}{{- $rotLive = (fromJson .).spec | default dict }}{{- end }}{{- end }}
+{{- if $live }}{{- $rotLive = (fromJson $live).spec | default dict }}{{- end }}
 {{- $rot := include "osh.messagingRotation" (list $ $c $rotLive) | fromJson }}
 {{- if $rot.refuse }}{{- fail (printf "\n\n%s\n" $rot.refuse) }}{{- end }}
 {{- if ne $rot.target $rot.base }}
@@ -289,9 +303,7 @@
 
        If the object is gone by the time its spec is read (deleted between osh.exists and here),
        there is no live spec to keep and the computed values are emitted, as before this block. */ -}}
-{{- $hold := include "osh.holdValues" (list (include "osh.version" (list $)) $emitVer $approved $exists (include "osh.definitionApiVersion" (list $cd)) (include "osh.definitionReady" (list $cd))) }}
 {{- if eq $hold "true" }}
-{{- $live := include "osh.liveState" (list $ $c.kind $c.name $emitVer $crds) }}
 {{- if $live }}
 {{- $state := $live | fromJson }}
 {{- $ov = $state.spec | default dict }}

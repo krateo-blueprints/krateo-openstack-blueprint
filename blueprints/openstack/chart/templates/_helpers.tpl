@@ -461,14 +461,16 @@ true
 krateo.io/composition-version
 {{- end -}}
 
-{{/* The live state of <kind>/<name>, read at <ver>, as JSON {"spec": ..., "version": ...}: its spec,
-     and the version its osh.compositionVersionLabel says it was last written through ("" when the
-     label is absent). "" when no such object exists.
+{{/* The live state of <kind>/<name>, read at <ver>, as JSON {"spec": ..., "version": ..., "managed": ...}:
+     its spec, the version its osh.compositionVersionLabel says it was last written through ("" when
+     the label is absent), and its status.managed. "" when no such object exists.
 
-     One named GET of the one object, made ONLY while osh.holdValues holds: compositions.yaml calls
-     it inside that branch, so a steady-state render pays nothing for it, and an upgrade pays one GET
-     per held component for the passes until its definition is Ready on the new version. Both
-     answers come from this one GET; the label is not read anywhere else. It is a third GET of an
+     One named GET of the one object, made ONLY while osh.holdValues holds or the component has a
+     rotate.<id> token (#309 C): compositions.yaml calls it once, under that condition, and hands the
+     result to both, so a steady-state render pays nothing for it, an upgrade pays one GET per held
+     component for the passes until its definition is Ready on the new version, and a rotated
+     component one GET per render (never two, holding or not). Every answer comes from this one GET;
+     the label is not read anywhere else. It is a third GET of an
      object osh.exists and osh.originVersion already read, for the reason osh.originVersion gives
      for being the second: hoisting one shared read into compositions.yaml would make this
      component's existence test different code from every dependency's.
@@ -487,24 +489,7 @@ krateo.io/composition-version
 {{- $o := lookup (include "osh.apiVersionAt" (list $ver)) $kind $top.Release.Namespace $name -}}
 {{- if $o -}}
 {{- $labels := (($o.metadata).labels) | default dict -}}
-{{- dict "spec" (($o.spec) | default dict) "version" ((index $labels (include "osh.compositionVersionLabel" $top)) | default "") | toJson -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
-
-{{- /* osh.liveMessaging (list $ kind name ver crds): what a RabbitMQ user rotation reads from the LIVE component
-       Composition (#309 C), as JSON {spec, managed}: its spec (the root its passwordFrom names is the active generation)
-       and its status.managed. One named GET of the component at <ver>, guarded by osh.crdExists as osh.liveState is.
-       Not osh.liveState: that is the hold's read, called once and only inside the hold
-       (hack/validate-two-phase-values.py), so a render that holds nothing makes no GET for it. This one is made only for
-       a component with an umbrella RabbitMQ projection (osh.messagingProjection: messaging.backend operator) that
-       exists: one GET per such component per render, the cost of deriving the rotation from what exists. */ -}}
-{{- define "osh.liveMessaging" -}}
-{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $ver := index . 3 -}}{{- $crds := index . 4 -}}
-{{- if eq (include "osh.crdExists" (list $kind $ver $crds)) "true" -}}
-{{- $o := lookup (include "osh.apiVersionAt" (list $ver)) $kind $top.Release.Namespace $name -}}
-{{- if $o -}}
-{{- dict "spec" (($o.spec) | default dict) "managed" ((($o.status) | default dict).managed | default list) | toJson -}}
+{{- dict "spec" (($o.spec) | default dict) "version" ((index $labels (include "osh.compositionVersionLabel" $top)) | default "") "managed" ((($o.status) | default dict).managed | default list) | toJson -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
