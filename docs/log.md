@@ -13,18 +13,15 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
-- **image-scan retries a scan cut short by a layer download (#316, #334).**
-  - **What failed:** image-scan run 44202269356 (on `feat/309-h0-h1`) failed in
-    `scan (quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble)`. The cause was no new CVE: Trivy stopped
-    with `failed to analyze layer ... unable to read the file: unexpected EOF`, a layer download cut short. The gate
-    then failed, correctly, on the image's missing report.
-  - **Measured on 2026-11-18:** the waived series tag still serves the recorded digest (`sha256:12c53f1f…`), so it
-    had not moved upstream. Main's image-scan on `08ec684`, a few minutes later, scanned the same digest with no
-    finding outside the allowlist.
-  - **The fix:** the scan step now tries up to three times and drops only the layer-analysis cache between attempts.
-    A real finding can't be retried away, because findings are judged from the report. An image that fails all
-    three attempts still has no report, and the gate fails it by name.
-  - **The allowlist doesn't change:** there was no new finding, and entries are only made for measured findings.
+- **neutron's tunnel interface is detected, not assumed.** `network.interface.tunnel` defaulted to `ens4`, a GCE NIC
+  name. On a node without `ens4` the OVS agent's init set no tunnel IP ("Var LOCAL_IP is empty"). The default is now
+  empty, so the init uses the interface of the default route. That logic was already in the script; the `ens4` default
+  had been skipping it.
+  - **Existing installs keep `ens4`.** The old schema default was written into each stored neutron object (#179). It is
+    harmless on GCE, where `ens4` is the right NIC. Elsewhere, clear `componentValues.neutron.network.interface.tunnel`
+    or set it to the node's NIC.
+  - **New gate:** `hack/validate-neutron-tunnel-interface.py` checks the empty default and the schema, and runs the
+    rendered fallback.
 
 - **Images pinned; remediation issues (#316, #328 to #334).**
   - **Dated tags:** Diego decided on 2026-11-17 to pin dated tags and verify their digests in CI. The 31 airshipit
