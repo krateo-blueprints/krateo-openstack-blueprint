@@ -77,6 +77,10 @@
           {
             "context": "lint-docs / lint-docs",
             "integration_id": 15368
+          },
+          {
+            "context": "pinned-uses / pinned-uses",
+            "integration_id": 15368
           }
         ]
       }

@@ -9,4 +9,6 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
   `pinned-uses` job, the shared check from charts 1.2.0 (`33c7951`). It refuses any non-local reusable-workflow `uses:`
   that is not a 40-hex commit with a `# X.Y.Z` or `# main YYYY-MM-DD` comment. `release-tag.yaml` keeps
   `788f1a6 # 1.1.0`, since the publisher and the preflight are byte-identical at 1.2.0. Run here, the check reports
-  6 reusable uses, 0 not pinned.
+  6 reusable uses, 0 not pinned. `pinned-uses / pinned-uses` becomes a required merge-queue check in
+  `hack/merge-queue-ruleset.json`, and `hack/validate-merge-queue-ruleset.py` maps its inner job name. The live ruleset
+  is updated after merge.
