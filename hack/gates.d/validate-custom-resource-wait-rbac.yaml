@@ -1,0 +1,9 @@
+# A pod that waits on a custom resource (dependencies custom_resources, which kubernetes-entrypoint reads with a named
+# GET) may read it: helm-toolkit's dependency Role covered only core, batch, apps and discovery resources, so every such
+# wait would be Forbidden and the pod would stay in Init. Needed before the operator CRs of #309 replace db-init and
+# rabbit-init.
+name: "A pod that waits on a custom resource may read it"
+job: capability-roles
+order: 148
+run: |
+  python3 hack/validate-custom-resource-wait-rbac.py .
