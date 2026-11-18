@@ -68,7 +68,12 @@ missing dependency, a malformed relaxation, an unrecognised creation gate or a g
 edges all exit non-zero. Four gates in this repo printed "SKIP: PyYAML unavailable" and exited 0
 for weeks (#120).
 
-What this gate does NOT claim. It judges the shipped chart defaults; a workload that only the
+Every chart is rendered twice: at its defaults, and with every manifests.job_* switch on (#302). A cycle that
+appears only with an opt-in Job on fails too: mariadb's ks-user Job, a post-install hook waiting on keystone, which
+waits on mariadb, deadlocked a first install with no gate to see it because the Job was off by default. The relax-set's
+minimality is judged on the defaults alone.
+
+What this gate does NOT claim. Beyond those Jobs it judges the shipped chart defaults; another workload that only the
 umbrella's componentValues enables is not rendered and not measured. It says nothing about waits
 that resolve to nothing -- an unmatched DEPENDENCY_POD_JSON selector or a DEPENDENCY_JOBS name no
 manifest renders is a forever-wait of a different kind, counted and printed here but left to its
@@ -297,9 +302,17 @@ def check_partition(root, comps, declared):
     return len(rendered)
 
 
+def job_switches(chart):
+    """manifests.job_*: true for every Job switch a chart's values define, as validate-job-hooks.py renders them."""
+    values = yaml.safe_load((chart / "values.yaml").read_text()) or {}
+    manifests = values.get("manifests") or {}
+    return [x for k, v in sorted(manifests.items()) if k.startswith("job_") and isinstance(v, bool)
+            for x in ("--set", f"manifests.{k}=true")]
+
+
 def render(args):
-    """helm template one component chart, exactly as validate-component-dag.py does."""
-    root, name = args
+    """helm template one component chart, exactly as validate-component-dag.py does; with opt_in, every Job on."""
+    root, name, opt_in = args
     chart = root / "blueprints" / name / "chart"
     if not (chart / "Chart.yaml").is_file():
         return name, None, f"no chart at blueprints/{name}/chart"
@@ -316,7 +329,8 @@ def render(args):
             # --kube-version for the same reason the DAG gate passes it: a kubeVersion-constrained
             # chart renders nothing without it, and a gate that accepts an empty render accepts
             # anything.
-            ["helm", "template", name, str(work), "--kube-version", "1.36.0"],
+            ["helm", "template", name, str(work), "--kube-version", "1.36.0",
+             *(job_switches(chart) if opt_in else [])],
             capture_output=True, text=True,
         )
     if out.returncode != 0:
@@ -354,11 +368,11 @@ def entrypoint_waits(pod_spec):
     return sorted(set(services)), pods, sorted(set(jobs))
 
 
-def collect(root, names):
+def collect(root, names, opt_in=False):
     """Render every component chart and reduce it to Services, workloads and their waits."""
     charts, errors = {}, []
     with ThreadPoolExecutor(max_workers=8) as pool:
-        for name, docs, err in pool.map(render, [(root, n) for n in names]):
+        for name, docs, err in pool.map(render, [(root, n, opt_in) for n in names]):
             if err:
                 errors.append(f"{name}: {err}")
                 continue
@@ -383,7 +397,8 @@ def collect(root, names):
                     })
             charts[name] = {"services": services, "workloads": workloads, "children": len(docs)}
     if errors:
-        fail_measurement("a component chart could not be measured, so its waits are invisible:\n  "
+        fail_measurement("a component chart could not be measured%s, so its waits are invisible:\n  "
+                         % (" with every Job on" if opt_in else "")
                          + "\n  ".join(errors))
     return charts
 
@@ -577,6 +592,35 @@ def witness(graph, scc):
     return [start, start]
 
 
+def report_cycles(cycles, graph, why, title, problems):
+    """One problem per cycle: the shortest path round it, why each step waits, and the edges a relaxation could break."""
+    for scc in sorted(cycles, key=lambda s: sorted(s)):
+        path = witness(graph, scc)
+        members = sorted({n[1] for n in scc})
+        candidates = sorted({(a[1], b[1]) for a in scc for b in graph.get(a, ())
+                             if a[0] == "creation" and b[0] == "composition" and b in set(scc)})
+        lines = ["  " + " -> ".join(label(n) for n in path)]
+        for a, b in zip(path, path[1:]):
+            lines.append(f"      {label(a)}")
+            lines.append(f"        waits for {label(b)}: {why[(a, b)]}")
+        lines.append(f"      components involved: {', '.join(members)}")
+        lines.append(f"      {len(scc)} nodes are stuck in this cycle, not just "
+                     f"{len(path) - 1} on the path above")
+        if candidates:
+            lines.append("      readiness is unreachable on these creation edges, so relaxing "
+                         "one of them to")
+            lines.append("      existence breaks the cycle; declare it in "
+                         "dependencyRelaxations with this reasoning:")
+            for c, d in candidates:
+                lines.append(f"        {c} -> {d}")
+        else:
+            lines.append("      NO creation edge is inside this cycle, so no relaxation can "
+                         "break it: the cycle is")
+            lines.append("      entirely between chart startup waits and has to be fixed in the "
+                         "charts.")
+        problems.append((title, "\n".join(lines)))
+
+
 def main(argv):
     root = Path(argv[1] if len(argv) > 1 else ".").resolve()
     comps, declared = read_umbrella(root)
@@ -610,31 +654,7 @@ def main(argv):
     problems = []
 
     # 1. Every cycle must be broken by a declared relaxation. Any cycle left is a deadlock.
-    for scc in sorted(cycles_of(graph), key=lambda s: sorted(s)):
-        path = witness(graph, scc)
-        members = sorted({n[1] for n in scc})
-        candidates = sorted({(a[1], b[1]) for a in scc for b in graph.get(a, ())
-                             if a[0] == "creation" and b[0] == "composition" and b in set(scc)})
-        lines = ["  " + " -> ".join(label(n) for n in path)]
-        for a, b in zip(path, path[1:]):
-            lines.append(f"      {label(a)}")
-            lines.append(f"        waits for {label(b)}: {why[(a, b)]}")
-        lines.append(f"      components involved: {', '.join(members)}")
-        lines.append(f"      {len(scc)} nodes are stuck in this cycle, not just "
-                     f"{len(path) - 1} on the path above")
-        if candidates:
-            lines.append("      readiness is unreachable on these creation edges, so relaxing "
-                         "one of them to")
-            lines.append("      existence breaks the cycle; declare it in "
-                         "dependencyRelaxations with this reasoning:")
-            for c, d in candidates:
-                lines.append(f"        {c} -> {d}")
-        else:
-            lines.append("      NO creation edge is inside this cycle, so no relaxation can "
-                         "break it: the cycle is")
-            lines.append("      entirely between chart startup waits and has to be fixed in the "
-                         "charts.")
-        problems.append(("an unbroken readiness cycle", "\n".join(lines)))
+    report_cycles(cycles_of(graph), graph, why, "an unbroken readiness cycle", problems)
 
     # 2. Every declared relaxation must still be load-bearing. Tighten it alone and require that
     #    a cycle reappears; if none does, readiness is reachable on that edge and ordering is
@@ -664,6 +684,20 @@ def main(argv):
             lines.append("  cannot see, say what in the entry and this gate needs to learn to "
                          "check it.")
         problems.append(("a relaxation that no longer breaks a cycle", "\n".join(lines)))
+
+    # 3. The same graph with every opt-in Job rendered (#302). The defaults are not the only install: a component's
+    #    manifests.job_* can switch a Job on, and an install hook that waits on a component created only after this
+    #    one is Ready deadlocks that first install. mariadb's ks-user Job did (waiting on keystone, which waits on
+    #    mariadb) and no gate saw it, because it was off by default. Minimality (2) stays judged on the defaults: a
+    #    relaxation must be needed there, not by a switch.
+    charts_on = collect(root, sorted(comps), opt_in=True)
+    owners_on, _ = resolve(charts_on)
+    workloads_on = {c: {w["name"]: w for w in d["workloads"]} for c, d in charts_on.items()}
+    graph_on, why_on, stats_on = build_graph(charts_on, comps, effective, workloads_on, owners_on)
+    seen = {frozenset(s) for s in cycles_of(graph)}
+    new_cycles = [s for s in cycles_of(graph_on) if frozenset(s) not in seen]
+    report_cycles(new_cycles, graph_on, why_on, "an unbroken readiness cycle once every opt-in Job is on", problems)
+    opt_in_jobs = sum(1 for d in charts_on.values() for w in d["workloads"] if w["kind"] == "Job")
 
     if problems:
         print(f"FAIL: {len(problems)} problem(s) with the creation gate. Creation gate in use: "
@@ -700,6 +734,8 @@ def main(argv):
           f"({total_workloads} workloads, {len(owners)} Services).")
     print(f"    creation gate: {gate_desc}; {stats['service']} Service waits, {stats['pod']} pod "
           f"waits, {stats['job']} job waits.")
+    print(f"    with every opt-in Job on: {len(graph_on)} nodes, {opt_in_jobs} Jobs, "
+          f"{sum(len(v) for v in graph_on.values())} wait edges, no cycle the relax-set leaves.")
     if partitioned:
         print(f"    the templates' own partition expression puts every edge of all "
               f"{partitioned} components in the gate the declarations name.")

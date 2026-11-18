@@ -46,6 +46,10 @@ the commit that will be tagged (Diego, 2026-11-17: "batch on main, GKE-verify, t
    For the same commit, the charts that tag publishes are the bytes the pair installed. The one
    difference is the version string: in `Chart.yaml`, in each stamped `CHART_VERSION`, and in the
    composition apiVersion derived from it.
+
+   The release refuses a tag whose commit has no `X.Y.Z-main.g<sha7>` pre-release in GHCR (see
+   **The release preflight** below). That stops a tag on a commit that skipped steps 2–4 or is not
+   on `main`. Whether the GKE pair passed is still your call: no machine record of it exists.
 6. **Pin the README:** set `BP_VERSION=X.Y.Z` in its install block, and record what the pair
    installed.
 
@@ -185,6 +189,46 @@ $ gh secret set PRERELEASE_PRUNE_TOKEN -R krateo-blueprints/krateo-openstack-blu
 Paste the token at the prompt rather than piping it, so it gets no trailing newline. Without the
 secret, the workflow refuses at its first step instead of skipping.
 
+## The release preflight
+
+`release-tag.yaml`'s first job, `preflight`, calls krateo-blueprints/charts
+`release-preflight.yaml` (PUBLISHING.md rule 12). It is pinned to the same commit as the
+publisher. `package-and-push` declares `needs: preflight`, and `publish-index` needs
+`package-and-push`, so a refusal stamps, pushes, indexes and releases nothing.
+
+The reusable workflow runs this repository's `hack/release-preflight X.Y.Z` at the tag's commit,
+with no secrets. The hook asks GHCR, anonymously, whether `openstack:X.Y.Z-main.g<sha7 of the
+commit>` exists, and refuses when it is missing or when GHCR cannot be asked:
+
+- `prerelease.yaml` publishes a `-main.` version only for a commit on `origin/main` that passed
+  lint. A hit therefore proves the tag is on `main`, on a commit that went through the pre-release
+  channel at this version.
+- It does **not** prove that the GKE pair passed.
+
+The other release-time preconditions are already enforced elsewhere, so the hook does not repeat
+them:
+
+- the tag shape: the first step, plus `hack/release-version.sh`;
+- lint, including the examples-apiVersion and first-release gates: `hack/require-lint-passed.sh`;
+- the stamped CDs: `hack/publish-charts.sh`, `hack/stage-release-assets.sh` and the publisher.
+
+The README pin is not a precondition, because it is set after the tag.
+
+`prune-prereleases.yaml` keeps the newest 5 pre-releases. If the commit's pre-release was pruned
+before you tagged, run `prerelease.yaml` on that commit again; it republishes the same version.
+Then re-run the release.
+
+`hack/validate-prerelease-channel.py` gates the wiring and the pins:
+
+- `preflight` and `publish-index` must use full 40-hex SHAs, the same commit, each with a
+  `# X.Y.Z` comment;
+- the preflight gets `${{ github.ref_name }}`;
+- the `needs:` chain must be in place.
+
+It also runs the hook against a stubbed GHCR (200, 404, 500, unreachable, a failed token request,
+a pre-release-shaped or empty version). Each wiring and hook check has a mutation that must be
+caught.
+
 ## What a tag ships
 
 `.github/workflows/release-tag.yaml` triggers on a semver tag (`[0-9]+.[0-9]+.[0-9]+`; GitHub
@@ -205,7 +249,8 @@ a repository move does not need a code change. For this repo that resolves to
 
 The stamped CompositionDefinitions, the two RBAC grants and the stamped examples are uploaded to
 the GitHub release of the tag. The `publish-index` job then hands the blueprint tarballs to
-krateo-blueprints/charts `publish-chart.yaml`, and that is how they reach the Marketplace. The
+krateo-blueprints/charts `publish-chart.yaml` (1.1.0), and that is how they reach the Marketplace.
+Since 1.1.0 the publisher refuses any version that is not plain `X.Y.Z` (its rule 13). The
 committed CompositionDefinitions keep the `CHART_VERSION` placeholder: nothing on `main` is bumped
 after a release.
 
@@ -266,11 +311,15 @@ the top of `docs/log.md` and the step list in `lint.yaml`. Both are now one file
   and CI checks only the entry (`hack/render-log.py . --check`). To preview, run
   `python3 hack/render-log.py .` and discard the result (`git checkout -- docs/log.md`).
   After the merge, `.github/workflows/render-log.yaml` renders `docs/log.md` on main and lands it
-  through a pull request of its own, from `bot/render-log-<sha7>` by `github-actions[bot]`, which
-  it squash-merges at once. That bot pull request is the only one allowed to change
-  `docs/log.md`. main's ruleset requires a pull request with no bypass, which is why the bot
-  doesn't push to main. It needs the org and repo setting "Allow GitHub Actions to create and
-  approve pull requests".
+  through a pull request of its own, from `bot/render-log-<sha7>` by the render-log App's bot
+  account (`krateo-openstack-render-log[bot]`, see below), which it squash-merges at once. That bot
+  pull request is the only one allowed to change `docs/log.md`. main's ruleset requires a pull
+  request with no bypass, which is why the bot doesn't push to main.
+- **No skip marker** in a pull request's title, body or commit messages. That means the bracketed
+  "skip ci" family, or a `skip-checks: true` trailer. GitHub honours one anywhere in a commit
+  message, even quoted, and skips every workflow for that commit. #347's squash message quoted one,
+  and main ran no lint for it (`hack/validate-no-skip-markers.py`). To mention one, write "the skip
+  marker".
 - **Gate:** add `hack/gates.d/<gate>.yaml` with `name`, `job` (an existing `lint.yaml` job, for
   the tools it installs), `order` and `run` (a block scalar), plus, if needed, `setup`,
   `working-directory` and `workflow-env`. Say in a comment above the keys what defect it
@@ -278,6 +327,50 @@ the top of `docs/log.md` and the step list in `lint.yaml`. Both are now one file
   registered in no gate file, or a gate file names a script that doesn't exist
   (`hack/validate-gates-registered.py`). Only a new job, or a gate needing a new `${{ }}`
   expression in its runner step's `env`, touches `lint.yaml`.
+- **Upstream divergence:** add a file to `hack/upstream-divergences.d/`, named
+  `<component>-<slug>.yaml`, holding one divergence: `component`, `issue`, `reason` and
+  `assertions`, with comments above saying why. `hack/validate-upstream-divergences.py` documents
+  the keys, and refuses a file holding more than one entry, a duplicate key, a name that doesn't
+  start with its component, an assertion already declared in another file, and an empty
+  directory. The old single `hack/upstream-divergences.yaml` is gone, and the gate refuses it if
+  it comes back.
+
+## The render-log GitHub App
+
+`.github/workflows/render-log.yaml` acts as a GitHub App, not with `GITHUB_TOKEN`: GitHub starts
+no workflow for a `GITHUB_TOKEN` event, so a bot merge made with it gets no lint run on main
+(d1cb62b, 2026-11-18), and prerelease and release-tag require a green lint on the exact commit.
+App-token events start workflows like any other. The workflow refuses to run without the App's
+secrets, and refuses an App whose slug isn't the one in `hack/render-log-app.yaml`, the only bot
+`hack/validate-log-untouched.py` lets change `docs/log.md`.
+
+Steps (an org owner, once):
+
+1. Create the App in the krateo-blueprints organization: Settings → Developer settings → GitHub
+   Apps → New GitHub App.
+   - **Name:** `krateo-openstack-render-log`. The slug must match `hack/render-log-app.yaml`; if the
+     name is taken, choose another and change the slug there in the same pull request.
+   - **Homepage URL:** this repository's URL.
+   - **Webhook:** off (clear "Active").
+   - **Repository permissions:** Contents **Read and write**, Pull requests **Read and write**.
+     Metadata stays read-only, which GitHub requires. Nothing else, and no organization or account
+     permissions.
+   - **Where can this GitHub App be installed:** Only on this account.
+2. On the App's page, note the **Client ID**, and under Private keys choose **Generate a private
+   key**, which downloads a `.pem` file.
+3. Install the App: Install App → krateo-blueprints → **Only select repositories** →
+   `krateo-openstack-blueprint` only.
+4. Add two repository secrets (Settings → Secrets and variables → Actions):
+   `RENDER_LOG_APP_CLIENT_ID` (the Client ID) and `RENDER_LOG_APP_PRIVATE_KEY` (the whole `.pem`
+   file, header lines included). Then delete the downloaded key.
+5. Check: run the render-log workflow by hand (Actions → render-log → Run workflow). With nothing to
+   render it ends "already the render"; after the next merge that adds a `docs/log.d` entry, a
+   pull request from `krateo-openstack-render-log[bot]` is opened and squash-merged, and lint runs
+   on its merge commit.
+
+The token it mints is scoped to this repository with contents and pull-requests write and expires
+within the hour. The org setting "Allow GitHub Actions to create and approve pull requests" isn't
+needed for this.
 
 ## Version pinning downstream
 

@@ -1,0 +1,24 @@
+component: heat
+issue: 110
+reason: >-
+  Upstream points both heat-api's and heat-cfn's liveness probes at uwsgi's stats socket
+  (1717, with stats-http) via pod.probes.api.heat_api.liveness.port and
+  pod.probes.cfn.heat_cfn.liveness.port, with the same consequence as placement's.
+assertions:
+  - file: templates/deployment-api.yaml
+    absent: liveness.port
+    why: >-
+      Restoring the knob restores the stats-port target. GET / on the orchestration endpoint
+      port returns 300 with the version document from the versionnegotiation filter, which a
+      worker must run.
+  - file: templates/deployment-api.yaml
+    present: failureThreshold
+    why: >-
+      The deliberate slack on liveness; see placement's entry. Upstream ships only
+      initialDelaySeconds: 10 here.
+  - file: templates/deployment-cfn.yaml
+    absent: liveness.port
+    why: The same knob for the cloudformation API.
+  - file: templates/deployment-cfn.yaml
+    present: failureThreshold
+    why: The same slack for the cloudformation API.

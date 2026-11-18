@@ -16,7 +16,6 @@ limitations under the License.
 {{- $envAll := . }}
 
 {{- $serviceAccountName := "mariadb-backup" }}
-{{- $failoverUserClass := .Values.conf.backup.remote_backup.failover_user_class }}
 {{ tuple $envAll "mariadb_backup" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
 apiVersion: batch/v1
@@ -118,39 +117,10 @@ spec:
                   valueFrom:
                     fieldRef:
                       fieldPath: metadata.namespace
+                # Krateo (#302): the Swift/RGW remote-backup path is removed (it needed a Keystone user created by a
+                # mariadb install hook waiting on keystone, which waits on mariadb). Backups stay local.
                 - name: REMOTE_BACKUP_ENABLED
-                  value: "{{ .Values.conf.backup.remote_backup.enabled }}"
-{{- if .Values.conf.backup.remote_backup.enabled }}
-                - name: MARIADB_REMOTE_BACKUP_DAYS_TO_KEEP
-                  value: {{ .Values.conf.backup.remote_backup.days_to_keep | quote }}
-                - name: CONTAINER_NAME
-                  value: {{ .Values.conf.backup.remote_backup.container_name | quote }}
-                - name: STORAGE_POLICY
-                  value: "{{ .Values.conf.backup.remote_backup.storage_policy }}"
-                - name: NUMBER_OF_RETRIES_SEND_BACKUP_TO_REMOTE
-                  value: {{ .Values.conf.backup.remote_backup.number_of_retries | quote }}
-                - name: MIN_DELAY_SEND_BACKUP_TO_REMOTE
-                  value: {{ .Values.conf.backup.remote_backup.delay_range.min | quote }}
-                - name: MAX_DELAY_SEND_BACKUP_TO_REMOTE
-                  value: {{ .Values.conf.backup.remote_backup.delay_range.max | quote }}
-                - name: THROTTLE_BACKUPS_ENABLED
-                  value: "{{ .Values.conf.backup.remote_backup.throttle_backups.enabled }}"
-                - name: THROTTLE_LIMIT
-                  value: {{ .Values.conf.backup.remote_backup.throttle_backups.sessions_limit | quote }}
-                - name: THROTTLE_LOCK_EXPIRE_AFTER
-                  value: {{ .Values.conf.backup.remote_backup.throttle_backups.lock_expire_after | quote }}
-                - name: THROTTLE_RETRY_AFTER
-                  value: {{ .Values.conf.backup.remote_backup.throttle_backups.retry_after | quote }}
-                - name: THROTTLE_CONTAINER_NAME
-                  value: {{ .Values.conf.backup.remote_backup.throttle_backups.container_name | quote }}
-{{- with $env := dict "ksUserSecret" $envAll.Values.secrets.identity.mariadb }}
-{{- include "helm-toolkit.snippets.keystone_openrc_env_vars" $env | indent 16 }}
-{{- $failoverIdentityClass := index $envAll.Values.endpoints.identity.auth $failoverUserClass }}
-{{- if $failoverIdentityClass }}
-{{- include "helm-toolkit.snippets.keystone_openrc_failover_env_vars" $env | indent 16 }}
-{{- end }}
-{{- end }}
-{{- end }}
+                  value: "false"
 {{ tuple $envAll "mariadb_backup" | include "helm-toolkit.snippets.image" | indent 14 }}
 {{ tuple $envAll $envAll.Values.pod.resources.jobs.mariadb_backup | include "helm-toolkit.snippets.kubernetes_resources" | indent 14 }}
 {{ dict "envAll" $envAll "application" "mariadb_backup" "container" "mariadb_backup" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 14 }}

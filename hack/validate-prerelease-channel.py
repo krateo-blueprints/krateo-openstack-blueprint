@@ -177,7 +177,116 @@ def check_release(text):
         for c in calls:
             if c != "release":
                 problems.append(f"{REL}: runs hack/{script} with channel {c!r}, not 'release'")
+    problems += check_release_wiring(doc, text)
     return problems
+
+
+# --- rule 12 (preflight) and rule 9 (pins) in release-tag.yaml ----------------------------------
+CHARTS_WF = "krateo-blueprints/charts/.github/workflows/"
+PIN = re.compile(r"^" + re.escape(CHARTS_WF) + r"(publish-chart|release-preflight)\.yaml@([0-9a-f]{40})$")
+
+
+def needs_of(job):
+    n = (job or {}).get("needs") or []
+    return [n] if isinstance(n, str) else list(n)
+
+
+def check_release_wiring(doc, text):
+    """The preflight job exists, is called with the tag, and gates the push; both charts reusables
+    are pinned to one full commit SHA with a version comment (PUBLISHING.md rules 9 and 12)."""
+    problems = []
+    jobs = doc.get("jobs") or {}
+    pins = {}
+    for job_name, wf in (("preflight", "release-preflight"), ("publish-index", "publish-chart")):
+        uses = str((jobs.get(job_name) or {}).get("uses", ""))
+        m = PIN.match(uses)
+        if not m or m.group(1) != wf:
+            problems.append(f"{REL}: job {job_name} must use {CHARTS_WF}{wf}.yaml@<40-hex commit>, "
+                            f"got {uses!r}; a branch or tag can move under an org-wide token (rule 9)")
+            continue
+        pins[wf] = m.group(2)
+        if not re.search(r"^\s*uses: " + re.escape(uses) + r" # \d+\.\d+\.\d+\s*$", text, re.M):
+            problems.append(f"{REL}: {wf}.yaml's pin has no `# X.Y.Z` version comment (rule 9)")
+    if len(set(pins.values())) > 1:
+        problems.append(f"{REL}: publish-chart and release-preflight are pinned to different commits "
+                        f"{pins}; they are one release of krateo-blueprints/charts")
+    version = str(((jobs.get("preflight") or {}).get("with") or {}).get("version", ""))
+    if version.replace(" ", "") != "${{github.ref_name}}":
+        problems.append(f"{REL}: the preflight must get the tag as its version, got {version!r}")
+    if "preflight" not in needs_of(jobs.get("package-and-push")):
+        problems.append(f"{REL}: package-and-push does not need preflight, so a refused preflight would "
+                        "still stamp and push (rule 12)")
+    if "package-and-push" not in needs_of(jobs.get("publish-index")):
+        problems.append(f"{REL}: publish-index does not need package-and-push")
+    return problems
+
+
+# --- hack/release-preflight ------------------------------------------------------------------------
+HOOK = "release-preflight"
+STUB_CURL = """#!/bin/sh
+echo "$*" >> "$STUB_LOG"
+case "$*" in
+  *ghcr.io/token*) [ "$STUB_TOKEN" = fail ] && exit 22; echo '{"token":"t"}' ;;
+  *manifests*) [ "$STUB_CODE" = unreachable ] && exit 6; printf '%s' "$STUB_CODE" ;;
+  *) exit 2 ;;
+esac
+"""
+STUB_GIT = '#!/bin/sh\n[ "$1 $2" = "rev-parse HEAD" ] && echo abcdef1234567890abcdef1234567890abcdef12 && exit 0\nexit 2\n'
+HOOK_CASES = [
+    # (version, GHCR answer, token, passes)
+    ("0.3.74", "200", "ok", True),
+    ("0.3.74", "404", "ok", False),
+    ("0.3.74", "500", "ok", False),
+    ("0.3.74", "unreachable", "ok", False),
+    ("0.3.74", "200", "fail", False),
+    ("0.3.74-main.gabc1234", "200", "ok", False),
+    ("", "200", "ok", False),
+]
+
+
+def hook_behaviour(hook_text, version_sh_text):
+    problems = []
+    for version, code, token, want in HOOK_CASES:
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, body in (("hack/" + HOOK, hook_text), ("hack/release-version.sh", version_sh_text),
+                               ("bin/curl", STUB_CURL), ("bin/git", STUB_GIT)):
+                p = os.path.join(tmp, name)
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                with open(p, "w") as f:
+                    f.write(body)
+                os.chmod(p, 0o755)
+            log = os.path.join(tmp, "curl.log")
+            env = dict(os.environ, PATH=os.path.join(tmp, "bin") + os.pathsep + os.environ["PATH"],
+                       STUB_LOG=log, STUB_CODE=code, STUB_TOKEN=token,
+                       GITHUB_REPOSITORY_OWNER="Krateo-Blueprints")
+            r = subprocess.run([os.path.join(tmp, "hack", HOOK), version], cwd=tmp, env=env,
+                               capture_output=True, text=True)
+            asked = open(log).read() if os.path.exists(log) else ""
+            label = f"hack/{HOOK} {version!r} (GHCR {code}, token {token})"
+            if (r.returncode == 0) != want:
+                problems.append(f"{label}: {'passed' if r.returncode == 0 else 'refused'}, expected "
+                                f"{'pass' if want else 'refusal'}")
+            if want and "krateo-blueprints/charts/openstack/manifests/0.3.74-main.gabcdef1" not in asked:
+                problems.append(f"{label}: did not ask GHCR for openstack 0.3.74-main.gabcdef1 "
+                                f"(asked: {asked.strip()!r})")
+            if (not version or PRE_RELEASE_SHAPED(version)) and asked:
+                problems.append(f"{label}: probed GHCR for a version it should have refused first")
+    return problems
+
+
+def PRE_RELEASE_SHAPED(v):
+    return re.search(r"-(main|dev)\.g[0-9a-f]{7}$", v) is not None
+
+
+HOOK_MUTATIONS = [
+    ("a 404 passes", "  200)\n", "  200|404)\n"),
+    ("an unreachable registry passes", '|| code="unreachable"', '|| code="200"'),
+    ("any other answer passes", "  *)\n    echo \"::error::GHCR answered", "  *)\n    exit 0\n    echo \"::error::GHCR answered"),
+    ("probes the release tag, not the pre-release", 'pre="${version}-main.g${sha:0:7}"', 'pre="${version}"'),
+    ("no version check", '"$here/release-version.sh" check release "$version"\n', ""),
+    ("a failed token request passes", "refusing rather than releasing unchecked\"\n  exit 1\n}",
+     "refusing rather than releasing unchecked\"\n  exit 0\n}"),
+]
 
 
 def check_only_release_indexes(workflows):
@@ -332,6 +441,16 @@ REL_MUTATIONS = [
      "hack/publish-charts.sh prerelease"),
     ("stage-release-assets with the prerelease channel", "hack/stage-release-assets.sh release",
      "hack/stage-release-assets.sh prerelease"),
+    ("preflight dropped from needs", "    needs:\n      - preflight\n", ""),
+    ("preflight pinned to a branch", "release-preflight.yaml@788f1a6c106707ada89792f499afdcf3bc0b5d13", "release-preflight.yaml@main"),
+    ("publisher pinned to a tag", "publish-chart.yaml@788f1a6c106707ada89792f499afdcf3bc0b5d13 # 1.1.0", "publish-chart.yaml@1.1.0"),
+    ("publisher and preflight at different commits", "publish-chart.yaml@788f1a6c106707ada89792f499afdcf3bc0b5d13",
+     "publish-chart.yaml@1e6210ab2a8b66ff1a8d6da86287e671154f44a2"),
+    ("preflight version comment dropped", "release-preflight.yaml@788f1a6c106707ada89792f499afdcf3bc0b5d13 # 1.1.0",
+     "release-preflight.yaml@788f1a6c106707ada89792f499afdcf3bc0b5d13"),
+    ("preflight given a fixed version", "      version: ${{ github.ref_name }}\n",
+     "      version: main\n"),
+    ("publish-index no longer needs package-and-push", "    needs: package-and-push\n", ""),
 ]
 VERSION_MUTATIONS = [
     ("release pattern unanchored", 'RELEASE_RE="^${CORE}\\$"', 'RELEASE_RE="^${CORE}"'),
@@ -495,7 +614,15 @@ def main():
             measurement_failed(f"no hack/{s}")
         scripts[s] = open(p).read()
 
+    hook_path = os.path.join(ROOT, "hack", HOOK)
+    if not os.path.isfile(hook_path):
+        measurement_failed(f"no hack/{HOOK}")
+    hook_src = open(hook_path).read()
+
     problems = []
+    if not os.access(hook_path, os.X_OK):
+        problems.append(f"hack/{HOOK} is not executable, so charts release-preflight.yaml would refuse "
+                        "every release; commit it with mode 100755")
     problems += check_prerelease(workflows[PRE])
     problems += check_release(workflows[REL])
     problems += check_only_release_indexes(workflows)
@@ -505,10 +632,14 @@ def main():
             f.write(scripts["release-version.sh"])
         problems += version_table(vs)
     problems += scripts_check_first(scripts)
+    problems += hook_behaviour(hook_src, scripts["release-version.sh"])
     problems += check_prune(workflows[PRUNE])
     problems += prune_behaviour(load_prune(prune_src))
 
     survived = []
+    for label, old, new in HOOK_MUTATIONS:
+        if not hook_behaviour(mutate(hook_src, old, new, label), scripts["release-version.sh"]):
+            survived.append(f"hack/{HOOK}: {label}")
     for label, old, new in PRUNE_MUTATIONS:
         if not check_prune(mutate(workflows[PRUNE], old, new, label)):
             survived.append(f"{PRUNE}: {label}")
@@ -543,7 +674,7 @@ def main():
             survived.append(f"{s}: version check removed")
 
     n_mut = (len(PRE_MUTATIONS) + len(REL_MUTATIONS) + 1 + len(VERSION_MUTATIONS) + 2
-             + len(PRUNE_MUTATIONS) + len(PRUNE_SCRIPT_MUTATIONS))
+             + len(PRUNE_MUTATIONS) + len(PRUNE_SCRIPT_MUTATIONS) + len(HOOK_MUTATIONS))
     for p in problems:
         print(f"  - {p}")
     for s in survived:

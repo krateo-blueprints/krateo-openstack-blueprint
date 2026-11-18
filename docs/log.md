@@ -13,6 +13,77 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Upstream divergences, one file per entry.** Every change that diverged from upstream appended to
+  `hack/upstream-divergences.yaml`, so each merge re-conflicted the branches in flight (#352, #353, #355, #344 and
+  #357 on 2026-11-18). Each divergence is now `hack/upstream-divergences.d/<component>-<slug>.yaml`, holding one
+  entry. The 19 entries were split out with their text and the comments above them, including #344's three. Loaded
+  from the directory, they are the same 19 entries and the same 81 assertions as the old file at 9c177be. The old file is removed.
+  - **Refusals:** `hack/validate-upstream-divergences.py` reads the directory and refuses, before checking anything:
+    - a file that isn't exactly one mapping of `component`, `issue`, `reason` and `assertions` (two entries, a list,
+      or a second YAML document);
+    - a duplicate key;
+    - a file whose name doesn't start with its component;
+    - an assertion already declared in another file;
+    - an empty directory;
+    - the old file coming back.
+  - [release.md](release.md) says how to add one.
+  - The case lists of `hack/validate-removed-values.sh` stay as they are for now.
+
+- **Publisher 1.1.0 and the release preflight.** `release-tag.yaml` pins krateo-blueprints/charts 1.1.0 (`788f1a6`).
+  - **Publisher:** from 1.1.0 it refuses any version that is not plain `X.Y.Z` (its rule 13).
+  - **Preflight (rule 12):** a new `preflight` job calls the `release-preflight.yaml` reusable, and `package-and-push`
+    `needs:` it, so a refusal publishes nothing.
+  - **The hook:** `hack/release-preflight` refuses a tag whose commit has no `X.Y.Z-main.g<sha7>` pre-release in GHCR.
+    It also refuses when GHCR cannot be asked.
+  - **Why the hook:** nothing else stopped a tag on a commit that skipped the pre-release channel, or a tag on a
+    branch commit. Lint runs on every pull request, so a branch commit passed the lint check too.
+  - **What it cannot prove:** that the GKE pair passed.
+  - **Gate:** `hack/validate-prerelease-channel.py` checks the pins, the `needs:` chain and the hook's behaviour
+    against a stubbed GHCR. All 45 mutations are caught. See [release.md](release.md).
+
+- **The render-log bot acts as a GitHub App; no skip markers.** The first bot render landed (d1cb62b) with two
+  defects, measured 2026-11-18:
+  - **Skipped workflows.** #347's squash message quoted the bot's skip marker, so GitHub skipped every push workflow
+    on main for that commit, lint included.
+  - **Unlinted bot commits.** The bot merged with `GITHUB_TOKEN`, and GitHub starts no workflow for a `GITHUB_TOKEN`
+    event, so its render commits on main got no lint run. prerelease and release-tag require a green lint on the
+    exact commit.
+
+  Diego chose a GitHub App:
+  - `render-log.yaml` mints the App's token with `actions/create-github-app-token`, pinned to a commit. It refuses
+    without `RENDER_LOG_APP_CLIENT_ID` and `RENDER_LOG_APP_PRIVATE_KEY`, and gives `GITHUB_TOKEN` no write
+    permission.
+  - `hack/render-log-pr.sh` refuses an App whose slug isn't `hack/render-log-app.yaml`'s, commits as
+    `<slug>[bot]`, and drops the skip marker. The loop guard is the paths filter alone: the bot's commit changes
+    `docs/log.md`, which the filter leaves out.
+  - `hack/validate-log-untouched.py` now exempts only `krateo-openstack-render-log[bot]` on a `bot/render-log-*`
+    branch. The retired `github-actions[bot]` login is refused.
+  - New gate `hack/validate-no-skip-markers.py` refuses any skip marker GitHub honours in a pull request's title,
+    body or commit messages. That covers the bracketed "skip ci" family and the `skip-checks: true` trailer, in any
+    case, quoted or not.
+  - `hack/validate-render-log-pr.py` adds two cases. One reads the workflow: the paths leave `docs/log.md` out, the
+    action is pinned, the job refuses without the App's secrets, and nothing has write permission. The other checks
+    that another App's token is refused.
+  - [release.md](release.md) lists the App's permissions and the steps to create it.
+
+- **mariadb's remote backup and its ks-user Job removed (#302).** Turning on `manifests.job_ks_user` deadlocked a
+  first install. The Job creates the Keystone user that Swift/RGW remote backups authenticate as. It is a
+  post-install hook that waits on keystone (#301), and keystone waits on mariadb. The user it created also had role
+  admin and OpenStack-Helm's published password. Diego decided (2026-11-17) to remove the path rather than move it.
+  - **Removed:** the ks-user Job and script, the RGW Secret, `endpoints.identity` with `mariadb-backup-user`,
+    `conf.backup.remote_backup`, and the backup CronJob's remote environment and Keystone credentials. The CronJob's
+    wait on `mariadb-ks-user` is gone too.
+  - **Refused:** `manifests.job_ks_user: true` and any `conf.backup.remote_backup` other than `enabled: false`, by the
+    schema and by `templates/removed-values.yaml` when the schema is skipped. `false` stays accepted for older
+    Compositions.
+  - **Local backups are unaffected.** With `manifests.cron_job_mariadb_backup` and `conf.backup.enabled` on, the
+    CronJob renders with `REMOTE_BACKUP_ENABLED=false` and waits only on mariadb.
+  - **Gates:**
+    - `hack/validate-removed-values.sh` gains nine mariadb cases.
+    - `hack/validate-readiness-deadlock.py` now also renders every chart with every `manifests.job_*` switch on. It
+      fails on a cycle that appears only with an opt-in Job on, which is how the ks-user Job got past it.
+    - An upstream-divergences entry keeps the script, the user and the remote settings out across a re-vendor.
+
 - **Uninstall deletes a component's hook Jobs (#206).** Since 0.3.41 every Job is a `post-install,post-upgrade` hook
   (#179), and Helm never deletes hook resources at uninstall: cinder's removal left six completed Jobs and their pods,
   and a full teardown 156 pods (#204). `hook-succeeded` can't be used, because kubernetes-entrypoint waits on dependency
@@ -31,6 +102,30 @@ Curated history; release notes live in GitHub Releases.
   (cloudkitty-storage-init, ironic-manage-cleaning-network, magnum-domain-ks-user, masakari-db-sync), which no
   selector can reach. They now carry helm-toolkit's labels; their pod templates are unchanged. libvirt, memcached, openvswitch and redis render no hook Job unless
   `images.local_registry.active` turns on image-repo-sync, and have no python image, so they get no cleanup.
+
+- **trove's db-purge CronJob removed (#289).** It rendered by default and ran `trove-manage db_purge --age_in_days 30`.
+  trove-manage on stable/2026.1 has no `db_purge`: `trove/cmd/manage.py` registers 12 commands, none a purge, and no
+  file in trove's tree defines a database purge. Every scheduled run would have failed at argument parsing, and a
+  failing CronJob, unlike a failing hook, blocks nothing that anyone sees. With no command to point it at, the CronJob,
+  its script and values are gone. `manifests.cron_job_db_purge: true` is refused by the schema and by
+  `templates/removed-values.yaml`; `false` is still accepted for older Compositions (`hack/validate-removed-values.sh`
+  covers both). New gate `hack/validate-cron-commands.py`: every `<project>-*` program that a CronJob's script starts,
+  in every chart and whether or not the CronJob is on by default, must be given a command listed for it in
+  `hack/cron-program-commands.yaml`, measured from the program's stable/2026.1 source. It is static, since the command
+  is in the script text. It found no other CronJob running a missing command (15 CronJobs, 20 commands).
+
+- **ceilometer publishes only to gnocchi (#294).** Both pipelines listed `notifier://` next to `gnocchi://`. The
+  notifier publisher sends every sample and event back onto ceilometer's vhost, as topics `metering` and `event`
+  (stable/2026.1 `ceilometer/publisher/messaging.py`), and nothing in this blueprint listens there: their consumers, the
+  collector and panko, are retired. On GKE (2026-11-17) `event.sample` went from 954 to 1062 messages in 10 minutes
+  with 0 consumers, and `metering.sample` grew too. The sinks now publish to `gnocchi://` alone. New gate
+  `hack/validate-ceilometer-publishers.py` renders ceilometer and requires each publisher to reach a consumer in its
+  `deps` closure: gnocchi's API, or a listener on that topic and vhost other than ceilometer's own agent (which would
+  re-ingest its own samples). Any other publisher fails until its consumer is measured. An upstream-divergences entry
+  keeps `notifier://` out across a re-vendor. On an existing install the two queues stop growing but keep what they
+  hold until deleted (`rabbitmqctl delete_queue -p ceilometer event.sample`, and `metering.sample`). ceilometer.conf
+  sets no `[oslo_messaging_rabbit]`, so at oslo.messaging's defaults they're non-durable and a RabbitMQ restart also
+  drops them (read from the defaults, not measured live).
 
 - **High availability, first phases (#309), and nova-compute liveness (#146).**
   - **`ha.enabled` (opt-in):** memcached as 3 replicas behind a headless Service, every component listing each
