@@ -13,6 +13,118 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Render-log bot waits for its checks and merges from a full history (#379 follow-up).** Two failures on the bot's
+  merge-queue path:
+  - **Read "no checks yet" as a failure.** Run 44280066151 opened #384 at 09:53:05Z and gave up a second later with
+    "failed a required check". `gh pr checks --required --watch --fail-fast` exits non-zero before any check exists on
+    a new head.
+    - The bot now polls the check runs of exactly the commit it pushed, against the ruleset's own required list.
+    - A check not reported yet is waited for, up to 10 minutes to appear and 60 to finish, and then the bot fails
+      saying so.
+    - A failed required check stops it at once. A non-required check is ignored.
+    - A ruleset that requires nothing is refused rather than enqueued unchecked.
+  - **Refused to update an open bot pull request.** Run 44281145388 failed with "refusing to merge unrelated
+    histories". `render-log.yaml` checked out main at depth 1, so main's commit had no parents.
+    - The checkout now uses `fetch-depth: 0`.
+    - `render-log-pr.sh` stops if the merge does not start at all, instead of swallowing the error with `|| true`.
+  - **Gate:** `hack/validate-render-log-pr.py` gains cases for each state:
+    - a check reported late, then passing;
+    - a check never reported;
+    - a check reported but never finished;
+    - a failed check;
+    - an empty required set;
+    - the update path from an actions/checkout-style clone. At depth 1 it reproduces the refusal; at the workflow's
+      depth it merges.
+
+    Six mutants are caught, including the depth-1 workflow and the original "not reported means failed" reading.
+
+- **The docs-rendering screen asks GitHub how admonitions render.** Adopted from
+  krateo-blueprints/openstack-nova-operator-kog at ed871ad (#177, #179). There, a `> [!WARNING]` indented in a list
+  item rendered as a plain quote, and a `[!NOTE]` swallowed by an open fence rendered as shell. No static check saw
+  either.
+  - **What it does:** `hack/check-doc-rendering.py` POSTs every markdown file outside `charts/` (63 here) to GitHub's
+    `/markdown` (gfm). Each file's count of rendered alert titles must equal all of its admonition markers, fenced or
+    not.
+  - **Controls:** a known-good fixture must render 1 alert and a known-bad fenced one 0. Otherwise the run is VOID
+    (exit 2).
+  - **Per-document check:** each response must contain the document's own identifying token. That is its longest
+    corpus-unique token outside fences and HTML comments, else its longest shared one, else any block element.
+  - **Port:** byte-for-byte for both files (`hack/check-doc-rendering.py` sha256 f5c6e4f5…, `scripts/mdfence.py`
+    bd1264c7…).
+  - **CI:** it runs in lint.yaml's examples-apiversion job (`hack/gates.d/check-doc-rendering.yaml`), with the job's
+    token and `contents: read`.
+  - **First run (2026-11-18):** all 63 documents agreed, 0 VOID. No document here declares an admonition yet.
+  - **Shared tokens:** 39 documents are identified by a shared token, not a unique one: the 37 files in
+    `docs/log.d` plus `docs/log.md`, because `docs/log.md` is their concatenation, and
+    `examples/identity-profile/README.md`. That still proves the response wasn't truncated. It doesn't prove the
+    response was for this document.
+  - **Upstream defect, worked around here:** the screen counts the alert title's class name as a substring anywhere in
+    the rendered HTML, so a document that names the class in prose counts as one alert. This entry did, and failed;
+    it now describes the class instead of naming it. The defect is to be reported to the nova repository, where the
+    screen lives.
+
+- **A disruption budget for the RabbitmqCluster (#309, H2).** The RabbitMQ cluster-operator renders no
+  PodDisruptionBudget, so a node drain could evict two of three brokers and take the quorum queues' majority. In
+  operator mode with more than one replica, the rabbitmq chart now renders one: `maxUnavailable: 1` on the cluster's
+  pods. A single broker gets none, because there a budget would only block drains. `hack/validate-messaging-operator.py`
+  checks both.
+
+- **RabbitMQ users and vhosts as topology-operator resources (#309, H2b).** With `messaging.backend: operator`,
+  helm-toolkit renders each component's rabbit-init as messaging-topology-operator resources instead of a Job:
+  - **User:** imports `<su>-rabbitmq-user`, an ExternalSecret projecting the user's generated root. The operator
+    re-syncs the password when the root rotates.
+  - **Vhost:** quorum by default, retained when its resource is deleted.
+  - **Permissions:** one for the user and one for the administrator, which ceilometer needs to read other components'
+    vhosts.
+  - **Policies:** one per chart policy, without the `ha-*` keys.
+  - **Waits:** every pod that waited on `<su>-rabbit-init` waits on those resources being Ready, through
+    kubernetes-entrypoint's condition waits, including the waits only the init container adds
+    (`dependencies.dynamic.job_rabbit_init`). Each wait is granted to the pod's ServiceAccount (#370).
+  - **Charts that ship rabbit-init off:** render nothing and wait on nothing.
+  - **Chart mode** is unchanged.
+  - **New gate:** `hack/validate-messaging-topology.py`.
+
+- **The pull-request gates measure the pull request's own change.** `hack/validate-log-untouched.py` diffed
+  `BASE..HEAD` on a pull request, with BASE the pull request's `base.sha`. That can be older than main's tip, so any
+  bot render of `docs/log.md` that landed after the branch forked counted as the branch's change. #376 at 8d5240e
+  failed this way without touching the file. `hack/validate-no-skip-markers.py` read commits over the same range, so
+  the skip markers in the old bot renders' messages would have failed a stale branch too.
+  - **Fix:** on a pull request, both gates now measure from the first parent of the merge ref that actions/checkout
+    checks out (`refs/pull/<n>/merge`, main's tip as GitHub merged it). When HEAD isn't a merge commit, they measure
+    from the merge base of BASE and HEAD instead. The merge base alone isn't enough on the merge ref: there it is
+    BASE itself, and main's later commits still count.
+  - **Unchanged:** a merge group's range (`merge_group.base_sha` is fixed, and the group's commits sit on top of it)
+    and a push's range (the previous head) were already right.
+  - **Tests:** each gate now builds throwaway repositories in which main gains a commit after the fork:
+    - log-untouched: a branch that only adds a log.d entry passes, and one that edits `docs/log.md` still fails, both
+      on the merge ref and at the head;
+    - skip-markers: a marker in main's commit isn't read, and the branch's own is.
+
+    Mutants caught: two-dot restored in either gate, and the merge base alone in log-untouched.
+
+- **Every reusable workflow pinned (krateo-blueprints/charts rule 9, charts#20).** The three krateo-platformops/.github
+  calls are pinned to `f25d6b5 # main 2026-11-17`: `lint-docs.yaml`, `release-notes.yaml` and `security.yml`. That
+  repository has no tags yet, and `security.yml` runs here with `security-events: write`. `lint.yaml` gains a
+  `pinned-uses` job, the shared check from charts 1.2.0 (`33c7951`). It refuses any non-local reusable-workflow `uses:`
+  that is not a 40-hex commit with a `# X.Y.Z` or `# main YYYY-MM-DD` comment. `release-tag.yaml` keeps
+  `788f1a6 # 1.1.0`, since the publisher and the preflight are byte-identical at 1.2.0. Run here, the check reports
+  6 reusable uses, 0 not pinned. `pinned-uses / pinned-uses` becomes a required merge-queue check in
+  `hack/merge-queue-ruleset.json`, and `hack/validate-merge-queue-ruleset.py` maps its inner job name. The live ruleset
+  is updated after merge.
+
+- **The render-log bot enqueues through enqueuePullRequest.** The merge-queue ruleset is applied (2026-11-18), and the
+  bot's queue step would have failed on its next render. It ran `gh pr merge --auto --squash`, and gh (2.86) does
+  that through `enablePullRequestAutoMerge`, as it does `gh pr merge` without `--auto`. This repository has
+  auto-merge disabled, so the call fails with "Auto merge is not allowed for this repository". The queue is the
+  mechanism, so auto-merge stays off.
+  - **Change:** under a merge queue, `hack/render-log-pr.sh` now waits for its pull request's required checks
+    (`gh pr checks --required --watch`). It then adds the pull request to the queue with the GraphQL
+    `enqueuePullRequest` mutation, using the pull request's node id and the App token. It never runs `gh pr merge`.
+    If a required check fails, nothing is enqueued.
+  - **Tests:** `hack/validate-render-log-pr.py` case 6 now requires the checks wait, then one enqueue mutation with
+    the node id, and no `gh pr merge`. A new case 7 covers a failed check: nothing is enqueued or merged. A mutant
+    that brings back `--auto` is caught.
+
 - **RabbitMQ cluster-operator mode for fresh installs (#309, H2b).** `messaging.backend: operator`, opt-in, with
   `chart` the default.
   - **The broker:** a RabbitmqCluster `openstack-mq`, run by the cluster-operator from
