@@ -1715,7 +1715,6 @@ images:
     keys:
     - trove_api
     - trove_conductor
-    - trove_db_purge
     - trove_db_sync
     - trove_taskmanager
   registry_facts:
