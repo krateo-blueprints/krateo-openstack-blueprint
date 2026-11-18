@@ -1,0 +1,9 @@
+# cinder's only backend is Ceph, and with none it waited in Init forever on ceph-etc and the
+# keyring Secrets, which nothing creates (#196). The umbrella's storage.backend reaches cinder as
+# krateo.storageBackend, is the one place that sets it, and with none cinder refuses to render,
+# naming it. Also: nova-compute's LIBVIRT_CEPH_SECRET_UUID read an undefined value path.
+name: "cinder renders only with the backend storage.backend names"
+job: capability-roles
+order: 351
+run: |
+  python3 hack/validate-storage-backend.py .
