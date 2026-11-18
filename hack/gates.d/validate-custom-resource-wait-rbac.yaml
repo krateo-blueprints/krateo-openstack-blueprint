@@ -4,6 +4,6 @@
 # rabbit-init.
 name: "A pod that waits on a custom resource may read it"
 job: capability-roles
-order: 148
+order: 147
 run: |
   python3 hack/validate-custom-resource-wait-rbac.py .
