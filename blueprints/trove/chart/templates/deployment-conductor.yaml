@@ -61,7 +61,7 @@ spec:
 {{ tuple $envAll "conductor" $mounts_trove_conductor_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: trove-conductor
-{{ dict "envAll" $envAll "component" "conductor" "container" "default" "args" (list "--process" "trove-conductor" "--exchange" "openstack" "--rpc-topic" "trove-conductor" "--rpc-server-default" "0.0.0.0") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "conductor" "container" "default" "args" (list "--process" "trove-conductor" "--exchange" "openstack" "--rpc-topic" "trove-conductor" "--rpc-server-default" "0.0.0.0") "config" (include "trove.config_args.conductor" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "trove_conductor" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.conductor | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "trove_conductor" "container" "trove_conductor" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}

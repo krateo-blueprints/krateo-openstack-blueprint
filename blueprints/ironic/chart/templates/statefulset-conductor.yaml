@@ -169,7 +169,7 @@ spec:
         {{- end }}
       containers:
         - name: ironic-conductor
-{{ dict "envAll" $envAll "component" "conductor" "container" "default" "args" (list "--process" "ironic-conductor" "--exchange" "ironic" "--rpc-topic" "ironic.conductor_manager" "--rpc-server-default" "@fqdn") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "conductor" "container" "default" "args" (list "--process" "ironic-conductor" "--exchange" "ironic" "--rpc-topic" "ironic.conductor_manager" "--rpc-server-default" "@fqdn") "config" (include "ironic.config_args.conductor" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "ironic_conductor" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.conductor | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           securityContext:

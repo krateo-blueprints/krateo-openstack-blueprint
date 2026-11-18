@@ -27,10 +27,4 @@ EOF
 {{- end }}
 
 exec cinder-volume \
-     --config-file /etc/cinder/cinder.conf \
-     --config-file /etc/cinder/conf/backends.conf \
-     --config-file /tmp/pod-shared/internal_tenant.conf \
-{{- if empty .Values.conf.cinder.DEFAULT.host }}
-     --config-file /tmp/cinder-volume-host.conf \
-{{- end }}
-     --config-dir /etc/cinder/cinder.conf.d
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "cinder.config_args.volume" . | fromYamlArray) "format" "shell" "indent" 5) }}

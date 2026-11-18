@@ -19,14 +19,5 @@ set -ex
 mkdir -p /var/lib/openstack-helm/ironic/images
 mkdir -p /var/lib/openstack-helm/ironic/master_images
 
-{{- if and (.Values.bootstrap.object_store.enabled) (.Values.bootstrap.object_store.openstack.enabled) }}
-OPTIONS=" --config-file /tmp/pod-shared/swift.conf"
-{{- end }}
-{{- if and (.Values.bootstrap.network.enabled) (.Values.bootstrap.network.openstack.enabled) }}
-OPTIONS="${OPTIONS} --config-file /tmp/pod-shared/cleaning-network.conf"
-{{- end }}
-
 exec ironic-conductor \
-      --config-file /etc/ironic/ironic.conf \
-      --config-file /tmp/pod-shared/conductor-local-ip.conf $([ -d /etc/ironic/ironic.conf.d ] && echo --config-dir /etc/ironic/ironic.conf.d) \
-      ${OPTIONS}
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "ironic.config_args.conductor" . | fromYamlArray) "format" "shell" "indent" 6) }}

@@ -16,5 +16,4 @@ limitations under the License.
 
 set -ex
 exec magnum-conductor \
-      --config-file /etc/magnum/magnum.conf \
-      --config-file /tmp/pod-shared/magnum.conf $([ -d /etc/magnum/magnum.conf.d ] && echo --config-dir /etc/magnum/magnum.conf.d)
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "magnum.config_args.conductor" . | fromYamlArray) "format" "shell" "indent" 6) }}

@@ -28,8 +28,7 @@ EOF
   dhclient -v o-w0 -cf /tmp/dhclient.conf
 
   exec octavia-worker \
-        --config-file /etc/octavia/octavia.conf \
-        --config-dir /etc/octavia/octavia.conf.d
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "octavia.config_args.worker" . | fromYamlArray) "format" "shell" "indent" 8) }}
 }
 
 function stop () {

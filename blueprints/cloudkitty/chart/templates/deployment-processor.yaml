@@ -69,7 +69,7 @@ spec:
 {{ tuple $envAll "cloudkitty_processor" $mounts_cloudkitty_processor_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: cloudkitty-processor
-{{ dict "envAll" $envAll "component" "processor" "container" "default" "args" (list "--process" "cloudkitty-processor" "--exchange" "cloudkitty" "--rpc-topic" "cloudkitty" "--rpc-server-default" "@fqdn") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "processor" "container" "default" "args" (list "--process" "cloudkitty-processor" "--exchange" "cloudkitty" "--rpc-topic" "cloudkitty" "--rpc-server-default" "@fqdn") "config" (include "cloudkitty.config_args.processor" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "cloudkitty_processor" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.cloudkitty_processor | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "cloudkitty" "container" "cloudkitty_processor" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}

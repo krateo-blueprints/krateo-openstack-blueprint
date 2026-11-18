@@ -32,12 +32,18 @@ it something over its own message queue; unlike them it is one script for every 
 topic, exchange and server name of the program it probes, which were read from each program's
 stable/2026.1 source (hack/readiness-probe-exceptions.yaml says where).
 
-It finds the program in /proc -- its processes in this container's mount namespace, so a hostPID
-pod never judges another pod's process -- and, for the RabbitMQ modes, reads the configuration the
-program was started with from the program's own command line, so the probe cannot read a different
-config than the process it judges. Then, by mode:
+The program is this container's processes: every process in the probe's own mount namespace except
+the probe itself, so a hostPID pod never judges another pod's process. NOT a name in /proc's cmdline:
+oslo.service's threading backend and cotyledon (2026.1 images, setproctitle installed) rewrite each
+process's cmdline into one title string -- `designate-central: master process [...]`, `designate-
+central: ServiceWrapper worker(0)` -- and its environ with it, comm is that title cut to 15 bytes, and
+exe is the interpreter. A probe that matched argv found no process on every titled service (0.3.74
+before this). --process names the program in messages only. The configuration is the chart's: the
+same ordered --config-file / --config-dir list that the container's own exec line is rendered from
+(helm-toolkit.snippets.oslo_config_args), passed here as arguments; --config-dir-if-present is the
+start script's `$([ -d D ] && echo --config-dir D)`. Then, by mode:
 
-  --rpc-topic T   an oslo.messaging RPC server. Its process must hold an ESTABLISHED connection to
+  --rpc-topic T   an oslo.messaging RPC server. One of its processes must hold an ESTABLISHED connection to
                   a RabbitMQ port of its transport_url, and an RPC call to Target(topic=T,
                   server=<its server name>) on <exchange> must be answered by an RPC server. The
                   method does not exist, so the answer is the dispatcher's NoSuchMethod or
@@ -46,9 +52,9 @@ config than the process it judges. Then, by mode:
                   oslo.messaging log NoSuchMethod at DEBUG (neutron's probe uses the same name),
                   and rpc_ping_enabled in the service's config makes every server answer
                   NoSuchMethod rather than UnsupportedVersion, which it logs at ERROR.
-  --broker        a notification listener. Its process must hold an ESTABLISHED connection to a
+  --broker        a notification listener. One of its processes must hold an ESTABLISHED connection to a
                   RabbitMQ port of its transport_url: a listener without one consumes nothing.
-  --listen L      a server on its own socket: its process must hold the listening socket L,
+  --listen L      a server on its own socket: one of its processes must hold the listening socket L,
                   tcp:<port>, udp:<port> or unix:<path>. Attributed by socket inode, so on
                   hostNetwork another process's socket on the same port does not count.
 
@@ -91,50 +97,58 @@ def mount_ns(pid):
         return None
 
 
-def find_program(name):
-    """[(pid, argv after the program)] for every process of this container running `name`.
+def is_probe(argv):
+    """True for this probe's own command line, or an earlier run of it still going."""
+    return any(os.path.basename(a) == SELF for a in argv[:2])
 
-    Matched on the basename of any argv element, so `python /usr/bin/heat-engine ...` and an
-    emulated `/run/rosetta/rosetta /usr/bin/python3 ...` match as well as a direct exec. /proc's
-    cmdline, not /proc/<pid>/exe: under an emulating runtime exe is the emulator (#96). Only
-    processes in this probe's mount namespace count: the probe runs in the program's container,
-    and a hostPID pod sees every process on the node.
+
+def container_processes():
+    """The pids of this container's processes: the probe's mount namespace, minus the probe.
+
+    Identity by namespace, never by name: a titled process's cmdline, environ and comm are all its
+    title (see the module docstring). A probed container runs one program and its workers; a shell
+    that started it holds none of the program's sockets, so counting it changes nothing. The probe's
+    own command line is never titled, so it is recognised by its script name.
     """
     me = os.getpid()
     ns = mount_ns("self")
+    if ns is None:
+        not_ready("cannot read this probe's own mount namespace (/proc/self/ns/mnt)")
     found = []
     for pid in os.listdir("/proc"):
         if not pid.isdigit() or int(pid) == me:
             continue
-        if ns is not None and mount_ns(pid) != ns:
+        if mount_ns(pid) != ns:
             continue
         try:
             with open("/proc/%s/cmdline" % pid, "rb") as f:
                 argv = [a.decode("utf-8", "replace") for a in f.read().split(b"\0") if a]
         except OSError:
             continue
-        if any(os.path.basename(a) == SELF for a in argv):
-            continue  # this probe, or an earlier one still running
-        for i, a in enumerate(argv):
-            if os.path.basename(a) == name:
-                found.append((int(pid), argv[i + 1:]))
-                break
-    return found
+        if not argv or is_probe(argv):
+            continue  # a kernel thread has no cmdline; and this probe, or an earlier one
+        found.append(int(pid))
+    return sorted(found)
 
 
-def config_args(argv):
-    """The --config-file/--config-dir arguments, in order, as the program was given them."""
+class ConfigArg(argparse.Action):
+    """--config-file, --config-dir and --config-dir-if-present into ONE list, in the order given:
+    oslo.config reads files and directories in command-line order, and the drop-ins rely on it."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        getattr(namespace, self.dest).append((option_string, values))
+
+
+def config_args(given):
+    """The --config-file/--config-dir arguments for oslo.config, in order; a --config-dir-if-present
+    directory only if it exists, as the start script's `$([ -d D ] && echo --config-dir D)` does."""
     out = []
-    i = 0
-    while i < len(argv):
-        a = argv[i]
-        for flag in ("--config-file", "--config-dir"):
-            if a == flag and i + 1 < len(argv):
-                out += [flag, argv[i + 1]]
-                i += 1
-            elif a.startswith(flag + "="):
-                out += [flag, a.split("=", 1)[1]]
-        i += 1
+    for flag, path in given:
+        if flag == "--config-dir-if-present":
+            if os.path.isdir(path):
+                out += ["--config-dir", path]
+        else:
+            out += [flag, path]
     return out
 
 
@@ -280,7 +294,11 @@ def deadline(*_):
 
 def parser():
     p = argparse.ArgumentParser()
-    p.add_argument("--process", required=True, help="the program's executable name, e.g. heat-engine")
+    p.add_argument("--process", required=True,
+                   help="the program's name, e.g. heat-engine: in messages only, never matched against /proc")
+    for flag in ("--config-file", "--config-dir", "--config-dir-if-present"):
+        p.add_argument(flag, dest="config", action=ConfigArg, default=[], metavar="PATH",
+                       help="the program's configuration, in its exec line's order (from the chart)")
     p.add_argument("--rpc-topic", help="an RPC server: its topic")
     p.add_argument("--exchange", help="the control_exchange the program sets by default, e.g. heat")
     p.add_argument("--rpc-server-opt", default="DEFAULT.host", help="GROUP.OPTION naming the RPC server")
@@ -306,19 +324,19 @@ def main():
     signal.signal(signal.SIGALRM, deadline)
     signal.alarm(DEADLINE)
 
-    procs = find_program(args.process)
-    if not procs:
-        not_ready("no %s process is running in this container" % args.process)
-    pids = [pid for pid, _ in procs]
+    if (args.rpc_topic or args.broker) and not args.config:
+        p.error("--rpc-topic and --broker need the program's --config-file/--config-dir arguments")
+
+    pids = container_processes()
+    if not pids:
+        not_ready("no process other than this probe runs in this container (%s)" % args.process)
     if args.listen:
         for spec in args.listen:
             if not listening(pids, spec):
                 not_ready("%s holds no listening socket %s" % (args.process, spec))
         return
 
-    conf_args = config_args(procs[0][1])
-    if "--config-file" not in conf_args:
-        not_ready("%s was started without --config-file, so its configuration cannot be read" % args.process)
+    conf_args = config_args(args.config)
 
     from oslo_config import cfg
     import oslo_messaging
@@ -327,7 +345,10 @@ def main():
         oslo_messaging.set_transport_defaults(control_exchange=args.exchange)
     if args.rpc_topic:
         register(cfg.CONF, args)
-    cfg.CONF(conf_args, project=None, default_config_files=[], default_config_dirs=[])
+    try:
+        cfg.CONF(conf_args, project=None, default_config_files=[], default_config_dirs=[])
+    except cfg.Error as e:
+        not_ready("%s's configuration %s does not load: %s" % (args.process, " ".join(conf_args), e))
 
     try:
         url = oslo_messaging.TransportURL.parse(cfg.CONF)

@@ -85,7 +85,7 @@ spec:
               readOnly: true
       containers:
         - name: neutron-ironic-agent
-{{ dict "envAll" $envAll "component" "ironic_agent" "container" "default" "args" (list "--process" "ironic-neutron-agent" "--broker") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "ironic_agent" "container" "default" "args" (list "--process" "ironic-neutron-agent" "--broker") "config" (include "neutron.config_args.ironic_agent" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "neutron_ironic_agent" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.ironic_agent | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "neutron_ironic_agent" "container" "neutron_ironic_agent" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
