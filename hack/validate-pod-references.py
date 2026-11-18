@@ -25,6 +25,7 @@ It fails when it measured nothing: a chart that does not render, or a run that f
 templates at all, is a failed measurement, not a pass.
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -119,6 +120,11 @@ def storage_backends(root: Path):
     return (((schema.get("properties") or {}).get("storage") or {}).get("properties") or {}).get("backend", {}).get("enum") or []
 
 KINDS = ("Secret", "ConfigMap", "PersistentVolumeClaim", "ServiceAccount")
+
+# The planted case of the completeness check (hack/gates.d/validate-pod-references.yaml runs it): with
+# GATE_PLANT_DROP_DELIVERED=<component> the delivered renders of that component are skipped, as a future change to the
+# modes could skip them, and the gate must fail naming it.
+PLANT_DROP = os.environ.get("GATE_PLANT_DROP_DELIVERED", "")
 
 
 
@@ -308,7 +314,7 @@ def main() -> int:
             component = chart.parent.name
             modes = [(f"storage.backend {b}", b, delivered[b].get(component) or {}) for b in backends] \
                 if component in vary else [("", None, None)]
-            if component not in vary:
+            if component not in vary and component != PLANT_DROP:
                 for (c, js), profs in sorted(as_delivered.items()):
                     if c == component:
                         modes.append(("as the umbrella delivers it, profile %s" % "/".join(profs), "umbrella",
@@ -362,9 +368,15 @@ def main() -> int:
     want = {c for (c, _js) in as_delivered} - vary
     if only:
         want &= only
-    missing = sorted(want - delivered_ok)
+
+    def undelivered(rendered_ok):
+        return sorted(want - rendered_ok)
+
+    missing = undelivered(delivered_ok)
     if missing:
         identity.append("no successful render as the umbrella delivers it for %s" % missing)
+    if not want:
+        identity.append("completeness: no profile selects any component, so nothing was checked")
     for f in identity:
         print(f"FAIL {f}")
     if failures or unrendered or not_refused or identity:
