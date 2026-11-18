@@ -81,6 +81,13 @@ spec:
     template:
       type: Opaque
       engineVersion: v2
+      metadata:
+        labels:
+          # The topology operator reads only Secrets with this label: its manager caches Secrets by it, and the User
+          # webhook refuses an import Secret without it (messaging-topology-operator v1.20.5 cmd/main.go:281-283,
+          # internal/webhook/v1beta1/label_validation.go). The same cache feeds the controller's Secret watch, so
+          # without it a rotated root would not re-sync either. H2 run 3, 2026-11-18.
+          rabbitmq.com/topology-operator: "true"
       data:
         username: {{ $auth.username | quote }}
         password: {{ "{{ .password }}" | quote }}

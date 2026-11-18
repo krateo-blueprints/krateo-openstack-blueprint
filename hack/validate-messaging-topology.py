@@ -18,7 +18,8 @@ ServiceAccount may read (#370).
        - no rabbit-init Job, and exactly the five resources by name, each referencing the cluster;
        - the User imports the ExternalSecret <su>-rabbitmq-topology-user, which reads exactly the root the spec passes
          at endpoints.oslo_messaging.auth.<component>.passwordFrom, with the chart's username; it is the one
-         ExternalSecret of that name and the only writer of its Secret;
+         ExternalSecret of that name and the only writer of its Secret, which it labels rabbitmq.com/topology-operator=true
+         (the operator reads no other Secret, and its User webhook refuses one without it);
        - the Vhost is the chart's path, quorum by default, deletionPolicy retain; both Permissions name it, one with the
          User, one with the administrator's username;
        - one Policy per chart policy, none with an ha-* key, message-ttl kept, names DNS-1123.
@@ -288,6 +289,12 @@ def main():
                         if refs != [(root.get("secret"), root.get("key"))] or not root:
                             fail("2: %s's user projection reads %s, not the root the umbrella passes (%s/%s)"
                                  % (chart, refs, root.get("secret"), root.get("key")))
+                        lbl = ((es[0]["spec"]["target"]["template"].get("metadata") or {}).get("labels") or {})
+                        if lbl.get("rabbitmq.com/topology-operator") != "true":
+                            fail("2: %s's user projection does not label its Secret rabbitmq.com/topology-operator=true "
+                                 "(target.template.metadata.labels %s): the topology operator caches only labelled "
+                                 "Secrets and its User webhook refuses the import otherwise (v1.20.5 cmd/main.go:281, "
+                                 "internal/webhook/v1beta1/label_validation.go; H2 run 3)" % (chart, lbl))
                         if data.get("username") != om["auth"][chart]["username"] or "password" not in data:
                             fail("2: %s's user projection holds username %r and keys %s; want username %r and a "
                                  "password" % (chart, data.get("username"), sorted(data), om["auth"][chart]["username"]))
