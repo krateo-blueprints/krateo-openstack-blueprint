@@ -1,0 +1,10 @@
+# publicEndpoints (#311): every public endpoint of the selected components gets an HTTPS route and nothing else does
+# (never metadata, RabbitMQ, MariaDB or memcached); HSTS and X-Forwarded-Proto on every HTTPS rule and a redirect-only
+# HTTP listener; the NetworkPolicy's exact peers (node CIDRs, the Gateway, block-style "every pod" selectors); the
+# refusals; off renders as before; and each routed chart rendered with the values the umbrella gives it. Mutations
+# prove each check reports the defect it guards.
+name: "Public endpoints expose exactly the public endpoints, over HTTPS"
+job: capability-roles
+order: 145
+run: |
+  python3 hack/validate-public-endpoints.py .

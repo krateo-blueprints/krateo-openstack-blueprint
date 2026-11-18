@@ -292,6 +292,49 @@
         "rerunHooksToken": {
           "type": "string",
           "description": "Rendered nowhere. The umbrella sets it from rerunHooks.<component>; changing it makes core-provider run a helm upgrade, which re-runs every hook (#297)."
+        },
+        "ceph": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Set by the umbrella with a ceph storage.backend (#308): references to its copies of the keys Ceph mints. With both, the chart consumes Ceph through projections and renders no client.admin keyring; without them it renders as upstream.",
+          "properties": {
+            "keyringFrom": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The key of the Ceph user this chart authenticates as.",
+              "properties": {
+                "store": {
+                  "type": "string"
+                },
+                "secret": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                }
+              }
+            },
+            "monHostFrom": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The monitor addresses (ceph.conf mon_host).",
+              "properties": {
+                "store": {
+                  "type": "string"
+                },
+                "secret": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "imagesMigratedFromPvc": {
+          "type": "boolean",
+          "description": "Set by the umbrella from storage.ceph.glanceImagesMigrated (#308): the images on the glance-images claim were copied to the rbd store, or there were none to keep. Without it, a ceph-managed rbd render refuses while that claim exists."
         }
       }
     }

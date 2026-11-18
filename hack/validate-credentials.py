@@ -2623,7 +2623,16 @@ def main():
     if not items:
         print("FAILED MEASUREMENT: the umbrella defines no credentials.items, so nothing protects any install")
         sys.exit(2)
-    components = uv.get("components") or []
+    # `source: provided` items (#308) are copies of keys Ceph mints, rendered only with a ceph storage.backend: they have
+    # no generator, no published default to replace, and no root at the umbrella's defaults. hack/validate-ceph-consumer.py
+    # checks them (27 provided roots, 22c readers, 18c restarts, 28 no client.admin, 29 consistency); every check here is
+    # about generated roots, so they are set aside -- from the items and from each component's list -- and named.
+    provided_ids = sorted(cid for cid, i in items.items() if i.get("source"))
+    items = {cid: i for cid, i in items.items() if not i.get("source")}
+    components = [dict(c, credentials=[x for x in (c.get("credentials") or []) if x not in provided_ids])
+                  for c in (uv.get("components") or [])]
+    if provided_ids:
+        print("set aside, checked by hack/validate-ceph-consumer.py: %s" % ", ".join(provided_ids))
     ITEMS_REF.update(items)
     for cid in IDUSER_BY_ITEM:
         if cid in items:

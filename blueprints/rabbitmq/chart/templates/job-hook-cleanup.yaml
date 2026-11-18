@@ -1,0 +1,10 @@
+{{/*
+Krateo blueprint addition (#206): at uninstall, delete this release's completed install/upgrade hook Jobs, which Helm
+never deletes (helm-toolkit.manifests.job_hook_cleanup). Its image is one this chart's own Jobs already run, for python.
+This chart keeps its job node selector under labels.jobs, not labels.job.
+*/}}
+{{- $job := dict "envAll" . "serviceName" "rabbitmq" "image" .Values.images.tags.rabbitmq_init "nodeSelector" (dict .Values.labels.jobs.node_selector_key .Values.labels.jobs.node_selector_value) -}}
+{{- if .Values.pod.tolerations.rabbitmq.enabled -}}
+{{- $_ := set $job "tolerationsEnabled" true -}}
+{{- end -}}
+{{ $job | include "helm-toolkit.manifests.job_hook_cleanup" }}

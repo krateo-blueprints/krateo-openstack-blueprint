@@ -24,12 +24,59 @@ enabled:
 # krateo.storageBackend; a componentValues.<component>.krateo.storageBackend is refused, so this is the one place that
 # says which backend the install has.
 #   none           no backend (the default).
-#   ceph-rook      Ceph run by the rook-ceph blueprint, which mints the client keys (#308). Not implemented yet:
-#                  cinder refuses it, naming #308.
-#   ceph-external  an existing Ceph whose admin provides the client keys (#308). Not implemented yet, likewise.
+#   ceph-rook      Ceph run by Rook, whose CephClients mint the client keys (#308); storage.ceph says where.
+#   ceph-external  an existing Ceph whose admin creates the users and places their keys (#308); storage.ceph.keys
+#                  names each Secret.
 # Typed by values.schema.json, which hack/gen-componentvalues-schema.py generates.
 storage:
   backend: none
+  # ceph (#308): how the install consumes a Ceph cluster when storage.backend is ceph-rook or ceph-external. One consumer
+  # path for both: each client key and the monitor addresses are COPIED by External Secrets Operator from where Ceph
+  # keeps them into this namespace's roots (credentials.items with `source: provided`), and the charts project the roots.
+  # No client.admin key is read or rendered anywhere. Nothing here names a cloud provider.
+  ceph:
+    # sourceNamespace: where the Secrets holding the client keys and mon_host live. Empty: this release's namespace.
+    # For ceph-rook, the namespace of Rook's CephCluster. Read through the SecretStore <credentials.store>-ceph, whose
+    # Role is rendered here only when that is this namespace; another namespace's owner grants it.
+    sourceNamespace: ""
+    # clients: the Ceph user each consumer authenticates as (client.<name>). For ceph-rook, the CephClient name. The
+    # caps are set where the user is created (a Rook CephClient, or the Ceph admin), never here.
+    clients:
+      cinder: cinder
+      glance: glance
+    # rook: where Rook keeps them (ceph-rook). A CephClient's key is in Secret rook-ceph-client-<name>, under userKey,
+    # and the monitors in Secret rook-ceph-config, under mon_host (Rook's pkg/operator/ceph/client/controller.go and
+    # config/store.go, read 2026-11-17).
+    rook:
+      clientSecretPrefix: rook-ceph-client-
+      clientKey: userKey
+      monHostSecret: rook-ceph-config
+      monHostKey: mon_host
+    # keys: the operator-named Secrets (ceph-external). Every secret must be set with ceph-external, or the umbrella
+    # refuses, naming the empty one.
+    keys:
+      cinder:
+        secret: ""
+        key: key
+      glance:
+        secret: ""
+        key: key
+      monHost:
+        secret: ""
+        key: mon_host
+    # pools: the RBD pools, created where the users are (a Rook CephBlockPool, or the Ceph admin).
+    pools:
+      volumes: cinder.volumes
+      images: glance.images
+    # libvirtSecretUUID: the libvirt secret every hypervisor defines for client.<clients.cinder>, named by cinder's
+    # connection info for each attached volume. One value, passed to cinder, libvirt and nova.
+    libvirtSecretUUID: 457eb676-33da-42ec-9a8c-9293d545c337
+    # glanceStore: pvc keeps images on glance's volume; rbd stores them in the images pool (#308 P1: opt-in).
+    glanceStore: pvc
+    # glanceImagesMigrated: with glanceStore rbd on an install whose images are on the glance-images claim, glance
+    # refuses to render until this is true: copy each image to the rbd store first (README), or confirm there is none
+    # to keep. Ignored with glanceStore pvc.
+    glanceImagesMigrated: false
 
 # tolerations: one list of Kubernetes tolerations applied to EVERY pod the blueprint renders, in every component
 # (Deployments, StatefulSets, DaemonSets, Jobs and CronJobs, helm-toolkit's Jobs included). Passed to each component
@@ -53,6 +100,87 @@ tolerations:
 # to recover a component reading Ready=False/HooksMayNotHaveRun (README). Use the current time; an unknown name is
 # rejected. Merged UNDER componentValues: an explicit componentValues.<component>.krateo.rerunHooksToken wins.
 rerunHooks:
+
+# publicEndpoints (#311): the OpenStack APIs, Horizon and the noVNC console reachable from outside the cluster over HTTPS,
+# through ONE Gateway API Gateway this release renders (templates/public-endpoints.yaml). Off by default; off renders
+# exactly what it rendered before this block existed (hack/validate-public-endpoints.py, part 1).
+#
+# When enabled, for every selected component that serves a public endpoint (the table publicEndpointRoutes below):
+#   - an HTTPRoute <host>.<baseDomain> -> that component's ClusterIP Service, on the Gateway's HTTPS listener, with
+#     Strict-Transport-Security added to every response and X-Forwarded-Proto: https set on every request (overwriting
+#     whatever the client sent, so the services' proxy-header parsing cannot be lied to);
+#   - the component's public catalog endpoint becomes https://<host>.<baseDomain>/... (endpoints.<type>.host_fqdn_override,
+#     scheme and port; the ks-endpoints hook re-registers it on the next upgrade), and its oslo.middleware
+#     enable_proxy_headers_parsing is set, so version-discovery links say https;
+#   - the charts' own Ingress objects (inert: no controller serves their class) are switched off;
+#   - Horizon's Service becomes ClusterIP (no NodePort 31000) and its cookies Secure, behind the Gateway.
+# Plus: one HTTP listener that only redirects to HTTPS, one cert-manager Certificate for every route hostname, issued
+# by issuerRef, and the NetworkPolicy set below.
+#
+# Never routed, whatever is selected: nova-metadata, RabbitMQ (and its management UI), MariaDB, memcached.
+#
+# PREREQUISITES, checked: a Gateway API implementation (Gateway API CRDs + a controller for gatewayClassName) and
+# cert-manager. Krateo's installer brings all of them with features.ingress (agentgateway + cert-manager); any other
+# implementation works by its GatewayClass name. On a live cluster the render is REFUSED, with the reason on the
+# Composition's status, while the Gateway API or cert-manager CRDs are absent.
+#
+# Clients reach the APIs at https://keystone.<baseDomain>/v3 with the CA of issuerRef (OS_CACERT for a private CA).
+# Create DNS records for the hostnames (or a wildcard *.<baseDomain>) pointing at the Gateway's address; with Krateo's
+# features.externalDns they follow the HTTPRoutes automatically.
+#
+# e.g.
+#   publicEndpoints:
+#     enabled: true
+#     baseDomain: cloud.example.com
+#     tls:
+#       issuerRef:
+#         name: krateo-selfsigned-ca
+#     networkPolicy:
+#       nodeCIDRs:
+#         - 192.168.10.0/24
+publicEndpoints:
+  enabled: false
+  # Every public hostname is <service>.<baseDomain>, e.g. keystone.cloud.example.com. Required when enabled.
+  baseDomain: ""
+  # The GatewayClass of the Gateway API implementation that serves the Gateway. agentgateway is what Krateo's
+  # features.ingress installs.
+  gatewayClassName: agentgateway
+  gateway:
+    name: openstack-gateway
+    # A reserved address for the Gateway (e.g. a static IP), so a rebuild does not move every DNS record.
+    # Empty: the implementation assigns one.
+    addresses:
+  tls:
+    # The cert-manager issuer that signs the Gateway's certificate. Required when enabled. A private CA (e.g. Krateo's
+    # krateo-selfsigned-ca ClusterIssuer) needs clients to trust that CA; an ACME issuer must be able to validate every
+    # hostname (DNS-01; an HTTP-01 solver attached to a different Gateway cannot).
+    issuerRef:
+      group: cert-manager.io
+      kind: ClusterIssuer
+      name: ""
+  hsts:
+    # Strict-Transport-Security max-age, in seconds, on every HTTPS response. No includeSubDomains and no preload: the
+    # base domain may be shared, and preload is a decision for the domain's owner.
+    maxAge: 31536000
+  networkPolicy:
+    # Ingress NetworkPolicy for the install namespace: deny by default, then allow (1) every pod of this namespace,
+    # (2) the cluster's nodes, (3) the Gateway's proxy pods to the routed backends, (4) the internet to the Gateway's
+    # proxy pods, and (5) the namespaces listed in allowNamespaces. Nothing else crosses into the namespace.
+    # Only enforced on a cluster whose network plugin enforces NetworkPolicy; the live check must prove it does.
+    # The policies select every pod WITHOUT the label krateo.io/networkpolicy-exempt; a pod given that label is
+    # selected by none of them, so it is left unrestricted (an explicit opt-out).
+    enabled: true
+    # REQUIRED when enabled: the CIDRs the nodes' own addresses come from. neutron's agents, nova-compute, libvirt and
+    # openvswitch run on the host network, so their traffic to RabbitMQ, placement and the APIs arrives from node
+    # addresses, which no pod selector matches; without this the compute plane loses its message bus.
+    nodeCIDRs:
+    # Namespaces whose pods may reach this namespace's pods, e.g. the one running the OpenStack KOG operators (they
+    # call the internal endpoints). Empty: none.
+    allowNamespaces:
+  # Where the Gateway implementation runs the Gateway's proxy pods. Empty: the install namespace (agentgateway; verify
+  # for yours). The proxy pods are selected by gateway.networking.k8s.io/gateway-name=<gateway.name>, the label the
+  # Gateway API asks in-cluster implementations to set.
+  proxyNamespace: ""
 
 # compute.virtType (#303): qemu (software emulation; works on any node, slowly) or kvm (hardware virtualization).
 # kvm sets nova [libvirt] virt_type=kvm and cpu_mode=host-model, and libvirt's virt_type, and libvirt then refuses to
@@ -497,6 +625,27 @@ credentials:
       key: privateKey
       publicKey: publicKey
       path: endpoints.sharev2.auth.service_instance_ssh_keyFrom
+    # Ceph client keys and monitor addresses (#308): `source: provided` items. Ceph mints the keys (a Rook CephClient,
+    # or the Ceph admin), so the root is a COPY of the Secret Ceph's side keeps (storage.ceph), refreshed, not a value
+    # generated here, and it exists only while storage.backend is a ceph backend. `ceph` names which source.
+    - id: ceph-client-cinder
+      source: provided
+      ceph: cinder
+      secret: openstack-credential-ceph-client-cinder
+      key: key
+      path: krateo.ceph.keyringFrom
+    - id: ceph-client-glance
+      source: provided
+      ceph: glance
+      secret: openstack-credential-ceph-client-glance
+      key: key
+      path: krateo.ceph.keyringFrom
+    - id: ceph-mon-host
+      source: provided
+      ceph: monHost
+      secret: openstack-credential-ceph-mon-host
+      key: mon_host
+      path: krateo.ceph.monHostFrom
     # Per-service MariaDB users (0.3.68, #228): one item per MariaDB USERNAME, reaching only the chart that owns it.
     # The chart builds every URL that logs in as that user from the root: its main config's connection URLs
     # through the drop-in <chart>-db-connection, <chart>-db-user (DB_CONNECTION) and its siblings as ExternalSecrets,
@@ -767,6 +916,11 @@ components:
       - identity-user-glance
       - oslo-db-glance
       - oslo-messaging-glance
+      - ceph-client-glance
+      - ceph-mon-host
+    ## ceph (#308): with a ceph storage.backend this component consumes Ceph (the rbd image store, when storage.ceph.glanceStore is rbd); the umbrella passes it the
+    ## provided items it lists and the storage values for its role (osh.storageValues).
+    ceph: images
     deps:
       - keystone
     tier: identity
@@ -804,6 +958,12 @@ components:
     tier: compute
   - name: libvirt
     kind: Libvirt
+    credentials:
+      - ceph-client-cinder
+      - ceph-mon-host
+    ## ceph (#308): with a ceph storage.backend this component consumes Ceph (libvirt's secret for attached volumes); the umbrella passes it the
+    ## provided items it lists and the storage values for its role (osh.storageValues).
+    ceph: volumes
     deps:
       - openvswitch
     tier: compute
@@ -899,6 +1059,11 @@ components:
       - identity-user-glance
       - oslo-db-cinder
       - oslo-messaging-cinder
+      - ceph-client-cinder
+      - ceph-mon-host
+    ## ceph (#308): with a ceph storage.backend this component consumes Ceph (cinder-volume's RBD backend); the umbrella passes it the
+    ## provided items it lists and the storage values for its role (osh.storageValues).
+    ceph: volumes
     deps:
       - keystone
       - rabbitmq
@@ -1421,6 +1586,429 @@ notificationVhosts:
     - keystone
     - neutron
     - heat
+
+# publicEndpointRoutes (#311): what publicEndpoints exposes, one entry per public endpoint. Not part of the Openstack
+# schema: a property of these charts, checked against them by hack/validate-public-endpoints.py (every catalog service
+# a selected chart registers has an entry here, every backend is a Service that chart renders on that port, and none
+# is metadata, RabbitMQ, MariaDB or memcached).
+#   endpoint, port: the chart's endpoints.<endpoint> and its port.<port>, whose public URL the entry moves.
+#   host: the hostname label; the route serves <host>.<baseDomain>.
+#   backend: the ClusterIP Service and port the route sends to (the chart's internal endpoint).
+#   catalog: the service type the chart registers in Keystone's catalog; absent for Horizon and the console proxy.
+publicEndpointRoutes:
+  - component: aodh
+    endpoint: alarming
+    port: api
+    host: aodh
+    backend:
+      name: aodh-api
+      port: 8042
+    catalog: alarming
+  - component: barbican
+    endpoint: key_manager
+    port: api
+    host: barbican
+    backend:
+      name: barbican-api
+      port: 9311
+    catalog: key-manager
+  - component: blazar
+    endpoint: reservation
+    port: api
+    host: blazar
+    backend:
+      name: blazar-api
+      port: 1234
+    catalog: reservation
+  - component: cinder
+    endpoint: volumev3
+    port: api
+    host: cinder
+    backend:
+      name: cinder-api
+      port: 8776
+    catalog: volumev3
+  - component: cloudkitty
+    endpoint: rating
+    port: api
+    host: cloudkitty
+    backend:
+      name: cloudkitty-api
+      port: 8089
+    catalog: rating
+  - component: cyborg
+    endpoint: accelerator
+    port: api
+    host: cyborg
+    backend:
+      name: cyborg-api
+      port: 6666
+    catalog: accelerator
+  - component: designate
+    endpoint: dns
+    port: api
+    host: designate
+    backend:
+      name: designate-api
+      port: 9001
+    catalog: dns
+  - component: freezer
+    endpoint: backup
+    port: api
+    host: freezer
+    backend:
+      name: freezer-api
+      port: 9090
+    catalog: backup
+  - component: glance
+    endpoint: image
+    port: api
+    host: glance
+    backend:
+      name: glance-api
+      port: 9292
+    catalog: image
+  - component: gnocchi
+    endpoint: metric
+    port: api
+    host: gnocchi
+    backend:
+      name: gnocchi-api
+      port: 8041
+    catalog: metric
+  - component: heat
+    endpoint: orchestration
+    port: api
+    host: heat
+    backend:
+      name: heat-api
+      port: 8004
+    catalog: orchestration
+  - component: heat
+    endpoint: cloudformation
+    port: api
+    host: cloudformation
+    backend:
+      name: heat-cfn
+      port: 8000
+    catalog: cloudformation
+  - component: horizon
+    endpoint: dashboard
+    port: web
+    host: horizon
+    backend:
+      name: horizon-int
+      port: 80
+  - component: ironic
+    endpoint: baremetal
+    port: api
+    host: ironic
+    backend:
+      name: ironic-api
+      port: 6385
+    catalog: baremetal
+  - component: keystone
+    endpoint: identity
+    port: api
+    host: keystone
+    backend:
+      name: keystone-api
+      port: 5000
+    catalog: identity
+  - component: magnum
+    endpoint: container_infra
+    port: api
+    host: magnum
+    backend:
+      name: magnum-api
+      port: 9511
+    catalog: container-infra
+  - component: manila
+    endpoint: sharev2
+    port: api
+    host: manila
+    backend:
+      name: manila-api
+      port: 8786
+    catalog: sharev2
+  - component: masakari
+    endpoint: instance_ha
+    port: api
+    host: masakari
+    backend:
+      name: masakari-api
+      port: 15868
+    catalog: instance-ha
+  - component: mistral
+    endpoint: workflowv2
+    port: api
+    host: mistral
+    backend:
+      name: mistral-api
+      port: 8989
+    catalog: workflowv2
+  - component: neutron
+    endpoint: network
+    port: api
+    host: neutron
+    backend:
+      name: neutron-server
+      port: 9696
+    catalog: network
+  - component: nova
+    endpoint: compute
+    port: api
+    host: nova
+    backend:
+      name: nova-api
+      port: 8774
+    catalog: compute
+  - component: nova
+    endpoint: compute_novnc_proxy
+    port: novnc_proxy
+    host: novncproxy
+    backend:
+      name: nova-novncproxy
+      port: 6080
+  - component: octavia
+    endpoint: load_balancer
+    port: api
+    host: octavia
+    backend:
+      name: octavia-api
+      port: 9876
+    catalog: load-balancer
+  - component: placement
+    endpoint: placement
+    port: api
+    host: placement
+    backend:
+      name: placement-api
+      port: 8778
+    catalog: placement
+  - component: swift
+    endpoint: object_store
+    port: api
+    host: swift
+    backend:
+      name: swift-proxy
+      port: 8080
+    catalog: object-store
+  - component: tacker
+    endpoint: nfv_orchestration
+    port: api
+    host: tacker
+    backend:
+      name: tacker-api
+      port: 9890
+    catalog: nfv-orchestration
+  - component: trove
+    endpoint: database
+    port: api
+    host: trove
+    backend:
+      name: trove-api
+      port: 8779
+    catalog: database
+  - component: watcher
+    endpoint: infra_optim
+    port: api
+    host: watcher
+    backend:
+      name: watcher-api
+      port: 9322
+    catalog: infra-optim
+  - component: zaqar
+    endpoint: messaging
+    port: api
+    host: zaqar
+    backend:
+      name: zaqar-api
+      port: 8888
+    catalog: messaging
+
+# publicEndpointComponents (#311): what else publicEndpoints changes in each component. Not part of the Openstack schema;
+# checked against the charts by hack/validate-public-endpoints.py.
+#   ingressManifests: every manifests.* switch of the chart that renders an Ingress, its Service or its TLS Secret. All
+#     of them are switched off: no controller serves their class, and the Gateway replaces them. The gate requires
+#     this to be EVERY such switch the chart has, so a re-vendor that adds one fails CI.
+#   proxyHeaders: the conf.<key> whose [oslo_middleware] enable_proxy_headers_parsing is set to true, so the service
+#     builds its links from X-Forwarded-Proto. Absent for a component that is not oslo.middleware-based.
+#   referencedEndpoints: endpoints.<key> of ANOTHER component's public endpoint that this chart renders into its own
+#     config (glance's CORS origin is Horizon's; ironic's swift temp URLs are swift's), moved the same way when that
+#     component is selected.
+#   dashboard: Horizon's Service becomes ClusterIP and its Django settings Secure.
+publicEndpointComponents:
+  aodh:
+    ingressManifests:
+      - ingress_api
+      - secret_ingress_tls
+      - service_ingress_api
+    proxyHeaders: aodh
+  barbican:
+    ingressManifests:
+      - ingress_api
+      - secret_ingress_tls
+      - service_ingress_api
+    proxyHeaders: barbican
+  blazar:
+    ingressManifests:
+      - ingress_api
+      - service_ingress_api
+    proxyHeaders: blazar
+  ceilometer:
+    ingressManifests:
+      - service_ingress_api
+  cinder:
+    ingressManifests:
+      - ingress_api
+      - secret_ingress_tls
+      - service_ingress_api
+    proxyHeaders: cinder
+  cloudkitty:
+    ingressManifests:
+      - ingress_api
+    proxyHeaders: cloudkitty
+  cyborg:
+    ingressManifests:
+      - ingress_api
+      - service_ingress_api
+    proxyHeaders: cyborg
+  designate:
+    ingressManifests:
+      - ingress_api
+      - secret_ingress_tls
+      - service_ingress_api
+    proxyHeaders: designate
+  freezer:
+    ingressManifests:
+      - ingress_api
+      - service_ingress_api
+    proxyHeaders: freezer
+  glance:
+    ingressManifests:
+      - ingress_api
+      - secret_ingress_tls
+      - service_ingress_api
+    proxyHeaders: glance
+    referencedEndpoints:
+      - dashboard
+  gnocchi:
+    ingressManifests:
+      - ingress_api
+      - secret_ingress_tls
+      - service_ingress_api
+    proxyHeaders: gnocchi
+  heat:
+    ingressManifests:
+      - ingress_api
+      - ingress_cfn
+      - secret_ingress_tls
+      - service_ingress_api
+      - service_ingress_cfn
+    proxyHeaders: heat
+  horizon:
+    ingressManifests:
+      - ingress_api
+      - secret_ingress_tls
+      - service_ingress
+    dashboard: true
+  ironic:
+    ingressManifests:
+      - ingress_api
+      - service_ingress_api
+    proxyHeaders: ironic
+    referencedEndpoints:
+      - object_store
+  keystone:
+    ingressManifests:
+      - ingress_api
+      - secret_ingress_tls
+      - service_ingress_api
+    proxyHeaders: keystone
+  magnum:
+    ingressManifests:
+      - ingress_api
+      - service_ingress_api
+    proxyHeaders: magnum
+  manila:
+    ingressManifests:
+      - ingress_api
+      - secret_ingress_tls
+      - service_ingress_api
+    proxyHeaders: manila
+  masakari:
+    proxyHeaders: masakari
+  mistral:
+    ingressManifests:
+      - ingress_api
+      - service_ingress_api
+    proxyHeaders: mistral
+  neutron:
+    ingressManifests:
+      - ingress_server
+      - secret_ingress_tls
+      - service_ingress_server
+    proxyHeaders: neutron
+  nova:
+    ingressManifests:
+      - ingress_metadata
+      - ingress_novncproxy
+      - ingress_osapi
+      - ingress_serialproxy
+      - ingress_spiceproxy
+      - secret_ingress_tls
+      - service_ingress_metadata
+      - service_ingress_novncproxy
+      - service_ingress_osapi
+      - service_ingress_serialproxy
+      - service_ingress_spiceproxy
+    proxyHeaders: nova
+  octavia:
+    ingressManifests:
+      - ingress_api
+      - secret_ingress_tls
+      - service_ingress_api
+    proxyHeaders: octavia
+  placement:
+    ingressManifests:
+      - ingress
+      - secret_ingress_tls
+      - service_ingress
+    proxyHeaders: placement
+  rabbitmq:
+    ingressManifests:
+      - ingress_management
+      - service_ingress_management
+  skyline:
+    ingressManifests:
+      - ingress
+      - service_ingress
+  swift:
+    ingressManifests:
+      - ingress_proxy
+      - service_ingress_proxy
+  tacker:
+    ingressManifests:
+      - ingress_api
+      - service_ingress_api
+    proxyHeaders: tacker
+  trove:
+    ingressManifests:
+      - ingress_api
+      - secret_ingress_tls
+      - service_ingress_api
+    proxyHeaders: trove
+  watcher:
+    ingressManifests:
+      - ingress_api
+      - service_ingress_api
+    proxyHeaders: watcher
+  zaqar:
+    ingressManifests:
+      - ingress_api
+      - service_ingress_api
+    proxyHeaders: zaqar
 
 # dependencyRelaxations: the dependency edges whose creation gate is EXISTENCE instead of
 # READINESS. Every other edge waits for the dependency to report Ready=True, which is what
