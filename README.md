@@ -1343,6 +1343,25 @@ kubectl -n openstack get compositiondefinitions \
   -o custom-columns='NAME:.metadata.name,API:.status.apiVersion,READY:.status.conditions[?(@.type=="Ready")].status'
 ```
 
+### neutron finds its tunnel interface by itself
+
+neutron's `network.interface.tunnel`, the host NIC that carries VXLAN tunnel traffic, defaults to empty. The OVS
+agent's init then uses the interface of the default route, which works on any node. Set it only when tunnel traffic
+must leave through another NIC.
+
+**Existing installs keep `ens4`.** The field used to default to `ens4`, a GCE NIC name. That old schema default was
+written into each stored neutron object (#179), and upgrading doesn't remove it.
+- On GCE, `ens4` is the right NIC, so nothing changes.
+- On any other node, the OVS agent's init stops with `Var LOCAL_IP is empty`. Clear the field, or set the node's NIC:
+
+  ```yaml
+  componentValues:
+    neutron:
+      network:
+        interface:
+          tunnel: ""        # or the NIC, e.g. eth0
+  ```
+
 ### Running guests on KVM
 
 By default (`compute.virtType: qemu`) nova runs guests in QEMU software emulation. That works on any node, slowly.
@@ -1588,8 +1607,9 @@ GHCR on a semver tag (`git tag 0.1.0 && git push origin 0.1.0` →
 `hack/gates.d` (each states the defect it was written for), the umbrella `componentValues` schema-in-sync check
 (`hack/gen-componentvalues-schema.py`), the service-contract SSO deep-link resolution, the
 removed-values refusal, and the shared `lint-docs` documentation-standard job. A change adds a
-`docs/log.d` file and, for a new gate, a `hack/gates.d` file; `docs/log.md` and the check steps
-of `lint.yaml` are never edited by hand. See [docs/release.md](docs/release.md).
+`docs/log.d` file and, for a new gate, a `hack/gates.d` file. A pull request never touches
+`docs/log.md`, which a bot renders on main after each merge, and never adds a check step to
+`lint.yaml` by hand. See [docs/release.md](docs/release.md).
 
 ## License
 

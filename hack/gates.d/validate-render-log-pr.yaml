@@ -1,0 +1,8 @@
+# The render-log workflow lands docs/log.md through a bot pull request after each merge to main. Its script runs here
+# against a local remote and a stand-in gh: nothing when the render is current, one branch, commit and squash-merged
+# pull request for a new entry, an open bot pull request updated rather than a second opened, idempotent once landed.
+name: "The render-log bot lands docs/log.md through one pull request, and only when it changed"
+job: capability-roles
+order: 475
+run: |
+  python3 hack/validate-render-log-pr.py .
