@@ -7,7 +7,7 @@
     "profile": {
       "type": "string",
       "title": "Profile",
-      "description": "identity = MariaDB+Memcached+Keystone+Glance+Horizon; full = the whole catalogue, including cinder, ironic, octavia and swift, which need infrastructure you must provide yourself (a Ceph cluster, a PXE interface, an lb-mgmt-net with a port per host, an RWX StorageClass) and otherwise sit in Init forever; full-strict = everything except those four, i.e. only what can start on a cluster as it comes. See hack/provisioning-preconditions.yaml.",
+      "description": "identity = MariaDB+Memcached+Keystone+Glance+Horizon; full = the whole catalogue, including cinder, ironic, octavia and swift, which need infrastructure you must provide yourself (a block-storage backend, a PXE interface, an lb-mgmt-net with a port per host, an RWX StorageClass): ironic, octavia and swift otherwise sit in Init forever, and cinder refuses to render while storage.backend is none; full-strict = everything except the components whose components[].requires this install does not provide, i.e. only what can start on the cluster as described (cinder joins it when storage.backend is not none). See hack/provisioning-preconditions.yaml.",
       "enum": [
         "identity",
         "full",
@@ -1098,6 +1098,28 @@
       "properties": {
         "enabled": {
           "type": "boolean"
+        }
+      }
+    },
+    "storage": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "Storage backend",
+      "description": "The backend that provides block storage, the `block-storage` capability cinder requires (#196, #308). Profile full-strict selects cinder only when storage.backend is not none, and the umbrella passes the value to each as its krateo.storageBackend (a componentValues override of that key is refused). With none, a cinder selected anyway (profile full, or enabled) refuses to render, naming this value. Only none is functional in this release. See hack/provisioning-preconditions.yaml.",
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "type": "string",
+          "title": "Block-storage backend",
+          "description": "none = no backend (the default): profile full-strict leaves cinder out, and a cinder selected anyway refuses to render, naming this value; ceph-rook = Ceph run by the rook-ceph blueprint, which mints the client keys (#308); not implemented yet, so cinder refuses it; ceph-external = an existing Ceph whose admin provides the client keys (#308); not implemented yet, so cinder refuses it.",
+          "enum": [
+            "none",
+            "ceph-rook",
+            "ceph-external"
+          ],
+          "default": "none"
         }
       }
     }

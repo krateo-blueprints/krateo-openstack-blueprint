@@ -237,7 +237,11 @@ kubectl create namespace openstack-system
 #     plane resizing), core-provider up to 2.13.107 can leave it deployed with its install hooks never
 #     run and its pods waiting forever. Recovery: delete that component's Composition, and the umbrella
 #     re-creates it (core-provider#563; 2.13.108 marks it Ready=False/HooksMayNotHaveRun, #297).
-# cinder is not in full-strict because its only backend needs Ceph (#196). NOT verified at this
+#   - cinder cannot be installed through the umbrella yet: it needs a block-storage backend, and
+#     storage.backend has only `none` in this release (the Ceph backends are #308). full-strict leaves it
+#     out; selected anyway (profile: full, or enabled:) its Composition reports "cinder needs a volume
+#     backend, and storage.backend is none (#196)" instead of waiting in Init (see the full-strict section).
+# NOT verified at this
 # version: the 36-component profile: full, kind, a VNC console in a browser, and the
 # per-component path further down.
 
@@ -304,19 +308,38 @@ kubectl apply -f "$OS"
 `profile: identity` brings up MariaDB+Memcached+Keystone+Glance+Horizon; `profile: full`
 brings up **all 36 components** (needs a large amd64 cluster — see `quickstart-gke.md`).
 
-#### `profile: full-strict` — full, minus the four that need provisioning you must do yourself
+#### `profile: full-strict` — full, minus what needs provisioning you must do yourself
+
+> **cinder now refuses to render without a block-storage backend (#196).** The Openstack
+> Composition has a `storage.backend` (default `none`), and the umbrella passes it to cinder.
+> With `none`, `full-strict` leaves cinder out, and a cinder selected anyway — `profile: full`, or
+> `enabled:` — does not install: its Composition reports *cinder needs a volume backend, and
+> storage.backend is none (#196)* instead of `cinder-volume` sitting in `Init` on `ceph-etc`.
+> `full` itself is unchanged and still selects cinder, so a `full` install shows that one
+> component failed rather than stuck. The two Ceph backends, `ceph-rook` and `ceph-external`, are
+> accepted by the schema and refused by cinder until #308 implements them, so **cinder cannot be
+> installed through the umbrella in this release**. Installs that provisioned Ceph by hand for the
+> old `rbd1` precondition lose that path on purpose: it handed OpenStack the Ceph `client.admin`
+> key, which #308 rules out. `componentValues.cinder.krateo.storageBackend` is refused:
+> `storage.backend` is the one place that says which backend the install has. A standalone
+> `Cinder` Composition keeps upstream's wiring at its own default (`krateo.storageBackend:
+> unmanaged`), with the old precondition.
 
 > **Upgrading an existing `full-strict` install to 0.3.43 or later uninstalls its `cinder`
 > Composition.** From 0.3.43 `cinder` is one of the components `full-strict` leaves out, because
 > its only shipped volume backend is Ceph and nothing provides a Ceph cluster (#196). On a
 > default install that cinder never worked: `cinder-volume` never started, and from 0.3.41 its
 > `storage-init` hook held the release in `pending-install`. Measured on #179 and on a cold
-> install (#204). If you have provisioned Ceph and use cinder, switch to `profile: full`, or
-> keep `full-strict` and add `cinder` to `enabled:`, **before** you upgrade.
+> install (#204). Up to the #196 fix, an install that had provisioned Ceph could keep cinder with
+> `profile: full` or `enabled:`; that path is now closed (see the notice above).
 
-Four components — `cinder`, `ironic`, `octavia` and `swift` — each wait on infrastructure that no
-Kubernetes cluster provides and that this blueprint does not create. They are in `profile: full`,
-and they stay there. `profile: full-strict` is the same set **minus those four**:
+Four components — `cinder`, `ironic`, `octavia` and `swift` — each require infrastructure that no
+Kubernetes cluster provides and that this blueprint does not create, listed as a capability under
+`components[].requires` in the umbrella (`block-storage`, `pxe-interface`, `lb-mgmt-net`,
+`rwx-storage-class`). They are in `profile: full`, and they stay there. `profile: full-strict` is
+the same set **minus each one whose capability the install does not provide**. Only
+`block-storage` can be provided today, by `storage.backend`; with the default `none` that is all
+four:
 
 ```yaml
 spec:
@@ -328,7 +351,7 @@ of `openstack-network-node` (see the labelling block above).
 
 | component | needs | symptom when it is absent |
 |---|---|---|
-| `cinder` | a Ceph cluster, plus the ConfigMap `ceph-etc` and the keyring Secrets `pvc-ceph-client-key` and `cinder-volume-rbd-keyring` in `openstack`, for the default `rbd1` backend | `cinder-storage-init` and `cinder-volume` stay in `Init` on `FailedMount` for `ceph-etc`; `cinder-api` and `cinder-scheduler` wait on `cinder-volume` |
+| `cinder` | `block-storage`: a `storage.backend` other than `none`. Only `none` exists in this release; the Ceph backends are #308 | its Composition reports the render error *cinder needs a volume backend, and storage.backend is none (#196)*. Before the fix: `cinder-storage-init` and `cinder-volume` stayed in `Init` on `FailedMount` for `ceph-etc` |
 | `ironic` | an interface named `ironic-pxe` on each conductor node — the bare-metal provisioning NIC | `ironic-conductor-init` exits 1 with `Could not find IP for pxe to bind to`; the pod sits in `Init:CrashLoopBackOff` |
 | `octavia` | `lb-mgmt-net` plus a Neutron port per node, named `octavia-{worker,health-manager}-port-<hostname>` | the `get-port` init containers log `No Port found for octavia-worker-port-…` and never finish |
 | `swift` | a StorageClass offering `ReadWriteMany` (upstream uses an `nfs-provisioner` default this repo does not ship) | `swift-ring-builder` and `swift-storage` stay `Pending`, `swift-proxy` stays in `Init` |
@@ -354,10 +377,13 @@ injected and `designate-manage pool update` died on `` Field `host' cannot be No
 was to deploy the thing it needs rather than to document the need, and `full-strict` went up by
 two — designate back in, and powerdns itself.
 
-`hack/provisioning-preconditions.yaml` carries each one with a command you can run to check it,
-and `hack/validate-provisioning-preconditions.py` asserts **both** halves by rendering the chart:
-every flagged component is still selected by `full`, none is selected by `full-strict`, and each
-declares what it needs, its symptom and that check. Neither profile can drift from the other
+`hack/provisioning-preconditions.yaml` carries each one with its capability and a command you can
+run to check it, and `hack/validate-provisioning-preconditions.py` asserts **both** halves by
+rendering the chart: every such component is still selected by `full`, none is selected by
+`full-strict` with `storage.backend: none`, and each declares what it needs, its symptom and that
+check. As a positive control it renders `full-strict` with every other backend too, which must add
+cinder and nothing else. `hack/validate-storage-backend.py` asserts the value reaches cinder alone
+and that cinder refuses without a backend. Neither profile can drift from the other
 silently, and a precondition cannot describe a component that no profile distinguishes.
 
 To take just one of them on top of `full-strict` — say you have the RWX StorageClass but no PXE
