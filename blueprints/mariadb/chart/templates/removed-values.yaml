@@ -1,0 +1,24 @@
+{{- /*
+Krateo blueprint addition. Values this chart no longer implements. Each one is refused here, not ignored: a value that
+silently does nothing reads as a feature that runs.
+
+The Swift/RGW remote-backup path and its ks-user Job (removed, #302). The Job created the Keystone user remote backups
+authenticate as. It was a post-install hook that waits on keystone, and keystone waits on mariadb, so a first install
+with it on deadlocked; and that user had role admin and OpenStack-Helm's published password. Backups stay local
+(conf.backup, manifests.cron_job_mariadb_backup). values.schema.json refuses these too; this guard holds when the
+schema is not applied (--skip-schema-validation).
+*/ -}}
+{{- if .Values.manifests.job_ks_user }}
+{{- fail "manifests.job_ks_user was removed (#302) with the Swift remote-backup path: its Keystone user was created by a mariadb install hook waiting on keystone, which waits on mariadb. Backups stay local. Unset it (or set it to false)." }}
+{{- end }}
+{{- $remote := ((.Values.conf | default dict).backup | default dict).remote_backup }}
+{{- if $remote }}
+{{- if not (kindIs "map" $remote) }}
+{{- fail "conf.backup.remote_backup was removed (#302): backups stay local. Unset it (or set enabled: false)." }}
+{{- end }}
+{{- range $k, $v := $remote }}
+{{- if or (ne $k "enabled") $v }}
+{{- fail (printf "conf.backup.remote_backup.%s: the Swift remote-backup path was removed (#302); backups stay local. Unset conf.backup.remote_backup (or set only enabled: false)." $k) }}
+{{- end }}
+{{- end }}
+{{- end }}
