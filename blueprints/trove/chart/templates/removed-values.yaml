@@ -1,0 +1,11 @@
+{{- /*
+Krateo blueprint addition. Values this chart no longer implements. Each one is refused here, not ignored: a value that
+silently does nothing reads as a feature that runs.
+
+manifests.cron_job_db_purge (removed, #289): the trove-db-purge CronJob ran `trove-manage db_purge`, which trove-manage
+on stable/2026.1 does not have (trove has no database purge command), so every scheduled run failed at argument
+parsing. values.schema.json refuses true too; this guard holds when the schema is not applied (--skip-schema-validation).
+*/ -}}
+{{- if .Values.manifests.cron_job_db_purge }}
+{{- fail "manifests.cron_job_db_purge was removed (#289): trove-manage on 2026.1 has no db_purge command and trove has no database purge, so the CronJob could only fail. Unset it (or set it to false)." }}
+{{- end }}
