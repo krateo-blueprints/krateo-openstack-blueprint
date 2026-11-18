@@ -36,6 +36,10 @@ NOT_REQUIRED = {
 # read from a pull request's checks (2026-11-18).
 REUSABLE_INNER = {
     "lint-docs": "lint-docs",
+    # krateo-blueprints/charts pinned-uses.yaml's one job, id `pinned-uses` with no `name`. Read from the checks of
+    # this repository's #376 run 44266587182 and the charts#20 rollout PRs: `pinned-uses / pinned-uses` (2026-11-18).
+    # Required: it is how charts PUBLISHING.md rule 9 is enforced, and it runs on merge groups like every lint job.
+    "pinned-uses": "pinned-uses",
 }
 
 
