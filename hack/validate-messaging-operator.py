@@ -82,7 +82,9 @@ LEDGER = _load("render_identity").Ledger(os.path.basename(__file__))
 def emit(tag, docs):
     if not EMIT:
         return
-    objs = [d for d in docs if d and str(d.get("apiVersion", "")).startswith("rabbitmq.com/")]
+    # rabbitmq.com objects, and the ExternalSecrets whose Secrets the operators' webhooks read (eso_model, #405).
+    objs = [d for d in docs if d and (str(d.get("apiVersion", "")).startswith("rabbitmq.com/")
+                                      or d.get("kind") == "ExternalSecret")]
     if objs:
         with open(os.path.join(EMIT, "%s.yaml" % tag), "w") as f:
             yaml.safe_dump_all(objs, f, default_flow_style=False, sort_keys=False)

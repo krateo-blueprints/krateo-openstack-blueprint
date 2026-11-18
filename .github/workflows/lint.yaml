@@ -207,7 +207,8 @@ jobs:
     # Gating. The offline gates render the operator-mode objects and check this repository's predicates; only an API
     # server can say whether the operators' CRDs admit them. H2 (2026-11-18) met a RabbitmqCluster that every offline
     # gate passed and GKE refused (its override PodSpec had no `containers`). This starts a kind cluster with the CRDs
-    # rabbitmq-operator-blueprint ships (hack/operator-crds.yaml) and dry-runs every rendered rabbitmq.com object.
+    # rabbitmq-operator-blueprint ships (hack/operator-crds.yaml) and dry-runs every rendered rabbitmq.com object; then
+    # (#405) installs cert-manager and both operators whole and dry-runs them again with the operators' webhooks active.
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
