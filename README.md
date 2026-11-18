@@ -1669,6 +1669,38 @@ How the token and the endpoints are written:
 READMEs show an unpinned install from `charts.krateo.io`, which serves 0.10.0; don't use it. nova-kog's owner measured
 all 6 nova Kinds reconciling on 0.80.0.
 
+### High availability
+
+High availability for the stateful core is opt-in and arrives phase by phase (#309). Today:
+
+```yaml
+ha:
+  enabled: true
+```
+
+- **memcached:** 3 replicas behind a headless Service, as the StatefulSet `memcached-ha`. Every component that builds
+  a memcache server list names each replica, so every client hashes a key to the same replica. Without `ha`, memcached
+  is one ClusterIP with ClientIP affinity: each client sticks to one replica, so several replicas would hold
+  disagreeing caches (keystone's token-validation and revocation caches among them). That is why more than one
+  memcached replica without `ha` is refused. Switching `ha` on starts the cache empty; nothing else is lost.
+- **The node refusal:** with `ha`, the render is refused while fewer than 3 nodes carry
+  `openstack-control-plane=enabled`. The replicas use required anti-affinity, one per node, so on fewer nodes the rest
+  would stay Pending. The check needs the node-read grant (`node-reader-rbac.yaml`); without it, the ConfigMap
+  `<release>-node-label-preconditions` says the nodes were not measured.
+- **Off changes nothing:** every chart renders as it always has.
+
+**RabbitMQ's host count has one source,** with or without `ha`: `componentValues.rabbitmq.pod.replicas.server`. Above
+1, every component that lists RabbitMQ hosts gets the count, so its transport URL (and ceilometer's notification URLs)
+lists every node. A component whose `componentValues` set a different count is refused. watcher names the headless
+Service, whose DNS answers every ready node, so it needs nothing passed.
+
+RabbitMQ and MariaDB move to their operators in later phases (#309). `hack/validate-ha-propagation.py` checks all of
+the above against the rendered charts.
+
+**nova-compute's liveness checks the process only (#146).** Upstream's liveness and startup probes ping nova-compute
+over RPC, so a RabbitMQ outage restarted every hypervisor's agent at once and repaired nothing. Readiness keeps the RPC
+check, so the outage still shows as NotReady. `hack/validate-nova-compute-liveness.py` runs the rendered probe.
+
 ### A component reads Ready=False/HooksMayNotHaveRun
 
 core-provider (#563, fixed in 2.13.108 by #569) can leave a component's first install `deployed` with its post-install

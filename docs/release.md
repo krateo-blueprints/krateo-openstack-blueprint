@@ -323,6 +323,13 @@ the top of `docs/log.md` and the step list in `lint.yaml`. Both are now one file
   registered in no gate file, or a gate file names a script that doesn't exist
   (`hack/validate-gates-registered.py`). Only a new job, or a gate needing a new `${{ }}`
   expression in its runner step's `env`, touches `lint.yaml`.
+- **Upstream divergence:** add a file to `hack/upstream-divergences.d/`, named
+  `<component>-<slug>.yaml`, holding one divergence: `component`, `issue`, `reason` and
+  `assertions`, with comments above saying why. `hack/validate-upstream-divergences.py` documents
+  the keys, and refuses a file holding more than one entry, a duplicate key, a name that doesn't
+  start with its component, an assertion already declared in another file, and an empty
+  directory. The old single `hack/upstream-divergences.yaml` is gone, and the gate refuses it if
+  it comes back.
 
 ## Version pinning downstream
 

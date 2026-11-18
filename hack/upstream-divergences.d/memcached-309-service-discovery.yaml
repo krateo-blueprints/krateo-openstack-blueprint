@@ -1,0 +1,21 @@
+component: memcached
+issue: 309
+reason: >-
+  Upstream serves every replica behind one ClusterIP with ClientIP affinity, so each client sticks to one replica
+  and the replicas hold disagreeing caches (keystone's token-validation and revocation caches among them). With
+  manifests.service_discovery (the umbrella's ha.enabled) the replicas run behind a headless Service and every
+  client lists them all; off, the chart renders as upstream's.
+assertions:
+  - file: templates/service-discovery.yaml
+    present: "clusterIP: None"
+    why: >-
+      Pod DNS names exist only under a headless governing Service, and every client's server list names the pods
+      through it. hack/validate-ha-propagation.py checks the names the clients list against the pods it governs.
+  - file: templates/statefulset.yaml
+    present: $stsName = printf "%s-ha"
+    why: >-
+      A new StatefulSet name with discovery, because serviceName is immutable: patching the existing StatefulSet
+      onto the headless Service would be refused, and the release would stop upgrading.
+  - file: templates/service.yaml
+    present: "if not .Values.manifests.service_discovery"
+    why: ClientIP affinity is what pinned each client to one replica; with discovery it is dropped.

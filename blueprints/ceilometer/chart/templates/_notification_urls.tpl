@@ -10,9 +10,22 @@ published-or-overridden value when the admin has no passwordFrom, or the ESO tem
 {{- $admin := $envAll.Values.endpoints.oslo_messaging.auth.admin -}}
 {{- $host := tuple "oslo_messaging" "internal" $envAll | include "helm-toolkit.endpoints.hostname_fqdn_endpoint_lookup" -}}
 {{- $port := tuple "oslo_messaging" "internal" "amqp" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" -}}
+{{- /* Krateo (#309): with more than one RabbitMQ replica (endpoints.oslo_messaging.statefulset, passed by the umbrella),
+       each URL lists every node, as the transport URLs do, so the agent fails over to the nodes it would otherwise omit.
+       At one replica the URL names the Service, as before. */ -}}
+{{- $ss := $envAll.Values.endpoints.oslo_messaging.statefulset | default dict -}}
+{{- $n := int ($ss.replicas | default 1) -}}
 {{- $out := list -}}
 {{- range $vhost := $envAll.Values.conf.notification_vhosts }}
+{{- if gt $n 1 -}}
+{{- $hosts := list -}}
+{{- range $i := until $n -}}
+{{- $hosts = append $hosts (printf "%s:%s@%s-%d.%s:%s" ($admin.username | urlquery) $password $ss.name $i $host $port) -}}
+{{- end -}}
+{{- $out = append $out (printf "rabbit://%s/%s" (join "," $hosts) $vhost) -}}
+{{- else -}}
 {{- $out = append $out (printf "rabbit://%s:%s@%s:%s/%s" ($admin.username | urlquery) $password $host $port $vhost) -}}
+{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
 {{- end -}}

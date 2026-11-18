@@ -48,6 +48,19 @@ if [ -n "$MEMCACHE_HOST" ] && [ "$MEMCACHE_HOST" != "null" ]; then
         echo "Added $MEMCACHE_IP $MEMCACHE_HOST to /etc/hosts"
     fi
 fi
+{{- if .Values.endpoints.oslo_cache.statefulset }}
+
+# Krateo (#309): with memcached's replicas listed one by one (ha), proxy-server.conf names each pod, so each is
+# resolved the same way. A pod's address is the one it had when this proxy started.
+for MEMCACHE_SERVER in $(echo "{{ tuple "oslo_cache" "internal" "memcache" . | include "helm-toolkit.endpoints.host_and_port_endpoint_uri_lookup" }}" | tr ',' ' '); do
+    MEMCACHE_POD="${MEMCACHE_SERVER%:*}"
+    MEMCACHE_POD_IP=$(getent hosts "$MEMCACHE_POD" | awk '{print $1}' | head -1)
+    if [ -n "$MEMCACHE_POD_IP" ]; then
+        echo "$MEMCACHE_POD_IP $MEMCACHE_POD" >> /etc/hosts
+        echo "Added $MEMCACHE_POD_IP $MEMCACHE_POD to /etc/hosts"
+    fi
+done
+{{- end }}
 
 echo "Starting Swift Proxy Server..."
 {{- if include "swift.proxy_conf_dir" . }}

@@ -1267,6 +1267,20 @@
           "default": "none"
         }
       }
+    },
+    "ha": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "High availability",
+      "description": "Opt-in (#309). enabled runs memcached as 3 replicas behind a headless Service, with every component listing each replica in its memcache server list, and refuses the render while fewer than 3 nodes carry openstack-control-plane=enabled (when the orchestrator can read nodes). Off changes nothing. README \"High availability\".",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "definitions": {

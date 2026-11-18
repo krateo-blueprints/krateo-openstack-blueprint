@@ -20,7 +20,9 @@ kind: Service
 metadata:
   name: {{ tuple "oslo_cache" "internal" . | include "helm-toolkit.endpoints.hostname_short_endpoint_lookup" }}
 spec:
+{{- if not .Values.manifests.service_discovery }}
   sessionAffinity: ClientIP
+{{- end }}
   ports:
     - name: memcache
       port: {{ tuple "oslo_cache" "internal" "memcache" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
