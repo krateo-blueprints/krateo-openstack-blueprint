@@ -32,6 +32,15 @@ Curated history; release notes live in GitHub Releases.
   selector can reach. They now carry helm-toolkit's labels; their pod templates are unchanged. libvirt, memcached, openvswitch and redis render no hook Job unless
   `images.local_registry.active` turns on image-repo-sync, and have no python image, so they get no cleanup.
 
+- **High availability, first phases (#309), and nova-compute liveness (#146).**
+  - **`ha.enabled` (opt-in):** memcached as 3 replicas behind a headless Service, every component listing each
+    replica, and a refusal while fewer than 3 nodes carry `openstack-control-plane=enabled`. More than one memcached
+    replica without `ha` is refused. Off renders as before.
+  - **RabbitMQ's host count** comes from `componentValues.rabbitmq.pod.replicas.server` alone and reaches every
+    transport URL and ceilometer's notification URLs; a conflicting per-component count is refused.
+  - **nova-compute** liveness and startup check the process only; readiness keeps the RPC check.
+  - **New gates:** `hack/validate-ha-propagation.py` and `hack/validate-nova-compute-liveness.py`.
+
 - **image-scan retries a scan cut short by a layer download (#316, #334).**
   - **What failed:** image-scan run 44202269356 (on `feat/309-h0-h1`) failed in
     `scan (quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble)`. The cause was no new CVE: Trivy stopped
