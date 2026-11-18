@@ -35,7 +35,7 @@ limitations under the License.
 {{- $val | float64 | int | default 1 -}}
 {{- end -}}
 
-{{- if .Values.manifests.configmap_etc }}
+{{- if and (.Values.manifests.configmap_etc) (include "rabbitmq.chart_mode" .) }}
 {{- $envAll := . }}
 
 {{- if empty $envAll.Values.conf.rabbitmq.cluster_formation.k8s.host -}}
