@@ -367,6 +367,17 @@
         "rerunHooksToken": {
           "type": "string",
           "description": "Rendered nowhere. The umbrella sets it from rerunHooks.<component>; changing it makes core-provider run a helm upgrade, which re-runs every hook (#297)."
+        },
+        "storageBackend": {
+          "type": "string",
+          "enum": [
+            "unmanaged",
+            "none",
+            "ceph-rook",
+            "ceph-external"
+          ],
+          "default": "unmanaged",
+          "description": "Which block-storage backend this cinder renders (#196, #308). The umbrella sets it from its storage.backend and refuses a componentValues override. unmanaged (the default) is the chart as OpenStack-Helm ships it, for a standalone install whose operator provides ceph-etc, pvc-ceph-client-key and cinder-volume-rbd-keyring; none is refused (no backend: cinder-volume would wait in Init forever); ceph-rook and ceph-external are refused until #308 implements them."
         }
       }
     }
