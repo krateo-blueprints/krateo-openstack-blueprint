@@ -20,7 +20,14 @@ export HOME=/tmp
 cp -fv /etc/ceph/ceph.conf.template /etc/ceph/ceph.conf
 
 KEYRING=/etc/ceph/ceph.client.${CEPH_CINDER_USER}.keyring
-{{- if .Values.conf.ceph.cinder.keyring }}
+{{- if eq (include "helm-toolkit.utils.ceph_managed" .) "true" }}
+# Krateo (#308): the key Ceph minted for client.${CEPH_CINDER_USER}, projected from the umbrella's copy. No user is
+# created and no client.admin key is present.
+cat > ${KEYRING} <<EOF
+[client.${CEPH_CINDER_USER}]
+    key = $(cat /tmp/client-keyring)
+EOF
+{{- else if .Values.conf.ceph.cinder.keyring }}
 cat > ${KEYRING} <<EOF
 [client.{{ .Values.conf.ceph.cinder.user }}]
     key = {{ .Values.conf.ceph.cinder.keyring }}

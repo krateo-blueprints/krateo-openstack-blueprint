@@ -1,0 +1,27 @@
+{{/*
+Krateo blueprint addition (#196, #308): cinder refuses to render without a volume backend.
+
+cinder's only shipped backend is Ceph RBD (rbd1). With no Ceph, cinder-volume and cinder-storage-init mount the
+ConfigMap ceph-etc and the keyring Secrets, which nothing creates, so they wait in Init forever and cinder-api and
+cinder-scheduler wait behind them. Measured on #179 and on a cold 0.3.42 install (#204). Init is the state a pod census
+can only count, so a refusal that names the value to set replaces it: a render error is on the Composition's own status.
+
+The umbrella passes its storage.backend here as krateo.storageBackend, `none` by default. `unmanaged` is this chart's
+own default, the chart as OpenStack-Helm ships it for a standalone install whose operator provides those objects; the
+umbrella never passes it. hack/validate-storage-backend.py renders every value.
+*/}}
+{{- $backend := .Values.krateo.storageBackend | default "unmanaged" -}}
+{{- $managed := eq (include "helm-toolkit.utils.ceph_managed" .) "true" -}}
+{{- if and $managed (not (hasPrefix "ceph-" $backend)) -}}
+{{- fail (printf "\n\nkrateo.ceph references are set and krateo.storageBackend is %s: the references belong to a ceph backend (#308), which the umbrella sets together with them.\n" $backend) -}}
+{{- end -}}
+{{- if eq $backend "none" -}}
+{{- fail "\n\ncinder needs a volume backend, and storage.backend is none (#196).\n\ncinder's only shipped backend is Ceph RBD, and with no backend cinder-volume waits in Init forever on Ceph objects nothing creates (the ConfigMap ceph-etc and the keyring Secrets). On the Openstack Composition, leave cinder out -- profile full-strict selects it only when storage.backend is not none -- or set storage.backend once a backend is available (#308). On a standalone Cinder Composition this value is krateo.storageBackend.\n" -}}
+{{- else if has $backend (list "ceph-rook" "ceph-external") -}}
+{{- if not $managed -}}
+{{- fail (printf "\n\nkrateo.storageBackend %s renders only with krateo.ceph.keyringFrom and krateo.ceph.monHostFrom (#308): the umbrella passes them with that storage.backend, copied from the keys Ceph mints. Rendered without them, cinder would have no key and no cluster.\n" $backend) -}}
+{{- end -}}
+{{- include "helm-toolkit.utils.ceph_refuse_literals" (tuple . (list "conf.ceph.admin_keyring" "ceph_client.enable_external_ceph_backend" "ceph_client.external_ceph.rbd_user_keyring" "backup.external_ceph_rbd.enabled" "backup.external_ceph_rbd.admin_keyring")) -}}
+{{- else if ne $backend "unmanaged" -}}
+{{- fail (printf "\n\nkrateo.storageBackend %q is not a backend this chart knows: unmanaged, none, ceph-rook or ceph-external.\n" $backend) -}}
+{{- end -}}

@@ -191,7 +191,7 @@ spec:
               value: "{{ .Values.conf.ceph.cinder.keyring }}"
             {{ end }}
             - name: LIBVIRT_CEPH_SECRET_UUID
-              value: "{{ .Values.conf.ceph.secret_uuid }}"
+              value: "{{ .Values.conf.ceph.cinder.secret_uuid }}"
           command:
             - /tmp/ceph-keyring.sh
           terminationMessagePath: /var/log/termination-log
@@ -308,7 +308,7 @@ spec:
               value: "{{ .Values.conf.ceph.cinder.keyring }}"
             {{ end }}
             - name: LIBVIRT_CEPH_SECRET_UUID
-              value: "{{ .Values.conf.ceph.secret_uuid }}"
+              value: "{{ .Values.conf.ceph.cinder.secret_uuid }}"
           {{ end }}
             - name: RPC_PROBE_TIMEOUT
               value: "{{ .Values.pod.probes.rpc_timeout }}"

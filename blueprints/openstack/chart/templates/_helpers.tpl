@@ -794,10 +794,220 @@ true
 {{- $out | uniq | join " " -}}
 {{- end -}}
 
+{{/* The infrastructure capabilities this install provides, space-joined, for components[].requires.
+     block-storage is provided by storage.backend when it is not none (#196, #308). Nothing in the
+     umbrella provides the others components list (pxe-interface, lb-mgmt-net, rwx-storage-class):
+     they exist only as preconditions an operator meets by hand (#163), so profile full-strict never
+     selects their components and `enabled:` is how to take one. hack/validate-provisioning-preconditions.py
+     asserts every capability a component requires is declared in hack/provisioning-preconditions.yaml. */}}
+{{- define "osh.providedCapabilities" -}}
+{{- $top := index . 0 -}}
+{{- $out := list -}}
+{{- if ne (include "osh.storageBackend" (list $top)) "none" -}}{{- $out = append $out "block-storage" -}}{{- end -}}
+{{- $out | join " " -}}
+{{- end -}}
+
+{{/* "true" when storage.backend is a Ceph backend (ceph-rook, ceph-external): the `source: provided` credential items
+     are copied and passed, and the charts consume Ceph through them (#308). */}}
+{{- define "osh.cephActive" -}}
+{{- $top := index . 0 -}}
+{{- if hasPrefix "ceph-" (include "osh.storageBackend" (list $top)) -}}true{{- end -}}
+{{- end -}}
+
+{{/* The namespace the provided items are copied from: storage.ceph.sourceNamespace, or this release's. */}}
+{{- define "osh.cephSourceNamespace" -}}
+{{- $top := index . 0 -}}
+{{- ((($top.Values.storage | default dict).ceph | default dict).sourceNamespace | default $top.Release.Namespace) -}}
+{{- end -}}
+
+{{/* (list $ $item): where a `source: provided` item is copied from, as JSON {"secret", "key"}. ceph-rook follows Rook's
+     conventions (storage.ceph.rook: a CephClient's Secret and key, the monitors' Secret and key); ceph-external reads the
+     operator-named storage.ceph.keys.<ceph>, and refuses an empty secret rather than copy from nothing. */}}
+{{- define "osh.cephSource" -}}
+{{- $top := index . 0 -}}{{- $i := index . 1 -}}
+{{- $ceph := (($top.Values.storage | default dict).ceph | default dict) -}}
+{{- $backend := include "osh.storageBackend" (list $top) -}}
+{{- if eq $backend "ceph-rook" -}}
+  {{- $rook := $ceph.rook | default dict -}}
+  {{- if eq $i.ceph "monHost" -}}
+    {{- dict "secret" $rook.monHostSecret "key" $rook.monHostKey | toJson -}}
+  {{- else -}}
+    {{- $client := index ($ceph.clients | default dict) $i.ceph -}}
+    {{- if not $client -}}{{- fail (printf "\n\nstorage.ceph.clients.%s is empty: credential %s copies that Ceph user's key.\n" $i.ceph $i.id) -}}{{- end -}}
+    {{- dict "secret" (printf "%s%s" $rook.clientSecretPrefix $client) "key" $rook.clientKey | toJson -}}
+  {{- end -}}
+{{- else if eq $backend "ceph-external" -}}
+  {{- $k := index ($ceph.keys | default dict) $i.ceph | default dict -}}
+  {{- if or (not $k.secret) (not $k.key) -}}
+    {{- fail (printf "\n\nstorage.backend is ceph-external and storage.ceph.keys.%s.secret (or .key) is empty.\n\nWith ceph-external the Ceph admin creates the users and places their keys and the monitor addresses in Secrets; name each one under storage.ceph.keys (in storage.ceph.sourceNamespace) so credential %s can be copied from it (#308).\n" $i.ceph $i.id) -}}
+  {{- end -}}
+  {{- dict "secret" $k.secret "key" $k.key | toJson -}}
+{{- else -}}
+  {{- fail (printf "osh.cephSource called with storage.backend %s, which is not a ceph backend" $backend) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* (list $ $c): "true" when component $c consumes Ceph in this install (#308): storage.backend is a ceph backend and
+     $c's components[].ceph role applies -- `volumes` (cinder, libvirt) always, `images` (glance) when
+     storage.ceph.glanceStore is rbd. Only then does it receive its provided items and its storage values. */}}
+{{- define "osh.cephConsumes" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- if eq (include "osh.cephActive" (list $top)) "true" -}}
+{{- if eq ($c.ceph | default "") "volumes" -}}true
+{{- else if and (eq ($c.ceph | default "") "images") (eq ((($top.Values.storage | default dict).ceph | default dict).glanceStore | default "pvc") "rbd") -}}true
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* (list $ $c): the values the umbrella sets on component $c for the install's Ceph, as YAML, or nothing (#308). One
+     source -- storage.ceph -- for every value the charts must agree on: the pools, the users, the libvirt secret UUID.
+     cinder: its rbd1 backend; glance: the rbd store; libvirt: the secret it defines; nova: the UUID and user its
+     [libvirt] section names (nova consumes no key in this release). Merged over componentValues, which may not set any
+     of them (osh.requireStorageNotOverridden); hack/validate-ceph-consumer.py (check 29) renders the four charts. */}}
+{{- define "osh.storageValues" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- $ceph := (($top.Values.storage | default dict).ceph | default dict) -}}
+{{- $out := dict -}}
+{{- if eq (include "osh.cephActive" (list $top)) "true" -}}
+  {{- $uuid := $ceph.libvirtSecretUUID -}}{{- $cinderUser := $ceph.clients.cinder -}}
+  {{- if eq $c.name "cinder" -}}
+    {{- $_ := set $out "conf" (dict "backends" (dict "rbd1" (dict "rbd_pool" $ceph.pools.volumes "rbd_user" $cinderUser "rbd_secret_uuid" $uuid))) -}}
+  {{- else if eq $c.name "libvirt" -}}
+    {{- $_ := set $out "conf" (dict "ceph" (dict "enabled" true "cinder" (dict "user" $cinderUser "secret_uuid" $uuid))) -}}
+  {{- else if eq $c.name "nova" -}}
+    {{- $_ := set $out "conf" (dict "ceph" (dict "cinder" (dict "user" $cinderUser "secret_uuid" $uuid)) "nova" (dict "libvirt" (dict "rbd_user" $cinderUser "rbd_secret_uuid" $uuid))) -}}
+  {{- else if and (eq $c.name "glance") (eq (include "osh.cephConsumes" (list $top $c)) "true") -}}
+    {{- $rbd := dict "rbd_store_pool" $ceph.pools.images "rbd_store_user" $ceph.clients.glance -}}
+    {{- $_ := set $out "storage" "rbd" -}}
+    {{- $_ := set $out "krateo" (dict "imagesMigratedFromPvc" ($ceph.glanceImagesMigrated | default false)) -}}
+    {{- $_ := set $out "conf" (dict "glance" (dict "rbd" $rbd "glance_store" (deepCopy $rbd) "DEFAULT" (dict "show_image_direct_url" true))) -}}
+  {{- end -}}
+{{- end -}}
+{{- if $out -}}{{- toYaml $out -}}{{- end -}}
+{{- end -}}
+
+{{/* (dict "node" <map> "prefix" <path>): every leaf path of a nested map, one per line. */}}
+{{- define "osh.leafPaths" -}}
+{{- $prefix := .prefix -}}
+{{- range $k, $v := .node -}}
+{{- $p := ternary $k (printf "%s.%s" $prefix $k) (eq $prefix "") -}}
+{{- if kindIs "map" $v -}}{{- include "osh.leafPaths" (dict "node" $v "prefix" $p) -}}{{- else -}}{{- $p }}
+{{ end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* (list $ <name>): the ExternalSecret <name> in this namespace, as JSON ("{}" when absent). One named GET; the umbrella
+     renders these objects, so its render identity may read them. The only ExternalSecret read in the chart. */}}
+{{- define "osh.lookupExternalSecret" -}}
+{{- $top := index . 0 -}}
+{{- lookup "external-secrets.io/v1" "ExternalSecret" $top.Release.Namespace (index . 1) | default dict | toJson -}}
+{{- end -}}
+
+{{/* (list $): the copy store <credentials.store>-ceph, as JSON ("{}" when absent). One named GET. */}}
+{{- define "osh.lookupCephStore" -}}
+{{- $top := index . 0 -}}
+{{- lookup "external-secrets.io/v1" "SecretStore" $top.Release.Namespace (printf "%s-ceph" $top.Values.credentials.store) | default dict | toJson -}}
+{{- end -}}
+
+{{/* (obj): "True", "False" or "" -- the status of obj's Ready condition, judged on type and status only. */}}
+{{- define "osh.readyStatus" -}}
+{{- $out := "" -}}
+{{- range $c := ((. | default dict).status | default dict).conditions | default list -}}
+{{- if eq ($c.type | default "") "Ready" -}}{{- $out = toString $c.status -}}{{- end -}}
+{{- end -}}
+{{- $out -}}
+{{- end -}}
+
+{{/* (list $ $c): "true" when component $c may be CREATED as far as Ceph is concerned (#308): it consumes no Ceph here,
+     or every provided root it lists reports Ready=True -- the copy of the key Ceph minted exists. Until then the
+     component is held, exactly like a dependency that is not Ready yet: listed in openstack-install-pending, never
+     created on a key nothing has copied, so no post-install hook of it can time out on a missing grant or Secret. Only
+     creation: compositions.yaml keeps an existing component (`or $exists`), since a component that stops rendering is
+     uninstalled (#68). hack/validate-ceph-consumer.py (check 30) renders it with stand-in ExternalSecrets. */}}
+{{- define "osh.cephRootsReady" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- $ready := true -}}
+{{- if eq (include "osh.cephConsumes" (list $top $c)) "true" -}}
+{{- range $id := ($c.credentials | default list) -}}
+{{- range $i := ($top.Values.credentials.items | default list) -}}
+{{- if and (eq $i.id $id) (eq ($i.source | default "") "provided") -}}
+{{- if ne (include "osh.readyStatus" (include "osh.lookupExternalSecret" (list $top $i.secret) | fromJson)) "True" -}}{{- $ready = false -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $ready -}}
+{{- end -}}
+
+{{/* (list $): with a ceph backend, refuse the render while the copy store reports Ready=False (#308). External Secrets
+     Operator validates a kubernetes-provider store by asking, in storage.ceph.sourceNamespace, whether its ServiceAccount
+     may read Secrets there (that is why its Role carries selfsubjectrulesreviews), so Ready=False is ESO's measurement
+     that the read grant is missing or wrong -- typically the Role that namespace's owner must create. Refused with the
+     exact grant, on the Composition's status, rather than holding cinder with no reason given. A store not yet
+     validated (no condition) only holds the consumers (osh.cephRootsReady). Check 30 renders both. */}}
+{{- define "osh.requireCephReadGrant" -}}
+{{- $top := index . 0 -}}
+{{- if eq (include "osh.cephActive" (list $top)) "true" -}}
+{{- $store := include "osh.lookupCephStore" (list $top) | fromJson -}}
+{{- if eq (include "osh.readyStatus" $store) "False" -}}
+{{- $msg := "" -}}
+{{- range $c := ($store.status | default dict).conditions | default list -}}{{- if eq ($c.type | default "") "Ready" -}}{{- $msg = $c.message | default "" -}}{{- end -}}{{- end -}}
+{{- $ns := include "osh.cephSourceNamespace" (list $top) -}}
+{{- $sa := printf "%s-ceph-reader" $top.Values.credentials.store -}}
+{{- $names := list -}}
+{{- range $i := ($top.Values.credentials.items | default list) -}}{{- if eq ($i.source | default "") "provided" -}}{{- $names = append $names (include "osh.cephSource" (list $top $i) | fromJson).secret -}}{{- end -}}{{- end -}}
+{{- fail (printf "\n\nThe Ceph copy store %s-ceph cannot read the key Secrets in namespace %s (#308). External Secrets Operator reports: %s\n\nGrant the ServiceAccount %s/%s get on exactly %s there, and create on selfsubjectrulesreviews -- the Role and RoleBinding in the README's \"Storage: consuming a Ceph cluster\". Until then no Ceph consumer (cinder, libvirt, glance with rbd) is created.\n" $top.Values.credentials.store $ns $msg $top.Release.Namespace $sa (join ", " ($names | uniq))) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* storage.backend, `none` when unset. */}}
+{{- define "osh.storageBackend" -}}
+{{- $top := index . 0 -}}
+{{- (($top.Values.storage | default dict).backend | default "none") -}}
+{{- end -}}
+
+{{/* The umbrella's storage.backend is the one statement of which block-storage backend the install has: it is what
+     full-strict selects cinder by, and what cinder renders by. A componentValues.<component>.krateo.storageBackend would
+     let the two disagree (full-strict leaving cinder out while cinder renders a backend, or the reverse), so it is
+     refused, for every component that requires block-storage. hack/validate-storage-backend.py renders the refusal. */}}
+{{- define "osh.requireStorageNotOverridden" -}}
+{{- $top := index . 0 -}}
+{{- range $c := $top.Values.components -}}
+  {{- $cv := (index ($top.Values.componentValues | default dict) $c.name) | default dict -}}
+  {{- if has "block-storage" ($c.requires | default list) -}}
+    {{- if hasKey ($cv.krateo | default dict) "storageBackend" -}}
+      {{- fail (printf "\n\ncomponentValues.%s.krateo.storageBackend is set. Set storage.backend instead: it is the one value that says which block-storage backend this install has, and both profile full-strict and %s read it (#196). The umbrella passes it to %s as krateo.storageBackend.\n" $c.name $c.name $c.name) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- /* #308: the Ceph values come from storage.ceph alone, so the charts cannot disagree on a pool, a user or the
+         libvirt secret UUID; and Ceph is reached only through the copies of the keys it mints, so a component is not
+         wired to Ceph by hand (that path needs client.admin): componentValues may set none of the paths
+         osh.storageValues sets, nor the references (krateo.ceph), nor glance's storage rbd/radosgw, nor
+         conf.ceph.enabled on libvirt or nova. */ -}}
+  {{- $paths := list "krateo.ceph" -}}
+  {{- with include "osh.storageValues" (list $top $c) -}}{{- $paths = concat $paths (splitList "\n" (include "osh.leafPaths" (dict "node" (fromYaml .) "prefix" "")) | compact) -}}{{- end -}}
+  {{- if has $c.name (list "libvirt" "nova") -}}{{- $paths = append $paths "conf.ceph.enabled" -}}{{- end -}}
+  {{- range $path := $paths -}}
+    {{- $v := $cv -}}{{- $found := true -}}
+    {{- range $p := splitList "." $path -}}
+      {{- if and $found (kindIs "map" $v) (hasKey $v $p) -}}{{- $v = index $v $p -}}{{- else -}}{{- $found = false -}}{{- end -}}
+    {{- end -}}
+    {{- if and $found (or (ne $path "conf.ceph.enabled") $v) -}}
+      {{- fail (printf "\n\ncomponentValues.%s.%s is set. The umbrella sets it from storage.ceph (#308): one value for every chart that must agree on it, and Ceph reached only through the copies of the keys it mints, never through client.admin. Set storage.backend and storage.ceph instead.\n" $c.name $path) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if and (eq $c.name "glance") (has ($cv.storage | default "") (list "rbd" "radosgw")) -}}
+    {{- fail (printf "\n\ncomponentValues.glance.storage is %s. Glance stores images in Ceph only through storage.ceph.glanceStore rbd with a ceph storage.backend (#308): upstream's %s path reaches Ceph with client.admin.\n" $cv.storage $cv.storage) -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{/* The set of component names to deploy, space-joined. If `enabled` is non-empty it
      is an explicit selection expanded to its transitive dependency closure (so
      `enabled: [heat]` pulls in keystone, rabbitmq, mariadb, memcached). Otherwise it
-     falls back to the `profile`: identity tier always, plus compute when profile=full. */}}
+     falls back to the `profile`: identity tier always, plus compute when profile=full,
+     plus compute minus unmet components[].requires when profile=full-strict. */}}
 {{- define "osh.selected" -}}
 {{- $top := index . 0 -}}
 {{- $comps := $top.Values.components -}}
@@ -816,12 +1026,14 @@ true
 {{- else -}}
   {{/* A PROFILE PROMISES ONLY WHAT CAN WORK ON THE CLUSTER YOU HAVE.
 
-       `requiresProvisioning` components are excluded from every profile, including `full`.
-       They are not unsupported and nothing about them is removed -- they are selectable, and
-       fully gated, through `enabled:`. What they are not is DEFAULT, because each of them waits
-       on infrastructure that no Kubernetes cluster provides and that this blueprint does not
-       create: an interface named ironic-pxe, a Neutron port per host on octavia's management
-       network, a ReadWriteMany StorageClass for swift.
+       A component whose `requires` names a capability this install does not provide
+       (osh.providedCapabilities) is excluded from `full-strict`. It is not unsupported and nothing
+       about it is removed -- it is selectable, and fully gated, through `enabled:`, and `full`
+       still selects it. What it is not is DEFAULT, because it waits on infrastructure that no
+       Kubernetes cluster provides and that this blueprint does not create: an interface named
+       ironic-pxe, a Neutron port per host on octavia's management network, a ReadWriteMany
+       StorageClass for swift. cinder's block-storage is the one capability the umbrella can be
+       told it has, by storage.backend (#196); then full-strict selects cinder.
 
        Measured on a 4-node GKE install of profile=full: six pods at 14 restarts in Init plus
        four Pending, none of which could EVER become Ready, and `Init:` is the state a pod
@@ -829,13 +1041,21 @@ true
        nothing. A profile that installs components which cannot start is a promise that cannot
        be kept, and the cost of keeping it is paid by whoever next reads that census.
 
-       hack/validate-provisioning-preconditions.py asserts the flag and the declared
-       precondition agree in BOTH directions, so a flagged component must say what it needs and
-       a declared precondition must belong to a flagged component. Issue #163. */}}
+       hack/validate-provisioning-preconditions.py asserts `requires` and the declared
+       precondition agree in BOTH directions, so a component that requires something must say
+       what it needs and a declared precondition must belong to a component that requires it, and
+       it renders this selection with storage.backend none AND with a backend, so the capability
+       is shown to be read and not merely declared. Issues #163, #196. */}}
+  {{- $provided := splitList " " (include "osh.providedCapabilities" (list $top)) | compact -}}
   {{- range $c := $comps -}}
-    {{/* `full` is unchanged and still selects every component, including the three that need
-         infrastructure an operator must provide. `full-strict` selects everything EXCEPT those,
-         so it is the profile that promises only what can start on a cluster as it comes.
+    {{- $unmet := false -}}
+    {{- range $r := ($c.requires | default list) -}}
+      {{- if not (has $r $provided) -}}{{- $unmet = true -}}{{- end -}}
+    {{- end -}}
+    {{/* `full` is unchanged and still selects every component, including the four that need
+         infrastructure an operator must provide. `full-strict` selects everything EXCEPT those
+         whose requirement the install does not provide, so it is the profile that promises only
+         what can start on the cluster as described.
 
          Opt-in rather than a change to `full`, deliberately: a profile silently selecting three
          fewer components than it did yesterday is a surprise delivered through a patch release,
@@ -843,7 +1063,7 @@ true
          what it means, and leaves anyone who HAS provisioned a PXE interface, an lb-mgmt-net or
          an RWX StorageClass exactly where they were. */}}
     {{- if or (eq $top.Values.profile "full")
-              (and (eq $top.Values.profile "full-strict") (not $c.requiresProvisioning))
+              (and (eq $top.Values.profile "full-strict") (not $unmet))
               (eq $c.tier "identity") -}}
       {{- $_ := set $sel $c.name true -}}
     {{- end -}}
@@ -1134,6 +1354,9 @@ krateo-openstack-node-reader
 {{- if $item.retired -}}
 {{- fail (printf "component %s lists credential %q, which is retired: no chart reads it any more" $c.name $id) -}}
 {{- end -}}
+{{- /* A `source: provided` item (#308) has a root only while storage.backend is a ceph backend: otherwise there is
+       nothing to copy, and the component gets no reference, exactly as before the item existed. */ -}}
+{{- if or (ne ($item.source | default "") "provided") (eq (include "osh.cephConsumes" (list $top $c)) "true") -}}
 {{- $ref := dict "store" $creds.store "secret" $item.secret "key" $item.key -}}
 {{- if $item.publicKey -}}{{- $_ := set $ref "publicKey" $item.publicKey -}}{{- end -}}
 {{- $path := $item.path -}}
@@ -1149,6 +1372,7 @@ krateo-openstack-node-reader
 {{- else -}}
 {{- if not (hasKey $node $p) -}}{{- $_ := set $node $p (dict) -}}{{- end -}}
 {{- $node = index $node $p -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

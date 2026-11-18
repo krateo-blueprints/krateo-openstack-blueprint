@@ -38,6 +38,56 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHART = os.path.join(ROOT, "blueprints/openstack/chart")
 
 
+def ceph_schema():
+    """storage.ceph (#308): how the install consumes a Ceph, for the ceph backends. Typed closed, so a misspelt key is
+    refused rather than silently ignored; no default names a cloud provider."""
+    def s(desc, **kw):
+        return dict({"type": "string", "description": desc}, **kw)
+
+    def ref(desc):
+        return {"type": "object", "additionalProperties": False, "description": desc,
+                "properties": {"secret": s("The Secret's name (in sourceNamespace)."),
+                               "key": s("The key in that Secret.", minLength=1)}}
+    return {
+        "type": "object",
+        "title": "Ceph consumer",
+        "description": ("How the install consumes Ceph when storage.backend is ceph-rook or ceph-external (#308): each "
+                        "client key and the monitor addresses are copied by External Secrets Operator from where Ceph "
+                        "keeps them, and the charts project the copies. No client.admin key is read anywhere."),
+        "additionalProperties": False,
+        "properties": {
+            "sourceNamespace": s("Where the client-key and mon_host Secrets live; empty: this release's namespace. For "
+                                 "ceph-rook, the CephCluster's namespace (its owner grants the copy store read access)."),
+            "clients": {"type": "object", "additionalProperties": False,
+                        "description": "The Ceph user each consumer authenticates as (client.<name>); for ceph-rook, the CephClient name.",
+                        "properties": {"cinder": s("cinder-volume's user, also libvirt's for attached volumes.", minLength=1),
+                                       "glance": s("glance-api's user.", minLength=1)}},
+            "rook": {"type": "object", "additionalProperties": False,
+                     "description": "Where Rook keeps the keys and monitors (ceph-rook).",
+                     "properties": {"clientSecretPrefix": s("A CephClient's Secret is <prefix><name>.", minLength=1),
+                                    "clientKey": s("The key holding a CephClient's key.", minLength=1),
+                                    "monHostSecret": s("The Secret holding mon_host.", minLength=1),
+                                    "monHostKey": s("Its key.", minLength=1)}},
+            "keys": {"type": "object", "additionalProperties": False,
+                     "description": "The operator-named Secrets (ceph-external); each secret is required with ceph-external.",
+                     "properties": {"cinder": ref("client.<clients.cinder>'s key."),
+                                    "glance": ref("client.<clients.glance>'s key."),
+                                    "monHost": ref("The monitor addresses, as ceph.conf's mon_host.")}},
+            "pools": {"type": "object", "additionalProperties": False,
+                      "description": "The RBD pools, created where the users are (a CephBlockPool, or the Ceph admin).",
+                      "properties": {"volumes": s("cinder's volumes.", minLength=1),
+                                     "images": s("glance's images (glanceStore rbd).", minLength=1)}},
+            "libvirtSecretUUID": s("The libvirt secret every hypervisor defines for cinder's user, passed to cinder, "
+                                   "libvirt and nova.",
+                                   pattern="^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"),
+            "glanceStore": s("pvc keeps images on glance's volume; rbd stores them in the images pool.", enum=["pvc", "rbd"]),
+            "glanceImagesMigrated": {"type": "boolean", "description": (
+                "With glanceStore rbd on an install whose images are on the glance-images claim, glance refuses until "
+                "this is true: copy the images to the rbd store first, or confirm there is none to keep.")},
+        },
+    }
+
+
 def main():
     vals = yaml.safe_load(open(os.path.join(CHART, "values.yaml")))
     # The umbrella pulls its components at its own chart version (#179), so that is the version
@@ -100,6 +150,54 @@ def main():
         "additionalProperties": False,
         "properties": {n: {"type": "string", "minLength": 1,
                            "description": f"Token for {n}: any change re-runs {n}'s hooks."} for n in props},
+    }
+    # storage (#196, #308): the block-storage backend, passed to each component that requires block-storage as its
+    # krateo.storageBackend. Each must declare that key with every backend the umbrella accepts (a key the CRD does not
+    # declare is pruned, and a value its enum lacks is refused by the component's CRD instead of its chart's message).
+    backends = {
+        "none": "no backend (the default): profile full-strict leaves cinder out, and a cinder selected anyway "
+                "refuses to render, naming this value",
+        "ceph-rook": "Ceph run by Rook, whose CephClients mint the client keys (#308); storage.ceph says where",
+        "ceph-external": "an existing Ceph whose admin creates the users and places their keys (#308); "
+                         "storage.ceph.keys names each Secret",
+    }
+    consumers = [c["name"] for c in vals["components"] if "block-storage" in (c.get("requires") or [])]
+    if not consumers:
+        sys.exit("ERROR: no component requires block-storage, so storage.backend would reach nothing")
+    for n in consumers:
+        decl = (((json.load(open(os.path.join(ROOT, f"blueprints/{n}/chart/values.schema.json")))["properties"]
+                  .get("krateo") or {}).get("properties") or {}).get("storageBackend") or {})
+        lacking = [b for b in backends if b not in (decl.get("enum") or [])]
+        if not decl or lacking:
+            sys.exit(f"ERROR: {n} requires block-storage, and its values.schema.json krateo.storageBackend "
+                     f"{'is not declared' if not decl else 'lacks ' + ', '.join(lacking)}: the umbrella's "
+                     "storage.backend would be pruned or refused by its CRD")
+    if (vals.get("storage") or {}).get("backend") not in backends:
+        sys.exit(f"ERROR: the umbrella's values.yaml storage.backend {(vals.get('storage') or {}).get('backend')!r} "
+                 f"is not one of {list(backends)}")
+    schema["properties"]["storage"] = {
+        "type": ["object", "null"],
+        "title": "Storage backend",
+        "description": (
+            "The backend that provides block storage, the `block-storage` capability "
+            + ", ".join(consumers) + " requires (#196, #308). Profile full-strict selects "
+            + ", ".join(consumers) + " only when storage.backend is not none, and the umbrella passes the value to "
+            "each as its krateo.storageBackend (a componentValues override of that key is refused). With none, a "
+            + ", ".join(consumers) + " selected anyway (profile full, or enabled) refuses to render, naming this "
+            "value. With a ceph backend the install consumes Ceph through copies of the keys Ceph mints (storage.ceph), never "
+            "client.admin. See hack/provisioning-preconditions.yaml."
+        ),
+        "additionalProperties": False,
+        "properties": {
+            "ceph": ceph_schema(),
+            "backend": {
+                "type": "string",
+                "title": "Block-storage backend",
+                "description": "; ".join(f"{k} = {v}" for k, v in backends.items()) + ".",
+                "enum": list(backends),
+                "default": "none",
+            },
+        },
     }
     json.dump(schema, open(sp, "w"), indent=2)
     open(sp, "a").write("\n")

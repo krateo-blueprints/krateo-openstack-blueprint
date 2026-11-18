@@ -144,6 +144,9 @@ spec:
 {{ tuple $envAll "glance" "api" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
       annotations:
 {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+{{- with include "helm-toolkit.snippets.ceph_key_checksum" (tuple $envAll .Values.secrets.rbd) }}
+{{ . | indent 8 }}
+{{- end }}
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
 {{ tuple "glance_api" . | include "helm-toolkit.snippets.custom_pod_annotations" | indent 8 }}
@@ -437,8 +440,13 @@ spec:
         - name: etcceph
           emptyDir: {}
         - name: ceph-etc
+          {{- if eq (include "helm-toolkit.utils.ceph_managed" $envAll) "true" }}
+          secret:
+            secretName: glance-ceph-etc
+          {{- else }}
           configMap:
             name: {{ .Values.ceph_client.configmap }}
+          {{- end }}
             defaultMode: 0444
         - name: ceph-keyring
           secret:
