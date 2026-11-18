@@ -49,7 +49,8 @@ jobs:
       - name: The tag is a plain X.Y.Z release version
         run: hack/release-version.sh check release "${GITHUB_REF_NAME}"
 
-      # Refuse to release a commit no gate ever ran against (the history is in the script).
+      # Refuse to release a commit no gate ever ran against: THIS commit must have a successful lint run from its
+      # merge group, its push to main, or a dispatch (hack/require-lint-passed.sh says why, and what it counts).
       - name: The commit being released must have passed lint
         env:
           GH_TOKEN: ${{ github.token }}

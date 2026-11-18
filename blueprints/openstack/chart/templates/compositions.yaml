@@ -216,6 +216,13 @@
 {{- with include "osh.haValues" (list $ $c) | fromYaml }}
 {{- $ov = mergeOverwrite . (deepCopy $ov) }}
 {{- end }}
+{{- /* RabbitMQ cluster-operator (#309 H2b): with messaging.backend operator, the RabbitmqCluster to the rabbitmq chart,
+       its pods to every component that lists RabbitMQ hosts, and quorum queues to every component that builds a
+       transport URL (osh.messagingOperatorValues says what, and what it refuses). Chart mode: nothing. Merged UNDER
+       componentValues. hack/validate-messaging-operator.py renders this span. */ -}}
+{{- with include "osh.messagingOperatorValues" (list $ $c) | fromYaml }}
+{{- $ov = mergeOverwrite . (deepCopy $ov) }}
+{{- end }}
 {{- /* Storage backend (#196, #308): a component that requires block-storage receives storage.backend as its
        krateo.storageBackend, always, `none` included: with none, cinder refuses to render and names the value, rather
        than waiting in Init on Ceph objects nothing creates. Not overridable (osh.requireStorageNotOverridden refuses a

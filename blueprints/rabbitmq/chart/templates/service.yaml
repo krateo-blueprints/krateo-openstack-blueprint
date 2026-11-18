@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- if .Values.manifests.service }}
+{{- if and (.Values.manifests.service) (include "rabbitmq.chart_mode" .) }}
 {{- $envAll := . }}
 {{- $prometheus_annotations := $envAll.Values.monitoring.prometheus.rabbitmq }}
 {{- $protocol := "http" }}

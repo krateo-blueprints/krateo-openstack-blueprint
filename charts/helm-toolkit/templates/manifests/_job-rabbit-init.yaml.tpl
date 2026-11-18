@@ -101,8 +101,23 @@ spec:
                 name: {{ index $envAll.Values.secrets.oslo_messaging $serviceName }}
                 key: RABBITMQ_CONNECTION
 {{- if $envAll.Values.conf.rabbitmq }}
+{{- /* Krateo (#309 H2b): with quorum queues (endpoints.oslo_messaging.quorum_queues, set by the umbrella's
+       messaging.backend operator), every policy definition loses its ha-* keys. Classic queue mirroring is gone in
+       RabbitMQ 4.x, which refuses a policy that names it, so the import would fail; quorum queues replicate by
+       themselves. Everything else in the policy (message-ttl, ...) is kept. Off, the configuration passes unchanged. */}}
+{{- $aux := $envAll.Values.conf.rabbitmq }}
+{{- if ($envAll.Values.endpoints.oslo_messaging | default dict).quorum_queues }}
+{{- $aux = deepCopy $envAll.Values.conf.rabbitmq }}
+{{- $policies := list }}
+{{- range $p := ($aux.policies | default list) }}
+{{- $def := dict }}
+{{- range $k, $v := ($p.definition | default dict) }}{{- if not (hasPrefix "ha-" $k) }}{{- $_ := set $def $k $v }}{{- end }}{{- end }}
+{{- $policies = append $policies (set (deepCopy $p) "definition" $def) }}
+{{- end }}
+{{- if $aux.policies }}{{- $_ := set $aux "policies" $policies }}{{- end }}
+{{- end }}
           - name: RABBITMQ_AUXILIARY_CONFIGURATION
-            value: {{ toJson $envAll.Values.conf.rabbitmq | quote }}
+            value: {{ toJson $aux | quote }}
 {{- end }}
 {{- if and $envAll.Values.manifests.certificates (ne $tlsSecret "") }}
           - name: RABBITMQ_X509

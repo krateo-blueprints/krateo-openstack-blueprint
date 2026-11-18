@@ -46,7 +46,7 @@ exec:
 {{- $val | float64 | int | default 1 -}}
 {{- end -}}
 
-{{- if .Values.manifests.statefulset }}
+{{- if and (.Values.manifests.statefulset) (include "rabbitmq.chart_mode" .) }}
 {{- $envAll := . }}
 
 {{- $rcControllerName := printf "%s-%s" $envAll.deployment_name "rabbitmq" }}

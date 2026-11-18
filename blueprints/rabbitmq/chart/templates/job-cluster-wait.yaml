@@ -18,7 +18,7 @@ limitations under the License.
 {{- $_ := set . "deployment_name" .Release.Name }}
 {{- end }}
 
-{{- if .Values.manifests.job_cluster_wait }}
+{{- if and (.Values.manifests.job_cluster_wait) (include "rabbitmq.chart_mode" .) }}
 {{- $envAll := . }}
 
 {{- $serviceAccountName := print .deployment_name "-cluster-wait" }}

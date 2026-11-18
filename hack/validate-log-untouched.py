@@ -6,14 +6,17 @@
 docs/log.md is rendered from docs/log.d on main, after each merge, by .github/workflows/render-log.yaml, which lands it
 through a pull request of its own (hack/render-log-pr.sh). Any other pull request that edits or regenerates it
 conflicts with every branch in flight, which is what #340's committed render still did. So the change being judged
-must leave docs/log.md alone, unless it is the bot's: its branch starts with bot/render-log- AND its author is
-github-actions[bot]. Both, because each is easy to claim alone: anyone can name a branch, and the author proves who
-opened it.
+must leave docs/log.md alone, unless it is the bot's: its branch starts with bot/render-log- AND its author is the
+render-log GitHub App's bot account, `<slug>[bot]` with the slug in hack/render-log-app.yaml. Both, because each is
+easy to claim alone: anyone can name a branch, and the author proves who opened it. Until 2026-11-18 the bot was
+github-actions[bot] (GITHUB_TOKEN); its merges started no workflow, so they went unlinted, and that login is refused
+now.
 
 What is judged, from the environment lint.yaml's job-hooks runner step sets:
   - EVENT_NAME pull_request: the files changed between BASE (the base commit) and HEAD, the branch HEAD_REF, the
     author PR_AUTHOR;
-  - EVENT_NAME push: each commit between BASE (the previous head) and HEAD that touches docs/log.md must be authored
+  - EVENT_NAME push or merge_group (the merge queue; BASE is the group's base, and each queued pull request is
+    one squash commit): each commit between BASE (the previous head) and HEAD that touches docs/log.md must be authored
     by the bot (its squash merge); a range with no previous head (a new branch) is compared with origin/main;
   - anything else (workflow_dispatch on a branch): the files changed since the branch left origin/main, judged as a
     pull request by GITHUB_ACTOR from GITHUB_REF_NAME.
@@ -21,14 +24,25 @@ The rule itself is checked first, case by case (--self-test runs only that), so 
 exemption fails here before it can pass a real run. Fails when no range can be determined.
 """
 import os
+import re
 import subprocess
 import sys
 
 LOG = "docs/log.md"
 BOT_PREFIX = "bot/render-log-"
-BOT_LOGIN = "github-actions[bot]"
-BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
 ZERO = "0" * 40
+
+
+def app_slug():
+    here = os.path.dirname(os.path.abspath(__file__))
+    for line in open(os.path.join(here, "render-log-app.yaml")):
+        m = re.match(r"^slug:\s*([a-z0-9-]+)\s*$", line)
+        if m:
+            return m.group(1)
+    raise SystemExit("FAILED MEASUREMENT: hack/render-log-app.yaml names no slug, so the bot's login is unknown")
+
+
+BOT_LOGIN = app_slug() + "[bot]"
 
 
 def judge(files, branch, author):
@@ -47,10 +61,12 @@ CASES = [
     ("an ordinary change", ["hack/x.py", "docs/log.d/2026-11-18-01-x.md"], "fix/x", "someone", True),
     ("a change that edits docs/log.md", ["docs/log.md", "docs/log.d/2026-11-18-01-x.md"], "fix/x", "someone", False),
     ("the bot's own pull request", ["docs/log.md"], "bot/render-log-1234567", BOT_LOGIN, True),
+    ("the retired GITHUB_TOKEN bot", ["docs/log.md"], "bot/render-log-1234567", "github-actions[bot]", False),
+    ("the App's name without [bot]", ["docs/log.md"], "bot/render-log-1234567", BOT_LOGIN[:-5], False),
     ("the bot prefix, a human author", ["docs/log.md"], "bot/render-log-1234567", "someone", False),
     ("the bot author, another branch", ["docs/log.md"], "fix/x", BOT_LOGIN, False),
     ("a prefix that only resembles the bot's", ["docs/log.md"], "bot/render-logs", BOT_LOGIN, False),
-    ("the bot's name with a different case", ["docs/log.md"], "bot/render-log-1234567", "GitHub-Actions[bot]", False),
+    ("the bot's name with a different case", ["docs/log.md"], "bot/render-log-1234567", BOT_LOGIN.upper(), False),
     ("another bot", ["docs/log.md"], "bot/render-log-1234567", "dependabot[bot]", False),
 ]
 
@@ -85,19 +101,19 @@ def main():
     event = os.environ.get("EVENT_NAME", "")
     base = os.environ.get("BASE", "")
     try:
-        if event == "push":
+        if event in ("push", "merge_group"):
             if not base or base == ZERO:
                 base = git(root, "merge-base", "origin/main", "HEAD").strip()
             commits = git(root, "rev-list", "%s..HEAD" % base, "--", LOG).split()
             wrong = []
             for c in commits:
                 name, email = git(root, "show", "-s", "--format=%an%n%ae", c).splitlines()[:2]
-                if email != BOT_EMAIL and name != BOT_LOGIN:
+                if name != BOT_LOGIN and not email.endswith("+%s@users.noreply.github.com" % BOT_LOGIN):
                     wrong.append("%s by %s <%s>" % (c[:7], name, email))
             if wrong:
                 print("FAIL: commits that change %s and are not the render-log bot's: %s" % (LOG, ", ".join(wrong)))
                 return 1
-            print("OK: push %s..HEAD: %d commit(s) touch %s, all the bot's" % (base[:7], len(commits), LOG))
+            print("OK: %s %s..HEAD: %d commit(s) touch %s, all the bot's" % (event, base[:7], len(commits), LOG))
             return 0
         if event == "pull_request":
             branch, author = os.environ.get("HEAD_REF", ""), os.environ.get("PR_AUTHOR", "")
