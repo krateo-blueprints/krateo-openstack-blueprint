@@ -23,7 +23,8 @@ openstack-credential-generations loses nothing a rotation needs (case 7: none of
        f. switched (active == target): steady, previous read from the stamp.
   2. The umbrella rendered offline in operator mode with rotate.oslo-messaging-heat set: it emits the generation root,
      refreshPolicy CreatedOnce, from the Password generator, stamped with previous-root and the token; with the reused-
-     token stand-in, the render refuses with that message on the status.
+     token stand-in, the render refuses with that message on the status; and with the chart-mode broker a rotate token
+     is refused (nothing would rotate, so it is never a silent no-op).
 
 Fails when helm or PyYAML is missing, and when a part checks nothing.
 """
@@ -172,6 +173,12 @@ def part2(tmp, base, gen):
             fail("2: the generation root %s: %s" % (gen("t1"), ", ".join(problems)))
         else:
             n += 1
+    r = helm(w, {"profile": "full", "rotate": {"oslo-messaging-heat": "t1"}})
+    if r.returncode == 0 or "needs messaging.backend operator" not in r.stderr:
+        fail("2: rotate with the chart-mode broker must refuse (nothing would rotate); rc %d: %s"
+             % (r.returncode, r.stderr.strip()[:200]))
+    else:
+        n += 1
     r = helm(w, merged(BASE_VALS, {"rotate": {"oslo-messaging-heat": "t1"},
                                    "gateES": {gen("t1"): {"metadata": {"annotations": {
                                        "krateo.io/previous-root": gen("t0")}}}}}))

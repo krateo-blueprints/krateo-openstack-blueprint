@@ -19,6 +19,10 @@ through the unchanged template. This measures it, on the ESO version create.sh i
   4. The root changed. A twin projection with refreshInterval 10s picks the change up (so the change is observable);
      the OnChange projection must NOT, over the same wait.
   5. Positive control: an annotation on the OnChange projection (its own change) must refresh it to the new root.
+  6. The root RENAMED (the projection's remoteRef moved to another root, which is how every release-driven rotation and
+     every #309 C generation works): the OnChange projection follows it at once.
+  0. Before all that: an OnChange projection created before its root exists syncs once the root appears (ESO returns the
+     read error and controller-runtime requeues it, v2.14.0 externalsecret_controller.go:417-418, whatever the policy).
 
 Fails when helm, kind, kubectl or PyYAML is missing, and when ESO never syncs (nothing measured).
 """
@@ -82,12 +86,12 @@ def wait(pred, timeout, step=3):
     return None
 
 
-def projection(name, policy, interval=None, annotations=None):
+def projection(name, policy, interval=None, annotations=None, root="root"):
     spec = {"secretStoreRef": {"kind": "SecretStore", "name": "gate-store"},
             "target": {"name": name, "creationPolicy": "Owner",
                        "template": {"type": "Opaque", "engineVersion": "v2",
                                     "data": {"url": "rabbit://heat:{{ .password }}@openstack-mq-nodes:5672/heat"}}},
-            "data": [{"secretKey": "password", "remoteRef": {"key": "root", "property": "password"}}]}
+            "data": [{"secretKey": "password", "remoteRef": {"key": root, "property": "password"}}]}
     if policy:
         spec["refreshPolicy"] = policy
     if interval:
@@ -150,6 +154,15 @@ def main():
                             "remoteNamespace": NS,
                             "server": {"caProvider": {"type": "ConfigMap", "name": "kube-root-ca.crt", "key": "ca.crt"}},
                             "auth": {"serviceAccount": {"name": "gate-reader"}}}}}}])
+            # 0. an OnChange projection created BEFORE its root exists
+            apply(kc, [projection("early", "OnChange", root="late-root")])
+            time.sleep(10)
+            apply(kc, [{"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "late-root", "namespace": NS},
+                        "stringData": {"password": "late-root-value"}}])
+            if not wait(lambda: synced(kc, "early") and data_sha(kc, "early")[0], 180):
+                failures.append("0: an OnChange projection created before its root never synced once the root appeared")
+            else:
+                print("0: an OnChange projection created before its root synced once the root appeared")
             # 2. today's form, plus a fast Periodic twin for step 4
             apply(kc, [projection("proj", None, "1h"), projection("proj-fast", None, "10s")])
             if not wait(lambda: synced(kc, "proj") and synced(kc, "proj-fast"), 240):
@@ -195,6 +208,15 @@ def main():
                     failures.append("5: the refreshed projection does not carry the new root")
                 else:
                     print("5: its own change refreshed it to the new root")
+            # 6. a rename: the projection's remoteRef moves to another root
+            apply(kc, [{"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "root-g2", "namespace": NS},
+                        "stringData": {"password": "generation-two-value"}}])
+            apply(kc, [projection("proj", "OnChange", annotations={"krateo.io/rotation": "t1"}, root="root-g2")])
+            renamed = wait(lambda: "generation-two-value" in base64.b64decode(data_sha(kc, "proj")[1].get("url", "") or b"").decode(), 90)
+            if not renamed:
+                failures.append("6: the OnChange projection did not follow its root's rename (a release-driven rotation)")
+            else:
+                print("6: a root rename (the remoteRef moved) reached the OnChange projection at once")
         finally:
             run(["kind", "delete", "cluster", "--name", name, "--kubeconfig", kc])
     if failures:
@@ -202,7 +224,8 @@ def main():
             print("FAIL: " + f)
         sys.exit(1)
     print("OK: ESO %s: switching a projection to OnChange keeps its Secret byte-identical; OnChange ignores a root change "
-          "a 10s Periodic twin follows, and refreshes on its own change" % ESO_VERSION)
+          "a 10s Periodic twin follows, refreshes on its own change, follows a root rename, and syncs once a missing root "
+          "appears" % ESO_VERSION)
 
 
 main()

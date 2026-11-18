@@ -8,17 +8,19 @@ annotation (pkg/controllers/externalsecret/externalsecret_controller.go:370: a r
 `!shouldRefresh(es) && isSecretValid(secret, es)`, and isSecretValid is false on a data-hash mismatch under
 creationPolicy Owner, whatever the refresh policy; only Orphan is always valid). So editing a root silently rotates it
 to a fresh random value. The umbrella cannot recompute ESO's data-hash (runtime/esutils ObjectHash is SHA3-224 of Go's
-%+v rendering; sprig has no SHA3), so it latches its own sha256 of each root's data under the rotate.<id> token
-(osh.credentialDrift, templates/credential-drift.yaml) and reports a change under an unchanged token.
+%+v rendering; sprig has no SHA3), so it latches its own sha256 of each root's data
+(osh.credentialDrift, templates/credential-drift.yaml) and reports a change until acknowledged with the sha the
+report shows (credentialDrift.acknowledge).
 
   1. THE LATCH. templates/credential-drift.yaml is rendered with stand-ins for osh.lookupSecret and
      osh.lookupConfigMap (helm template's lookup returns nothing, so an offline render would show no root at all):
        a. no root Secret: no state for it, no drift;
-       b. a root, no previous state: baselined "<token> <sha256>", no drift;
+       b. a root, no previous state: baselined with its sha256, no drift;
        c. previous state equal to the root: unchanged, no drift;
-       d. the root changed, same token: a ConfigMap openstack-credential-drift-<Secret>, and the state keeps the OLD
-          baseline (so the drift stays reported on the next render);
-       e. the root changed and rotate.<id> changed: re-baselined, no drift (acknowledged);
+       d. the root changed, not acknowledged: a ConfigMap openstack-credential-drift-<Secret>, and the state keeps the
+          OLD baseline (so the drift stays reported on the next render);
+       e. acknowledged with the current sha (credentialDrift.acknowledge.<Secret>): re-baselined, no drift;
+       e2. acknowledged with a stale sha: still reported (an operator acknowledges exactly what they saw);
        f. a provided root (Ceph) changed: never latched (its owner rotates it by design, #308).
      The expected sha256 is computed here, independently, from the stand-in Secret's data.
   2. THE REPORT. blueprints/openstack/compositiondefinition.yaml has one statusDataTemplate entry for credentialDrift;
@@ -119,15 +121,18 @@ def part1(tmp):
     cm = lambda v: {"openstack-credential-generations": {"data": {gen["id"]: v}}}
     cases = [
         ("a. no root Secret", {}, None, []),
-        ("b. a root, no previous state", {"gateSecrets": gs(old)}, "- " + s_old, []),
-        ("c. unchanged", {"gateSecrets": gs(old), "gateConfigMaps": cm("- " + s_old)}, "- " + s_old, []),
-        ("d. changed under the same token", {"gateSecrets": gs(new), "gateConfigMaps": cm("- " + s_old)},
-         "- " + s_old, [gen["secret"]]),
-        ("e. changed, rotate token changed", {"gateSecrets": gs(new), "gateConfigMaps": cm("- " + s_old),
-                                              "rotate": {gen["id"]: "t1"}}, "t1 " + s_new, []),
+        ("b. a root, no previous state", {"gateSecrets": gs(old)}, s_old, []),
+        ("c. unchanged", {"gateSecrets": gs(old), "gateConfigMaps": cm(s_old)}, s_old, []),
+        ("d. changed, not acknowledged", {"gateSecrets": gs(new), "gateConfigMaps": cm(s_old)}, s_old, [gen["secret"]]),
+        ("e. changed, acknowledged with the current sha", {"gateSecrets": gs(new), "gateConfigMaps": cm(s_old),
+                                                           "credentialDrift": {"acknowledge": {gen["secret"]: s_new}}},
+         s_new, []),
+        ("e2. changed, acknowledged with a stale sha (what the operator saw is no longer current)",
+         {"gateSecrets": gs(new), "gateConfigMaps": cm(s_old),
+          "credentialDrift": {"acknowledge": {gen["secret"]: s_old}}}, s_old, [gen["secret"]]),
         ("f. a provided root changed", {"gateSecrets": {prov["secret"]: {"data": new}},
                                         "gateConfigMaps": {"openstack-credential-generations": {"data": {
-                                            prov["id"]: "- " + s_old}}}}, None, []),
+                                            prov["id"]: s_old}}}}, None, []),
     ]
     n = 0
     for label, vals, want_state, want_drift in cases:
