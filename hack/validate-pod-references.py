@@ -129,6 +129,26 @@ PLANT_DROP = os.environ.get("GATE_PLANT_DROP_DELIVERED", "")
 
 
 
+def projection_problems(rendered, generated_roots):
+    """#309 C: every ExternalSecret that reads a GENERATED root is refreshPolicy OnChange, with no refreshInterval: a root
+    edited by hand (External Secrets Operator regenerates it, v2.14.0 externalsecret_controller.go:370) must reach no
+    live credential until a rotation. Returns (checked, problems)."""
+    checked, problems = 0, []
+    for d in yaml.safe_load_all(rendered):
+        if not isinstance(d, dict) or d.get("kind") != "ExternalSecret":
+            continue
+        spec = d.get("spec") or {}
+        keys = {((x.get("remoteRef") or {}).get("key")) for x in spec.get("data") or []}
+        if not keys & generated_roots:
+            continue
+        checked += 1
+        if spec.get("refreshPolicy") != "OnChange" or "refreshInterval" in spec:
+            problems.append("%s reads %s with refreshPolicy %r, refreshInterval %r: want OnChange and no interval"
+                            % (d["metadata"]["name"], sorted(keys & generated_roots), spec.get("refreshPolicy"),
+                               spec.get("refreshInterval")))
+    return checked, problems
+
+
 def stage_and_render(chart: Path, component: str, workdir: Path, values=None) -> str:
     staged = workdir / component
     if not staged.exists():
@@ -308,6 +328,9 @@ def main() -> int:
     # rendered once more as the umbrella delivers it (its spec from compositions.yaml), checked for identity only.
     ri = load_render_identity(root)
     ledger = ri.Ledger("validate-pod-references")
+    generated_roots = {i["secret"] for i in (umbrella(root).get("credentials") or {}).get("items") or []
+                       if i.get("source") != "provided"}
+    proj_checked, proj_problems, proj_control = 0, [], False
     total_pods, failures, unrendered, not_refused = 0, [], [], []
     delivered_ok = set()
     with tempfile.TemporaryDirectory() as td:
@@ -335,6 +358,20 @@ def main() -> int:
                 before = len(ledger.failures)
                 ledger.check(tag, rendered)
                 if backend == "umbrella":
+                    c_n, c_p = projection_problems(rendered, generated_roots)
+                    proj_checked += c_n
+                    proj_problems += ["%s: %s" % (tag, x) for x in c_p]
+                    if c_n and not proj_control:
+                        # Planted: the first projection seen, with an hourly refresh, must be flagged.
+                        es = next(d for d in yaml.safe_load_all(rendered) if isinstance(d, dict)
+                                  and d.get("kind") == "ExternalSecret" and {((x.get("remoteRef") or {}).get("key"))
+                                  for x in (d.get("spec") or {}).get("data") or []} & generated_roots)
+                        es = json.loads(json.dumps(es)); es["spec"].pop("refreshPolicy", None)
+                        es["spec"]["refreshInterval"] = "1h"
+                        if not projection_problems(yaml.safe_dump(es), generated_roots)[1]:
+                            proj_problems.append("control: a planted hourly projection was not flagged: this check "
+                                                 "cannot say no")
+                        proj_control = True
                     delivered_ok.add(component)
                     print(f"{'OK  ' if len(ledger.failures) == before else 'FAIL'} {tag}: identity only")
                     continue
@@ -364,6 +401,10 @@ def main() -> int:
         print("that never starts) and nothing reports it. Render it from the chart, or, if another")
         print("component creates it, add it to ALLOWED in this script with the reason.")
     identity = ledger.report()
+    identity += ["projection refresh: %s" % x for x in proj_problems]
+    if not proj_checked or not proj_control:
+        identity.append("projection refresh: %d projection(s) of generated roots checked, control ran: %s -- nothing "
+                        "was measured" % (proj_checked, proj_control))
     # Every component some profile selects must have been rendered as the umbrella delivers it at least once (cinder
     # and any other storage-dependent chart is rendered per storage.backend instead): none may drop out unseen.
     want = {c for (c, _js) in as_delivered} - vary
@@ -388,7 +429,8 @@ def main() -> int:
         print(f"FAIL {f}")
     if failures or unrendered or not_refused or identity:
         return 1
-    print(f"\nOK: {len(charts)} charts, {total_pods} pod templates, every reference rendered; identity: {ledger.summary()}")
+    print(f"\nOK: {len(charts)} charts, {total_pods} pod templates, every reference rendered; identity: {ledger.summary()}; "
+          f"{proj_checked} projection(s) of generated roots refresh OnChange (control refused)")
     return 0
 
 

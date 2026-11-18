@@ -22,7 +22,7 @@ when endpoints.oslo_messaging.operator.cluster names the cluster. One source of 
     for its other readers), and helm refuses a release holding two ExternalSecrets of one name (H2 run 2, 2026-11-18),
     so a projection named like the chart's Secret is refused here. The topology operator watches that
     Secret and re-syncs the password when it changes (its User doc and controller), so a rotated root reaches RabbitMQ
-    when the projection refreshes (refreshInterval 1h), with no Job;
+    when the projection changes (refreshPolicy OnChange: on a rotation, never on a timer), with no Job;
   - the vhost is the one rabbit-init declared: endpoints.oslo_messaging.path without its leading slash;
   - the user gets configure, write and read ".*" on it, as rabbit-init granted, and so does the RabbitMQ
     administrator (endpoints.oslo_messaging.auth.admin.username): ceilometer's notification agent consumes other
@@ -77,7 +77,10 @@ metadata:
     # Deleted by helm WITH the release, after its pre-delete hooks (#254).
     krateo.io/teardown: with-release
 spec:
-  refreshInterval: 1h
+  # OnChange (#309 C): refreshed only when this ExternalSecret itself changes (a new root, a new
+  # template), never on a timer, so a root edited by hand (which ESO regenerates) reaches no live
+  # credential until a rotation; the umbrella reports the edit (status.credentialDrift).
+  refreshPolicy: OnChange
   secretStoreRef:
     kind: SecretStore
     name: {{ $from.store | quote }}
