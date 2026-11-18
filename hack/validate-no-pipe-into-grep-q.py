@@ -11,7 +11,17 @@ on how much the producer writes after the match, so it passes for months and the
 0.1.9 release refused a chart whose values.schema.json was the third of 24 archive entries (nova-kog #183,
 2026-11-18). Forced: `seq 1 3000000 | grep -q '^1$'` under pipefail exits 141; `seq 1 100` exits 0.
 
+The same holds for any reader that exits early: `| head` (2026-11-18, the GHCR push script's
+`tar -tzf | head -n1` died 20 of 20 times on a 20,001-entry archive) and `| grep -m N`. All three are refused.
+
 The clear form captures, then matches: `out=$(producer) || fail ...; grep -q pattern <<<"$out"`.
+
+A producer whose output fits in one pipe write (`printf "$v" | grep -q x`) cannot lose the race, but this gate
+refuses it too, deliberately: whether a producer's output stays that small is not something a static scan can
+know (an `echo "$x"` or `cat file` grows with its input), and the `<<<` form is just as short.
+Measured (nova-kog, 2026-11-18): `printf '%s' "$var" | grep -q` with a first-byte match exits 0 at 1, 32, 64 and
+128 KB and 141 at 1 MB, so "safe by size" is a threshold, not a property. Two of that repo's credential-leak
+checks piped `docker logs` captures this way.
 
 Scans .github/workflows/*.y[a]ml and every *.sh under hack/ and .github/, skipping comment lines. Fails when it
 scanned nothing (a gate with no input must fail), and when its own self-test does not catch the planted forms.
@@ -21,7 +31,7 @@ import os
 import re
 import sys
 
-PIPE_GREP_Q = re.compile(r"\|\s*grep\b(?:\s+-[A-Za-z]+)*?\s+-[A-Za-z]*q[A-Za-z]*\b")
+PIPE_GREP_Q = re.compile(r"\|\s*(?:grep\b(?:\s+-[A-Za-z]+)*?\s+-[A-Za-z]*[qm][A-Za-z0-9]*\b|head\b)")
 
 
 def offending(text):
@@ -42,12 +52,18 @@ def self_test():
         'migrate prepare --apply | grep -q "nothing to migrate" || fail x',
         "helm template . | grep -Eq '^kind: Job'",
         "kubectl get pods | grep -i -q running",
+        'name="$(tar -tzf "$tgz" | head -n1 | cut -d/ -f1)"',
+        "git log | grep -m1 Merge",
+        # refused deliberately: safe only while the output fits one pipe write, which a scan cannot know
+        'printf "%s" "$version" | grep -q "^v"',
     ]
     passed = [
         'grep -q "nothing to migrate" <<<"$out"',
         '# producer | grep -q x  (a comment)',
         'out=$(producer) || fail; grep -qxF "$want" <<< "$members"',
         "producer | grep -c pattern",
+        "head -n1 file.txt",
+        "grep -m1 Merge log.txt",
     ]
     bad = [c for c in caught if not offending(c)] + [p for p in passed if offending(p)]
     if bad:
@@ -71,10 +87,10 @@ def main(root):
             failures.append("%s:%d: %s" % (os.path.relpath(f, root), n, s))
     if failures:
         for x in failures:
-            print("FAIL: pipes a producer into grep -q (under pipefail a found line can read as missing; capture, "
+            print("FAIL: pipes a producer into an early-exiting reader (grep -q, grep -m, head; under pipefail a found line can read as missing; capture, "
                   "then match with <<<): " + x)
         return 1
-    print("OK: %d workflow and shell file(s) scanned; none pipes a producer into grep -q" % len(files))
+    print("OK: %d workflow and shell file(s) scanned; none pipes a producer into grep -q, grep -m or head" % len(files))
     return 0
 
 
