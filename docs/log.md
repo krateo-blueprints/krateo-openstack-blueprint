@@ -13,6 +13,17 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **The docs-rendering screen's fixture contract with nova-kog.** The nova peer couldn't copy this repository's
+  `hack/check-doc-rendering.py`, so it implemented the tier ordering itself (its #187). The two repositories now agree
+  on five named cases instead of on identical bytes. All five passed against main's file (f260b87) before they were
+  added, and both repositories now run them as self-test arms 7a–7e:
+  - **7a:** uniqueness beats length.
+  - **7b:** a concatenation C = A + B leaves A and B at tier 2 and C shared, at tier 3.
+  - **7c:** a document quoting only some of another's tokens isn't a superset of it, which the arm asserts first. The
+    quoted document takes the token the quote lacks, at tier 1.
+  - **7d:** a superset means containment, and an empty token set has no supersets.
+  - **7e:** a document with no tokens falls to tier 4.
+
 - **The operator-mode RabbitmqCluster was refused by its CRD (#309 H2).** H2's live test on GKE installed
   0.3.74-main.g92cd983 with `messaging.backend: operator`. The rabbitmq Composition then stayed Ready=False with
   `RabbitmqCluster.rabbitmq.com "openstack-mq" is invalid: spec.override.statefulSet.spec.template.spec.containers:

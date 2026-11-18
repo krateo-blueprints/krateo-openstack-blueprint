@@ -473,7 +473,45 @@ def self_test():
     assert got["x.md"] == ("xOwnToken12", True, 2), got["x.md"]
     assert got["l.md"][2] == 1, got["l.md"]
 
-    print("check-doc-rendering.py: self-test passed (13 arms)")
+    # 7a-7e. THE FIXTURE CONTRACT shared with openstack-nova-operator-kog (its
+    #     #187), whose implementation of the tiers is its own: the two repos
+    #     agree on these cases by name, not on the bytes of the code.
+    def tiers(corp):
+        return {f: (tok, uniq, tier) for f, tok, uniq, tier in plan(corp)}
+
+    # 7a. Uniqueness beats length: the longer token is shared, so each document
+    #     takes its own, at tier 1.
+    got = tiers({"a.md": {"aMuchLongerSharedToken", "uniqueTokenA"},
+                 "b.md": {"aMuchLongerSharedToken", "uniqueTokenB"}})
+    assert got["a.md"] == ("uniqueTokenA", True, 1), ("7a", got["a.md"])
+    assert got["b.md"] == ("uniqueTokenB", True, 1), ("7a", got["b.md"])
+
+    # 7b. A concatenation C = A + B: A and B at tier 2, C at tier 3 (shared).
+    got = tiers({"a.md": {"alphaOnlyInA", "commonToAllThree"},
+                 "b.md": {"bravoOnlyInB", "commonToAllThree"},
+                 "c.md": {"alphaOnlyInA", "bravoOnlyInB", "commonToAllThree"}})
+    assert got["a.md"] == ("alphaOnlyInA", True, 2), ("7b", got["a.md"])
+    assert got["b.md"] == ("bravoOnlyInB", True, 2), ("7b", got["b.md"])
+    assert got["c.md"][1:] == (False, 3), ("7b", got["c.md"])
+
+    # 7c. Quoting: Q holds SOME of E's tokens, so Q is NOT a superset of E, and E
+    #     takes the token Q lacks, at tier 1. The precondition is asserted, so the
+    #     arm cannot pass on a fixture where Q quietly became a superset.
+    corp = {"e.md": {"aVeryLongTokenEandQshare", "entryOwnToken"},
+            "q.md": {"aVeryLongTokenEandQshare", "quoteOwnToken"}}
+    assert "q.md" not in supersets_of("e.md", corp), "7c: Q must not be a superset of E"
+    assert tiers(corp)["e.md"] == ("entryOwnToken", True, 1), ("7c", tiers(corp)["e.md"])
+
+    # 7d. supersets_of is containment, and the empty token set is not everyone's
+    #     subset: a document with no tokens has no supersets.
+    corp = {"empty.md": set(), "x.md": {"someTokenOfX"}}
+    assert supersets_of("empty.md", corp) == [], ("7d", supersets_of("empty.md", corp))
+    assert supersets_of("x.md", corp) == [], ("7d", supersets_of("x.md", corp))
+
+    # 7e. No tokens at all: tier 4, the block-element fallback.
+    assert tiers({"none.md": set()})["none.md"] == (None, False, 4), ("7e", tiers({"none.md": set()}))
+
+    print("check-doc-rendering.py: self-test passed (18 arms)")
     return OK
 
 
