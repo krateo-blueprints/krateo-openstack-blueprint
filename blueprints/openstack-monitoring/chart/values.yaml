@@ -1,7 +1,7 @@
 # openstack-monitoring (issue #312): the install's metrics and alerts, for the Krateo observability stack.
 #
 # Three exporters' worth of metrics, scraped by one OpenTelemetry collector and forwarded as OTLP:
-#   - openstack-exporter 1.7.0: per-service API availability (openstack_<service>_up) and nova/neutron agent
+#   - openstack-exporter 2.0.0-alpha: per-service API availability (openstack_<service>_up) and nova/neutron agent
 #     liveness, through a Keystone user of its own (endpoints.identity.auth.openstack_exporter);
 #   - mysqld-exporter v0.21.0, a Deployment of its own (not the mariadb chart's 2019 sidecar, whose readiness probe
 #     gates the database pod), logging in as MariaDB's `exporter` user from any host. The mariadb chart creates that
@@ -23,12 +23,16 @@ images:
   tags:
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
     ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
-    # The last 1.7.x release (2024-02-20). The 1.8.0 and 2.0.0 tags are alphas. Metric names used by the alerts are
-    # cited against this tag's source in files/alerts.yaml.
-    openstack_exporter: ghcr.io/openstack-exporter/openstack-exporter:1.7.0
+    # 2.0.0-alpha (2026-08-02), built with Go 1.26.5: GitHub publishes it as a full release, not a pre-release, despite its
+    # name. 1.7.0 (2024) is built with Go 1.18 and carries four CRITICAL stdlib CVEs fixed in later Go (the image scan of
+    # 2026-11-18: CVE-2023-24538, CVE-2023-24540, CVE-2024-24790, CVE-2025-68121). The metric names the alerts use are
+    # unchanged, and cited against this tag's source in files/alerts.yaml.
+    openstack_exporter: ghcr.io/openstack-exporter/openstack-exporter:2.0.0-alpha
     mysqld_exporter: quay.io/prometheus/mysqld-exporter:v0.21.0
-    # The same collector version the Krateo node agent runs (otel-collector-daemonset 0.1.35, appVersion 0.158.0).
-    otel_collector: docker.io/otel/opentelemetry-collector-contrib:0.158.0
+    # The Kubernetes distribution of the collector, not contrib: it holds the prometheus receiver and every processor this
+    # chart uses, and none of contrib's ~200 other components. contrib 0.158.0 carried three CRITICAL CVEs in
+    # github.com/rabbitmq/amqp091-go v1.12.0, through its RabbitMQ components (the image scan of 2026-11-18).
+    otel_collector: docker.io/otel/opentelemetry-collector-k8s:0.165.0
 
 labels:
   job:

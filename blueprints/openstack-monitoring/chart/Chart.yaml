@@ -15,7 +15,7 @@
 # OTLP to the Krateo observability stack; the alerts are alert-provider Alert CRs rendered from files/alerts.yaml.
 ---
 apiVersion: v2
-appVersion: "1.7.0"
+appVersion: "2.0.0-alpha"
 description: OpenStack monitoring for Krateo (openstack-exporter, mysqld-exporter, an OTel collector and alert-provider alerts)
 name: openstack-monitoring
 type: application

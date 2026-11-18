@@ -5,14 +5,20 @@
 
        openstack-exporter calls every enabled API on each scrape (legacy mode), so its timeout is most of the interval.
 
-       transform/agent-state: openstack-exporter 1.7.0 emits nova's and neutron's agent_state as COUNTERS of a 0/1
-       state (exporters/nova.go#L150, exporters/neutron.go#L167), which would land as cumulative sums. Every metric whose
-       upstreamType in files/alerts.yaml is counter while its type is gauge is converted here, from that file. */ -}}
+       transform/counter-to-gauge: every metric whose upstreamType in files/alerts.yaml is counter while its type is gauge
+       is converted here, from that file, or it would land as a cumulative sum. Rendered only when one exists (none
+       today: openstack-exporter 2.0.0-alpha emits agent_state as a gauge; 1.7.0 emitted a counter). */ -}}
 {{- if .Values.manifests.configmap_collector }}
 {{- $envAll := . }}
 {{- $src := include "osm.alertSource" . | fromYaml }}
 {{- $ns := .Release.Namespace }}
 {{- $suffix := .Values.endpoints.cluster_domain_suffix }}
+{{- $convert := list }}
+{{- range $m := $src.metrics }}
+{{- if and (eq ($m.upstreamType | default "") "counter") (eq $m.type "gauge") }}
+{{- $convert = append $convert $m.metricName }}
+{{- end }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -60,12 +66,12 @@ data:
         check_interval: 1s
         limit_percentage: 80
         spike_limit_percentage: 20
-      transform/agent-state:
+{{- if $convert }}
+      transform/counter-to-gauge:
         error_mode: ignore
         metric_statements:
-{{- range $m := $src.metrics }}
-{{- if and (eq ($m.upstreamType | default "") "counter") (eq $m.type "gauge") }}
-          - convert_sum_to_gauge() where metric.name == {{ $m.metricName | quote }}
+{{- range $name := $convert }}
+          - convert_sum_to_gauge() where metric.name == {{ $name | quote }}
 {{- end }}
 {{- end }}
       resource:
@@ -89,7 +95,9 @@ data:
             - prometheus
           processors:
             - memory_limiter
-            - transform/agent-state
+{{- if $convert }}
+            - transform/counter-to-gauge
+{{- end }}
             - resource
             - batch
           exporters:

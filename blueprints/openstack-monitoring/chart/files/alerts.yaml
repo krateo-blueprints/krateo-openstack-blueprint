@@ -15,9 +15,9 @@
 # this chart when it was written (2026-11-17). A metric without evidence is not shipped: the gate refuses it.
 #
 # metrics[].upstreamType is the type the exporter declares when it differs from `type`, the type the Metric records
-# (which otel_metrics_* table HyperDX reads). openstack-exporter 1.7.0 declares its agent_state metrics as COUNTERS
-# although each sample is a 0/1 state, so the collector converts them to gauges (templates/configmap-collector.yaml,
-# convert_sum_to_gauge); HyperDX would otherwise read a cumulative sum.
+# (which otel_metrics_* table HyperDX reads): a counter recorded as a gauge is converted by the collector
+# (templates/configmap-collector.yaml, convert_sum_to_gauge), or HyperDX would read a cumulative sum. None needs it
+# today: openstack-exporter 1.7.0 declared its agent_state metrics as counters, and 2.0.0-alpha declares gauges.
 #
 # alerts[].requires is the component that must be selected for the alert to render (an absent service's metric never
 # arrives, reads 0, and would fire forever). alerts[].runbook names docs/runbooks/<runbook>.md, linked from the Alert at
@@ -45,8 +45,10 @@ scrapeUp:
     kind: cited
     pinnedTo: openstack-monitoring:otel_collector
     source: >-
-      https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.158.0/receiver/prometheusreceiver/internal/metadata.go#L20-L24
-      (up, a gauge) and receiver/prometheusreceiver/README.md#L151 at v0.158.0 (service.name is set from job_name)
+      https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.165.0/receiver/prometheusreceiver/internal/metadata.go#L19-L23
+      (up, a gauge) and receiver/prometheusreceiver/README.md#L151 at v0.165.0 (service.name is set from job_name); the
+      otelcol-k8s 0.165.0 image builds that receiver at v0.165.0 (opentelemetry-collector-releases, tag v0.165.0,
+      distributions/otelcol-k8s/manifest.yaml#L74)
 
 metrics:
   - name: openstack-identity-up
@@ -58,8 +60,8 @@ metrics:
       kind: cited
       pinnedTo: openstack-monitoring:openstack_exporter
       source: >-
-        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/exporter.go#L161-L164
-        (<prefix>_<exporter name>_up, a gauge set at #L133-L135) with exporters/keystone.go#L31 (name identity)
+        https://github.com/openstack-exporter/openstack-exporter/blob/v2.0.0-alpha/exporters/exporter.go#L196-L203
+        (<prefix>_<exporter name>_up, a gauge set at #L167-L176; the name from GetName, #L97-L99) with exporters/keystone.go#L36 (name identity)
   - name: openstack-glance-up
     metricName: openstack_glance_up
     type: gauge
@@ -69,8 +71,8 @@ metrics:
       kind: cited
       pinnedTo: openstack-monitoring:openstack_exporter
       source: >-
-        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/exporter.go#L161-L164
-        with exporters/glance.go#L21 (name glance)
+        https://github.com/openstack-exporter/openstack-exporter/blob/v2.0.0-alpha/exporters/exporter.go#L196-L203
+        with exporters/glance.go#L25 (name glance)
   - name: openstack-nova-up
     metricName: openstack_nova_up
     type: gauge
@@ -80,8 +82,8 @@ metrics:
       kind: cited
       pinnedTo: openstack-monitoring:openstack_exporter
       source: >-
-        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/exporter.go#L161-L164
-        with exporters/nova.go#L105 (name nova)
+        https://github.com/openstack-exporter/openstack-exporter/blob/v2.0.0-alpha/exporters/exporter.go#L196-L203
+        with exporters/nova.go#L121 (name nova)
   - name: openstack-neutron-up
     metricName: openstack_neutron_up
     type: gauge
@@ -91,8 +93,8 @@ metrics:
       kind: cited
       pinnedTo: openstack-monitoring:openstack_exporter
       source: >-
-        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/exporter.go#L161-L164
-        with exporters/neutron.go#L79 (name neutron)
+        https://github.com/openstack-exporter/openstack-exporter/blob/v2.0.0-alpha/exporters/exporter.go#L196-L203
+        with exporters/neutron.go#L144 (name neutron)
   - name: openstack-cinder-up
     metricName: openstack_cinder_up
     type: gauge
@@ -102,8 +104,8 @@ metrics:
       kind: cited
       pinnedTo: openstack-monitoring:openstack_exporter
       source: >-
-        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/exporter.go#L161-L164
-        with exporters/cinder.go#L75 (name cinder)
+        https://github.com/openstack-exporter/openstack-exporter/blob/v2.0.0-alpha/exporters/exporter.go#L196-L203
+        with exporters/cinder.go#L67 (name cinder)
   - name: openstack-placement-up
     metricName: openstack_placement_up
     type: gauge
@@ -113,32 +115,30 @@ metrics:
       kind: cited
       pinnedTo: openstack-monitoring:openstack_exporter
       source: >-
-        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/exporter.go#L161-L164
-        with exporters/placement.go#L23 (name placement)
+        https://github.com/openstack-exporter/openstack-exporter/blob/v2.0.0-alpha/exporters/exporter.go#L196-L203
+        with exporters/placement.go#L30 (name placement)
   - name: openstack-nova-agent-state
     metricName: openstack_nova_agent_state
     type: gauge
-    upstreamType: counter
     job: openstack-exporter
     description: Per Nova service (hostname, service), 1 while Nova reports it up, 0 when down
     evidence:
       kind: cited
       pinnedTo: openstack-monitoring:openstack_exporter
       source: >-
-        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/nova.go#L81 (labels) and
-        #L145-L151 (1 when service.State is up, emitted as a CounterValue)
+        https://github.com/openstack-exporter/openstack-exporter/blob/v2.0.0-alpha/exporters/nova.go#L77 (labels) and
+        #L153-L159 (1 when service.State is up, a GaugeValue; 1.7.0 emitted a CounterValue)
   - name: openstack-neutron-agent-state
     metricName: openstack_neutron_agent_state
     type: gauge
-    upstreamType: counter
     job: openstack-exporter
     description: Per Neutron agent (hostname, service), 1 while the agent is alive, 0 when not
     evidence:
       kind: cited
       pinnedTo: openstack-monitoring:openstack_exporter
       source: >-
-        https://github.com/openstack-exporter/openstack-exporter/blob/v1.7.0/exporters/neutron.go#L67 (labels) and
-        #L147-L168 (1 when agent.Alive, emitted as a CounterValue)
+        https://github.com/openstack-exporter/openstack-exporter/blob/v2.0.0-alpha/exporters/neutron.go#L123 (labels) and
+        #L208-L232 (1 when agent.Alive, a GaugeValue; 1.7.0 emitted a CounterValue)
   - name: openstack-mysql-up
     metricName: mysql_up
     type: gauge

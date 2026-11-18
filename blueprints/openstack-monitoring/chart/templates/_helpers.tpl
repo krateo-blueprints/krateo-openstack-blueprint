@@ -8,7 +8,7 @@ openstack-monitoring helpers (issue #312).
 {{- if has $name ($envAll.Values.openstack.components | default list) }}true{{ end -}}
 {{- end -}}
 
-{{/* openstack-exporter's service names (its --disable-service.<name> flags, v1.7.0 main.go and exporters/exporter.go
+{{/* openstack-exporter's service names (its --disable-service.<name> flags, v2.0.0-alpha main.go and exporters/exporter.go
      EnableExporter), by the component that serves each. A service whose component is not selected is disabled, so the
      exporter does not log a failure for it on every scrape. */}}
 {{- define "osm.exporterServices" -}}
@@ -26,6 +26,7 @@ baremetal: ironic
 gnocchi: gnocchi
 database: trove
 orchestration: heat
+sharev2: manila
 {{- end -}}
 
 {{/* The parsed alert source, files/alerts.yaml: the one place every metric and alert is defined. */}}

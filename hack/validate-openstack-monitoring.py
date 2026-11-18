@@ -236,8 +236,11 @@ def part_alerts(root, tmp, counts):
     collector = yaml.safe_load(cms[0]["data"]["collector.yaml"])
     scrape_jobs = {j["job_name"] for j in ((collector.get("receivers") or {}).get("prometheus") or {})
                    .get("config", {}).get("scrape_configs") or []}
-    statements = (((collector.get("processors") or {}).get("transform/agent-state") or {}).get("metric_statements")
+    statements = (((collector.get("processors") or {}).get("transform/counter-to-gauge") or {}).get("metric_statements")
                   or [])
+    pipeline = ((((collector.get("service") or {}).get("pipelines") or {}).get("metrics") or {}).get("processors") or [])
+    if statements and "transform/counter-to-gauge" not in pipeline:
+        fails.append("1e: the counter-to-gauge transform is configured but not in the metrics pipeline: it converts nothing")
     src_alerts = {a["name"]: a for a in src.get("alerts") or []}
     src_metrics = {m["name"]: m for m in src.get("metrics") or []}
     scrape_up = src.get("scrapeUp") or {}
@@ -620,9 +623,11 @@ def mutations(r):
         ("a metric is cited at a branch", part_alerts,
          lambda: sub(P(osm, "files", "alerts.yaml"), "rabbitmq-server/blob/v3.10.18/", "rabbitmq-server/blob/main/")),
         ("the exporter image moves without re-citing", part_alerts,
-         lambda: sub(P(osm, "values.yaml"), "openstack-exporter:1.7.0", "openstack-exporter:1.8.0")),
-        ("the counter-to-gauge conversion is dropped", part_alerts,
-         lambda: sub(P(osm, "templates", "configmap-collector.yaml"), "convert_sum_to_gauge()", "convert_gauge_to_sum()")),
+         lambda: sub(P(osm, "values.yaml"), "openstack-exporter:2.0.0-alpha", "openstack-exporter:2.0.1")),
+        ("a counter is recorded as a gauge without conversion", part_alerts,
+         lambda: (sub(P(osm, "files", "alerts.yaml"), "    metricName: openstack_nova_agent_state\n    type: gauge\n",
+                      "    metricName: openstack_nova_agent_state\n    type: gauge\n    upstreamType: counter\n"),
+                  sub(P(osm, "templates", "configmap-collector.yaml"), "convert_sum_to_gauge()", "convert_gauge_to_sum()"))),
         ("an alert renders without its component", part_alerts,
          lambda: sub(P(osm, "files", "alerts.yaml"), "    requires: rabbitmq\n    displayName", "    requires: mariadb\n    displayName")),
         ("the collector mounts the exporter's clouds.yaml", part_readers,

@@ -395,7 +395,7 @@ On, the umbrella makes these changes:
   PROCESS, BINLOG MONITOR and SLAVE MONITOR only. The StatefulSet is unchanged, so the database does not restart.
 
 The component runs:
-- openstack-exporter 1.7.0;
+- openstack-exporter 2.0.0-alpha;
 - a standalone mysqld-exporter v0.21.0;
 - one OpenTelemetry collector, which scrapes both exporters, and RabbitMQ's `/metrics/detailed` when rabbitmq is
   selected, and exports OTLP to `otlpEndpoint`.

@@ -1,4 +1,4 @@
-{{- /* openstack-exporter 1.7.0 in legacy mode: one cloud, /metrics on openstack_exporter.port. Every scrape calls each
+{{- /* openstack-exporter 2.0.0-alpha in legacy mode: one cloud, /metrics on openstack_exporter.port. Every scrape calls each
        enabled service's API as the openstack-exporter user; services whose component is not selected are disabled.
        It reads the clouds.yaml key of its user's openrc Secret and nothing else, and restarts when that template changes. */ -}}
 {{- if .Values.manifests.deployment_openstack_exporter }}

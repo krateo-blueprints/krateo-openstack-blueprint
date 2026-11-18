@@ -1547,7 +1547,7 @@ spec:
 
 - **What it scrapes.** One OpenTelemetry collector Deployment scrapes three sources and forwards them as OTLP to
   `otlpEndpoint`:
-  - **openstack-exporter 1.7.0** reports per-service API availability (`openstack_<service>_up`) and nova and neutron
+  - **openstack-exporter 2.0.0-alpha** reports per-service API availability (`openstack_<service>_up`) and nova and neutron
     agent liveness. It logs in as its own Keystone user, `openstack-exporter`, whose password is a generated root,
     `openstack-credential-identity-user-openstack-exporter`. Nova, Neutron and Placement show their services and
     agents only to an admin, so this user has the admin role on the `service` project, like every service user.

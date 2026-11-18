@@ -50,12 +50,12 @@ digest); the digest each tag served when recorded is in `hack/images.yaml`, and 
 | `docker.io/docker:17.07.0` | version | Docker Official Images | yes | linux/amd64 | aodh (x), barbican (x), blazar (x), ceilometer (x), cinder (x), cloudkitty (x), freezer (x), glance (x), heat (x), horizon (x), ironic (x), keystone (x), magnum (x), manila (x), mistral (x), neutron (x), nova (x), octavia (x), placement (x), swift (x), trove (x), watcher (x), zaqar (x) |
 | `docker.io/library/redis:7.2.17` | version | Docker Official Images | yes | linux/386, linux/amd64, linux/arm/v7, linux/arm64/v8, linux/ppc64le | redis (d) |
 | `docker.io/nginx:1.13.3` | version | Docker Official Images | yes | linux/amd64 | ironic (d) |
-| `docker.io/otel/opentelemetry-collector-contrib:0.158.0` | version | OpenTelemetry project | yes | linux/386, linux/amd64, linux/arm/v7, linux/arm64, linux/ppc64le, linux/riscv64, linux/s390x | openstack-monitoring (d) |
+| `docker.io/otel/opentelemetry-collector-k8s:0.165.0` | version | OpenTelemetry project | yes | linux/amd64, linux/arm64, linux/ppc64le, linux/riscv64, linux/s390x | openstack-monitoring (d) |
 | `docker.io/powerdns/pdns-auth-49:4.9.18` | version | PowerDNS | yes | linux/amd64, linux/arm64/v8 | powerdns (d) |
 | `docker.io/prom/mysqld-exporter:v0.12.1` | version | Prometheus project | yes | linux/amd64 | mariadb (x) |
 | `docker.io/rabbitmq:3.13.7-management` | version | Docker Official Images | yes | linux/amd64, linux/arm/v7, linux/arm64/v8, linux/ppc64le, linux/riscv64, linux/s390x | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), glance (m), heat (d), ironic (d), keystone (m), magnum (d), manila (d), masakari (d), mistral (d), neutron (d), nova (d), octavia (d), tacker (d), trove (d), watcher (d) |
 | `docker.io/xrally/xrally-openstack:2.0.0` | version | OpenStack Rally project | yes | linux/amd64 | blazar (m), cinder (m), freezer (x), glance (m), heat (m), keystone (m), mistral (m), neutron (m), nova (m), octavia (x), trove (m), watcher (m), zaqar (x) |
-| `ghcr.io/openstack-exporter/openstack-exporter:1.7.0` | version | openstack-exporter project | yes | linux/amd64, linux/arm64, linux/s390x | openstack-monitoring (d) |
+| `ghcr.io/openstack-exporter/openstack-exporter:2.0.0-alpha` | version | openstack-exporter project | yes | linux/amd64, linux/arm64, linux/s390x | openstack-monitoring (d) |
 | `ghcr.io/vexxhost/netoffload:v1.0.1` | version | VEXXHOST | yes | linux/amd64 | neutron (x) |
 | `quay.io/airshipit/aodh:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d) |
 | `quay.io/airshipit/barbican:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | barbican (d) |
@@ -114,12 +114,12 @@ digest); the digest each tag served when recorded is in `hack/images.yaml`, and 
 | --- | --- | --- |
 | `docker.io/bitnami/` | Bitnami (Broadcom) | github.com/bitnami/containers |
 | `docker.io/library/` | Docker Official Images | github.com/docker-library/official-images |
-| `docker.io/otel/` | OpenTelemetry project | github.com/open-telemetry/opentelemetry-collector-releases (opentelemetry-collector-contrib, openstack-monitoring's collector, |
+| `docker.io/otel/` | OpenTelemetry project | github.com/open-telemetry/opentelemetry-collector-releases (the otelcol-k8s distribution, openstack-monitoring's collector, issue 312) |
 | `docker.io/powerdns/` | PowerDNS | github.com/PowerDNS/pdns |
 | `docker.io/prom/` | Prometheus project | github.com/prometheus/mysqld_exporter |
 | `docker.io/xrally/` | OpenStack Rally project | opendev.org/openstack/rally-openstack |
-| `ghcr.io/openstack-exporter/` | openstack-exporter project | github.com/openstack-exporter/openstack-exporter (openstack-monitoring, |
+| `ghcr.io/openstack-exporter/` | openstack-exporter project | github.com/openstack-exporter/openstack-exporter (openstack-monitoring, issue 312) |
 | `ghcr.io/vexxhost/` | VEXXHOST | github.com/vexxhost/netoffload |
 | `quay.io/airshipit/` | OpenStack-Helm (OpenInfra Airship) | opendev.org/openstack/loci (OpenStack service images), opendev.org/openstack/openstack-helm-images (infrastructure images), opendev.org/airship/kubernetes-entrypoint, opendev.org/airship/porthole |
 | `quay.io/openstack.kolla/` | OpenStack Kolla project | opendev.org/openstack/kolla (gnocchi only, replacing upstream's unpullable images, |
-| `quay.io/prometheus/` | Prometheus project | github.com/prometheus/mysqld_exporter (openstack-monitoring's standalone mysqld-exporter, |
+| `quay.io/prometheus/` | Prometheus project | github.com/prometheus/mysqld_exporter (openstack-monitoring's standalone mysqld-exporter, issue 312) |

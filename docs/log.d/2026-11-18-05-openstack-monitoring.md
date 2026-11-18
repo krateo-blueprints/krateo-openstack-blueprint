@@ -7,7 +7,7 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
   Unset, it is on wherever the cluster serves alert-provider's CRDs. Off, the render is byte-identical.
   - **What it scrapes.** An OpenTelemetry collector forwards OTLP to the Krateo observability stack. The endpoint is an
     input, and nothing in the defaults is cloud-specific. It scrapes:
-    - openstack-exporter 1.7.0, through its own generated Keystone user;
+    - openstack-exporter 2.0.0-alpha, through its own generated Keystone user;
     - a standalone mysqld-exporter v0.21.0, whose least-privilege MariaDB user the mariadb chart creates without
       restarting the database;
     - RabbitMQ's `/metrics/detailed`.

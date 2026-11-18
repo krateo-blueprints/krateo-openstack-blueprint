@@ -76,10 +76,14 @@ charts:
     source: series-of
     chart: blueprints/keystone/chart
   # Krateo's own chart (#312): what it runs that versions it is openstack-exporter; the collector and mysqld-exporter
-  # images carry their own versions in their tags.
+  # images carry their own versions in their tags. Measured, not `tag`: the tag rule drops a suffix after `-`, which
+  # would read 2.0.0-alpha as the release 2.0.0.
   blueprints/openstack-monitoring/chart:
-    source: tag
+    source: measured
     image: openstack_exporter
+    tag: 2.0.0-alpha
+    version: "2.0.0-alpha"
+    how: "docker run --version of that exact image, linux/amd64, digest sha256:2a864f41db28a1656a5034e8a17831fb37986e8856fd3f5361586a05f928950a (2026-11-18): revision 38c8acfd06300b27d3f7cc3eb705dc5713c936e6, the commit tag v2.0.0-alpha points at, go1.26.5; the binary's own version field is empty, so the version is the tag of that commit"
   blueprints/openvswitch/chart:
     source: measured
     image: openvswitch_vswitchd
