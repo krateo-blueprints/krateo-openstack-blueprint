@@ -199,6 +199,18 @@ compute:
 kogCredentials:
   enabled: false
 
+# ha (#309): opt-in high availability for the stateful core, phase by phase. Off (the default) changes nothing: every
+# chart renders as it always has. On:
+#   - memcached runs 3 replicas behind a headless discovery Service, as the StatefulSet memcached-ha, and every
+#     component in haTopology.cache lists each replica in its memcache server list, so every client hashes a key to
+#     the same replica (one ClusterIP with ClientIP affinity pinned each client to one cache, so caches disagreed);
+#   - the render is refused while fewer than 3 nodes carry openstack-control-plane=enabled, when the orchestrator can
+#     read the nodes (README "High availability"): 3 replicas with required anti-affinity need 3 nodes.
+# RabbitMQ and MariaDB move to their operators in later phases (#309). The RabbitMQ host count does not depend on this
+# switch: see haTopology.messaging. Merged UNDER componentValues, except where a refusal says otherwise.
+ha:
+  enabled: false
+
 # componentValues: per-component spec passed through to that component's Composition, keyed by
 # component name. Each value is exactly that component's own spec (its curated schema),
 # so you can configure any component through the umbrella instead of dropping to a
@@ -1470,6 +1482,88 @@ components:
     ## hack/provisioning-preconditions.yaml.
     requires:
       - rwx-storage-class
+
+# haTopology (#309): who reads the stateful services' host lists, so one value reaches every reader, and what ha needs
+# of the cluster. Not part of the Openstack schema: properties of these charts, measured from them by
+# hack/validate-ha-propagation.py, which fails when a list misses a chart that builds the URL or names one that does not.
+#   minNodes, nodeLabel: with ha.enabled the render is refused while fewer than minNodes nodes carry nodeLabel (when the
+#     orchestrator can read nodes; templates/node-preconditions-state.yaml records whether it could).
+#   messaging: the components whose charts hold endpoints.oslo_messaging.statefulset, from which their transport URLs
+#     list one RabbitMQ host per server replica (helm-toolkit authenticated_transport_endpoint_uri_lookup),
+#     and the replica count has ONE source: componentValues.rabbitmq.pod.replicas.server (the server's own value,
+#     default 1). Above 1 the umbrella passes {name: messagingStatefulset, replicas: N} to each of these; at 1 it passes
+#     nothing, because every chart's own default already lists the one host. A component whose componentValues set a
+#     different count is refused: a transport URL that lists fewer hosts than the cluster has leaves the missing nodes'
+#     loss unrecoverable for that client.
+#   messagingByService: the components whose charts build a transport URL from the Service name instead (watcher, through
+#     helm-toolkit authenticated_endpoint_uri_lookup). The rabbitmq Service is headless, so its DNS name answers every
+#     ready node; these need nothing passed.
+#   messagingStatefulset: the rabbitmq chart's StatefulSet name (global.subchart_release_name, so not the release name).
+#   cache: the components whose charts build a memcache server list (helm-toolkit host_and_port_endpoint_uri_lookup of
+#     oslo_cache). With ha.enabled each gets endpoints.oslo_cache {hosts.default: cacheDiscovery, statefulset: {name:
+#     cacheStatefulset, replicas: N}}, so the list names every memcached pod through the headless Service.
+haTopology:
+  minNodes: 3
+  nodeLabel:
+    key: openstack-control-plane
+    value: enabled
+  messagingStatefulset: rabbitmq-rabbitmq
+  messaging:
+    - aodh
+    - barbican
+    - blazar
+    - ceilometer
+    - cinder
+    - cloudkitty
+    - cyborg
+    - designate
+    - glance
+    - heat
+    - ironic
+    - keystone
+    - magnum
+    - manila
+    - masakari
+    - mistral
+    - neutron
+    - nova
+    - octavia
+    - placement
+    - tacker
+    - trove
+  messagingByService:
+    - watcher
+  cacheStatefulset: memcached-ha
+  cacheDiscovery: memcached-discovery
+  cacheReplicas: 3
+  cache:
+    - aodh
+    - barbican
+    - blazar
+    - ceilometer
+    - cinder
+    - cloudkitty
+    - cyborg
+    - designate
+    - glance
+    - gnocchi
+    - heat
+    - horizon
+    - ironic
+    - keystone
+    - magnum
+    - manila
+    - masakari
+    - mistral
+    - neutron
+    - nova
+    - octavia
+    - placement
+    - swift
+    - tacker
+    - trove
+    - watcher
+    - zaqar
 
 # notificationVhosts (#285): the RabbitMQ vhosts `component`'s notification agent consumes, in the order of that chart's
 # conf.notification_vhosts default (upstream ceilometer's list; check 26 fails if the two differ). The umbrella passes the

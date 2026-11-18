@@ -64,6 +64,10 @@
         "service": {
           "type": "boolean"
         },
+        "service_discovery": {
+          "type": "boolean",
+          "description": "Krateo (#309): the replicas run as the StatefulSet <hosts.default>-ha behind the headless Service hosts.discovery, and the ClusterIP Service drops ClientIP affinity. Set by the umbrella with ha.enabled."
+        },
         "statefulset": {
           "type": "boolean"
         }
