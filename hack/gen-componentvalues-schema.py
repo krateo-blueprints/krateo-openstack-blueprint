@@ -151,6 +151,25 @@ def main():
         "properties": {n: {"type": "string", "minLength": 1,
                            "description": f"Token for {n}: any change re-runs {n}'s hooks."} for n in props},
     }
+    # rotate (#309 C): one token per GENERATED credential item, by its id (an unknown id is rejected).
+    generated = [i["id"] for i in (vals.get("credentials") or {}).get("items") or [] if i.get("source") != "provided"]
+    if not generated:
+        sys.exit("ERROR: credentials.items lists no generated credential, so rotate would key nothing")
+    schema["properties"]["rotate"] = {
+        "type": ["object", "null"],
+        "title": "Acknowledge or rotate a generated credential",
+        "description": (
+            "A token per generated credential id (an unknown id is rejected). The umbrella latches the sha256 of each "
+            "generated root's data under its token; a root that changes while its token does not is reported on "
+            "status.credentialDrift, naming the Secret, until a new token acknowledges its current value. With "
+            "messaging.backend operator an oslo-messaging-<service> token also rotates that RabbitMQ user. README: "
+            "\"Rotating a credential\" (#309)."
+        ),
+        "additionalProperties": False,
+        # No per-id description: 142 ids would add ~19 KB to every served version of the umbrella CRD
+        # (hack/umbrella-crd-size bounds it); the block's description says what each token does.
+        "properties": {i: {"type": "string", "minLength": 1} for i in generated},
+    }
     # storage (#196, #308): the block-storage backend, passed to each component that requires block-storage as its
     # krateo.storageBackend. Each must declare that key with every backend the umbrella accepts (a key the CRD does not
     # declare is pruned, and a value its enum lacks is refused by the component's CRD instead of its chart's message).

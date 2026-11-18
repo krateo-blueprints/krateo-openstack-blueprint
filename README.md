@@ -874,6 +874,27 @@ Two consequences to know:
   clients. Before this they reached a Service with no pods.
 - **Not routed in this release:** Skyline, and nova's spice and serial consoles.
 
+## Editing or deleting a root Secret
+
+Each generated credential's root is an External Secrets Operator `ExternalSecret` (`refreshPolicy: CreatedOnce`,
+`creationPolicy: Owner`) writing the Secret `openstack-credential-<id>`. What touching that Secret does, from ESO
+v2.14.0's source (`pkg/controllers/externalsecret/externalsecret_controller.go:370`, `isSecretValid`):
+
+- **Editing its data regenerates it.** ESO skips a refresh only while the Secret's data still matches its data-hash
+  annotation. An edit breaks that, and ESO writes a **fresh random value**, neither the one you wrote nor the old one.
+  The services keep the value they were given until their own copies refresh, so an edit is an uncoordinated
+  rotation, not a way to set a password.
+- **Deleting it** does the same: ESO recreates it with a new value.
+- **The blueprint detects both and reports them.** It latches a sha256 of each root under its `rotate.<id>` token
+  (ConfigMap `openstack-credential-generations`). A root whose data changes while its token does not is listed on the
+  Openstack resource's `status.credentialDrift` by its Secret's name, with a ConfigMap
+  `openstack-credential-drift-<Secret>` stating why, until you set a new `rotate.<id>` to acknowledge it (#309).
+
+```yaml
+rotate:
+  oslo-messaging-heat: "2026-11-18T21:00:00Z"
+```
+
 ## Upgrading an existing install
 
 Bumping the blueprint version on a running install is one `kubectl apply` of the new
@@ -1209,7 +1230,7 @@ pod runs the new configuration, nothing logs in with the old password. It happen
 to its root, and not again: the generated value is stable afterwards. MariaDB has no failed-login lockout (an access
 denied does not count toward `max_connect_errors`), so no account is locked by it. Anything outside the
 blueprint that logs in as a service's MariaDB user with the old password is refused from then on. It must
-read the new value from the matching root Secret. Never delete those Secrets.
+read the new value from the matching root Secret. Never delete or edit those Secrets: either regenerates the value ("Editing or deleting a root Secret").
 
 ### Upgrading to 0.3.69 or later: each service's RabbitMQ password rotates
 
@@ -1248,7 +1269,7 @@ The rotation window has the same shape as 0.3.68's MariaDB one. rabbit-init is a
 with the new password is refused until its chart's rabbit-init has run, and retries. RabbitMQ authenticates only when
 a connection opens, so a pod still running with the old password keeps its open connections; a reconnect with the old
 password is refused until the pod is replaced. RabbitMQ has no failed-login lockout. Anything outside the blueprint that
-logs in as a service's RabbitMQ user must read the new value from the matching root Secret. Never delete those Secrets.
+logs in as a service's RabbitMQ user must read the new value from the matching root Secret. Never delete or edit those Secrets: either regenerates the value ("Editing or deleting a root Secret").
 
 ceilometer's notification agent now consumes only the vhosts that exist (#285). It had a fixed list of seven
 (ceilometer, cinder, glance, nova, keystone, neutron, heat), and oslo.messaging retries a missing vhost forever: on a
