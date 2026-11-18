@@ -1281,6 +1281,24 @@
           "type": "boolean"
         }
       }
+    },
+    "messaging": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "Messaging backend",
+      "description": "backend: chart (the rabbitmq chart's StatefulSet, the default) or operator (a RabbitmqCluster from krateo-blueprints/rabbitmq-operator-blueprint, fresh installs only, with quorum queues for every client). #309.",
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": [
+            "chart",
+            "operator"
+          ]
+        }
+      }
     }
   },
   "definitions": {

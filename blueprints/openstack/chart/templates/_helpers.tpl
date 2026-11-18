@@ -1478,7 +1478,8 @@ krateo-openstack-node-reader
 {{- $ep := $cv.endpoints | default dict -}}
 {{- $out := dict -}}
 {{- $mq := include "osh.mqReplicas" $top | int -}}
-{{- if has $c.name ($topo.messaging | default list) -}}
+{{- /* With messaging.backend operator the RabbitMQ host list is osh.messagingOperatorValues', not this. */ -}}
+{{- if and (has $c.name ($topo.messaging | default list)) (ne (include "osh.messagingBackend" $top) "operator") -}}
 {{- with (($ep.oslo_messaging | default dict).statefulset) -}}
 {{- if ne (int (.replicas | default 0)) $mq -}}
 {{- fail (printf "componentValues.%s.endpoints.oslo_messaging.statefulset.replicas is %v, but RabbitMQ runs %d server replica(s) (componentValues.rabbitmq.pod.replicas.server, the one source).\n\nA transport URL that lists fewer hosts than the cluster has cannot fail over to the nodes it omits. Remove the override: the umbrella passes the count to every component that builds a transport URL. #309." $c.name .replicas $mq) -}}
@@ -1529,5 +1530,57 @@ krateo-openstack-node-reader
 {{- if lt $carry $min -}}
 {{- fail (printf "\n\nha.enabled needs %d nodes carrying %s=%s; %d of the %d node(s) this release can see carry it.\n\nWith ha, memcached runs %d replicas with required anti-affinity, one per node, so on fewer nodes the rest stay Pending forever; and a quorum system on 2 nodes survives no node loss. Label more nodes:\n\n    kubectl label --overwrite node <node> %s=%s\n\nor set ha.enabled: false. #309, README \"High availability\".\n" $min $key $value $carry (len $nodes) $min $key $value) -}}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* osh.messagingBackend ($): messaging.backend, "chart" unless set. #309 H2b. */ -}}
+{{- define "osh.messagingBackend" -}}
+{{- ($.Values.messaging | default dict).backend | default "chart" -}}
+{{- end -}}
+
+{{- /* osh.messagingOperatorValues (list $ $c): what messaging.backend operator passes component $c (#309 H2b), as a YAML
+       dict merged UNDER its componentValues. Nothing in chart mode.
+         rabbitmq: operator {enabled, name}, so it renders the RabbitmqCluster haTopology.messagingOperator.name.
+         a component in haTopology.messaging (it holds endpoints.oslo_messaging.statefulset): hosts.default
+           <name>-nodes and statefulset {name: <name>-server, replicas: osh.mqReplicas}, always, because the chart's
+           own default names the chart-mode broker.
+         a component in haTopology.messagingByService: hosts.default <name>-nodes.
+         a component in haTopology.messagingQuorum: endpoints.oslo_messaging.quorum_queues (its rabbit-init drops ha-*
+           policy keys) and conf.<component>.oslo_messaging_rabbit = haTopology.messagingQuorumConf.
+       Refused: a component whose componentValues set conf.<component>.oslo_messaging_rabbit.rabbit_ha_queues true,
+       which oslo.messaging rejects together with rabbit_quorum_queue, and a statefulset override (the count is the
+       one source's). hack/validate-messaging-operator.py renders this span for every component. */ -}}
+{{- define "osh.messagingOperatorValues" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- if eq (include "osh.messagingBackend" $top) "operator" -}}
+{{- $topo := $top.Values.haTopology | default dict -}}
+{{- $name := $topo.messagingOperator.name -}}
+{{- $cv := (index ($top.Values.componentValues | default dict) $c.name) | default dict -}}
+{{- $mq := include "osh.mqReplicas" $top | int -}}
+{{- $out := dict -}}
+{{- $om := dict -}}
+{{- if eq $c.name "rabbitmq" -}}
+{{- $_ := set $out "operator" (dict "enabled" true "name" $name) -}}
+{{- end -}}
+{{- if has $c.name ($topo.messaging | default list) -}}
+{{- with ((($cv.endpoints | default dict).oslo_messaging | default dict).statefulset) -}}
+{{- fail (printf "componentValues.%s.endpoints.oslo_messaging.statefulset is set, but with messaging.backend operator the RabbitMQ host list is the umbrella's: %s-server-0..%d behind %s-nodes (componentValues.rabbitmq.pod.replicas.server, the one source). Remove the override. #309." $c.name $name (sub $mq 1) $name) -}}
+{{- end -}}
+{{- $_ := set $om "hosts" (dict "default" (printf "%s-nodes" $name)) -}}
+{{- $_ := set $om "statefulset" (dict "name" (printf "%s-server" $name) "replicas" $mq) -}}
+{{- end -}}
+{{- if has $c.name ($topo.messagingByService | default list) -}}
+{{- $_ := set $om "hosts" (dict "default" (printf "%s-nodes" $name)) -}}
+{{- end -}}
+{{- if has $c.name ($topo.messagingQuorum | default list) -}}
+{{- $own := ((index (($cv.conf | default dict)) $c.name | default dict).oslo_messaging_rabbit | default dict) -}}
+{{- if eq (toString $own.rabbit_ha_queues) "true" -}}
+{{- fail (printf "componentValues.%s.conf.%s.oslo_messaging_rabbit.rabbit_ha_queues is true, but messaging.backend operator runs quorum queues: oslo.messaging raises RuntimeError when both are enabled, and RabbitMQ 4.x has no queue mirroring. Remove it. #309." $c.name $c.name) -}}
+{{- end -}}
+{{- $_ := set $om "quorum_queues" true -}}
+{{- $_ := set $out "conf" (dict $c.name (dict "oslo_messaging_rabbit" (deepCopy $topo.messagingQuorumConf))) -}}
+{{- end -}}
+{{- if $om -}}{{- $_ := set $out "endpoints" (dict "oslo_messaging" $om) -}}{{- end -}}
+{{- if $out -}}{{- toYaml $out -}}{{- end -}}
 {{- end -}}
 {{- end -}}
