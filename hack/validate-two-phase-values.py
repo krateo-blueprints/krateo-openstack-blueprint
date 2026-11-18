@@ -51,9 +51,18 @@ What this asserts, in five parts:
     asserted as exact text: one named GET of the component's own CompositionDefinition, the only
     CompositionDefinition lookup in the chart, parsed once in compositions.yaml and handed to the
     readers that feed osh.holdValues; the readers and the decision perform no read of their own;
-    osh.liveState is one named GET of the component at the resolved version, called only inside
-    the hold, and is where the label is read; the label key is core-provider's and is spelled once,
-    in osh.compositionVersionLabel. The behavioural proof of the reads needs an apiserver.
+    osh.liveState is one named GET of the component at the resolved version, called once, in the
+    live-read block, reached only when the component is held or has a rotate.<id> token (#309 C),
+    and is where the label is read; the label key is core-provider's and is spelled once, in
+    osh.compositionVersionLabel. Which helpers look up a component Composition is checked by what
+    they do (a lookup of the $kind they are passed), not by name, with a planted second read under a
+    new name as positive control. The behavioural proof of the GETs themselves needs an apiserver.
+
+ 6. THE LIVE READS, COUNTED. osh.liveState stubbed to record each call, the real compositions.yaml
+    in operator mode with every component existing: 0 reads plain, exactly the rotated component's
+    one with a rotate token, and with its token removed while a generation root of it is latched
+    (so the removal is refused), none for a latched root of another credential, one per held
+    component, and still one for a component both held and rotated.
 
  5. THE OFFLINE RENDER IS UNCHANGED, PROVED DIFFERENTIALLY. Offline nothing exists, so nothing
     is held. Built against a counterfactual chart whose $hold is the constant "", in the four
@@ -709,8 +718,15 @@ WIRING = (
      "the decision must be fed the emitted version, that approval, the existence answer, and the "
      "status of the SAME definition read -- not a value, not a second lookup"),
 )
+# THE LIVE READ (#309 C): one read of the component's live Composition, reached only when holding, or when the component
+# has a rotate.<id> token or was rotated (a generation root latched, $rotMark: a removed token); the hold and the
+# rotation both consume $live.
+LIVE_READ = ('{{- $rotTok := toString (index ($.Values.rotate | default dict) (printf "oslo-messaging-%s" $c.name) | default "") }}\n'
+             '{{- $live := "" }}\n'
+             '{{- if or (eq $hold "true") (and (or $rotTok $rotMark) (eq $exists "true")) }}\n'
+             '{{- $live = include "osh.liveState" (list $ $c.kind $c.name $emitVer $crds) }}\n'
+             '{{- end }}\n')
 HOLD_BLOCK = ('{{- if eq $hold "true" }}\n'
-              '{{- $live := include "osh.liveState" (list $ $c.kind $c.name $emitVer $crds) }}\n'
               '{{- if $live }}\n'
               '{{- $state := $live | fromJson }}\n'
               '{{- $ov = $state.spec | default dict }}\n'
@@ -746,10 +762,21 @@ if len(reassigned) != 1 or comp_code.count(HOLD_BLOCK) != 1 or not (
         f"$emitVer is reassigned {len(reassigned)} time(s) in compositions.yaml; it must be reassigned "
         "exactly once, inside the hold block, to osh.holdVersion's answer -- a version the CRD serves "
         "and that the gate's $crd check therefore still covers.")
-for var in ("$cd", "$approved", "$hold", "$live", "$state"):
+for var in ("$cd", "$approved", "$hold", "$state"):
     if len(re.findall(re.escape(var) + r"\s*:?=(?!=)", comp_code)) != 1:
         problems.append(f"compositions.yaml assigns {var} more than once (or never): the decision "
                         "inputs must come from the one read, not be replaced on the way.")
+if comp_code.count(LIVE_READ) != 1:
+    problems.append("compositions.yaml does not read the live Composition with the one block this gate expects: "
+                    "$live is \"\" unless the component is held or has a rotate.<id> token, and then the one "
+                    "osh.liveState read (#309 C). Any other shape either reads when nothing needs it or reads twice.")
+else:
+    lr = comp_code.index(LIVE_READ)
+    if not (comp_code.find(WIRING[3][0]) < lr < comp_code.find(HOLD_BLOCK)):
+        problems.append("the live read is not between the $hold decision and the hold block that consumes it.")
+    if len(re.findall(r"\$live\s*:?=(?!=)", comp_code)) != 2:
+        problems.append("compositions.yaml assigns $live outside the live-read block: the hold and the rotation must "
+                        "both consume the one read.")
 
 all_lookups = {p: lookup_args(strip_comments(p.read_text(errors="replace"))) for p in template_files}
 cd_lookups = [(p, a) for p, calls in all_lookups.items() for a in calls
@@ -829,10 +856,44 @@ else:
 for gone in ("osh.liveSpec",):
     if gone in helpers_code or gone in comp_code:
         problems.append(f"{gone} is still defined or called; it was replaced by osh.liveState.")
+# Which helpers look up a component Composition (a lookup whose kind is the $kind they are passed). Behaviour, not a
+# name: a second live read under a NEW helper name is caught here (131b239 did exactly that, as osh.liveMessaging).
+COMPONENT_LOOKUP_HELPERS = {
+    "osh.exists": "existence, the creation gate",
+    "osh.originVersion": "the origin-version pin",
+    "osh.ready": "a dependency's Ready",
+    "osh.paused": "a dependency's paused annotation",
+    "osh.liveState": "THE live read: spec, label, status.managed, once, only when holding or rotating",
+}
+
+
+def component_lookup_helpers(text):
+    out = set()
+    for m in re.finditer(r'\{\{-? define "([^"]+)" -?\}\}', text):
+        body = define_body(text, m.group(1)) or ""
+        if any(len(a) >= 2 and a[1] == "$kind" for a in lookup_args(body)):
+            out.add(m.group(1))
+    return out
+
+
+found = component_lookup_helpers(helpers_code)
+if found != set(COMPONENT_LOOKUP_HELPERS):
+    problems.append(f"the helpers that look up a component Composition are {sorted(found)}, not "
+                    f"{sorted(COMPONENT_LOOKUP_HELPERS)}: a new one is a second read of the live object (route it "
+                    "through osh.liveState's one read), a missing one means this gate is out of date.")
+PLANTED = ('{{- define "osh.gatePlantedRead" -}}{{- $top := index . 0 -}}{{- $kind := index . 1 -}}'
+           '{{- lookup (include "osh.apiVersionAt" (list "v1")) $kind $top.Release.Namespace (index . 2) | toJson -}}'
+           '{{- end -}}\n')
+if "osh.gatePlantedRead" not in component_lookup_helpers(helpers_code + "\n" + PLANTED):
+    measurement_failed("the planted second Composition read under a new helper name was not detected, so the "
+                       "component-lookup check above can pass a second read")
+for p, calls in all_lookups.items():
+    if p != HELPERS and any(len(a) >= 2 and "kind" in a[1] for a in calls):
+        problems.append(f"{p.relative_to(ROOT)} looks up a component Composition itself; only the helpers above may.")
 n_live = sum(strip_comments(p.read_text(errors="replace")).count('include "osh.liveState"') for p in template_files)
 if n_live != 1:
-    problems.append(f"osh.liveState is called {n_live} times across the templates; it must be called "
-                    "once, inside the hold block, so a render that holds nothing makes no extra GET.")
+    problems.append(f"osh.liveState is called {n_live} times across the templates; it must be called once, in the "
+                    "live-read block, so a render that holds nothing and rotates nothing makes no live read.")
 for p, calls in all_lookups.items():
     for a in calls:
         if len(a) == 4 and unquote(a[3]) == "" and p == HELPERS:
@@ -889,10 +950,80 @@ else:
                     "`helm template` an operator runs.")
 
 # ---------------------------------------------------------------------------
+# Part 6: the live reads, counted (#309 C). osh.liveState stubbed to record each call; the real compositions.yaml in
+# operator mode, every component existing, rendered per state. Plain: 0 reads. A rotate token: 1, that component's.
+# Holding: 1 per held component. Holding and rotating the same component: still 1.
+# ---------------------------------------------------------------------------
+READS_COMPONENT = "heat"
+READS_VALUES = {"profile": "full", "messaging": {"backend": "operator"},
+                "componentValues": {"rabbitmq": {"pod": {"replicas": {"server": 3}}}}}
+
+
+def live_reads(crds, cd, rotate, latched=None):
+    d = stage(CHART, "reads-%d" % len(list(Path(_tmp).glob("reads-*"))))
+    cp = d / "templates/compositions.yaml"
+    # Counted inside compositions.yaml itself: helm gives each template its own copy of the values, so a count kept
+    # in .Values is visible only to the template that made it (measured).
+    cp.write_text(cp.read_text().replace(CRDS_LINE, "{{- $crds := %s | fromJsonArray }}" % gotmpl_raw(json.dumps(crds)))
+                  + '\n# GATEREADS {{ $.Values.gateReads | default list | toJson }}\n')
+    hp = d / "templates/_helpers.tpl"
+    h = hp.read_text()
+    counter = ('{{- $top := index . 0 -}}{{- $_ := set $top.Values "gateReads" (append ($top.Values.gateReads | default list) '
+               '(index . 2)) -}}' + gotmpl_raw(json.dumps(held())).join(("{{- ", " -}}")))
+    for name, body in (("osh.exists", "true"), ("osh.definition", gotmpl_raw(json.dumps(cd)).join(("{{- ", " -}}"))),
+                       ("osh.originVersion", ""), ("osh.liveState", counter),
+                       ("osh.depsReady", "true"), ("osh.depsExist", "true"),
+                       ("osh.lookupConfigMap", gotmpl_raw(json.dumps({"data": latched} if latched else {})).join(
+                           ("{{- ", " -}}")))):
+        h = stub_define(h, name, body)
+    hp.write_text(h)
+    vf = Path(_tmp) / ("reads-values-%s.yaml" % d.name)
+    vals = dict(READS_VALUES)
+    if rotate:
+        vals["rotate"] = {"oslo-messaging-%s" % READS_COMPONENT: "gate-token"}
+    vf.write_text(yaml.safe_dump(vals))
+    r = render(d, "-f", str(vf))
+    if r.returncode != 0:
+        measurement_failed(f"the live-read probe did not render -- {helm_error(r.stderr)}")
+    m = re.search(r"^# GATEREADS (.*)$", r.stdout, re.M)
+    if not m:
+        measurement_failed("the live-read probe printed no count")
+    return json.loads(m.group(1))
+
+
+_heat_root = next(i["secret"] for i in umbrella["credentials"]["items"] if i["id"] == "oslo-messaging-" + READS_COMPONENT)
+READS_CASES = (
+    ("plain", BOTH, CD["available"], False, lambda rd: rd == []),
+    ("rotating", BOTH, CD["available"], True, lambda rd: rd == [READS_COMPONENT]),
+    # a generation root of heat latched, its token removed: the read still happens, so the removal is refused
+    ("rotated, token removed", BOTH, CD["available"], False, lambda rd: rd == [READS_COMPONENT],
+     {_heat_root + "-gdeadbeef": "0" * 64}),
+    # a latched root of ANOTHER credential is not heat's marker
+    ("latched, not messaging", BOTH, CD["available"], False, lambda rd: rd == [],
+     {"oslo-db-keystone": "0" * 64}),
+    ("holding", BUMP, CD["ready_on_old"], False,
+     lambda rd: len(rd) > 1 and len(rd) == len(set(rd)) and READS_COMPONENT in rd),
+    ("holding+rotating", BUMP, CD["ready_on_old"], True,
+     lambda rd: len(rd) > 1 and len(rd) == len(set(rd)) and rd.count(READS_COMPONENT) == 1),
+)
+reads_seen = {}
+for rid, crds, cd, rot, ok, *latched in READS_CASES:
+    rd = live_reads(crds, cd, rot, latched[0] if latched else None)
+    reads_seen[rid] = rd
+    if not ok(rd):
+        problems.append(f"live reads, {rid}: osh.liveState was reached for {rd}; the rule is one read per component, "
+                        "only when it is held, has a rotate.<id> token, or was rotated (a generation root latched) (0 plain, 1 rotating, "
+                        "1 rotated with its token removed, 1 holding, 1 both).")
+if not reads_seen.get("holding"):
+    measurement_failed("the holding case made no live read, so the counter is not counting")
+
+# ---------------------------------------------------------------------------
 print(f"two-phase values: {len(HOLD_CASES)} decisions, {len(HOLD_VERSION_CASES)} hold versions, "
       f"{len(CD)} synthetic definitions, "
       f"{len(APPROVAL_CASES)} approvals, {len(E2E_CASES)} end-to-end cluster states, "
-      f"{len(SELECTIONS)} selections x 2 modes rendered twice")
+      f"{len(SELECTIONS)} selections x 2 modes rendered twice; live reads plain/rotating/holding/both: "
+      f"{len(reads_seen.get('plain', []))}/{len(reads_seen.get('rotating', []))}/{len(reads_seen.get('holding', []))}"
+      f"/{len(reads_seen.get('holding+rotating', []))} (components {len(set(reads_seen.get('holding', [])))})")
 if problems:
     print()
     for p in problems:
