@@ -295,13 +295,21 @@ jobs:
     # for every other. They had drifted to v0-2-0, a chart version no longer published under this
     # org, which made the quickstart's final `kubectl apply` impossible on a fresh cluster -- and
     # nothing objected, because an example is not rendered, linted or installed by CI.
+    #
+    # Also the docs-rendering screen (hack/gates.d/check-doc-rendering.yaml), which asks GitHub's own
+    # /markdown renderer whether each admonition renders as an alert box. It reads only, through
+    # the job's token.
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
       # Checks: hack/gates.d/*.yaml with `job: examples-apiversion`. Add a file there, never a step here.
       - name: Gates (hack/gates.d, job examples-apiversion)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 hack/run-gates.py --job examples-apiversion .
 
   chart-deps:

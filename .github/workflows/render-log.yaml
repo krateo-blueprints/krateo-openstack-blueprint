@@ -61,10 +61,15 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
+      # Full history. When a bot pull request is already open, render-log-pr.sh merges main into its branch, and from
+      # the default depth-1 checkout main's one commit has no parents, so it shares no commit with that branch and git
+      # refuses ("refusing to merge unrelated histories", run 44281145388). hack/validate-render-log-pr.py clones at the
+      # depth this step sets and runs that path.
       - name: Checkout
         uses: actions/checkout@v7
         with:
           ref: main
+          fetch-depth: 0
           token: ${{ steps.app.outputs.token }}
 
       - name: Render docs/log.md and land it through a bot pull request if it changed

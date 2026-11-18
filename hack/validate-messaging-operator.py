@@ -30,8 +30,9 @@ host lists, and the clients' queue settings.
        - every transport URL it renders lists exactly the cluster's pods (statefulset holders) or its headless Service;
        - every [oslo_messaging_rabbit] it renders has no rabbit_ha_queues true, and at least one has every
          messagingQuorumConf value;
-       - its rabbit-init's RABBITMQ_AUXILIARY_CONFIGURATION, where it has policies, keeps them without any ha-* key
-         (and keeps message-ttl); the chart-mode render still carries ha-mode, unchanged.
+       - a rabbit-init's RABBITMQ_AUXILIARY_CONFIGURATION, where one is still rendered, has no ha-* key and keeps
+         message-ttl (in operator mode rabbit-init is replaced by topology resources, whose Policies
+         hack/validate-messaging-topology.py checks); the chart-mode render still carries ha-mode, unchanged.
 
 Fails when helm or PyYAML is missing, and when any part finds nothing to check.
 """
@@ -229,6 +230,7 @@ def part2(uv, tmp):
                 om["hosts"] = {"default": "%s-nodes" % name}
             if n in topo["messagingQuorum"]:
                 om["quorum_queues"] = True
+                om["operator"] = {"cluster": name}
                 add["conf"] = {n: {"oslo_messaging_rabbit": topo["messagingQuorumConf"]}}
             if om:
                 add["endpoints"] = {"oslo_messaging": om}
@@ -292,6 +294,16 @@ def part3(uv, spec, tmp):
                 fail("3: the default-user Secret has no default_user.conf, which the cluster-operator reads")
         if "requiredDuringSchedulingIgnoredDuringExecution" not in ((s.get("affinity") or {}).get("podAntiAffinity") or {}):
             fail("3: three quorum members without required hostname anti-affinity: one node's loss can take a majority")
+        pdbs = [d for d in docs if d.get("kind") == "PodDisruptionBudget"]
+        if len(pdbs) != 1 or pdbs[0]["spec"].get("maxUnavailable") != 1 or "minAvailable" in pdbs[0]["spec"] or \
+                (pdbs[0]["spec"].get("selector") or {}).get("matchLabels") != {"app.kubernetes.io/name": name}:
+            fail("3: three brokers need exactly one PodDisruptionBudget, maxUnavailable 1, on app.kubernetes.io/name: %s "
+                 "(the cluster-operator renders none, so a drain could evict two); got %s" % (name, [p["spec"] for p in pdbs]))
+        one = json.loads(json.dumps(spec))
+        one.setdefault("pod", {}).setdefault("replicas", {})["server"] = 1
+        rc1, out1, err1 = helm_template(r, "rabbitmq", one)
+        if rc1 != 0 or any(d and d.get("kind") == "PodDisruptionBudget" for d in yaml.safe_load_all(out1)):
+            fail("3: a single broker renders a PodDisruptionBudget (or does not render): any budget there only blocks drains")
     leftovers = sorted("%s/%s" % (d["kind"], d["metadata"]["name"]) for d in docs
                        if d.get("kind") in ("StatefulSet", "Service", "ConfigMap")
                        or (d.get("kind") in ("Secret", "ExternalSecret") and ("cookie" in d["metadata"]["name"]

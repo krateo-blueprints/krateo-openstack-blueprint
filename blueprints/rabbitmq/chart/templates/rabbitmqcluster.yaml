@@ -122,4 +122,20 @@ spec:
             # The same node label as every other control-plane pod (the umbrella's node-label precondition).
             nodeSelector:
               {{ .Values.labels.server.node_selector_key }}: {{ .Values.labels.server.node_selector_value | quote }}
+{{- if gt (int .Values.pod.replicas.server) 1 }}
+---
+# The cluster-operator renders no PodDisruptionBudget (v2.23.2's internal/resource builds none), so without this a node
+# drain could evict two brokers at once and take the quorum queues' majority. One at a time; nothing on a single node,
+# where any budget would only block drains. Its preStop (rabbitmq-upgrade await_online_quorum_plus_one, then drain)
+# makes each eviction wait until losing that node is safe.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $op.name }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $op.name }}
+{{- end }}
 {{- end }}

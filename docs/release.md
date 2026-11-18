@@ -323,10 +323,23 @@ commit it publishes, from that commit's merge group, its push to main, or a disp
 (`hack/require-lint-passed.sh`). A pull request's run is for another commit and doesn't count.
 
 Under a queue, the render-log bot waits for its pull request's required checks and then enqueues
-it with `enqueuePullRequest`, instead of merging. That needs the App token
-from "The render-log GitHub App" below: GitHub's `GITHUB_TOKEN` rule starts no workflow for an
-event the token caused, and lists no `merge_group` exception. So a queue entry made with it would
-wait out the timeout with no lint run. The App comes first, then the ruleset.
+it with `enqueuePullRequest`, instead of merging. "Required" means the ruleset's own list, read
+from the API, and the bot polls the check runs of exactly the commit it pushed. It handles three
+states differently:
+
+- A check that hasn't been reported yet: it keeps waiting, for up to 10 minutes for the check to
+  appear and 60 minutes for it to finish, and then fails saying it timed out.
+- A required check that failed: it stops at once.
+- Every required check passed: it enqueues the pull request.
+
+Enqueuing needs the App token from "The render-log GitHub App" below: GitHub's `GITHUB_TOKEN`
+rule starts no workflow for an event the token caused, and lists no `merge_group` exception. So a
+queue entry made with it would wait out the timeout with no lint run. The App comes first, then
+the ruleset.
+
+The bot checks out main with its full history. When a bot pull request is already open, it merges
+main into that pull request's branch, and from a depth-1 checkout git refuses that merge as
+unrelated histories.
 
 To apply the ruleset, once the App is in place (an admin, with Diego's OK):
 

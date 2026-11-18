@@ -1578,6 +1578,9 @@ krateo-openstack-node-reader
 {{- fail (printf "componentValues.%s.conf.%s.oslo_messaging_rabbit.rabbit_ha_queues is true, but messaging.backend operator runs quorum queues: oslo.messaging raises RuntimeError when both are enabled, and RabbitMQ 4.x has no queue mirroring. Remove it. #309." $c.name $c.name) -}}
 {{- end -}}
 {{- $_ := set $om "quorum_queues" true -}}
+{{- /* Its rabbit-init becomes messaging-topology-operator resources on this cluster
+       (helm-toolkit.manifests.rabbitmq_topology), and its pods wait on them. */ -}}
+{{- $_ := set $om "operator" (dict "cluster" $name) -}}
 {{- $_ := set $out "conf" (dict $c.name (dict "oslo_messaging_rabbit" (deepCopy $topo.messagingQuorumConf))) -}}
 {{- end -}}
 {{- if $om -}}{{- $_ := set $out "endpoints" (dict "oslo_messaging" $om) -}}{{- end -}}

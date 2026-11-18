@@ -1,0 +1,9 @@
+# With the RabbitMQ cluster-operator (#309 H2b), each component's rabbit-init becomes topology-operator resources from
+# the same generated root (User, Vhost retained on deletion, the user's and the administrator's Permissions, Policies
+# without ha-*), and every pod that waited on the Job waits on those resources being Ready, granted to its
+# ServiceAccount. A wait on a resource no chart renders would hold a pod in Init forever.
+name: "With the RabbitMQ operator, rabbit-init becomes topology resources and every wait follows"
+job: capability-roles
+order: 151
+run: |
+  python3 hack/validate-messaging-topology.py .
