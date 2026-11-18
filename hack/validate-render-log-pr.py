@@ -59,6 +59,10 @@ def setup(tmp):
         p = os.path.join(ROOT, "docs", f)
         if os.path.isfile(p) and f != "log.md":
             shutil.copy(p, os.path.join(work, "docs", f))
+        elif os.path.isdir(p) and f != "log.d":
+            # A subdirectory holds link targets too: #312's entry links ../runbooks/openstack-api-down.md. Without it
+            # the renderer here refused a link the real tree resolves, and the setup failed for the fixture, not the bot.
+            shutil.copytree(p, os.path.join(work, "docs", f))
     run(["git", "init", "-q", "-b", "main"], work)
     git(work, "config", "user.name", "Maintainer")
     git(work, "config", "user.email", "maintainer@example.invalid")
