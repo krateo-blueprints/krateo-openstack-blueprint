@@ -13,23 +13,25 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
-- **Monitoring (#312, phase 1).** New component `openstack-monitoring`, switched by the umbrella's `monitoring` value.
-  Unset, it is on wherever the cluster serves alert-provider's CRDs. Off, the render is byte-identical.
-  - **What it scrapes.** An OpenTelemetry collector forwards OTLP to the Krateo observability stack. The endpoint is an
-    input, and nothing in the defaults is cloud-specific. It scrapes:
-    - openstack-exporter 2.0.0-alpha, through its own generated Keystone user;
-    - a standalone mysqld-exporter v0.21.0, whose least-privilege MariaDB user the mariadb chart creates without
-      restarting the database;
-    - RabbitMQ's `/metrics/detailed`.
-  - **Why a plain collector Deployment.** It is a Deployment rather than an `OpenTelemetryCollector` CR because the
-    Krateo stack runs no OpenTelemetry Operator. Its collectors come from the upstream opentelemetry-collector Helm
-    chart.
-  - **Alerts.** They are alert-provider CRs in `krateo-system`, rendered from one source file. Each has a runbook (see
-    [the runbooks](runbooks/openstack-api-down.md)) and a scrape-down companion. Each metric name is cited at the
-    pinned image's tag.
-  - **The gate.** `hack/validate-openstack-monitoring.py` checks the alerts, the credential readers and the switch, and
-    plants a defect for each check.
-  - **Not yet run on a cluster.**
+- **docs/log.md is rendered on main, by a bot pull request.** After #340, every branch still committed a regenerated
+  `docs/log.md`, so merges kept conflicting on it (#322, #320).
+  - **Pull requests:** a pull request now adds its `docs/log.d` entry and nothing else.
+    `hack/validate-log-untouched.py` fails one whose diff touches `docs/log.md`. It makes one exception, for the
+    bot's own pull request, and only when the branch is `bot/render-log-*` and the author is `github-actions[bot]`.
+    The rule is checked case by case first (prefix with a human author, bot author on another branch, a look-alike
+    prefix, another bot). `hack/render-log.py --check` now validates only the entries: names with real dates, front
+    matter, the bullet, links that resolve from `docs/log.d`, and no two entries with the same date and number.
+    CI checks the pull request merged with current main, so a number an entry merged ahead already took fails, and
+    the author takes the next free one.
+  - **Main:** after each merge, `.github/workflows/render-log.yaml` re-renders `docs/log.md`. If it changed,
+    `hack/render-log-pr.sh` commits it as `github-actions[bot]` on `bot/render-log-<sha7>` with `[skip ci]`, opens a
+    pull request and squash-merges it. If a bot pull request is already open, it updates that one with a
+    fast-forward instead. It runs one at a time and commits nothing when the render is unchanged. It's a pull request
+    rather than a push because main's org ruleset requires one and has no bypass actor (Diego, 2026-11-18). It needs
+    "Allow GitHub Actions to create and approve pull requests", which is off for the org and the repo (checked
+    2026-11-18).
+  - **Gate:** `hack/validate-render-log-pr.py` runs the script against a local remote and a stand-in `gh`, in four
+    cases: current, a new entry, a bot pull request already open, and after landing.
 
 - **neutron's tunnel interface is detected, not assumed.** `network.interface.tunnel` defaulted to `ens4`, a GCE NIC
   name. On a node without `ens4` the OVS agent's init set no tunnel IP ("Var LOCAL_IP is empty"). The default is now
