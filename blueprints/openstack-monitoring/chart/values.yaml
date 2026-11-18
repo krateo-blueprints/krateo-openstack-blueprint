@@ -1,0 +1,316 @@
+# openstack-monitoring (issue #312): the install's metrics and alerts, for the Krateo observability stack.
+#
+# Three exporters' worth of metrics, scraped by one OpenTelemetry collector and forwarded as OTLP:
+#   - openstack-exporter 2.0.0-alpha: per-service API availability (openstack_<service>_up) and nova/neutron agent
+#     liveness, through a Keystone user of its own (endpoints.identity.auth.openstack_exporter);
+#   - mysqld-exporter v0.21.0, a Deployment of its own (not the mariadb chart's 2019 sidecar, whose readiness probe
+#     gates the database pod), logging in as MariaDB's `exporter` user from any host. The mariadb chart creates that
+#     user (krateo.exporterUser); this chart only reads its password;
+#   - RabbitMQ's /metrics/detailed (per-queue depth and consumers), served by the rabbitmq_prometheus plugin the
+#     rabbitmq chart already enables.
+# The alerts are alert-provider Alert CRs (observability.krateo.io/v1alpha1), rendered from ONE source,
+# files/alerts.yaml, into the release namespace. hack/validate-openstack-monitoring.py is the gate.
+#
+# Installed through the umbrella's `monitoring` value (README "Monitoring"), which passes the selected components, the
+# collector's OTLP endpoint.
+
+images:
+  pull_policy: IfNotPresent
+  local_registry:
+    active: false
+    exclude:
+      - dep_check
+  tags:
+    dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
+    ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
+    # 2.0.0-alpha (2026-08-02), built with Go 1.26.5: GitHub publishes it as a full release, not a pre-release, despite its
+    # name. 1.7.0 (2024) is built with Go 1.18 and carries four CRITICAL stdlib CVEs fixed in later Go (the image scan of
+    # 2026-11-18: CVE-2023-24538, CVE-2023-24540, CVE-2024-24790, CVE-2025-68121). The metric names the alerts use are
+    # unchanged, and cited against this tag's source in files/alerts.yaml. A recorded exception (hack/app-versions.yaml,
+    # Diego 2026-11-18): no plain release since 1.7.0. Move to a plain 2.x when upstream cuts one (#348).
+    openstack_exporter: ghcr.io/openstack-exporter/openstack-exporter:2.0.0-alpha
+    mysqld_exporter: quay.io/prometheus/mysqld-exporter:v0.21.0
+    # The Kubernetes distribution of the collector, not contrib: it holds the prometheus receiver and every processor this
+    # chart uses, and none of contrib's ~200 other components. contrib 0.158.0 carried three CRITICAL CVEs in
+    # github.com/rabbitmq/amqp091-go v1.12.0, through its RabbitMQ components (the image scan of 2026-11-18).
+    otel_collector: docker.io/otel/opentelemetry-collector-k8s:0.165.0
+
+labels:
+  job:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+  exporter:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+  collector:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+
+# Which OpenStack components this install runs. The umbrella sets it to its selection; an alert whose `requires`
+# component is absent is not rendered (an absent service's metric reads 0 in HyperDX and would fire forever), and
+# openstack-exporter is told not to scrape the absent services. The default is every component an alert names, so the
+# chart renders every alert on its own (the gate renders it that way).
+openstack:
+  components:
+    - cinder
+    - glance
+    - keystone
+    - mariadb
+    - neutron
+    - nova
+    - placement
+    - rabbitmq
+
+# Where the collector sends its metrics: an OTLP/HTTP endpoint. The default is the Krateo node agent's node-local
+# Service, the installer's own default for core-provider. internalTrafficPolicy Local DROPS traffic from a node with no
+# agent on it (the agent DaemonSet has no tolerations), so on tainted nodes point this at a collector that is
+# reachable from every node.
+collector:
+  otlpEndpoint: http://otel-collector-daemonset-local.krateo-system.svc:4318
+  scrapeInterval: 60s
+  replicas: 1
+
+openstack_exporter:
+  # The cloud name in the rendered clouds.yaml, passed as the exporter's positional argument (legacy mode: /metrics).
+  cloud: openstack
+  # Keystone's catalog interface to call. The internal endpoints are the in-cluster Services.
+  endpoint_type: internal
+  port: 9180
+
+mysqld_exporter:
+  port: 9104
+
+rabbitmq:
+  # The rabbitmq chart's prometheus port (endpoints.oslo_messaging.port.metrics) on its headless Service. Every server
+  # pod is scraped (DNS A records), because /metrics/detailed reports the queues of the node it is asked.
+  metrics_port: 15692
+
+alerts:
+  # Render the Metric and Alert CRs, in the release namespace. alert-provider reconciles Alerts and Metrics in every
+  # namespace (its main.go cacheOptions, 0.2.85). Outside its home namespace an Alert opens no Incident, and these
+  # metric Alerts open none anywhere. The umbrella refuses monitoring where those CRDs are not served; set false only
+  # for a standalone install without alert-provider.
+  enabled: true
+  # Where each Alert's runbook link points: <runbookBase>/<this chart's version, the release tag>/docs/runbooks/<name>.md.
+  runbookBase: https://github.com/krateo-blueprints/krateo-openstack-blueprint/blob
+
+dependencies:
+  dynamic:
+    common:
+      local_image_registry:
+        jobs:
+          - image-repo-sync
+        services:
+          - endpoint: node
+            service: local_image_registry
+  static:
+    ks_user:
+      services:
+        - endpoint: internal
+          service: identity
+    openstack_exporter:
+      jobs:
+        - openstack-monitoring-ks-user
+      services:
+        - endpoint: internal
+          service: identity
+    # Waits for the database, NOT for the mariadb chart's mariadb-exporter-user Job (krateo.exporterUser) that creates its
+    # user: a Job of another chart that is not rendered (krateo.exporterUser off) would hold this pod in Init forever,
+    # silently (hack/validate-component-config-closure.py). Without the user, mysql_up reads 0 and
+    # openstack-mariadb-down fires, which says so.
+    mysqld_exporter:
+      services:
+        - endpoint: internal
+          service: oslo_db
+    collector:
+      services: null
+
+endpoints:
+  cluster_domain_suffix: cluster.local
+  local_image_registry:
+    name: docker-registry
+    namespace: docker-registry
+    hosts:
+      default: localhost
+      internal: docker-registry
+      node: localhost
+    host_fqdn_override:
+      default: null
+    port:
+      registry:
+        node: 5000
+  oci_image_registry:
+    name: oci-image-registry
+    namespace: oci-image-registry
+    auth:
+      enabled: false
+      openstack_monitoring:
+        username: openstack-monitoring
+        password: password
+    hosts:
+      default: localhost
+    host_fqdn_override:
+      default: null
+    port:
+      registry:
+        default: null
+  identity:
+    name: keystone
+    auth:
+      admin:
+        region_name: RegionOne
+        username: admin
+        password: password
+        project_name: admin
+        user_domain_name: default
+        project_domain_name: default
+      openstack_exporter:
+        # openstack-exporter lists nova services, neutron agents and placement providers, which the 2026.1 default
+        # policies allow only to an admin. The role is admin on the service project, like every service user.
+        role: admin
+        region_name: RegionOne
+        username: openstack-exporter
+        password: password
+        project_name: service
+        user_domain_name: service
+        project_domain_name: service
+    hosts:
+      default: keystone
+      internal: keystone-api
+    host_fqdn_override:
+      default: null
+    path:
+      default: /v3
+    scheme:
+      default: http
+    port:
+      api:
+        default: 80
+        internal: 5000
+  oslo_db:
+    auth:
+      # MariaDB's mysqld-exporter user. The mariadb chart creates it from the same credential; the username must be
+      # the mariadb chart's endpoints.oslo_db.auth.exporter.username.
+      exporter:
+        username: exporter
+        password: password
+    hosts:
+      default: mariadb
+    host_fqdn_override:
+      default: null
+    path: null
+    scheme: mysql+pymysql
+    port:
+      mysql:
+        default: 3306
+  oslo_messaging:
+    hosts:
+      default: rabbitmq
+    host_fqdn_override:
+      default: null
+
+identity:
+  openrc:
+    exclude_vars: []
+    extra_vars: []
+
+secrets:
+  identity:
+    admin: openstack-monitoring-keystone-admin
+    openstack_exporter: openstack-monitoring-keystone-user
+  oci_image_registry:
+    openstack_monitoring: openstack-monitoring-oci-image-registry-key
+  # The openstack_exporter openrc above also carries openstack-exporter's clouds.yaml. This one is mysqld-exporter's .my.cnf.
+  mysqld_exporter_cnf: openstack-monitoring-mysqld-exporter
+
+manifests:
+  configmap_bin: true
+  configmap_collector: true
+  deployment_collector: true
+  deployment_mysqld_exporter: true
+  deployment_openstack_exporter: true
+  job_ks_user: true
+  observability: true
+  secret_keystone: true
+  service_mysqld_exporter: true
+  service_openstack_exporter: true
+
+pod:
+  security_context:
+    ks_user:
+      pod:
+        runAsUser: 65534
+      container:
+        ks_user:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+    openstack_exporter:
+      pod:
+        runAsUser: 65534
+        runAsNonRoot: true
+        # The clouds.yaml Secret is mounted 0440: group-readable through fsGroup, by nobody else.
+        fsGroup: 65534
+      container:
+        openstack_exporter:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+    mysqld_exporter:
+      pod:
+        runAsUser: 65534
+        runAsNonRoot: true
+        fsGroup: 65534
+      container:
+        mysqld_exporter:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+    collector:
+      pod:
+        runAsUser: 10001
+        runAsNonRoot: true
+      container:
+        collector:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+  tolerations:
+    openstack-monitoring:
+      enabled: false
+      tolerations: []
+  resources:
+    enabled: true
+    openstack_exporter:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    mysqld_exporter:
+      requests:
+        cpu: 20m
+        memory: 32Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    collector:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    jobs:
+      ks_user:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 2000m
+          memory: 1024Mi
+
+# Krateo blueprint addition (#297): controls that belong to the blueprint, not to OpenStack-Helm.
+krateo:
+  # rerunHooksToken: rendered nowhere. The umbrella sets it from rerunHooks.<component>. Changing it changes this
+  # component's values, so core-provider runs a real helm upgrade, which runs every hook again (each install hook is an
+  # upgrade hook too, hack/validate-rerun-hooks.py). It is the documented way to re-run hooks that were never run
+  # (Ready=False/HooksMayNotHaveRun, README).
+  rerunHooksToken: ""

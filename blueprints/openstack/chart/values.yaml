@@ -223,6 +223,24 @@ ha:
 messaging:
   backend: chart
 
+# monitoring (issue #312): the openstack-monitoring component, metrics and alerts for the Krateo observability stack
+# (README "Monitoring"). An OpenTelemetry collector scrapes openstack-exporter, a standalone mysqld-exporter and RabbitMQ's
+# /metrics/detailed, and forwards OTLP to `otlpEndpoint`; the alerts are alert-provider Alert CRs in the release
+# namespace.
+#   enabled: explicit opt-in (Diego, 2026-11-18). true turns it on; unset (null, the default) and false are off. With
+#            true on a cluster that does not serve alert-provider's Alert and Metric CRDs the render is refused, naming
+#            alert-provider (templates/monitoring-precondition.yaml).
+# Off, the render is byte-identical to a release without this value: no component, no CompositionDefinition, no
+# credential root, and mariadb's spec unchanged. On, it adds the openstack-monitoring component (after keystone and
+# mariadb), its credential root identity-user-openstack-exporter, and krateo.exporterUser on mariadb, which creates the
+# exporter's MariaDB user without restarting the database. Listing openstack-monitoring in `enabled:` is refused: this
+# value is the one switch. hack/validate-openstack-monitoring.py asserts all of it.
+monitoring:
+  enabled:
+  # OTLP/HTTP endpoint the collector exports to. The default is the Krateo node agent's node-local Service (the
+  # installer's own default for core-provider), which drops traffic from a node with no agent on it.
+  otlpEndpoint: http://otel-collector-daemonset-local.krateo-system.svc:4318
+
 # componentValues: per-component spec passed through to that component's Composition, keyed by
 # component name. Each value is exactly that component's own spec (its curated schema),
 # so you can configure any component through the umbrella instead of dropping to a
@@ -876,8 +894,18 @@ credentials:
       secret: openstack-credential-oslo-messaging-watcher
       key: password
       path: endpoints.oslo_messaging.auth.watcher.passwordFrom
+    # openstack-exporter's Keystone user (#312), read by the openstack-monitoring component alone. `monitoring: true`:
+    # its root is rendered only while monitoring is on, so an install without monitoring renders byte-identical; once
+    # rendered it is kept (helm.sh/resource-policy: keep) like every root, and turning monitoring off and on again
+    # finds the same password.
+    - id: identity-user-openstack-exporter
+      secret: openstack-credential-identity-user-openstack-exporter
+      key: password
+      path: endpoints.identity.auth.openstack_exporter.passwordFrom
+      monitoring: true
 # The component DAG. `deps` are component names whose Compositions must be Ready
-# before this one's Composition is emitted. `tier`: identity or compute. (CRD existence is matched by Kind, so no plural needed.)
+# before this one's Composition is emitted. `tier`: identity, compute or monitoring. `monitoring: true`: selected only by the
+# `monitoring` value, never by a profile or `enabled:` (#312). (CRD existence is matched by Kind, so no plural needed.)
 # `rabbitmqVhost`: the RabbitMQ vhost this component's chart's rabbit-init Job declares (its endpoints.oslo_messaging.path
 # at the chart's defaults); `rabbitmqInit: false` when the chart ships that Job switched off (manifests.job_rabbit_init:
 # glance and keystone), so at defaults no vhost exists for it; `rabbitmqSecret: false` when it ships the Secret that Job
@@ -1494,6 +1522,22 @@ components:
     ## hack/provisioning-preconditions.yaml.
     requires:
       - rwx-storage-class
+  # Metrics and alerts (#312). `monitoring: true`: never selected by a profile or by `enabled:`, only by the
+  # `monitoring` value above. Reads two credentials and creates one user: its Keystone user (identity-admin for the
+  # ks-user Job, identity-user-openstack-exporter for the exporter), and MariaDB's exporter user's password
+  # (oslo-db-exporter), which the mariadb chart creates the user from. RabbitMQ is scraped when it is selected, and is
+  # not a dependency: an identity install has none.
+  - name: openstack-monitoring
+    kind: OpenstackMonitoring
+    credentials:
+      - identity-admin
+      - identity-user-openstack-exporter
+      - oslo-db-exporter
+    deps:
+      - keystone
+      - mariadb
+    tier: monitoring
+    monitoring: true
 
 # haTopology (#309): who reads the stateful services' host lists, so one value reaches every reader, and what ha needs
 # of the cluster. Not part of the Openstack schema: properties of these charts, measured from them by
@@ -2174,6 +2218,7 @@ nodeLabelPreconditions:
       - neutron
       - nova
       - octavia
+      - openstack-monitoring
       - placement
       - powerdns
       - rabbitmq

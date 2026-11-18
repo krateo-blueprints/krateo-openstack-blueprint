@@ -32,6 +32,7 @@ charts:
 - nova
 - octavia
 - openstack
+- openstack-monitoring
 - openvswitch
 - placement
 - powerdns
@@ -210,6 +211,27 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:788fa27763db6d69ad3444e8ba72f947df9e7e163bad7c1f5614f8fd27a311c3
+- image: docker.io/otel/opentelemetry-collector-k8s:0.165.0
+  registry: docker.io
+  repository: otel/opentelemetry-collector-k8s
+  tag: 0.165.0
+  tag_form: version
+  used_by:
+  - chart: openstack-monitoring
+    rendered: defaults
+    keys:
+    - otel_collector
+  registry_facts:
+    observed: '2026-11-18'
+    anonymous_pull: true
+    media_type: application/vnd.docker.distribution.manifest.list.v2+json
+    platforms:
+    - linux/amd64
+    - linux/arm64
+    - linux/ppc64le
+    - linux/riscv64
+    - linux/s390x
+    digest: sha256:ce55d0a38923c83120e4ba613fbdf446786652d2ce9f29d1cd7879e5d869829f
 - image: docker.io/powerdns/pdns-auth-49:4.9.18
   registry: docker.io
   repository: powerdns/pdns-auth-49
@@ -416,6 +438,25 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:32e9ee3edd2900b10efed209f8f9443ab2a6774fe2515c3ada8c269e946ff05d
+- image: ghcr.io/openstack-exporter/openstack-exporter:2.0.0-alpha
+  registry: ghcr.io
+  repository: openstack-exporter/openstack-exporter
+  tag: 2.0.0-alpha
+  tag_form: version
+  used_by:
+  - chart: openstack-monitoring
+    rendered: defaults
+    keys:
+    - openstack_exporter
+  registry_facts:
+    observed: '2026-11-18'
+    anonymous_pull: true
+    media_type: application/vnd.oci.image.index.v1+json
+    platforms:
+    - linux/amd64
+    - linux/arm64
+    - linux/s390x
+    digest: sha256:2a864f41db28a1656a5034e8a17831fb37986e8856fd3f5361586a05f928950a
 - image: ghcr.io/vexxhost/netoffload:v1.0.1
   registry: ghcr.io
   repository: vexxhost/netoffload
@@ -960,6 +1001,10 @@ images:
     rendered: defaults
     keys:
     - dep_check
+  - chart: openstack-monitoring
+    rendered: defaults
+    keys:
+    - dep_check
   - chart: openvswitch
     rendered: defaults
     keys:
@@ -1463,6 +1508,10 @@ images:
     - ks_user
     - octavia_health_manager_init
     - octavia_worker_init
+  - chart: openstack-monitoring
+    rendered: defaults
+    keys:
+    - ks_user
   - chart: placement
     rendered: defaults
     keys:
@@ -1845,3 +1894,25 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:8d5c3b677c2a56373563c5debe4d162411127d3af715e60b9b971b5ad016f668
+- image: quay.io/prometheus/mysqld-exporter:v0.21.0
+  registry: quay.io
+  repository: prometheus/mysqld-exporter
+  tag: v0.21.0
+  tag_form: version
+  used_by:
+  - chart: openstack-monitoring
+    rendered: defaults
+    keys:
+    - mysqld_exporter
+  registry_facts:
+    observed: '2026-11-17'
+    anonymous_pull: true
+    media_type: application/vnd.docker.distribution.manifest.list.v2+json
+    platforms:
+    - linux/amd64
+    - linux/arm/v7
+    - linux/arm64
+    - linux/ppc64le
+    - linux/riscv64
+    - linux/s390x
+    digest: sha256:afad0c59a154fea24ca5ea0e6f95f2b0b168601b111266963dc8a347715b5318

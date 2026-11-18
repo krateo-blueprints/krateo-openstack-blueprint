@@ -1,0 +1,12 @@
+{{- /* ks-user.sh, read only by the openstack-monitoring-ks-user Job when the openstack-exporter user's password comes
+       from values. With the umbrella's root (passwordFrom) the Job's script is inline (helm-toolkit job_ks_user). */ -}}
+{{- if .Values.manifests.configmap_bin }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openstack-monitoring-bin
+data:
+  ks-user.sh: |
+{{- include "helm-toolkit.scripts.keystone_user" . | indent 4 }}
+{{- end }}

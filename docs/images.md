@@ -17,11 +17,11 @@ The pinning policy and the scan's allowlist are in [supply-chain.md](supply-chai
 
 ## Summary
 
-- **58 distinct images** across 38 published charts.
-- **By registry:** docker.io 8, ghcr.io 1, quay.io 49.
-- **Rendered at a chart's defaults:** 47. **Only with off-by-default manifests on:** 4. **Declared in `images.tags`, rendered by neither:** 7.
+- **61 distinct images** across 39 published charts.
+- **By registry:** docker.io 9, ghcr.io 2, quay.io 50.
+- **Rendered at a chart's defaults:** 50. **Only with off-by-default manifests on:** 4. **Declared in `images.tags`, rendered by neither:** 7.
 - **Not pullable anonymously:** 0.
-- **Pinned by tag form:** dated 37, commit 3, version 13, digest 1. **Not pinned, waived:** 4.
+- **Pinned by tag form:** dated 37, commit 3, version 16, digest 1. **Not pinned, waived:** 4.
 - **Charts that run no image:** openstack, openstack-capabilities.
 
 "Pullable anonymously" was measured without credentials, as the kubelet pulls here: the manifest is served
@@ -50,10 +50,12 @@ digest); the digest each tag served when recorded is in `hack/images.yaml`, and 
 | `docker.io/docker:17.07.0` | version | Docker Official Images | yes | linux/amd64 | aodh (x), barbican (x), blazar (x), ceilometer (x), cinder (x), cloudkitty (x), freezer (x), glance (x), heat (x), horizon (x), ironic (x), keystone (x), magnum (x), manila (x), mistral (x), neutron (x), nova (x), octavia (x), placement (x), swift (x), trove (x), watcher (x), zaqar (x) |
 | `docker.io/library/redis:7.2.17` | version | Docker Official Images | yes | linux/386, linux/amd64, linux/arm/v7, linux/arm64/v8, linux/ppc64le | redis (d) |
 | `docker.io/nginx:1.13.3` | version | Docker Official Images | yes | linux/amd64 | ironic (d) |
+| `docker.io/otel/opentelemetry-collector-k8s:0.165.0` | version | OpenTelemetry project | yes | linux/amd64, linux/arm64, linux/ppc64le, linux/riscv64, linux/s390x | openstack-monitoring (d) |
 | `docker.io/powerdns/pdns-auth-49:4.9.18` | version | PowerDNS | yes | linux/amd64, linux/arm64/v8 | powerdns (d) |
 | `docker.io/prom/mysqld-exporter:v0.12.1` | version | Prometheus project | yes | linux/amd64 | mariadb (x) |
 | `docker.io/rabbitmq:3.13.7-management` | version | Docker Official Images | yes | linux/amd64, linux/arm/v7, linux/arm64/v8, linux/ppc64le, linux/riscv64, linux/s390x | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), glance (m), heat (d), ironic (d), keystone (m), magnum (d), manila (d), masakari (d), mistral (d), neutron (d), nova (d), octavia (d), tacker (d), trove (d), watcher (d) |
 | `docker.io/xrally/xrally-openstack:2.0.0` | version | OpenStack Rally project | yes | linux/amd64 | blazar (m), cinder (m), freezer (x), glance (m), heat (m), keystone (m), mistral (m), neutron (m), nova (m), octavia (x), trove (m), watcher (m), zaqar (x) |
+| `ghcr.io/openstack-exporter/openstack-exporter:2.0.0-alpha` | version | openstack-exporter project | yes | linux/amd64, linux/arm64, linux/s390x | openstack-monitoring (d) |
 | `ghcr.io/vexxhost/netoffload:v1.0.1` | version | VEXXHOST | yes | linux/amd64 | neutron (x) |
 | `quay.io/airshipit/aodh:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d) |
 | `quay.io/airshipit/barbican:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | barbican (d) |
@@ -73,7 +75,7 @@ digest); the digest each tag served when recorded is in `hack/images.yaml`, and 
 | `quay.io/airshipit/ironic:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | ironic (d) |
 | `quay.io/airshipit/keystone:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | keystone (d) |
 | `quay.io/airshipit/kubernetes-entrypoint:4fbcf7ce324dc66e78480f73035e31434cfea1e8-ubuntu_focal` | commit | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | ironic (d) |
-| `quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble` | commit | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), freezer (d), glance (d), gnocchi (d), heat (d), horizon (d), keystone (d), libvirt (d), magnum (d), manila (d), mariadb (d), masakari (d), memcached (d), mistral (d), neutron (d), nova (d), octavia (d), openvswitch (d), placement (d), powerdns (d), rabbitmq (d), redis (d), skyline (d), swift (d), tacker (d), trove (d), watcher (d), zaqar (d) |
+| `quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble` | commit | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), freezer (d), glance (d), gnocchi (d), heat (d), horizon (d), keystone (d), libvirt (d), magnum (d), manila (d), mariadb (d), masakari (d), memcached (d), mistral (d), neutron (d), nova (d), octavia (d), openstack-monitoring (d), openvswitch (d), placement (d), powerdns (d), rabbitmq (d), redis (d), skyline (d), swift (d), tacker (d), trove (d), watcher (d), zaqar (d) |
 | `quay.io/airshipit/libvirt:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | libvirt (d) |
 | `quay.io/airshipit/magnum:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | magnum (d) |
 | `quay.io/airshipit/manila:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | manila (d) |
@@ -86,7 +88,7 @@ digest); the digest each tag served when recorded is in `hack/images.yaml`, and 
 | `quay.io/airshipit/neutron:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | neutron (d) |
 | `quay.io/airshipit/nova:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | nova (d) |
 | `quay.io/airshipit/octavia:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | octavia (d) |
-| `quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), freezer (d), glance (d), gnocchi (d), heat (d), horizon (d), keystone (d), magnum (d), manila (d), mariadb (d), masakari (d), mistral (d), neutron (d), nova (d), octavia (d), placement (d), powerdns (d), rabbitmq (d), skyline (d), tacker (d), watcher (d), zaqar (d) |
+| `quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), freezer (d), glance (d), gnocchi (d), heat (d), horizon (d), keystone (d), magnum (d), manila (d), mariadb (d), masakari (d), mistral (d), neutron (d), nova (d), octavia (d), openstack-monitoring (d), placement (d), powerdns (d), rabbitmq (d), skyline (d), tacker (d), watcher (d), zaqar (d) |
 | `quay.io/airshipit/openvswitch:ubuntu_jammy-20261018` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | octavia (d) |
 | `quay.io/airshipit/openvswitch:ubuntu_noble-20261030` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | openvswitch (d) |
 | `quay.io/airshipit/osh-selenium:ubuntu_noble-20261030` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | horizon (m) |
@@ -104,6 +106,7 @@ digest); the digest each tag served when recorded is in `hack/images.yaml`, and 
 | `quay.io/openstack.kolla/gnocchi-base:2026.1-ubuntu-noble` | **not pinned**: waived until 2027-01-31 (#334) | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
 | `quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble` | **not pinned**: waived until 2027-01-31 (#334) | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
 | `quay.io/openstack.kolla/gnocchi-statsd:2026.1-ubuntu-noble` | **not pinned**: waived until 2027-01-31 (#334) | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
+| `quay.io/prometheus/mysqld-exporter:v0.21.0` | version | Prometheus project | yes | linux/amd64, linux/arm/v7, linux/arm64, linux/ppc64le, linux/riscv64, linux/s390x | openstack-monitoring (d) |
 
 ## Publishers
 
@@ -111,9 +114,12 @@ digest); the digest each tag served when recorded is in `hack/images.yaml`, and 
 | --- | --- | --- |
 | `docker.io/bitnami/` | Bitnami (Broadcom) | github.com/bitnami/containers |
 | `docker.io/library/` | Docker Official Images | github.com/docker-library/official-images |
+| `docker.io/otel/` | OpenTelemetry project | github.com/open-telemetry/opentelemetry-collector-releases (the otelcol-k8s distribution, openstack-monitoring's collector, issue 312) |
 | `docker.io/powerdns/` | PowerDNS | github.com/PowerDNS/pdns |
 | `docker.io/prom/` | Prometheus project | github.com/prometheus/mysqld_exporter |
 | `docker.io/xrally/` | OpenStack Rally project | opendev.org/openstack/rally-openstack |
+| `ghcr.io/openstack-exporter/` | openstack-exporter project | github.com/openstack-exporter/openstack-exporter (openstack-monitoring, issue 312) |
 | `ghcr.io/vexxhost/` | VEXXHOST | github.com/vexxhost/netoffload |
 | `quay.io/airshipit/` | OpenStack-Helm (OpenInfra Airship) | opendev.org/openstack/loci (OpenStack service images), opendev.org/openstack/openstack-helm-images (infrastructure images), opendev.org/airship/kubernetes-entrypoint, opendev.org/airship/porthole |
 | `quay.io/openstack.kolla/` | OpenStack Kolla project | opendev.org/openstack/kolla (gnocchi only, replacing upstream's unpullable images, |
+| `quay.io/prometheus/` | Prometheus project | github.com/prometheus/mysqld_exporter (openstack-monitoring's standalone mysqld-exporter, issue 312) |

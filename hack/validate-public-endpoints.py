@@ -73,8 +73,11 @@ DOMAIN = "cloud.example.test"
 ISSUER = "gate-ca"
 NODE_CIDRS = ["192.168.10.0/24", "fd00:10::/64"]
 NS = "openstack"
+# profile full selects every component except openstack-monitoring, which only monitoring.enabled true selects (#312,
+# explicit opt-in); with it on, the probe below sees every component the umbrella lists.
 ON = {
     "profile": "full",
+    "monitoring": {"enabled": True},
     "publicEndpoints": {
         "enabled": True,
         "baseDomain": DOMAIN,
@@ -492,8 +495,8 @@ def main():
                  '{{- range $c := .Values.components }}\n{{- if has $c.name $sel }}\n%s\n'
                  '# PESPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n{{- end }}\n')
         specs = {}
-        for key, body, vals in (("off-without", without, {"profile": "full"}), ("off-with", span, {"profile": "full"}),
-                                ("on", span, ON)):
+        every = {"profile": "full", "monitoring": {"enabled": True}}
+        for key, body, vals in (("off-without", without, every), ("off-with", span, every), ("on", span, ON)):
             open(os.path.join(u, "templates", "zz-gate-pe-probe.yaml"), "w").write(probe % body)
             rc, out, err = helm_template(u, "openstack-gate", vals, "--show-only", "templates/zz-gate-pe-probe.yaml")
             if rc != 0:

@@ -749,3 +749,8 @@ krateo:
   # upgrade hook too, hack/validate-rerun-hooks.py). It is the documented way to re-run hooks that were never run
   # (Ready=False/HooksMayNotHaveRun, README).
   rerunHooksToken: ""
+  # exporterUser (issue #312): create MariaDB's exporter user for any host ('%'), for openstack-monitoring's standalone
+  # mysqld-exporter (templates/job-exporter-user.yaml), from the same credential as the sidecar's user
+  # (endpoints.oslo_db.auth.exporter). The umbrella sets it with its `monitoring` value. It renders a Job and its
+  # Secret, nothing the StatefulSet reads, so switching it on does not restart the database.
+  exporterUser: false

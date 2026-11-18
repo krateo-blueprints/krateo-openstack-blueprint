@@ -31,6 +31,7 @@ own, smaller schemas; the orchestrator's `componentValues` mirrors them.
 | `ha.enabled` | boolean | `false` | Opt-in high availability (#309). memcached runs 3 replicas behind a headless Service (`memcached-ha`), every component lists each replica in its memcache server list, and the render is refused while fewer than 3 nodes carry `openstack-control-plane=enabled` (when the orchestrator can read nodes). More than one memcached replica without it is refused. Off changes nothing. RabbitMQ's host count follows `componentValues.rabbitmq.pod.replicas.server` regardless. README "High availability". |
 | `messaging.backend` | string (`chart` \| `operator`) | `chart` | `operator` runs RabbitMQ as a RabbitmqCluster `openstack-mq` (krateo-blueprints/rabbitmq-operator-blueprint, which needs cert-manager), for fresh installs only: every client lists its pods and runs quorum queues, and the rabbitmq component refuses a cluster without the operator's CRD or with a chart-mode broker already running. `chart` changes nothing. README "High availability" (#309). |
 | `rerunHooks` | object \| null | `null` | A token per component name (non-empty string; an unknown name is rejected). Setting or changing `rerunHooks.<component>` passes it to that component alone, as its `krateo.rerunHooksToken`, which every component schema declares and no template renders. Its values change, so core-provider runs a helm upgrade and every hook runs again. Use the current time. The recovery for `Ready=False/HooksMayNotHaveRun` (README, #297). |
+| `monitoring` | object | `enabled` unset (off) | The openstack-monitoring component (#312), explicit opt-in. `enabled`: only `true` turns it on, and is refused where alert-provider's `observability.krateo.io/v1alpha1` Alert and Metric CRDs are not served; unset and `false` are off. `otlpEndpoint`: where its collector sends OTLP (default the Krateo node agent's node-local Service). Off, the render is byte-identical; listing `openstack-monitoring` in `enabled` is refused. See below. |
 | `publicEndpoints` | object | `enabled: false` | The APIs, Horizon and the noVNC console over HTTPS from outside the cluster, through one Gateway API Gateway with an HTTPRoute per public endpoint of a selected component, a cert-manager Certificate and an ingress NetworkPolicy (see below, #311). Off changes nothing. |
 | `serviceContract` | object | chart default | Service integration descriptor, contract v1 (see below). |
 | `contractEmitter` | object | absent | Removed in 0.3.68 (see below). |
@@ -407,6 +408,43 @@ If you skip this, the render fails with one of these messages. Helm prefixes eac
   protocol's own group has none, so two places would decide which identity provider a token came
   from. Set conf.keystone.openid.remote_id_attribute instead and remove this one. See
   docs/configuration.md, section "Upgrading an install that already uses OIDC".`
+
+## `monitoring` — metrics and alerts (#312)
+
+```yaml
+spec:
+  monitoring:
+    enabled: true
+```
+
+On, the umbrella makes these changes:
+- It adds the `openstack-monitoring` component after keystone and mariadb.
+- It adds its credential root, `openstack-credential-identity-user-openstack-exporter`.
+- It sets `krateo.exporterUser` on mariadb. That adds a Job creating the exporter's MariaDB user for any host, with
+  PROCESS, BINLOG MONITOR and SLAVE MONITOR only. The StatefulSet is unchanged, so the database does not restart.
+
+The component runs:
+- openstack-exporter 2.0.0-alpha;
+- a standalone mysqld-exporter v0.21.0;
+- one OpenTelemetry collector, which scrapes both exporters, and RabbitMQ's `/metrics/detailed` when rabbitmq is
+  selected, and exports OTLP to `otlpEndpoint`.
+
+Its alert-provider `Alert` CRs:
+- go to the release namespace (alert-provider reconciles Alerts in every namespace);
+- are rendered only for selected components;
+- are defined in `blueprints/openstack-monitoring/chart/files/alerts.yaml`;
+- each link a runbook under `docs/runbooks/` and have a scrape-down companion.
+
+Values the umbrella sets on the component (an explicit `componentValues.openstack-monitoring` entry wins):
+
+| Component value | Set to |
+| --- | --- |
+| `openstack.components` | the umbrella's selection |
+| `collector.otlpEndpoint` | `monitoring.otlpEndpoint` |
+
+With `enabled: true` on a cluster that does not serve alert-provider's Alert and Metric CRDs, the umbrella refuses,
+naming alert-provider (`templates/monitoring-precondition.yaml`). `hack/validate-openstack-monitoring.py` is the gate.
+Not measured on a cluster yet (2026-11-18): see the README's "Monitoring" section for what that leaves open.
 
 ## `serviceContract` (contract v1)
 

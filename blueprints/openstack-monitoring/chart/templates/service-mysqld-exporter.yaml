@@ -1,0 +1,17 @@
+{{- if .Values.manifests.service_mysqld_exporter }}
+{{- $envAll := . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openstack-mysqld-exporter
+  labels:
+{{ tuple $envAll "openstack-monitoring" "mysqld-exporter" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+spec:
+  ports:
+    - name: metrics
+      port: {{ .Values.mysqld_exporter.port }}
+      targetPort: metrics
+  selector:
+{{ tuple $envAll "openstack-monitoring" "mysqld-exporter" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+{{- end }}

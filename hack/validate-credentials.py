@@ -23,8 +23,8 @@ four things hold, and each is checked here:
      MariaDB root DB_CONNECTION Secret (templates/secret-db.yaml) and to mariadb itself;
      oslo-messaging-admin to exactly the charts rendering a RabbitMQ admin connection Secret
      (templates/secret-rabbitmq.yaml) and to rabbitmq itself, whose administrator it is (at
-     auth.user); oslo-messaging-guest and oslo-messaging-erlang-cookie to rabbitmq alone; oslo-db-sst,
-     oslo-db-audit and oslo-db-exporter to mariadb alone.
+     auth.user); oslo-messaging-guest and oslo-messaging-erlang-cookie to rabbitmq alone; oslo-db-sst and
+     oslo-db-audit to mariadb alone; oslo-db-exporter to mariadb and openstack-monitoring (#312).
   3. NO VALUE FROM VALUES. Each listed chart is rendered with its references AND with the admin
      password in values replaced by a unique sentinel. The sentinel must appear NOWHERE: not in any
      rendered text (configs, scripts) and not in any Secret's data once base64-decoded. A substring
@@ -308,13 +308,18 @@ RULES = {
         "password_path": lambda chart: "endpoints.oslo_db.auth.audit.password",
         "projections": lambda chart, cv: ["mariadb-dbaudit-generated"],
     },
+    # The mysqld-exporter user: MariaDB creates it (the sidecar's 'exporter'@'127.0.0.1', and with krateo.exporterUser
+    # the standalone exporter's 'exporter'@'%', #312), and openstack-monitoring's standalone exporter logs in as it.
     "oslo-db-exporter": {
-        "what": "is MariaDB itself (the mysqld-exporter user)",
-        "consumes": lambda d, has: d == "mariadb",
+        "what": "is MariaDB itself, or openstack-monitoring's standalone mysqld-exporter (the mysqld-exporter user)",
+        "consumes": lambda d, has: d in ("mariadb", "openstack-monitoring"),
         "password_path": lambda chart: "endpoints.oslo_db.auth.exporter.password",
-        "projections": lambda chart, cv: ["mysql-exporter-generated"],
-        # Created only with monitoring on: render it on, or the sentinel would pass vacuously.
-        "enable": lambda chart: {"monitoring": {"prometheus": {"enabled": True}}},
+        "projections": lambda chart, cv: (["mysql-exporter-generated", "mariadb-exporter-user"] if chart == "mariadb"
+                                          else [cv["secrets"]["mysqld_exporter_cnf"]]),
+        # Created only with monitoring on (and the standalone user with krateo.exporterUser): render both on, or the
+        # sentinel would pass vacuously.
+        "enable": lambda chart: ({"monitoring": {"prometheus": {"enabled": True}}, "krateo": {"exporterUser": True}}
+                                 if chart == "mariadb" else {}),
     },
 }
 
@@ -1450,6 +1455,9 @@ def one_account_check(tmp):
         fail("25: hack/db-users.yaml names no MariaDB user under two keys of one chart; the check had no input")
 
 
+MARIADB_OWN_USERS = ("admin", "sst", "audit", "exporter")
+
+
 def db_map_check(tmp):
     """15b. hack/db-users.yaml is exactly what the charts render: every chart is rendered with a sentinel per per-service
     endpoints.oslo_db*.auth key (MariaDB's own users and the PostgreSQL family are not per-service MariaDB users), and the
@@ -1465,7 +1473,9 @@ def db_map_check(tmp):
             if not fam.startswith("oslo_db") or fam == "oslo_db_postgresql" or not isinstance(e, dict):
                 continue
             for k, a in (e.get("auth") or {}).items():
-                if k != "admin" and isinstance(a, dict) and "password" in a:
+                # MariaDB's own users are tier 1, one root each (oslo-db-<user>), not per-service: the map's header says
+                # so. openstack-monitoring renders `exporter` (#312), the first chart besides mariadb to hold one.
+                if k not in MARIADB_OWN_USERS and isinstance(a, dict) and "password" in a:
                     keys["%s.%s" % (fam, k)] = a.get("username")
         if not keys:
             continue
@@ -2718,7 +2728,10 @@ def main():
                     '# CREDSPEC {{ $c.name }} {{ $ov | toJson }}\n'
                     '{{- end }}\n')
         override = {"endpoints": {"identity": {"auth": {"admin": {"passwordFrom": {"store": "gate-explicit-store"}}}}}}
-        rc, out, err = helm_template(u, "openstack-gate", {"componentValues": {"keystone": override}})
+        # monitoring on: a `monitoring: true` item's root (identity-user-openstack-exporter, #312) renders only then, and
+        # every root must be checked. hack/validate-openstack-monitoring.py checks that it is absent with monitoring off.
+        rc, out, err = helm_template(u, "openstack-gate", {"componentValues": {"keystone": override},
+                                                           "monitoring": {"enabled": True}})
         if rc != 0:
             print("FAILED MEASUREMENT: the umbrella does not render: %s" % err.strip()[:400])
             sys.exit(2)

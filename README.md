@@ -394,6 +394,11 @@ enabled:
   - swift
 ```
 
+#### Monitoring: recommended when alert-provider is installed
+
+Add `monitoring.enabled: true` to the `Openstack` spec above. It is off unless you ask, and the umbrella refuses it on
+a cluster without alert-provider's CRDs. See "Monitoring" below.
+
 #### The install unlocks over several reconciles, and that is normal
 
 The orchestrator emits a component's Composition only once its CRD exists *and* its dependencies
@@ -1817,6 +1822,71 @@ orchestrator also carries a `serviceContract` v1 stanza. Usage and health are em
 [krateo-platformops/cmp-usage-collector](https://github.com/krateo-platformops/cmp-usage-collector), not by this chart (its emitter was removed in 0.3.68).
 The whole surface is documented in [docs/configuration.md](docs/configuration.md), and the
 CRD/schema in [docs/api.md](docs/api.md).
+
+### Monitoring
+
+`spec.monitoring` adds the **openstack-monitoring** component (#312), which sends the install's metrics and alerts to
+the Krateo observability stack. It is explicit opt-in: only `enabled: true` turns it on. Unset (the default) is off,
+exactly like `false`.
+
+**Recommended when alert-provider is installed** (the Krateo installer's portal feature ships it):
+
+```yaml
+spec:
+  monitoring:
+    enabled: true
+    otlpEndpoint: http://otel-collector-daemonset-local.krateo-system.svc:4318   # the default; any OTLP/HTTP endpoint
+```
+
+With `enabled: true` on a cluster that does not serve alert-provider's `Alert` and `Metric` CRDs, the umbrella refuses
+to render and says why on its status, naming alert-provider. Its CRs would otherwise fail to apply.
+
+- **What it scrapes.** One OpenTelemetry collector Deployment scrapes three sources and forwards them as OTLP to
+  `otlpEndpoint`:
+  - **openstack-exporter 2.0.0-alpha** reports per-service API availability (`openstack_<service>_up`) and nova and neutron
+    agent liveness. It logs in as its own Keystone user, `openstack-exporter`, whose password is a generated root,
+    `openstack-credential-identity-user-openstack-exporter`. Nova, Neutron and Placement show their services and
+    agents only to an admin, so this user has the admin role on the `service` project, like every service user.
+  - **A standalone mysqld-exporter v0.21.0** logs in to the `mariadb` Service as MariaDB's `exporter` user (the
+    `openstack-credential-oslo-db-exporter` root). The mariadb chart's sidecar exporter is not used: its 2019 image
+    gates the database pod's readiness, and switching it on restarts the only database replica.
+    - The mariadb chart creates the user for any host (`krateo.exporterUser`, set by this value).
+    - The grants are PROCESS, BINLOG MONITOR and SLAVE MONITOR, with at most 3 connections. It does not get `SELECT ON *.*`,
+      so it cannot read the OpenStack databases.
+    - Turning it on adds a Job to mariadb and does not change its StatefulSet.
+  - **RabbitMQ's `/metrics/detailed`** gives per-queue depth and consumers on every server pod. The `rabbitmq_prometheus` plugin
+    serving it is already enabled. It is scraped only when rabbitmq is selected.
+- **Why a plain Deployment.** The collector is a Deployment, not an `OpenTelemetryCollector` CR: the Krateo
+  observability stack runs no OpenTelemetry Operator (checked in krateo-platformops/installer on 2026-11-18). Its own
+  collectors are deployed from the upstream opentelemetry-collector Helm chart. If the installer adds the operator, the
+  collector should become a CR.
+- **Cloud-agnostic.** Nothing in the defaults is cloud-specific. The endpoint is an input, and the credentials come from
+  the install's generated roots through ESO.
+- **The alerts.** These are alert-provider `Alert` CRs in the release namespace, the only namespace the install writes
+  to. alert-provider reconciles Alerts in every namespace. They are defined in one file,
+  `blueprints/openstack-monitoring/chart/files/alerts.yaml`:
+  - an API down for Keystone, Glance, Nova, Neutron, Cinder or Placement;
+  - a Nova service or Neutron agent down;
+  - MariaDB unreachable;
+  - a RabbitMQ queue that is not drained.
+  - Only the alerts for selected components are rendered: an absent service's metric reads 0 and would fire forever.
+  - Each alert links a runbook in [docs/runbooks/](docs/runbooks/openstack-api-down.md).
+  - Every scrape job has a companion alert, `openstack-scrape-down-<job>`. HyperDX reads a window with no data as 0,
+    so without the companion a dead scrape would silence the alerts that fire on high values.
+  - These are metric alerts, so a firing notifies and shows on the portal's alerts page. It opens no Incident:
+    alert-provider opens Incidents only for counted log records, and only in its home namespace. Putting them in
+    `krateo-system` would gain nothing.
+- **Off, nothing changes.** Unset or `false`, the render is byte-identical to a release without this value: no
+  component, no definition, no credential root. `enabled: [openstack-monitoring]` is refused, because this value is the
+  one switch.
+- **Not measured yet, as of 2026-11-18.** No cluster has run this component. Phase 2 measures the rest:
+  - the metric names, which are cited against each exporter's source at the pinned tag rather than scraped;
+  - the default endpoint drops traffic from a node with no Krateo node agent (a tainted node, for instance);
+  - how HyperDX evaluates the gauges and the grouping.
+
+  `hack/validate-openstack-monitoring.py` is the gate.
+- **Never delete** `openstack-credential-identity-user-openstack-exporter`. Like every root, it holds the only copy of
+  the password, and it is kept when monitoring is switched off.
 
 ## Examples
 

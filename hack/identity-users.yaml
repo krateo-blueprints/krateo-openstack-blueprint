@@ -98,6 +98,8 @@ users:
     nova: service
   octavia:
     octavia: octavia
+  openstack-exporter:
+    openstack-monitoring: openstack_exporter
   placement:
     cyborg: placement
     placement: placement

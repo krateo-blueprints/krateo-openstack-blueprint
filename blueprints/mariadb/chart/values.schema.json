@@ -321,6 +321,10 @@
         "rerunHooksToken": {
           "type": "string",
           "description": "Rendered nowhere. The umbrella sets it from rerunHooks.<component>; changing it makes core-provider run a helm upgrade, which re-runs every hook (#297)."
+        },
+        "exporterUser": {
+          "type": "boolean",
+          "description": "Create MariaDB's exporter user for any host, for openstack-monitoring's standalone mysqld-exporter (#312). Set by the umbrella's monitoring value; does not restart the database."
         }
       }
     }
