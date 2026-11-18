@@ -1729,8 +1729,11 @@ messaging:
 - **No release yet:** neither that blueprint nor this mode has a release until the H2 live tests have run.
 - **Image:** pinned to `rabbitmq:4.3.4-management`, never the operator's default.
 - **Administrator:** comes from the install's generated root.
-- **Clients:** every component lists the cluster's pods and runs quorum queues, which RabbitMQ 4.x needs. Their
-  rabbit-init policies drop the `ha-*` keys 4.x refuses.
+- **Clients:** every component lists the cluster's pods and runs quorum queues, which RabbitMQ 4.x needs.
+- **Users and vhosts:** instead of a rabbit-init Job, each component's RabbitMQ user, vhost, permissions and policies
+  are messaging-topology-operator resources, fed by the same generated root. The vhosts are retained on deletion, and
+  the policies drop the `ha-*` keys 4.x refuses. Every pod that waited on the Job waits on those resources being
+  Ready.
 - **Refusals, on the Composition's status:** the rabbitmq component refuses a cluster without the operator's CRD,
   and an install that already runs the chart-mode broker; moving one over is a separate migration (H2c).
 - **Off (`chart`, the default):** nothing changes.

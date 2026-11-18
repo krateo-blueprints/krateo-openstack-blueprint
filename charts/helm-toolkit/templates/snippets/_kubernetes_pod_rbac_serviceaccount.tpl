@@ -77,8 +77,17 @@ imagePullSecrets:
        the pod stays in Init. Each entry names its `resource` plural (kubernetes-entrypoint ignores the extra key);
        the Role grants get on exactly that object, in the release namespace where the init container looks it up.
        hack/validate-custom-resource-wait-rbac.py renders this. */}}
+{{- $crWaits := $deps.custom_resources | default list }}
+{{- /* With the RabbitMQ cluster-operator, the rabbit-init waits the init container adds from
+       dependencies.dynamic.job_rabbit_init.<component> become topology-resource waits there
+       (helm-toolkit.utils.dependency_jobs_filter); grant them here too, or those waits are Forbidden. */}}
+{{- if and ((($envAll.Values.endpoints.oslo_messaging | default dict).operator | default dict).cluster) $envAll.Values.manifests.job_rabbit_init (hasKey $envAll.Values.dependencies "dynamic") }}
+{{- with (index ($envAll.Values.dependencies.dynamic.job_rabbit_init | default dict) $component) }}
+{{- $crWaits = concat $crWaits (include "helm-toolkit.utils.rabbitmq_topology_waits" .jobs | fromJsonArray) }}
+{{- end }}
+{{- end }}
 {{- $crRules := list }}
-{{- range $cr := ($deps.custom_resources | default list) }}
+{{- range $cr := $crWaits }}
 {{- $parts := splitList "/" ($cr.apiVersion | default "" | toString) }}
 {{- if or (ne (len $parts) 2) (not (index $parts 0)) }}
 {{- fail (printf "dependencies custom_resources entry %q (kind %v): apiVersion %q must be <group>/<version>; kubernetes-entrypoint reads custom resources only (#309)" ($cr.name | default "") $cr.kind ($cr.apiVersion | default "")) }}
