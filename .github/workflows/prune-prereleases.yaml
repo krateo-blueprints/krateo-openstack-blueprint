@@ -1,0 +1,80 @@
+# Deletes old pre-releases (X.Y.Z-main.g<sha7>, X.Y.Z-dev.g<sha7>) of every chart this repository
+# publishes from GHCR, keeping the newest N. prerelease.yaml pushes about 39 package versions per
+# pre-release and nothing else removes them. A release (plain X.Y.Z) is never deleted: the script
+# deletes only versions whose every tag has the pre-release shape, and re-checks that immediately
+# before each DELETE. hack/validate-prerelease-channel.py tests it and mutates it.
+#
+# Needs the repository secret PRERELEASE_PRUNE_TOKEN: a classic token with read:packages and
+# delete:packages, from an account that administers the krateo-blueprints/charts/* packages. An org
+# owner creates it (docs/release.md). Without it this refuses to run rather than skipping.
+#
+# Scheduled runs delete. A manual run is a dry run unless `dry-run` is unticked.
+name: prune-prereleases
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: "How many of the newest pre-releases to keep (at least 1)."
+        required: true
+        default: "5"
+      dry-run:
+        description: "Print what would be deleted and change nothing."
+        type: boolean
+        required: true
+        default: true
+
+# Exactly this. Deletion goes through PRERELEASE_PRUNE_TOKEN, never GITHUB_TOKEN, and nothing here
+# writes the repository. The gate refuses any other set, and any job-level override.
+permissions:
+  contents: read
+
+concurrency:
+  group: prune-prereleases
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: The prune token must be present
+        env:
+          PRUNE_TOKEN: ${{ secrets.PRERELEASE_PRUNE_TOKEN }}
+        run: |
+          if [ -z "${PRUNE_TOKEN}" ]; then
+            echo "::error::secret PRERELEASE_PRUNE_TOKEN is not set. An org owner creates a classic token with"
+            echo "::error::read:packages and delete:packages and saves it as that repository secret (docs/release.md)."
+            exit 1
+          fi
+          case "${PRUNE_TOKEN}" in
+            *[[:space:]]*|*[[:cntrl:]]*)
+              echo "::error::secret PRERELEASE_PRUNE_TOKEN contains whitespace or a control character, usually a trailing newline."
+              exit 1 ;;
+          esac
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # A scheduled run has no inputs: keep defaults to 5 and it deletes. A manual run deletes only
+      # when dry-run is unticked.
+      - name: Prune
+        env:
+          PRUNE_TOKEN: ${{ secrets.PRERELEASE_PRUNE_TOKEN }}
+          KEEP: ${{ github.event.inputs.keep || '5' }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run != 'false' }}
+        run: |
+          set -euo pipefail
+          if [ "${DRY_RUN}" = "true" ]; then
+            python3 hack/prune-prereleases.py --keep "${KEEP}"
+          else
+            python3 hack/prune-prereleases.py --keep "${KEEP}" --delete
+          fi

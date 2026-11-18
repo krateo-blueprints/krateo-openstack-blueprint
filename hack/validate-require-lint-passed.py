@@ -3,7 +3,7 @@
 
     hack/validate-require-lint-passed.py [repo-root]
 
-release-tag.yaml (and #345's prerelease.yaml) publish only a commit that lint passed on. With the merge queue, a
+release-tag.yaml (and prerelease.yaml) publish only a commit that lint passed on. With the merge queue, a
 commit that lands is linted twice under its own SHA: by its merge group's run (merge_group, GITHUB_SHA the group's
 SHA) and by the push to main. The script must accept a successful run from either, or from a dispatched run (the
 recovery it names), and nothing else. It is run against a stand-in gh that answers the runs listing from a fixture:

@@ -11,10 +11,17 @@ own default, the chart as OpenStack-Helm ships it for a standalone install whose
 umbrella never passes it. hack/validate-storage-backend.py renders every value.
 */}}
 {{- $backend := .Values.krateo.storageBackend | default "unmanaged" -}}
+{{- $managed := eq (include "helm-toolkit.utils.ceph_managed" .) "true" -}}
+{{- if and $managed (not (hasPrefix "ceph-" $backend)) -}}
+{{- fail (printf "\n\nkrateo.ceph references are set and krateo.storageBackend is %s: the references belong to a ceph backend (#308), which the umbrella sets together with them.\n" $backend) -}}
+{{- end -}}
 {{- if eq $backend "none" -}}
 {{- fail "\n\ncinder needs a volume backend, and storage.backend is none (#196).\n\ncinder's only shipped backend is Ceph RBD, and with no backend cinder-volume waits in Init forever on Ceph objects nothing creates (the ConfigMap ceph-etc and the keyring Secrets). On the Openstack Composition, leave cinder out -- profile full-strict selects it only when storage.backend is not none -- or set storage.backend once a backend is available (#308). On a standalone Cinder Composition this value is krateo.storageBackend.\n" -}}
 {{- else if has $backend (list "ceph-rook" "ceph-external") -}}
-{{- fail (printf "\n\nstorage.backend %s is not implemented in this release (#308).\n\nThe backend is designed (#308: Ceph mints the client keys, which reach cinder as projections and never through client.admin) but this chart cannot render it yet, so cinder cannot be installed with it. Until it ships, leave cinder out: set storage.backend back to none and use profile full-strict.\n" $backend) -}}
+{{- if not $managed -}}
+{{- fail (printf "\n\nkrateo.storageBackend %s renders only with krateo.ceph.keyringFrom and krateo.ceph.monHostFrom (#308): the umbrella passes them with that storage.backend, copied from the keys Ceph mints. Rendered without them, cinder would have no key and no cluster.\n" $backend) -}}
+{{- end -}}
+{{- include "helm-toolkit.utils.ceph_refuse_literals" (tuple . (list "conf.ceph.admin_keyring" "ceph_client.enable_external_ceph_backend" "ceph_client.external_ceph.rbd_user_keyring" "backup.external_ceph_rbd.enabled" "backup.external_ceph_rbd.admin_keyring")) -}}
 {{- else if ne $backend "unmanaged" -}}
 {{- fail (printf "\n\nkrateo.storageBackend %q is not a backend this chart knows: unmanaged, none, ceph-rook or ceph-external.\n" $backend) -}}
 {{- end -}}

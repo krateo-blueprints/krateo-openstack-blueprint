@@ -1,0 +1,13 @@
+component: ceilometer
+issue: 294
+reason: >-
+  Upstream's pipelines publish to notifier:// as well as gnocchi://. The notifier publisher sends every sample and
+  event back onto ceilometer's vhost as topics metering and event, whose consumers (the collector, panko) are
+  retired, so on this blueprint the queues metering.sample and event.sample only grow.
+assertions:
+  - file: values.yaml
+    absent: "notifier://"
+    why: >-
+      Restoring it refills queues nothing consumes (GKE 2026-11-17: event.sample 954 -> 1062 messages in 10
+      minutes, 0 consumers). hack/validate-ceilometer-publishers.py checks the rendered pipelines; this keeps
+      the values from coming back with a re-vendor.

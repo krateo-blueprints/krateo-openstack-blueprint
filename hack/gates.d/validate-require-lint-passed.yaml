@@ -1,4 +1,4 @@
-# release-tag.yaml (and #345's prerelease.yaml) publish only a commit lint passed on. With the merge queue that run
+# release-tag.yaml (and prerelease.yaml) publish only a commit lint passed on. With the merge queue that run
 # is the commit's merge group or its push to main, under the same SHA; this runs the check against a stand-in gh.
 name: "A release commit needs a successful merge_group, push or dispatched lint run on that exact SHA"
 job: capability-roles

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Refuse to publish a commit no gate ever ran against. Called by release-tag.yaml (and by #345's prerelease.yaml)
+# Refuse to publish a commit no gate ever ran against. Called by release-tag.yaml and prerelease.yaml
 # before anything is pushed. Needs GH_TOKEN with actions:read on REPO.
 #
 # On 2026-11-02 a pull request sat with ZERO check runs. Not pending -- never created. The branch existed at the right

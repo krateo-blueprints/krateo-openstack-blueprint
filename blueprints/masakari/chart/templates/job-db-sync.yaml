@@ -22,6 +22,9 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: masakari-db-sync
+  # Krateo (#206): the release's hook-cleanup selects Jobs by release_group, so the Job carries the labels.
+  labels:
+{{ tuple $envAll "masakari" "db-sync" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
 {{ tuple "db-sync" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
