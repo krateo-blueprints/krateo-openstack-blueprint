@@ -450,6 +450,28 @@ def part3(uv, ha_specs, tmp):
             fail("3: %s is in haTopology.cache but renders no memcache server list at its defaults" % chart)
         checked[chart] = (nmq, nmc)
     counts["3"] = checked
+    # Positive controls for the tooz rule (H2 run 4): the URL gnocchi rendered on GKE must be refused by this check, and
+    # gnocchi with a non-redis store under the ha spec must refuse to render (memcached cannot be its lock backend).
+    if "gnocchi" in topo["cache"]:
+        w = stage(os.path.join(BP, "gnocchi", "chart"), tmp, "c-gnocchi-ctl")
+        planted = ("memcached-discovery://" + ",".join("%s-%d.%s.%s:11211" % (topo["cacheStatefulset"], i, topo["cacheDiscovery"],
+                                                                              SUFFIX) for i in range(3)))
+        spec = merged(ha_specs.get("gnocchi") or {}, {"conf": {"gnocchi": {"DEFAULT": {"coordination_url": planted}}}})
+        rc, out, err = helm_template(w, "gnocchi-gate1234", spec)
+        seen = [m.group(2) for d in (yaml.safe_load_all(out) if rc == 0 else []) if d for t in doc_texts(d)
+                for line in t.splitlines() for m in [TOOZ_RX.match(line)] if m]
+        if rc != 0 or planted not in seen or tooz_problem(planted) is None:
+            fail("3: control: gnocchi with run 4's coordination_url %s must render it and this check must refuse it "
+                 "(rendered %s, rc %d)" % (planted[:60], seen[:1], rc))
+        else:
+            counts["tooz-control"] = 1
+        spec = merged(ha_specs.get("gnocchi") or {}, {"conf": {"gnocchi": {"storage": {"driver": "file"}}}})
+        rc, out, err = helm_template(w, "gnocchi-gate1234", spec)
+        if rc == 0 or "cannot be gnocchi's tooz lock backend" not in err:
+            fail("3: control: gnocchi with storage.driver file under the ha spec must refuse to render (memcached cannot "
+                 "be its lock backend); rc %d: %s" % (rc, err.strip()[:200]))
+        else:
+            counts["tooz-control"] = counts.get("tooz-control", 0) + 1
 
 
 # --- 4. the node refusal --------------------------------------------------------------------------------------------
@@ -505,7 +527,7 @@ def main():
         if ha_specs is not None:
             part3(uv, ha_specs, tmp)
             part4(u)
-    for k in ("1", "2", "3", "4", "tooz"):
+    for k in ("1", "2", "3", "4", "tooz", "tooz-control"):
         if not counts.get(k):
             fail("part %s checked nothing" % k)
     if failures:
@@ -516,8 +538,8 @@ def main():
     print("OK: haTopology matches the charts (%d hold the RabbitMQ host list, %d build a memcache list); %d component specs: ha off "
           "and one RabbitMQ replica pass nothing, RabbitMQ at 3 and ha move only their readers, the refusals hold; "
           "%d charts rendered with the ha spec list every RabbitMQ and memcached pod; %d tooz coordination URL(s) name a "
-          "registered driver and one backend; the node refusal holds in %d cases"
-          % (mq, mc, counts["2"], len(counts["3"]), counts["tooz"], counts["4"]))
+          "registered driver and one backend (%d control(s) refused); the node refusal holds in %d cases"
+          % (mq, mc, counts["2"], len(counts["3"]), counts["tooz"], counts["tooz-control"], counts["4"]))
 
 
 main()
