@@ -38,6 +38,74 @@ bot="$want[bot]"
 id=${BOT_USER_ID:-$(gh api "users/$bot" --jq .id)}
 BOT=(-c "user.name=$bot" -c "user.email=$id+$bot@users.noreply.github.com")
 
+# Wait until every check the ruleset requires has been REPORTED on exactly this commit, then until each has passed.
+# `gh pr checks --required --watch --fail-fast`, used up to #379, exits non-zero when no check exists yet on a head
+# that was pushed a second earlier, and that was read as a failure: run 44280066151 opened #384 at 09:53:05Z and
+# gave up on it at 09:53:06Z. So the two states are told apart here:
+#   - not reported yet (missing, or queued/in progress): keep polling, up to CHECKS_APPEAR_POLLS for a check to
+#     appear at all and CHECKS_DONE_POLLS for every one to finish, then fail saying which and that it timed out;
+#   - reported and failed (any conclusion but success, skipped or neutral): fail at once, naming it.
+# The required set is the ruleset's own (the branch's required_status_checks rules), not a list kept here; an empty
+# set is refused, since a queue that requires nothing would land the pull request unchecked.
+CHECKS_POLL_SECONDS=${CHECKS_POLL_SECONDS:-15}
+CHECKS_APPEAR_POLLS=${CHECKS_APPEAR_POLLS:-40}   # 10 minutes at 15 s
+CHECKS_DONE_POLLS=${CHECKS_DONE_POLLS:-240}      # 60 minutes at 15 s: lint's slowest job takes about 20
+wait_for_required_checks() {
+  # Every gh call checks its own status: this function runs as `wait_for_required_checks ... || exit 1`, and bash
+  # ignores `set -e` inside a function called in a `||` list, so an unchecked failure would read as "nothing yet".
+  local sha=$1 required runs polls=0 missing pending failed name state conclusion line
+  required=$(gh api "repos/{owner}/{repo}/rules/branches/$BASE_BRANCH" \
+    --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context') || {
+    echo "could not read the $BASE_BRANCH ruleset's required checks; bot pull request #$number is not enqueued" >&2
+    return 1
+  }
+  required=$(printf '%s\n' "$required" | sed '/^$/d' | sort -u)
+  if [ -z "$required" ]; then
+    echo "the $BASE_BRANCH ruleset requires no status check; refusing to enqueue bot pull request #$number unchecked" >&2
+    return 1
+  fi
+  while :; do
+    polls=$((polls + 1))
+    runs=$(gh api "repos/{owner}/{repo}/commits/$sha/check-runs?per_page=100" --paginate \
+      --jq '.check_runs[] | [.name, .status, (.conclusion // "")] | @tsv') || {
+      echo "could not read the check runs of $sha; bot pull request #$number is not enqueued" >&2
+      return 1
+    }
+    missing=() pending=() failed=()
+    while IFS= read -r name; do
+      line=$(printf '%s\n' "$runs" | awk -F'\t' -v n="$name" '$1 == n' | tail -n1)
+      if [ -z "$line" ]; then missing+=("$name"); continue; fi
+      state=$(printf '%s' "$line" | cut -f2)
+      conclusion=$(printf '%s' "$line" | cut -f3)
+      if [ "$state" != "completed" ]; then pending+=("$name"); continue; fi
+      case "$conclusion" in
+        success|skipped|neutral) ;;
+        *) failed+=("$name ($conclusion)") ;;
+      esac
+    done <<< "$required"
+    if [ "${#failed[@]}" -gt 0 ]; then
+      echo "bot pull request #$number failed a required check on $sha: ${failed[*]}; it is not enqueued (the next run" \
+        "updates it)" >&2
+      return 1
+    fi
+    if [ "${#missing[@]}" -eq 0 ] && [ "${#pending[@]}" -eq 0 ]; then
+      echo "every required check passed on $sha"
+      return 0
+    fi
+    if [ "${#missing[@]}" -gt 0 ] && [ "$polls" -ge "$CHECKS_APPEAR_POLLS" ]; then
+      echo "required checks never reported on $sha within $CHECKS_APPEAR_POLLS polls of ${CHECKS_POLL_SECONDS}s:" \
+        "${missing[*]}; bot pull request #$number is not enqueued (the next run updates it)" >&2
+      return 1
+    fi
+    if [ "$polls" -ge "$CHECKS_DONE_POLLS" ]; then
+      echo "required checks still not finished on $sha after $CHECKS_DONE_POLLS polls of ${CHECKS_POLL_SECONDS}s:" \
+        "${pending[*]} ${missing[*]}; bot pull request #$number is not enqueued (the next run updates it)" >&2
+      return 1
+    fi
+    sleep "$CHECKS_POLL_SECONDS"
+  done
+}
+
 python3 hack/render-log.py .
 if git diff --quiet -- docs/log.md; then
   echo "docs/log.md is already the render of docs/log.d; nothing to commit"
@@ -58,7 +126,18 @@ if [ -n "$open" ]; then
   git checkout -- docs/log.md
   git fetch origin "$branch"
   git checkout -B "$branch" "origin/$branch"
-  git "${BOT[@]}" merge --no-commit --no-ff "origin/$BASE_BRANCH" || true
+  # A conflict is expected (both sides changed docs/log.md) and resolved below by taking the fresh render. Any other
+  # failure is not, and was swallowed by `|| true` up to #379: from a depth-1 checkout, origin/main's one commit has no
+  # parents, so it shares no commit with the bot branch and git refuses ("refusing to merge unrelated histories",
+  # run 44281145388). render-log.yaml checks out with fetch-depth 0 for that reason; this stops the script if the merge
+  # did not even start, rather than committing a render onto a branch that never got main.
+  if ! git "${BOT[@]}" merge --no-commit --no-ff "origin/$BASE_BRANCH"; then
+    if ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+      echo "could not bring $BASE_BRANCH into $branch: git refused the merge (a shallow checkout gives unrelated" \
+        "histories; render-log.yaml must check out with fetch-depth: 0)" >&2
+      exit 1
+    fi
+  fi
   cp "$rendered" docs/log.md
   git add docs/log.md
   unmerged=$(git diff --name-only --diff-filter=U)
@@ -89,10 +168,7 @@ fi
 # exception). Without a queue it squash-merges at once, as before.
 queued=$(gh api "repos/{owner}/{repo}/rules/branches/$BASE_BRANCH" --jq '[.[] | select(.type == "merge_queue")] | length')
 if [ "$queued" != "0" ]; then
-  if ! gh pr checks "$number" --required --watch --fail-fast; then
-    echo "bot pull request #$number failed a required check; it is not enqueued (the next run updates it)" >&2
-    exit 1
-  fi
+  wait_for_required_checks "$(git rev-parse HEAD)" || exit 1
   node=$(gh pr view "$number" --json id --jq .id)
   for attempt in 1 2 3 4 5; do
     if gh api graphql -f query='mutation($id: ID!) { enqueuePullRequest(input: {pullRequestId: $id}) { mergeQueueEntry { position } } }' \
