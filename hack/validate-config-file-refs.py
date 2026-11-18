@@ -49,6 +49,16 @@ GUARDED_RE = re.compile(r"\[\s+-[df]\s+(/[^\s\]]+?)/?\s+\]\s*&&\s*echo\s+--(?:co
 GUARDED = set()
 
 
+# What the umbrella delivers for a chart's storage (#308): cinder's default refuses, so a chart render carries
+# hack/gate_values.py's arguments (nothing for every other chart).
+import importlib.util as _gv_util
+import os as _gv_os
+_gv_spec = _gv_util.spec_from_file_location(
+    "gate_values", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "gate_values.py"))
+gate_values = _gv_util.module_from_spec(_gv_spec)
+_gv_spec.loader.exec_module(gate_values)
+
+
 def flag_refs(text):
     """Paths named by a config flag, minus those guarded by an existence test on the same path (counted)."""
     guarded = {a.rstrip("/") for a, b in GUARDED_RE.findall(text) if a.rstrip("/") == b.rstrip("/")}
@@ -73,7 +83,7 @@ def render(chart_dir):
         if os.path.isdir(tk):
             os.makedirs(os.path.join(dst, "charts"), exist_ok=True)
             shutil.copytree(tk, os.path.join(dst, "charts", "helm-toolkit"))
-        p = subprocess.run(["helm", "template", "gate", dst],
+        p = subprocess.run(["helm", "template", "gate", dst] + gate_values.helm_args(dst),
                            capture_output=True, text=True)
         if p.returncode:
             return None, p.stderr.strip().splitlines()[-1] if p.stderr else "helm template failed"

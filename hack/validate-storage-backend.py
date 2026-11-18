@@ -21,8 +21,10 @@ without a backend, naming the value. Each half is checked here, by rendering:
   3. THE CHART REFUSES. Rendered with krateo.storageBackend none, cinder fails, naming storage.backend and #196; with each
      ceph backend but without the krateo.ceph references the umbrella passes with it, it fails naming that backend and
      the references (#308); with them it renders, which hack/validate-ceph-consumer.py checks. Its own
-     default is `unmanaged` (the chart as OpenStack-Helm ships it, for a standalone install), which renders
-     cinder-volume: the other gates render each chart at its defaults and must keep seeing cinder's pods.
+     default is `none` too (#308 step 4): rendered with no values at all it refuses, and the refusal tells a standalone
+     Cinder Composition its two escapes, `unmanaged` and ceph-external, by name. `unmanaged` set explicitly renders
+     cinder-volume (upstream's wiring). The other gates render cinder through hack/gate_values.py, as the umbrella
+     delivers it, and must keep seeing its pods; a gate that renders it at its defaults fails on the refusal.
   4. ONE LIBVIRT SECRET UUID. nova-compute's DaemonSet read `.Values.conf.ceph.secret_uuid`, which nova's values never
      define, so LIBVIRT_CEPH_SECRET_UUID rendered with no value (`value:`, upstream's defect). nova and libvirt are rendered with
      conf.ceph.enabled and a sentinel at conf.ceph.cinder.secret_uuid: every LIBVIRT_CEPH_SECRET_UUID (nova) and
@@ -197,16 +199,27 @@ def main():
         for n in block:
             cdir = os.path.join(BP, n, "chart")
             cvals = yaml.safe_load(open(os.path.join(cdir, "values.yaml")))
-            if dig(cvals, "krateo.storageBackend") != "unmanaged":
-                fail("3: %s's values.yaml krateo.storageBackend is %r, want unmanaged: every gate renders each chart "
-                     "at its defaults and must keep seeing %s's pods" % (n, dig(cvals, "krateo.storageBackend"), n))
+            if dig(cvals, "krateo.storageBackend") != "none":
+                fail("3: %s's values.yaml krateo.storageBackend is %r, want none: a standalone Cinder Composition must "
+                     "choose, and an absent value must not fall back to upstream's wiring (#196)"
+                     % (n, dig(cvals, "krateo.storageBackend")))
             c = stage(cdir, tmp, n)
             rc, out, err = helm_template(c, n + "-gate1234", {})
+            if rc == 0:
+                fail("3: %s renders at its defaults; with no storageBackend it must refuse (#196, #308)" % n)
+            else:
+                for frag in (REFUSE_NONE, "krateo.storageBackend: unmanaged", "ceph-external"):
+                    if frag not in err:
+                        fail("3: %s's refusal at its defaults does not name %r, so a standalone Composition is not told "
+                             "how to choose: %s" % (n, frag, err.strip()[-300:]))
+            count("3")
+            rc, out, err = helm_template(c, n + "-gate1234", {"krateo": {"storageBackend": "unmanaged"}})
             if rc != 0:
-                fail("3: %s does not render at its default (unmanaged): %s" % (n, err.strip()[:300]))
+                fail("3: %s does not render with krateo.storageBackend unmanaged set: %s" % (n, err.strip()[:300]))
             elif not [d for d in yaml.safe_load_all(out) if isinstance(d, dict)
                       and d.get("kind") in ("Deployment", "StatefulSet") and "volume" in d["metadata"]["name"]]:
-                fail("3: %s at its default (unmanaged) renders no volume workload" % n)
+                fail("3: %s with unmanaged renders no volume workload" % n)
+            count("3")
             for b in backends:
                 rc, out, err = helm_template(c, n + "-gate1234", {"krateo": {"storageBackend": b}})
                 want = REFUSE_NONE if b == "none" else REFUSE_LATER

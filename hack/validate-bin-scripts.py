@@ -26,6 +26,16 @@ toolkit = os.path.join(repo, "charts", "helm-toolkit")
 failures, checked, charts = [], 0, 0
 
 
+# What the umbrella delivers for a chart's storage (#308): cinder's default refuses, so a chart render carries
+# hack/gate_values.py's arguments (nothing for every other chart).
+import importlib.util as _gv_util
+import os as _gv_os
+_gv_spec = _gv_util.spec_from_file_location(
+    "gate_values", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "gate_values.py"))
+gate_values = _gv_util.module_from_spec(_gv_spec)
+_gv_spec.loader.exec_module(gate_values)
+
+
 def bash_n(text):
     r = subprocess.run(["bash", "-n"], input=text, capture_output=True, text=True)
     return r.returncode, r.stderr.strip().replace("\n", " ")[:200]
@@ -52,8 +62,8 @@ with tempfile.TemporaryDirectory() as tmp:
         if "helm-toolkit" in txt and not os.path.isdir(os.path.join(w, "charts", "helm-toolkit")):
             os.makedirs(os.path.join(w, "charts"), exist_ok=True)
             shutil.copytree(toolkit, os.path.join(w, "charts", "helm-toolkit"))
-        r = subprocess.run(["helm", "template", name + "-gate", w, "--namespace", "openstack", "--kube-version", "1.36.0"],
-                           capture_output=True, text=True)
+        r = subprocess.run(["helm", "template", name + "-gate", w, "--namespace", "openstack", "--kube-version", "1.36.0"]
+                           + gate_values.helm_args(w), capture_output=True, text=True)
         if r.returncode != 0:
             failures.append("%s: does not render at defaults: %s" % (name, r.stderr.strip()[:200]))
             continue

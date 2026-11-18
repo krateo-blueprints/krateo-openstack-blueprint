@@ -12,8 +12,13 @@ assertions:
       wiring again, and cinder-volume sits in Init on FailedMount for ceph-etc, the state #196
       was filed for. hack/validate-storage-backend.py renders it.
   - file: values.yaml
-    present: "storageBackend: unmanaged"
+    present: "storageBackend: none"
     why: >-
-      The value the umbrella sets. A re-vendor keeps values overrides, but this key and its
-      template are one fix; if the key goes, the CRD prunes the umbrella's value and every
-      umbrella install renders as unmanaged.
+      The value the umbrella sets, and since #308 step 4 a default that refuses. A re-vendor keeps
+      values overrides, but this key and its template are one fix; if the key goes, the CRD prunes
+      the umbrella's value, and a default of upstream's wiring brings #196 back for a standalone
+      Cinder Composition.
+  - file: templates/krateo-storage-backend.yaml
+    present: .Values.krateo.storageBackend | default "none"
+    why: >-
+      An absent value refuses too; it does not fall back to upstream's wiring.

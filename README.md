@@ -322,8 +322,8 @@ brings up **all 36 components** (needs a large amd64 cluster — see `quickstart
 > old `rbd1` precondition lose that path on purpose: it handed OpenStack the Ceph `client.admin`
 > key, which #308 rules out. `componentValues.cinder.krateo.storageBackend` is refused:
 > `storage.backend` is the one place that says which backend the install has. A standalone
-> `Cinder` Composition keeps upstream's wiring at its own default (`krateo.storageBackend:
-> unmanaged`), with the old precondition.
+> `Cinder` Composition must choose its own `krateo.storageBackend` (see "Upgrading: a standalone
+> Cinder Composition must choose its storage backend").
 
 > **Upgrading an existing `full-strict` install to 0.3.43 or later uninstalls its `cinder`
 > Composition.** From 0.3.43 `cinder` is one of the components `full-strict` leaves out, because
@@ -1306,6 +1306,25 @@ Then set `componentValues.glance.volume.size`, for example `10Gi`.
 | live 2Gi, `size: 10Gi` | 10Gi |
 | live 20Gi, `size: 10Gi` | 20Gi |
 | a size that isn't a quantity | refused |
+
+### Upgrading: a standalone Cinder Composition must choose its storage backend
+
+From #308 step 4, cinder's chart default for `krateo.storageBackend` is `none`, which refuses to render, instead of
+`unmanaged`, upstream's `rbd1` wiring (#196).
+
+- **Through the Openstack Composition: nothing to do.** The umbrella always passes `storage.backend` (`none` by
+  default) and refuses a `componentValues` override, so cinder never renders at its chart default.
+- **A standalone `Cinder` Composition** (created from the Cinder CompositionDefinition, without the umbrella) whose
+  spec does not set `krateo.storageBackend` refuses at its next render after the upgrade, naming the key. Its render
+  fails before any helm upgrade, so the release stays at its previous revision until the spec chooses. Set it
+  **before** upgrading:
+  - `krateo.storageBackend: unmanaged` keeps upstream's wiring exactly: you provide the ConfigMap `ceph-etc` and the
+    Secrets `pvc-ceph-client-key` (which holds Ceph's `client.admin`) and `cinder-volume-rbd-keyring`;
+  - or `krateo.storageBackend: ceph-external` with `krateo.ceph.keyringFrom` and `krateo.ceph.monHostFrom`, each a
+    reference (`store`, `secret`, `key`) to a Secret holding the cinder user's key and the monitors' `mon_host`.
+
+Before this change, such a Composition with no `krateo.storageBackend` rendered upstream's wiring silently, which works
+only when those three objects exist; otherwise cinder-volume waited in `Init` forever.
 
 ### Components follow the umbrella's version
 
