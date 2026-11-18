@@ -119,6 +119,13 @@ spec:
       spec:
         template:
           spec:
+            # The CRD types this as a whole PodSpec, so `containers` is required: without it the API server refuses
+            # the RabbitmqCluster (H2, 2026-11-18). The operator merges this PodSpec into its own strategically
+            # (v2.23.2 internal/resource/statefulset.go patchPodSpec), containers by name, so naming its container
+            # `rabbitmq` with nothing else changes nothing in it. hack/validate-operator-admission.py has the API
+            # server admit what this renders.
+            containers:
+              - name: rabbitmq
             # The same node label as every other control-plane pod (the umbrella's node-label precondition).
             nodeSelector:
               {{ .Values.labels.server.node_selector_key }}: {{ .Values.labels.server.node_selector_value | quote }}

@@ -13,6 +13,33 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **The operator-mode RabbitmqCluster was refused by its CRD (#309 H2).** H2's live test on GKE installed
+  0.3.74-main.g92cd983 with `messaging.backend: operator`. The rabbitmq Composition then stayed Ready=False with
+  `RabbitmqCluster.rabbitmq.com "openstack-mq" is invalid: spec.override.statefulSet.spec.template.spec.containers:
+  Required value`, so no broker was ever created, and every component that waits on messaging waited behind it.
+  - **The cause:** the template's override PodSpec held only a `nodeSelector`. The cluster-operator's CRD types that
+    field as a whole PodSpec, where `containers` is required.
+  - **The fix:** the override lists one container, `rabbitmq`, by name only. The operator merges the override into
+    its own PodSpec strategically, containers by name (v2.23.2 `internal/resource/statefulset.go`, `patchPodSpec`),
+    so the entry changes nothing else. Without any entry the override would marshal `containers: null`, which the
+    merge would read as deleting them; the CRD refuses that case before it can happen.
+  - **Why every gate was green:** `validate-messaging-operator.py` and `validate-messaging-topology.py` render the
+    objects and check this repository's own predicates. Nothing asked the CRD.
+- **The guard: `hack/validate-operator-admission.py`, in a new lint job `operator-admission`.**
+  - **The CRDs:** read from rabbitmq-operator-blueprint at the commit of the operator build H2 runs (e22d03a), with a
+    sha256 per upstream manifest (`hack/operator-crds.yaml`). There is no copy here to drift.
+  - **The objects:** the two messaging gates write every rabbitmq.com object they render from the umbrella's operator
+    spec to `OPERATOR_OBJECTS_DIR`, never one from a mutation. Both gates must pass, and each required kind
+    (RabbitmqCluster, User, Vhost, Permission, Policy) must have at least one object.
+  - **The validator:** a kind cluster serving those CRDs dry-runs every object server-side. The API server validates,
+    not a schema library, which would be a second implementation that disagrees at the edges.
+  - **The controls:** per kind, one admitted object is broken and must be refused: the RabbitmqCluster without its
+    override `containers` (this defect), each other kind without the first field its CRD requires.
+  - **Also:** `validate-messaging-operator.py` asserts the override lists exactly `rabbitmq`, and the rabbitmq
+    divergence entry asserts the three lines.
+  - **Out of scope:** the operators' admission webhooks and what the operators do after admission. The H2 live test
+    covers those.
+
 - **No shell line pipes a producer into `grep -q`.** Under `set -o pipefail`, `producer | grep -q pattern` fails
   when grep exits on its match while the producer still has output to write: the producer takes SIGPIPE (rc 141)
   and pipefail makes that the pipeline's status, so a line that was found reads as missing.
@@ -20,6 +47,9 @@ Curated history; release notes live in GitHub Releases.
     looked for was the third of 24 archive entries, so tar still had most of its listing to write.
   - **Here:** one instance, `hack/smoke-migrate-to-pvc.sh`'s second `migrate prepare`. It now captures the output,
     then matches with `<<<`, and a failing prepare fails as such rather than as "did not recognise".
+  - **Same class, other readers:** `| head` (the GHCR push script's `tar -tzf | head -n1` died 20 of 20 times on a
+    20,001-entry archive) and `| grep -m N`. The guard refuses all three, and refuses a small `printf | grep -q`
+    deliberately: it is safe only while the output fits one pipe write, which a scan cannot know.
   - **The guard:** `hack/validate-no-pipe-into-grep-q.py` (job-hooks) scans every workflow and shell file. It fails
     on scanning nothing, and its self-test must catch four planted forms and pass four safe ones.
 

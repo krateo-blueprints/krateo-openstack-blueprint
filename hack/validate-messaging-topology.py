@@ -54,6 +54,23 @@ if shutil.which("helm") is None:
     print("FAILED MEASUREMENT: helm not on PATH, so nothing was rendered")
     sys.exit(2)
 failures = []
+
+
+# OPERATOR_OBJECTS_DIR: hack/validate-operator-admission.py sets it to collect every rabbitmq.com object this gate
+# renders from the umbrella's operator spec (never from a mutation), for a real API server to admit. Unset, nothing is
+# written and the gate is unchanged.
+EMIT = os.environ.get("OPERATOR_OBJECTS_DIR")
+
+
+def emit(tag, docs):
+    if not EMIT:
+        return
+    objs = [d for d in docs if d and str(d.get("apiVersion", "")).startswith("rabbitmq.com/")]
+    if objs:
+        with open(os.path.join(EMIT, "%s.yaml" % tag), "w") as f:
+            yaml.safe_dump_all(objs, f, default_flow_style=False, sort_keys=False)
+
+
 counts = {}
 
 # What the umbrella delivers for a chart's storage (#308): cinder's default refuses, so a chart render carries
@@ -203,6 +220,7 @@ def main():
             topo_docs = [d for d in docs if d.get("apiVersion", "").startswith("rabbitmq.com/") and d.get("kind") in KINDS]
             for d in topo_docs:
                 rendered_crs.add((d["kind"], d["metadata"]["name"]))
+            emit(chart, topo_docs)
             om = cv["endpoints"]["oslo_messaging"]
             su = chart.replace("_", "-")
             if not runs:
