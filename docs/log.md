@@ -13,6 +13,23 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Render-log bot updates a queued pull request (#387).** Run 44291452478 found bot pull request #384 already in the
+  merge queue, queued by the run before it. GitHub refused the push to its branch (GH006), and the run failed. The
+  entry that run rendered then waited for the next docs/log.d merge, because the bot's own merge starts no run: the
+  paths filter is the loop guard, and it is unchanged.
+  - **The fix:** before pushing to an open bot pull request, `hack/render-log-pr.sh` asks GraphQL whether it is in the
+    queue (`isInMergeQueue`). If it is, the script:
+    - takes it out with `dequeuePullRequest`;
+    - pushes;
+    - waits for the required checks on the new commit;
+    - enqueues it again.
+  - **Queued during the run:** a push refused because the pull request entered the queue after the script looked
+    re-reads the state and takes the same path once. A refused push to a pull request that isn't queued fails, and so
+    does a queue state that can't be read.
+  - **Tests:** `hack/validate-render-log-pr.py` adds three cases: already queued, queued mid-run, and refused while
+    not queued. Its local remote refuses pushes to a queued branch the way GitHub does. Six mutants now run inside the
+    gate, among them no dequeue and enqueue before the checks pass.
+
 - **Render-log bot waits for its checks and merges from a full history (#379 follow-up).** Two failures on the bot's
   merge-queue path:
   - **Read "no checks yet" as a failure.** Run 44280066151 opened #384 at 09:53:05Z and gave up a second later with
@@ -62,6 +79,41 @@ Curated history; release notes live in GitHub Releases.
     the rendered HTML, so a document that names the class in prose counts as one alert. This entry did, and failed;
     it now describes the class instead of naming it. The defect is to be reported to the nova repository, where the
     screen lives.
+
+- **Monitoring (#312, phase 1).** New component `openstack-monitoring`, switched by the umbrella's `monitoring` value.
+  It is explicit opt-in: only `true` turns it on, and the umbrella refuses `true` where alert-provider's CRDs are not
+  served. Unset or false, the render is byte-identical.
+  - **What it scrapes.** An OpenTelemetry collector forwards OTLP to the Krateo observability stack. The endpoint is an
+    input, and nothing in the defaults is cloud-specific. It scrapes:
+    - openstack-exporter 2.0.0-alpha, through its own generated Keystone user;
+    - a standalone mysqld-exporter v0.21.0, whose least-privilege MariaDB user the mariadb chart creates without
+      restarting the database;
+    - RabbitMQ's `/metrics/detailed`.
+  - **Why a plain collector Deployment.** It is a Deployment rather than an `OpenTelemetryCollector` CR because the
+    Krateo stack runs no OpenTelemetry Operator. Its collectors come from the upstream opentelemetry-collector Helm
+    chart.
+  - **Alerts.** They are alert-provider CRs in the release namespace, rendered from one source file. Each has a runbook (see
+    [the runbooks](runbooks/openstack-api-down.md)) and a scrape-down companion. Each metric name is cited at the
+    pinned image's tag.
+  - **The gate.** `hack/validate-openstack-monitoring.py` checks the alerts, the credential readers and the switch, and
+    plants a defect for each check.
+  - **Not yet run on a cluster.**
+
+- **cinder's default refuses; the gates render it as the umbrella delivers it (#308 step 4, #196).**
+  - **The flip:** cinder's chart default for `krateo.storageBackend` is now `none`, which refuses to render, instead
+    of `unmanaged` (upstream's `rbd1` wiring). Through the umbrella nothing changes, since it always passes
+    `storage.backend`. A standalone Cinder Composition must choose: its refusal names the key and the two escapes,
+    `unmanaged` and `ceph-external` (README, "Upgrading: a standalone Cinder Composition must choose its storage
+    backend"). Diego chose this, keeping `unmanaged` as an explicit opt-in.
+  - **Why:** #196 stayed open for a standalone Cinder Composition, which rendered upstream's wiring silently and waited
+    in `Init` forever without hand-provided Ceph objects, including `client.admin`.
+  - **Gates:** the new `hack/gate_values.py` hands a chart that requires block-storage exactly what
+    `storage.backend: ceph-external` adds to its delivered spec, computed from the umbrella's own lines through
+    `hack/umbrella_spec.py`; every other chart gets nothing, so its render is unchanged. The 25 gates that render every
+    chart (measured: all 25 rendered cinder at its default and failed when the default was flipped without it), the HA
+    gate and the image inventory pass it; the inventory is unchanged. A renderer that misses it renders cinder's refusal
+    and fails. `validate-storage-backend` check 3 and the cinder
+    divergence entry assert the new default.
 
 - **A disruption budget for the RabbitmqCluster (#309, H2).** The RabbitMQ cluster-operator renders no
   PodDisruptionBudget, so a node drain could evict two of three brokers and take the quorum queues' majority. In
