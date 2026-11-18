@@ -19,21 +19,7 @@ COMMAND="${@:-start}"
 
 function start () {
   exec neutron-rpc-server \
-        --config-file /etc/neutron/neutron.conf \
-{{- if ( has "ovn" .Values.network.backend ) }}
-        --config-file /tmp/pod-shared/ovn.ini \
-{{- end }}
-{{- if .Values.conf.plugins.taas.taas.enabled }}
-        --config-file /etc/neutron/taas_plugin.ini \
-{{- end }}
-{{- if ( has "sriov" .Values.network.backend ) }}
-        --config-file /etc/neutron/plugins/ml2/sriov_agent.ini \
-{{- end }}
-{{- if .Values.conf.plugins.l2gateway }}
-        --config-file /etc/neutron/l2gw_plugin.ini \
-{{- end }}
-        --config-file /etc/neutron/plugins/ml2/ml2_conf.ini \
-        --config-dir /etc/neutron/neutron.conf.d
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "neutron.config_args.rpc_server" . | fromYamlArray) "format" "shell" "indent" 8) }}
 }
 
 function stop () {

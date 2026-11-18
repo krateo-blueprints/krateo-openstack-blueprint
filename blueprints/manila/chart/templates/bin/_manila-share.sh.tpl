@@ -27,11 +27,4 @@ EOF
 {{- end }}
 
 exec manila-share \
-     --config-file /etc/manila/manila.conf \
-{{- if empty .Values.conf.manila.DEFAULT.host }}
-     --config-file /tmp/manila-share-host.conf \
-{{- end }}
-     --config-dir /etc/manila/manila.conf.d \
-{{- if and ( empty .Values.conf.manila.generic.service_network_host ) ( .Values.pod.use_fqdn.share ) }}
-     --config-file /tmp/pod-shared/manila-share-fqdn.conf
-{{- end }}
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "manila.config_args.share" . | fromYamlArray) "format" "shell" "indent" 5) }}

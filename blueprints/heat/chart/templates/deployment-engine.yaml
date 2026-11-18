@@ -76,7 +76,7 @@ spec:
 {{ tuple $envAll "engine" $mounts_heat_engine_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: heat-engine
-{{ dict "envAll" $envAll "component" "engine" "container" "default" "args" (list "--process" "heat-engine" "--exchange" "heat" "--rpc-topic" "engine") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "engine" "container" "default" "args" (list "--process" "heat-engine" "--exchange" "heat" "--rpc-topic" "engine") "config" (include "heat.config_args.engine" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "heat_engine" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.engine | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "heat" "container" "heat_engine" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}

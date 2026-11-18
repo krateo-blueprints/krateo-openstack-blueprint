@@ -1,0 +1,27 @@
+component: trove
+issue: 231
+reason: >-
+  0.3.74 defect B. The 2026.1 images' oslo.service threading backend and cotyledon rewrite a worker's /proc
+  cmdline into a title, so the worker readiness probe could neither find the program by argv nor read its
+  --config-file arguments from it, and 14 titled workers never became Ready. Each probed program's
+  configuration is now one list, trove.config_args.conductor, trove.config_args.taskmanager in templates/_config-args.tpl, rendered by
+  helm-toolkit.snippets.oslo_config_args into both its start script and its probe. Upstream's scripts carry
+  the arguments literally, so a re-vendor would silently fork the list the probe reads from the one the program
+  starts with (hack/validate-probe-config-args.py would still pass while the two literal copies agreed).
+assertions:
+  - file: templates/bin/_trove-conductor.sh.tpl
+    present: 'include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "trove.config_args.conductor"'
+    why: >-
+      The start script's exec line renders trove.config_args.conductor; a literal argument list here forks the one definition the probe reads too.
+  - file: templates/deployment-conductor.yaml
+    present: '"config" (include "trove.config_args.conductor" $envAll | fromYamlArray)'
+    why: >-
+      The worker readiness probe is given the program's configuration from the same definition its exec line renders.
+  - file: templates/bin/_trove-taskmanager.sh.tpl
+    present: 'include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "trove.config_args.taskmanager"'
+    why: >-
+      The start script's exec line renders trove.config_args.taskmanager; a literal argument list here forks the one definition the probe reads too.
+  - file: templates/deployment-taskmanager.yaml
+    present: '"config" (include "trove.config_args.taskmanager" $envAll | fromYamlArray)'
+    why: >-
+      The worker readiness probe is given the program's configuration from the same definition its exec line renders.

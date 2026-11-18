@@ -59,7 +59,7 @@ spec:
 {{ tuple $envAll "agent" $mounts_cyborg_agent_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: cyborg-agent
-{{ dict "envAll" $envAll "component" "agent" "container" "default" "args" (list "--process" "cyborg-agent" "--exchange" "cyborg" "--rpc-topic" "cyborg-agent") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "agent" "container" "default" "args" (list "--process" "cyborg-agent" "--exchange" "cyborg" "--rpc-topic" "cyborg-agent") "config" (include "cyborg.config_args.agent" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "cyborg_agent" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.agent | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           securityContext:

@@ -10,7 +10,9 @@ So this renders every chart that ships worker-health-probe.py, requires every re
 byte-identical (they come from one helm-toolkit define, and a chart-local edit would fork it),
 writes that text out, and runs hack/tests/health_probe against it: oslo.messaging's real RPC
 server and dispatcher on the in-process driver, the remote error as it crosses RabbitMQ, and the
-/proc reading against real processes and sockets.
+/proc reading against real processes and sockets -- including processes started through oslo.service's
+threading and eventlet backends and cotyledon, whose cmdline setproctitle rewrites into a title as in the
+2026.1 images (test_titled_processes.py; native Linux only, and it fails rather than skips elsewhere).
 
 Fails when no chart renders the script, when the tests cannot import oslo.messaging, and when any
 test is skipped or none ran: a probe test that did not run is not a pass.

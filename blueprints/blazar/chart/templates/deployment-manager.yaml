@@ -60,7 +60,7 @@ spec:
 {{ tuple $envAll "manager" $mounts_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: blazar-manager
-{{ dict "envAll" $envAll "component" "manager" "container" "default" "args" (list "--process" "blazar-manager" "--exchange" "openstack" "--rpc-topic" "blazar.manager" "--rpc-server-default" "0.0.0.0") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "manager" "container" "default" "args" (list "--process" "blazar-manager" "--exchange" "openstack" "--rpc-topic" "blazar.manager" "--rpc-server-default" "0.0.0.0") "config" (include "blazar.config_args.manager" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "blazar_manager" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.manager | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "blazar" "container" "blazar_manager" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
