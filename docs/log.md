@@ -13,33 +13,35 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
-- **Public endpoints over HTTPS through the Gateway API (#311, phase 1).**
-  - **Umbrella `publicEndpoints`:** off by default, and off renders byte-identical. When on, the umbrella renders:
-    - one Gateway (`gatewayClassName`, default `agentgateway`, which Krateo's `features.ingress` installs);
-    - an HTTPRoute per public endpoint of every selected component;
-    - an HTTP-to-HTTPS redirect;
-    - a cert-manager Certificate from `tls.issuerRef`;
-    - an ingress NetworkPolicy set: deny by default, allow the namespace, `nodeCIDRs`, the Gateway proxy, and
-      `allowNamespaces`. The policies select every pod without the label `krateo.io/networkpolicy-exempt`, in block
-      style; the label is an explicit opt-out.
-  - **The components:**
-    - Each public catalog URL becomes `https://<service>.<baseDomain>`, with proxy-header parsing set.
-    - The charts' inert Ingress switches go off (upstream removed those templates in 6ec1132485).
-    - Horizon becomes ClusterIP with Secure cookies.
-    - Routes set HSTS, and overwrite X-Forwarded-Proto with `https`.
-    - Never routed: metadata, RabbitMQ, MariaDB, memcached.
-  - **Refused on a live cluster** without the Gateway API or cert-manager CRDs, and on a missing input.
-  - **The new gate:** `hack/validate-public-endpoints.py` checks:
-    - off equals before;
-    - the routes against what each chart registers;
-    - the deny list, HSTS and redirect, and the policy's exact peers;
-    - the refusals;
-    - every routed chart rendered with the values the umbrella gives it (backend Service, catalog URL, no Ingress,
-      proxy headers, Horizon);
-    - the tables against the charts.
+- **docs/log.md is rendered on main, by a bot pull request.** After #340, every branch still committed a regenerated
+  `docs/log.md`, so merges kept conflicting on it (#322, #320).
+  - **Pull requests:** a pull request now adds its `docs/log.d` entry and nothing else.
+    `hack/validate-log-untouched.py` fails one whose diff touches `docs/log.md`. It makes one exception, for the
+    bot's own pull request, and only when the branch is `bot/render-log-*` and the author is `github-actions[bot]`.
+    The rule is checked case by case first (prefix with a human author, bot author on another branch, a look-alike
+    prefix, another bot). `hack/render-log.py --check` now validates only the entries: names with real dates, front
+    matter, the bullet, links that resolve from `docs/log.d`, and no two entries with the same date and number.
+    CI checks the pull request merged with current main, so a number an entry merged ahead already took fails, and
+    the author takes the next free one.
+  - **Main:** after each merge, `.github/workflows/render-log.yaml` re-renders `docs/log.md`. If it changed,
+    `hack/render-log-pr.sh` commits it as `github-actions[bot]` on `bot/render-log-<sha7>` with `[skip ci]`, opens a
+    pull request and squash-merges it. If a bot pull request is already open, it updates that one with a
+    fast-forward instead. It runs one at a time and commits nothing when the render is unchanged. It's a pull request
+    rather than a push because main's org ruleset requires one and has no bypass actor (Diego, 2026-11-18). It needs
+    "Allow GitHub Actions to create and approve pull requests", which is off for the org and the repo (checked
+    2026-11-18).
+  - **Gate:** `hack/validate-render-log-pr.py` runs the script against a local remote and a stand-in `gh`, in four
+    cases: current, a new entry, a bot pull request already open, and after landing.
 
-    It also runs thirteen mutations, each of which must be reported as the defect it plants.
-  - **Not yet verified on a cluster.** The live checks are in the README. Follow-ups: #325, #326, #327.
+- **neutron's tunnel interface is detected, not assumed.** `network.interface.tunnel` defaulted to `ens4`, a GCE NIC
+  name. On a node without `ens4` the OVS agent's init set no tunnel IP ("Var LOCAL_IP is empty"). The default is now
+  empty, so the init uses the interface of the default route. That logic was already in the script; the `ens4` default
+  had been skipping it.
+  - **Existing installs keep `ens4`.** The old schema default was written into each stored neutron object (#179). It is
+    harmless on GCE, where `ens4` is the right NIC. Elsewhere, clear `componentValues.neutron.network.interface.tunnel`
+    or set it to the node's NIC.
+  - **New gate:** `hack/validate-neutron-tunnel-interface.py` checks the empty default and the schema, and runs the
+    rendered fallback.
 
 - **Images pinned; remediation issues (#316, #328 to #334).**
   - **Dated tags:** Diego decided on 2026-11-17 to pin dated tags and verify their digests in CI. The 31 airshipit
