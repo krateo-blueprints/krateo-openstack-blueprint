@@ -941,6 +941,134 @@
         }
       }
     },
+    "publicEndpoints": {
+      "type": "object",
+      "title": "Public endpoints",
+      "description": "The OpenStack APIs, Horizon and the noVNC console over HTTPS from outside the cluster, through one Gateway API Gateway with an HTTPRoute per public endpoint of a selected component, a cert-manager Certificate and an ingress NetworkPolicy for the namespace (#311). Each component's public catalog endpoint becomes https://<service>.<baseDomain>; Horizon becomes ClusterIP with Secure cookies. Needs a Gateway API implementation and cert-manager (Krateo: features.ingress); refused on a live cluster without their CRDs. Off (the default) changes nothing. README: \"Public endpoints\".",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Render the Gateway, routes, Certificate and NetworkPolicy, and move every selected component's public endpoint to its hostname."
+        },
+        "baseDomain": {
+          "type": "string",
+          "default": "",
+          "description": "Every public hostname is <service>.<baseDomain>, e.g. keystone.cloud.example.com. Required when enabled.",
+          "pattern": "^$|^([a-z0-9]([-a-z0-9]*[a-z0-9])?\\.)+[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "gatewayClassName": {
+          "type": "string",
+          "default": "agentgateway",
+          "minLength": 1,
+          "description": "The GatewayClass of the Gateway API implementation (agentgateway is what Krateo's features.ingress installs)."
+        },
+        "gateway": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "default": "openstack-gateway",
+              "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+              "maxLength": 48,
+              "description": "The Gateway's name; its certificate Secret is <name>-tls and each route <name>-<service>."
+            },
+            "addresses": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Reserved IP addresses for the Gateway, so a rebuild keeps its DNS records valid. Empty: the implementation assigns one."
+            }
+          }
+        },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "issuerRef": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "group": {
+                  "type": "string",
+                  "default": "cert-manager.io"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "ClusterIssuer",
+                    "Issuer"
+                  ],
+                  "default": "ClusterIssuer"
+                },
+                "name": {
+                  "type": "string",
+                  "default": "",
+                  "description": "The cert-manager issuer of the Gateway's certificate, e.g. krateo-selfsigned-ca. Required when enabled."
+                }
+              }
+            }
+          }
+        },
+        "hsts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxAge": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 31536000,
+              "description": "Strict-Transport-Security max-age (seconds) on every HTTPS response."
+            }
+          }
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Deny ingress to the namespace by default; allow the namespace itself, the nodes, the Gateway and allowNamespaces."
+            },
+            "nodeCIDRs": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "The CIDRs of the nodes' own addresses. Required with networkPolicy.enabled: the hostNetwork data-plane pods reach RabbitMQ and the APIs from them."
+            },
+            "allowNamespaces": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Namespaces whose pods may reach this namespace (e.g. the OpenStack KOG operators'). Empty: none."
+            }
+          }
+        },
+        "proxyNamespace": {
+          "type": "string",
+          "default": "",
+          "description": "Where the implementation runs the Gateway's proxy pods (selected by gateway.networking.k8s.io/gateway-name). Empty: the install namespace."
+        }
+      }
+    },
     "compute": {
       "type": [
         "object",

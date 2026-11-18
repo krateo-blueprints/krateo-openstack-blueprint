@@ -675,6 +675,99 @@ The ownership decision is in `templates/_capabilities.tpl`. `hack/validate-capab
 checks it against owned, foreign, absent and partly taken-over objects, and checks that the
 umbrella renders none of them on its own.
 
+## Public endpoints: the APIs and Horizon over HTTPS (#311)
+
+Off by default. Without it, OpenStack is reachable from inside the cluster, plus Horizon on NodePort 31000 over plain
+HTTP; the public catalog URLs point at Services nothing serves. With `publicEndpoints.enabled`, the orchestrator renders
+one Gateway API `Gateway` and an `HTTPRoute` per public endpoint of every selected component, and moves each public
+catalog URL to `https://<service>.<baseDomain>`:
+
+```yaml
+spec:
+  publicEndpoints:
+    enabled: true
+    baseDomain: cloud.example.com          # keystone.cloud.example.com, nova.cloud.example.com, ...
+    tls:
+      issuerRef:
+        name: krateo-selfsigned-ca         # any cert-manager ClusterIssuer (or kind: Issuer)
+    networkPolicy:
+      nodeCIDRs:
+        - 192.168.10.0/24                  # your nodes' address range (example)
+      allowNamespaces:
+        - krateo-system                    # e.g. where the OpenStack KOG operators run
+```
+
+**Prerequisites:** a Gateway API implementation (the CRDs plus a controller for `gatewayClassName`, default
+`agentgateway`) and cert-manager. Krateo's installer brings both with `features.ingress`. On a live cluster the
+orchestrator refuses to render, with the reason on its status, while the Gateway API or cert-manager CRDs are absent.
+Then point DNS for the hostnames, or a wildcard `*.<baseDomain>`, at the Gateway's address
+(`kubectl -n openstack get gateway openstack-gateway`). Krateo's `features.externalDns` does that from the HTTPRoutes.
+Set `gateway.addresses` to a reserved IP so a rebuild keeps the records valid.
+
+Nothing here is specific to a cloud. The class, the issuer, the domain and the node CIDRs are all inputs, and the
+chart renders no load-balancer annotations and assumes no DNS provider. How the Gateway gets an external address
+(a cloud load balancer, MetalLB, or something else) is up to the Gateway API implementation.
+
+**What it renders and changes:**
+
+- **The Gateway** `openstack-gateway`: an HTTPS listener on 443 with the Certificate `openstack-gateway-tls`, and an
+  HTTP listener on 80 that only redirects to HTTPS.
+- **The Certificate:** issued by `tls.issuerRef` for every routed hostname. A private CA (such as Krateo's
+  `krateo-selfsigned-ca`) needs clients to trust it: `export OS_CACERT=ca.crt`, or `openstack --os-cacert ca.crt`. An
+  ACME issuer must be able to validate every hostname. DNS-01 works; an HTTP-01 solver attached to a different Gateway
+  cannot.
+- **One HTTPRoute per public endpoint:** every catalog service a selected chart registers, plus Horizon and the noVNC
+  console proxy. Each route sends to that component's ClusterIP Service. Every response carries
+  `Strict-Transport-Security: max-age=31536000`. Every request gets `X-Forwarded-Proto: https`, overwriting what the
+  client sent, so the services' proxy-header parsing cannot be lied to.
+- **Never routed:** nova-metadata, RabbitMQ (and its management UI), MariaDB, memcached.
+- **Each component's public endpoint** (`endpoints.<type>.host_fqdn_override.public`, scheme `https`, port 443) moves to
+  its hostname. Its `[oslo_middleware] enable_proxy_headers_parsing` is set, so version-discovery links say `https`.
+  Its own Ingress objects are switched off: they were inert, because no controller serves their class. nova's noVNC
+  base URL and glance's CORS origin follow too.
+- **Horizon:** its Service becomes `ClusterIP`, so **NodePort 31000 goes away**. Its cookies become `Secure`, it
+  trusts `X-Forwarded-Proto`, and it accepts CSRF only from `https://horizon.<baseDomain>`.
+- **An ingress NetworkPolicy for the install namespace.** It denies everything by default, then allows:
+  - this namespace;
+  - `nodeCIDRs`. These are required: neutron's agents, nova-compute, libvirt and openvswitch run on the host network,
+    so their traffic arrives from node addresses;
+  - the Gateway's proxy pods, to the routed backends' ports;
+  - the internet, to the proxy pods only;
+  - `allowNamespaces`.
+
+  Nothing else crosses into the namespace. That includes the OpenStack KOG operators, unless you list their
+  namespace. Set `networkPolicy.enabled: false` to leave policy to yourself.
+
+  The policies select every pod that lacks the label `krateo.io/networkpolicy-exempt`. A pod given that label is
+  selected by none of them and is left unrestricted: an explicit, visible opt-out.
+
+**Turning it on for an existing install** changes the values of every component it touches once, so each runs a helm
+upgrade. The ks-endpoints hooks then re-register the public catalog URLs. Anyone using `:31000` must move to
+`https://horizon.<baseDomain>`.
+
+**Not verified on a cluster yet.** `hack/validate-public-endpoints.py` checks the rendered objects and every
+component chart rendered with the values the orchestrator gives it. A release run still has to show:
+
+1. From a machine outside the cluster, `openstack --os-cacert ca.crt --os-auth-url https://keystone.<baseDomain>/v3
+   --os-interface public token issue` succeeds, and `catalog list` shows only `https://...<baseDomain>` public URLs.
+2. One call per routed service also succeeds through its public URL.
+3. `curl -sI https://horizon.<baseDomain>/` shows `Strict-Transport-Security`, `http://` answers 301, and a browser
+   login works with `Secure` cookies.
+4. The NetworkPolicy is enforced. A pod in another namespace connecting to `memcached:11211`, `mariadb:3306`,
+   `rabbitmq:5672` or `keystone-api:5000` **must be refused**. If it connects, the cluster's network plugin is not
+   enforcing NetworkPolicy, and the run fails rather than passes.
+5. A server still boots and gets its address, which shows the node allowance kept the host-network agents working.
+6. The Gateway answers a hostname it does not route, and an internal name such as `keystone-api.openstack.svc`,
+   with 404.
+
+Two consequences to know:
+
+- **In-cluster clients that use the public interface now reach the external hostname, so they need cluster DNS to
+  resolve it and must trust the CA.** heat's own heat client (`clients_heat`, publicURL, as upstream) and castellan's
+  `barbican_endpoint_type` (upstream default `public`, used by nova and cinder for encrypted volumes) are two such
+  clients. Before this they reached a Service with no pods.
+- **Not routed in this release:** Skyline, and nova's spice and serial consoles.
+
 ## Upgrading an existing install
 
 Bumping the blueprint version on a running install is one `kubectl apply` of the new
