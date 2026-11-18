@@ -17,7 +17,10 @@ Krateo (#309 H2b): a component's RabbitMQ user, vhost, permissions and policies 
 resources (rabbitmq.com/v1beta1), for a RabbitmqCluster run by the cluster-operator. It replaces the rabbit-init Job
 when endpoints.oslo_messaging.operator.cluster names the cluster. One source of truth, as #228 wants:
   - the password is the user's generated root, endpoints.oslo_messaging.auth.<serviceName>.passwordFrom, projected
-    with the username into <serviceUser>-rabbitmq-user, which the User imports. The topology operator watches that
+    with the username into <serviceUser>-rabbitmq-topology-user, which the User imports. Not <serviceUser>-rabbitmq-user:
+    that is the name charts give their own connection Secret (secrets.oslo_messaging.<serviceName>, which still renders
+    for its other readers), and helm refuses a release holding two ExternalSecrets of one name (H2 run 2, 2026-11-18),
+    so a projection named like the chart's Secret is refused here. The topology operator watches that
     Secret and re-syncs the password when it changes (its User doc and controller), so a rotated root reaches RabbitMQ
     when the projection refreshes (refreshInterval 1h), with no Job;
   - the vhost is the one rabbit-init declared: endpoints.oslo_messaging.path without its leading slash;
@@ -54,11 +57,16 @@ it). hack/validate-messaging-topology.py renders all of it.
 {{- end }}
 {{- end }}
 {{- $ref := dict "name" $cluster -}}
+{{- $proj := printf "%s-rabbitmq-topology-user" $su -}}
+{{- $chartSecret := index ((($envAll.Values.secrets | default dict).oslo_messaging) | default dict) $serviceName | default "" -}}
+{{- if eq (toString $chartSecret) $proj }}
+{{- fail (printf "secrets.oslo_messaging.%s is %s, the name of the user projection the RabbitMQ topology resources import: one release cannot hold both (helm refuses a duplicate resource), so rename the chart's Secret" $serviceName $proj) }}
+{{- end }}
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: {{ printf "%s-rabbitmq-user" $su }}
+  name: {{ $proj }}
   annotations:
     # Deleted by helm WITH the release, after its pre-delete hooks (#254).
     krateo.io/teardown: with-release
@@ -68,7 +76,7 @@ spec:
     kind: SecretStore
     name: {{ $from.store | quote }}
   target:
-    name: {{ printf "%s-rabbitmq-user" $su }}
+    name: {{ $proj }}
     creationPolicy: Owner
     template:
       type: Opaque
@@ -90,7 +98,7 @@ spec:
   rabbitmqClusterReference:
     name: {{ $cluster | quote }}
   importCredentialsSecret:
-    name: {{ printf "%s-rabbitmq-user" $su }}
+    name: {{ $proj }}
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: Vhost

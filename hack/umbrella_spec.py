@@ -75,3 +75,34 @@ def specs(root, values=None):
         return out
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def selected(root, values=None):
+    """The components the umbrella selects for `values`, as osh.selected returns them (rendered, not inferred). A spec
+    from specs() is delivered only to these: identity selects no ceilometer, and ceilometer's spec for a profile that
+    does not select it has no notification vhosts, which the chart refuses (#281). Raises SpecError like specs()."""
+    chart = os.path.join(root, "blueprints", "openstack", "chart")
+    tmp = tempfile.mkdtemp()
+    try:
+        w = os.path.join(tmp, "umbrella")
+        shutil.copytree(chart, w)
+        cy = os.path.join(w, "Chart.yaml")
+        body = open(cy).read()
+        open(cy, "w").write(body.replace("CHART_VERSION", "0.0.0-gate"))
+        open(os.path.join(w, "templates", "zz-umbrella-selected-probe.yaml"), "w").write(
+            '{{ printf "\\n# UMBRELLASELECTED %s\\n" (include "osh.selected" (list $)) }}\n')
+        vf = os.path.join(tmp, "values.yaml")
+        open(vf, "w").write(yaml.safe_dump(values or {}))
+        r = subprocess.run(["helm", "template", "openstack-gate", w, "--namespace", "openstack", "-f", vf],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            raise SpecError("the umbrella does not render with %s: %s" % (values, r.stderr.strip()[-400:]))
+        for line in r.stdout.splitlines():
+            if line.startswith("# UMBRELLASELECTED"):
+                sel = set(line.split()[2:])
+                if not sel:
+                    raise SpecError("osh.selected returned nothing for %s" % (values,))
+                return sel
+        raise SpecError("the selection probe printed no line for %s" % (values,))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)

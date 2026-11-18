@@ -6,8 +6,8 @@ root, and every pod that waited on the Job waits on them (issue #309, phase H2b)
 
 With messaging.backend operator the umbrella passes endpoints.oslo_messaging.operator.cluster to every component that
 builds a transport URL. helm-toolkit.manifests.rabbitmq_topology then renders, in place of the rabbit-init Job, a User
-(importing <su>-rabbitmq-user, an ExternalSecret projecting the user's generated root), a Vhost (quorum by default,
-retained on deletion), the user's Permission, the administrator's Permission (ceilometer reads other vhosts as the
+(importing <su>-rabbitmq-topology-user, an ExternalSecret projecting the user's generated root), a Vhost (quorum by
+default, retained on deletion), the user's Permission, the administrator's Permission (ceilometer reads other vhosts as the
 administrator, #281) and a Policy per conf.rabbitmq.policies entry without ha-* keys. helm-toolkit.utils.
 dependency_jobs_filter turns every wait on <su>-rabbit-init into waits on those resources being Ready, which the pod's
 ServiceAccount may read (#370).
@@ -16,12 +16,18 @@ ServiceAccount may read (#370).
      RabbitMQ replicas), as hack/validate-messaging-operator.py does.
   2. EACH COMPONENT. Every chart in haTopology.messagingQuorum is rendered with its spec. Where it runs rabbit-init:
        - no rabbit-init Job, and exactly the five resources by name, each referencing the cluster;
-       - the User imports the ExternalSecret <su>-rabbitmq-user, which reads exactly the root the spec passes at
-         endpoints.oslo_messaging.auth.<component>.passwordFrom, with the chart's username;
+       - the User imports the ExternalSecret <su>-rabbitmq-topology-user, which reads exactly the root the spec passes
+         at endpoints.oslo_messaging.auth.<component>.passwordFrom, with the chart's username; it is the one
+         ExternalSecret of that name and the only writer of its Secret;
        - the Vhost is the chart's path, quorum by default, deletionPolicy retain; both Permissions name it, one with the
          User, one with the administrator's username;
        - one Policy per chart policy, none with an ha-* key, message-ttl kept, names DNS-1123.
      Where it does not (keystone and glance ship rabbit-init off): no topology resource, and no pod waits on one.
+     In every chart: no two rendered resources share an identity (group, kind, namespace, name). helm install refuses
+     such a release and helm template does not, so before H2 run 2 the topology projection and the chart's own
+     connection Secret, both ExternalSecret <svc>-rabbitmq-user, passed here and failed on GKE.
+     2b: rabbit-init switched off renders and waits on nothing. 2c: a chart whose secrets.oslo_messaging.<svc> is named
+     like the projection must refuse to render.
   3. THE WAITS. In every rendered pod: no Job wait named *-rabbit-init; every custom-resource wait is on a Ready
      condition and granted to the pod's ServiceAccount; every rabbit-init the chart-mode render waited on is replaced
      by its four waits; and every resource any pod waits on is rendered by some component.
@@ -60,6 +66,19 @@ failures = []
 # renders from the umbrella's operator spec (never from a mutation), for a real API server to admit. Unset, nothing is
 # written and the gate is unchanged.
 EMIT = os.environ.get("OPERATOR_OBJECTS_DIR")
+
+
+def _load(name):
+    import importlib.util as _u
+    _s = _u.spec_from_file_location(name, os.path.join(ROOT, "hack", name + ".py"))
+    _m = _u.module_from_spec(_s)
+    _s.loader.exec_module(_m)
+    return _m
+
+
+# render_identity (H2 run 2): every render this gate makes from the umbrella's operator spec must hold no two resources
+# of one identity, which helm template accepts and helm install refuses.
+LEDGER = _load("render_identity").Ledger(os.path.basename(__file__))
 
 
 def emit(tag, docs):
@@ -221,6 +240,11 @@ def main():
             for d in topo_docs:
                 rendered_crs.add((d["kind"], d["metadata"]["name"]))
             emit(chart, topo_docs)
+            # helm install refuses a release holding two resources of one identity ("rendered manifest contains
+            # duplicate resource"); helm template does not, so this gate must (H2 run 2: the topology projection and
+            # the chart's own connection Secret were both ExternalSecret <svc>-rabbitmq-user).
+            LEDGER.control(docs)
+            LEDGER.check("%s (operator mode)" % chart, docs)
             om = cv["endpoints"]["oslo_messaging"]
             su = chart.replace("_", "-")
             if not runs:
@@ -250,8 +274,14 @@ def main():
                 if u:
                     es_name = (u["spec"].get("importCredentialsSecret") or {}).get("name")
                     es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == es_name]
+                    owners = [d["metadata"]["name"] for d in docs if d.get("kind") == "ExternalSecret"
+                              and ((d.get("spec") or {}).get("target") or {}).get("name") == es_name] + \
+                             [d["metadata"]["name"] for d in docs if d.get("kind") == "Secret" and d["metadata"]["name"] == es_name]
                     if not es:
                         fail("2: %s's User imports %r, which the chart does not render" % (chart, es_name))
+                    elif len(es) != 1 or owners != [es_name]:
+                        fail("2: %s's User imports %r, which %d ExternalSecret(s) render and %s write: one projection, "
+                             "one owner of its Secret" % (chart, es_name, len(es), owners))
                     else:
                         refs = [(x["remoteRef"]["key"], x["remoteRef"]["property"]) for x in es[0]["spec"]["data"]]
                         data = es[0]["spec"]["target"]["template"]["data"]
@@ -336,6 +366,17 @@ def main():
                 fail("2b: nova with job_rabbit_init off renders %s and waits on %s" % (stray, bad[:3]))
             if not waits(ndocs):
                 fail("2b: nova with job_rabbit_init off renders no pod with dependencies; nothing was checked")
+        # 2c. A chart whose own connection Secret is named like the topology projection must refuse to render: one
+        # release cannot hold both, and helm would refuse it only at install, past every gate.
+        heat_spec = json.loads(json.dumps(specs.get("heat") or {}))
+        heat_spec.setdefault("secrets", {}).setdefault("oslo_messaging", {})["heat"] = "heat-rabbitmq-topology-user"
+        rc, out, err = helm_template(stage(os.path.join(BP, "heat", "chart"), tmp, "heat-2c"), "heat", heat_spec)
+        if rc == 0:
+            fail("2c: heat renders with secrets.oslo_messaging.heat named like its topology projection; it must refuse")
+        elif "the name of the user projection" not in err:
+            fail("2c: heat with a colliding secrets.oslo_messaging.heat fails for another reason: %s" % err.strip()[:200])
+        else:
+            counts["2c"] = True
         for chart, wl, kind, name in waited:
             if (kind, name) not in rendered_crs:
                 fail("3: %s %s waits on %s %s, which no component renders" % (chart, wl, kind, name))
@@ -352,16 +393,18 @@ def main():
 
 
 def report():
-    for k in ("1", "2", "3", "4"):
+    for k in ("1", "2", "2c", "3", "4"):
         if not counts.get(k):
             fail("part %s checked nothing" % k)
+    for f in LEDGER.report():
+        fail("identity: " + f)
     if failures:
         for f in failures:
             print("FAIL: " + f)
         sys.exit(1)
     print("OK: operator mode: %d component(s) render their user, vhost, permissions and policies as topology resources "
           "from their roots; %d custom-resource wait(s) replace rabbit-init, each Ready-conditioned, granted and "
-          "rendered; chart mode unchanged" % (counts["2"], counts["3"]))
+          "rendered; chart mode unchanged; identity: %s" % (counts["2"], counts["3"], LEDGER.summary()))
     sys.exit(0)
 
 
