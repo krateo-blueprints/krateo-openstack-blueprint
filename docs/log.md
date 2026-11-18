@@ -13,6 +13,12 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **A disruption budget for the RabbitmqCluster (#309, H2).** The RabbitMQ cluster-operator renders no
+  PodDisruptionBudget, so a node drain could evict two of three brokers and take the quorum queues' majority. In
+  operator mode with more than one replica, the rabbitmq chart now renders one: `maxUnavailable: 1` on the cluster's
+  pods. A single broker gets none, because there a budget would only block drains. `hack/validate-messaging-operator.py`
+  checks both.
+
 - **RabbitMQ users and vhosts as topology-operator resources (#309, H2b).** With `messaging.backend: operator`,
   helm-toolkit renders each component's rabbit-init as messaging-topology-operator resources instead of a Job:
   - **User:** imports `<su>-rabbitmq-user`, an ExternalSecret projecting the user's generated root. The operator
