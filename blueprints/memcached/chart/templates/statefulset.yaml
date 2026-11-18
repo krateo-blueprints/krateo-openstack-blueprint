@@ -28,13 +28,21 @@ tcpSocket:
 
 {{- $rcControllerName := printf "%s-%s" $envAll.deployment_name "memcached" }}
 {{- $configMapBinName := printf "%s-%s" $envAll.deployment_name "memcached-bin" }}
+{{- /* Krateo (#309): with manifests.service_discovery, the StatefulSet <hosts.default>-ha governed by the headless
+       Service hosts.discovery, so every pod has a DNS name the clients list. A new name, because serviceName is immutable. */}}
+{{- $stsName := $rcControllerName }}
+{{- $governing := tuple "oslo_cache" "internal" . | include "helm-toolkit.endpoints.hostname_short_endpoint_lookup" }}
+{{- if .Values.manifests.service_discovery }}
+{{- $stsName = printf "%s-ha" .Values.endpoints.oslo_cache.hosts.default }}
+{{- $governing = tuple "oslo_cache" "discovery" . | include "helm-toolkit.endpoints.hostname_short_endpoint_lookup" }}
+{{- end }}
 
 {{ tuple $envAll "memcached" $rcControllerName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ $rcControllerName | quote }}
+  name: {{ $stsName | quote }}
   annotations:
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
@@ -42,7 +50,7 @@ metadata:
 spec:
   podManagementPolicy: Parallel
   replicas: {{ .Values.pod.replicas.server }}
-  serviceName: "{{ tuple "oslo_cache" "internal" . | include "helm-toolkit.endpoints.hostname_short_endpoint_lookup" }}"
+  serviceName: "{{ $governing }}"
   selector:
     matchLabels:
 {{ tuple $envAll "memcached" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}

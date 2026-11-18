@@ -1,0 +1,19 @@
+component: cinder
+issue: 196
+reason: >-
+  Upstream's only shipped volume backend is Ceph RBD, and with no Ceph cinder-volume waits in
+  Init forever on objects nothing creates. Under the umbrella, cinder renders only with a
+  backend the umbrella's storage.backend names, and refuses otherwise, naming the value.
+assertions:
+  - file: templates/krateo-storage-backend.yaml
+    present: eq $backend "none"
+    why: >-
+      The refusal. Without it, an install with storage.backend none renders upstream's rbd1
+      wiring again, and cinder-volume sits in Init on FailedMount for ceph-etc, the state #196
+      was filed for. hack/validate-storage-backend.py renders it.
+  - file: values.yaml
+    present: "storageBackend: unmanaged"
+    why: >-
+      The value the umbrella sets. A re-vendor keeps values overrides, but this key and its
+      template are one fix; if the key goes, the CRD prunes the umbrella's value and every
+      umbrella install renders as unmanaged.

@@ -73,6 +73,8 @@ endpoints:
       default: null
     hosts:
       default: memcached
+      # Krateo (#309): the headless Service that names each replica, rendered with manifests.service_discovery.
+      discovery: memcached-discovery
     namespace: null
     port:
       memcache:
@@ -99,6 +101,12 @@ manifests:
   network_policy: false
   secret_registry: true
   service: true
+  # Krateo (#309), off by default: the umbrella turns it on with ha.enabled. On, the replicas run as the StatefulSet
+  # <hosts.default>-ha (memcached-ha) governed by the headless Service hosts.discovery, so each pod has its own DNS name
+  # and every client lists them all and hashes a key to the same replica; the ClusterIP Service drops ClientIP affinity,
+  # which pinned each client to one replica. A new StatefulSet name, because serviceName is immutable: the cache is
+  # empty after the switch, nothing else is lost. With more than one replica a PodDisruptionBudget allows one disruption.
+  service_discovery: false
   statefulset: true
 memcached:
   extraContainers: []
@@ -121,6 +129,10 @@ pod:
       weight:
         default: 10
   lifecycle:
+    # Krateo (#309): rendered only with more than one replica (pdb-memcached.yaml).
+    disruption_budget:
+      memcached:
+        max_unavailable: 1
     termination_grace_period:
       memcached:
         timeout: 30

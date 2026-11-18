@@ -20,20 +20,22 @@ preconditions:
   - component: cinder
     capability: block-storage
     requires: >-
-      A block-storage backend, named by the Openstack Composition's storage.backend. Only `none`
-      exists in this release: the Ceph backends (ceph-rook, ceph-external) are designed in #308 and
-      refused until they ship, so cinder cannot be installed through the umbrella yet. A standalone
-      Cinder Composition at its own default (krateo.storageBackend: unmanaged) still renders
-      upstream's rbd1 backend, which needs a Ceph cluster plus the ConfigMap ceph-etc and the Secrets
-      pvc-ceph-client-key and cinder-volume-rbd-keyring in its namespace.
+      A block-storage backend, named by the Openstack Composition's storage.backend: ceph-rook (a Ceph run by Rook) or
+      ceph-external (an existing Ceph), configured under storage.ceph (#308). On Ceph's side -- Rook CephBlockPool and
+      CephClient resources, or the Ceph admin -- the pool storage.ceph.pools.volumes and the user
+      client.<storage.ceph.clients.cinder> with `profile rbd` on that pool must exist, and the Secrets holding the user's
+      key and mon_host must be readable by the umbrella's copy store (in another namespace, its owner grants the
+      ServiceAccount <credentials.store>-ceph-reader get on exactly those Secrets; see the README). No client.admin key
+      is used. A standalone Cinder Composition at its own default (krateo.storageBackend: unmanaged) still renders
+      upstream's rbd1 backend, with its ceph-etc, pvc-ceph-client-key and cinder-volume-rbd-keyring precondition.
     symptom: >-
-      With storage.backend none, profile full-strict leaves cinder out, and a cinder selected anyway
-      (profile full, or enabled:) does not install: its Composition reports the render error "cinder
-      needs a volume backend, and storage.backend is none (#196)". Before the #196 fix the same install sat
-      in Init forever instead: cinder-storage-init and cinder-volume on FailedMount for ceph-etc and
-      the keyring Secret, and storage-init holding the release in pending-install (measured on #179
-      and on a cold 0.3.42 install, #204).
-    check: kubectl get openstack -A -o custom-columns=NAME:.metadata.name,BACKEND:.spec.storage.backend
+      With storage.backend none, profile full-strict leaves cinder out, and a cinder selected anyway (profile full, or
+      enabled:) does not install: its Composition reports the render error "cinder needs a volume backend, and
+      storage.backend is none (#196)". With a ceph backend whose read grant is missing, the Openstack Composition
+      refuses to render, naming the namespace, the ServiceAccount and the Secrets to grant; while a source Secret is
+      missing, cinder is held in openstack-install-pending; and cinder-storage-init fails with "client.<user> cannot list
+      pool <pool>" when the pool or the user's caps are missing. Before the #196 fix the same install sat in Init forever on FailedMount for ceph-etc (#179, #204).
+    check: kubectl get externalsecret openstack-credential-ceph-client-cinder openstack-credential-ceph-mon-host
     issue: 196
   - component: ironic
     capability: pxe-interface
