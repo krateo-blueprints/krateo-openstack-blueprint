@@ -18,8 +18,9 @@ Two checks, one per half of that mechanism:
 
   (a) No values.schema.json in the repo may carry a release-stamped placeholder in a `default`.
       A stamped default is frozen into every object at create time, so it can never be a version
-      that has to change on upgrade. The placeholders are read out of release-tag.yaml's own
-      `sed` stamps rather than listed here, so a new placeholder cannot slip past.
+      that has to change on upgrade. The placeholders are read out of the release's own `sed`
+      stamps (release-tag.yaml and the hack/*.sh it runs) rather than listed here, so a new
+      placeholder cannot slip past.
 
   (b) Render the umbrella as release X with values that a Composition born at an OLDER release
       carries: the older release's stamped schema defaults, plus the stale `chartVersion` that
@@ -61,10 +62,22 @@ def measurement_failed(msg):
 
 
 def stamped_placeholders():
-    """Every placeholder release-tag.yaml substitutes, read from its `sed -i "s/NAME/${...}/g"`."""
+    """Every placeholder the release substitutes, read from its `sed ... "s/NAME/${...}/g"`.
+
+    Read from release-tag.yaml AND every hack/*.sh it runs: since 2026-11-17 the stamping lives in
+    hack/publish-charts.sh and hack/stage-release-assets.sh, shared with prerelease.yaml, and the
+    workflow only calls them. Reading the workflow alone would now find no stamp and fail, or, had
+    one stamp stayed inline, silently miss every placeholder the scripts add."""
     if not os.path.isfile(RELEASE):
         measurement_failed(f"no release workflow at {RELEASE}")
-    names = set(re.findall(r's/([A-Z][A-Z0-9_]+)/\$\{', open(RELEASE).read()))
+    workflow = open(RELEASE).read()
+    texts = [workflow]
+    for rel in sorted(set(re.findall(r"\bhack/[\w.-]+\.sh\b", workflow))):
+        path = os.path.join(ROOT, rel)
+        if not os.path.isfile(path):
+            measurement_failed(f"release-tag.yaml runs {rel}, which does not exist")
+        texts.append(open(path).read())
+    names = set(re.findall(r's/([A-Z][A-Z0-9_]+)/\$\{', "\n".join(texts)))
     if not names:
         measurement_failed("release-tag.yaml stamps no placeholder this gate can recognise; "
                            "the stamp syntax changed, so update the pattern rather than pass")

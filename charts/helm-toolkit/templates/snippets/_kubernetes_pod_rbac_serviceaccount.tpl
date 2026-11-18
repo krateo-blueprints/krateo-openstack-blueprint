@@ -71,4 +71,55 @@ imagePullSecrets:
 {{- $resourceList := (splitList "," (trimSuffix "," $vv)) }}
 {{- tuple $envAll $resourceList $ns $saName $saNamespace | include "helm-toolkit.snippets.kubernetes_pod_rbac_roles" }}
 {{- end -}}
+{{- /* Krateo (#309): kubernetes-entrypoint waits on custom resources (dependencies custom_resources, matched by fields
+       or by status.conditions) by reading each one with a named GET, after discovering its group/version. The Roles
+       above cover only core, batch, apps and discovery resources, so without this every such wait is Forbidden and
+       the pod stays in Init. Each entry names its `resource` plural (kubernetes-entrypoint ignores the extra key);
+       the Role grants get on exactly that object, in the release namespace where the init container looks it up.
+       hack/validate-custom-resource-wait-rbac.py renders this. */}}
+{{- $crRules := list }}
+{{- range $cr := ($deps.custom_resources | default list) }}
+{{- $parts := splitList "/" ($cr.apiVersion | default "" | toString) }}
+{{- if or (ne (len $parts) 2) (not (index $parts 0)) }}
+{{- fail (printf "dependencies custom_resources entry %q (kind %v): apiVersion %q must be <group>/<version>; kubernetes-entrypoint reads custom resources only (#309)" ($cr.name | default "") $cr.kind ($cr.apiVersion | default "")) }}
+{{- end }}
+{{- if not $cr.resource }}
+{{- fail (printf "dependencies custom_resources entry %q (%s %v) needs `resource`, its plural (e.g. users), so the Role can grant kubernetes-entrypoint get on it; without it the wait is Forbidden and the pod never leaves Init (#309)" ($cr.name | default "") $cr.apiVersion $cr.kind) }}
+{{- end }}
+{{- $crRules = append $crRules (dict "group" (index $parts 0) "resource" ($cr.resource | toString) "name" ($cr.name | toString)) }}
+{{- end }}
+{{- if $crRules }}
+{{- $crRole := printf "%s-%s-%s-custom-resources" $envAll.Release.Name $saNamespace ($saName | replace "_" "-") }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $crRole }}
+  namespace: {{ $envAll.Release.Namespace }}
+rules:
+{{- range $r := $crRules }}
+  - apiGroups:
+      - {{ $r.group | quote }}
+    resources:
+      - {{ $r.resource | quote }}
+    resourceNames:
+      - {{ $r.name | quote }}
+    verbs:
+      - get
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $crRole }}
+  namespace: {{ $envAll.Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $crRole }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ $saNamespace }}
+{{- end }}
 {{- end -}}

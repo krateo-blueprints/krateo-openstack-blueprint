@@ -1457,9 +1457,9 @@ images:
     - ks_service
     - ks_user
   - chart: mariadb
-    rendered: every-manifest-on
+    rendered: defaults
     keys:
-    - ks_user
+    - hook_cleanup
     - prometheus_mysql_exporter_helm_tests
   - chart: masakari
     rendered: defaults
@@ -1764,7 +1764,6 @@ images:
     keys:
     - trove_api
     - trove_conductor
-    - trove_db_purge
     - trove_db_sync
     - trove_taskmanager
   registry_facts:

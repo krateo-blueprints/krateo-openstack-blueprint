@@ -158,6 +158,28 @@
       "description": "Deep-merged into the chart's `forceBoot` values.",
       "x-kubernetes-preserve-unknown-fields": true
     },
+    "operator": {
+      "type": "object",
+      "title": "RabbitMQ cluster-operator mode (#309)",
+      "description": "enabled renders a RabbitmqCluster (krateo-blueprints/rabbitmq-operator-blueprint) instead of the chart's StatefulSet, with the administrator from the generated root. Set by the umbrella's messaging.backend: operator, for fresh installs only.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "image": {
+          "type": "string"
+        },
+        "storage": {
+          "type": "string",
+          "pattern": "^[0-9]+(Mi|Gi|Ti)$"
+        }
+      }
+    },
     "global": {
       "type": "object",
       "title": "global",

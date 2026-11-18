@@ -700,7 +700,8 @@ def mutations(r):
                      '        secrets-etc-exporter-hash: {{ tuple "exporter-secrets-etc.yaml" . | include "helm-toolkit.utils.hash" }}\n'
                      '        exporter-user-hash: {{ tuple "secret-exporter-user.yaml" . | include "helm-toolkit.utils.hash" }}')),
         ("the root renders with monitoring off", part_switch,
-         lambda: sub(P(umb, "templates", "credentials.yaml"), "{{- if or (not $i.monitoring) $monitoring }}", "{{- if true }}")),
+         lambda: sub(P(umb, "templates", "credentials.yaml"),
+                     "{{- if and (not $i.source) (or (not $i.monitoring) $monitoring) }}", "{{- if not $i.source }}")),
         ("mariadb gets exporterUser with monitoring off", part_switch,
          lambda: sub(P(umb, "templates", "compositions.yaml"),
                      '{{- if include "osh.monitoringOn" (list $) }}\n{{- if eq $c.name "mariadb" }}',

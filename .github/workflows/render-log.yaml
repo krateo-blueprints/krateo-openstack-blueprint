@@ -2,12 +2,18 @@
 #
 # Pull requests never touch docs/log.md (hack/validate-log-untouched.py fails one that does); they add a docs/log.d
 # entry, so branches in flight stop conflicting on it. main's org ruleset requires a pull request and has no bypass
-# actor, so this cannot push to main: hack/render-log-pr.sh commits the render on bot/render-log-<sha7> as
-# github-actions[bot], opens a pull request and squash-merges it, or updates the one already open (Diego,
+# actor, so this cannot push to main: hack/render-log-pr.sh commits the render on bot/render-log-<sha7> as the
+# render-log App's bot account, opens a pull request and squash-merges it, or updates the one already open (Diego,
 # 2026-11-18). It commits nothing when the render is unchanged.
 #
-# It cannot loop: events made with GITHUB_TOKEN start no workflow, the commit says [skip ci], and this runs only when
-# docs/log.d or the renderer changes, which the bot's commit (docs/log.md alone) never does.
+# It acts with a GitHub App token, not GITHUB_TOKEN (Diego, 2026-11-18): GitHub starts no workflow for a GITHUB_TOKEN
+# event, so the first bot render commit on main (d1cb62b) got no lint run, while prerelease and release-tag require a
+# green lint on the exact commit. App-token events start workflows, so the bot's pull request and merge commit are
+# linted like any other. The App is created as docs/release.md says; this refuses to run without its secrets.
+#
+# It cannot loop: the bot's commit changes docs/log.md alone, and this runs only when docs/log.d or the renderer
+# changes (hack/validate-render-log-pr.py asserts both). No skip marker is used: GitHub honours one anywhere in a
+# commit message, and #347's squash message quoting it skipped every push workflow on main, lint included.
 name: render-log
 
 on:
@@ -18,8 +24,10 @@ on:
       - docs/log.d/**
       - hack/render-log.py
       - hack/render-log-pr.sh
+      - hack/render-log-app.yaml
   workflow_dispatch:
 
+# GITHUB_TOKEN writes nothing: the push, the pull request and the merge use the App's token.
 permissions:
   contents: read
 
@@ -32,17 +40,35 @@ concurrency:
 jobs:
   render:
     runs-on: ubuntu-latest
-    # Write access here only: the branch push, and opening and merging the bot pull request.
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
+      - name: Refuse without the render-log App's secrets
+        env:
+          CLIENT_ID: ${{ secrets.RENDER_LOG_APP_CLIENT_ID }}
+          PRIVATE_KEY: ${{ secrets.RENDER_LOG_APP_PRIVATE_KEY }}
+        run: |
+          if [ -z "$CLIENT_ID" ] || [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::RENDER_LOG_APP_CLIENT_ID and RENDER_LOG_APP_PRIVATE_KEY must be set (docs/release.md):" \
+              "without the App's token docs/log.md is not rendered, and a GITHUB_TOKEN merge would go unlinted."
+            exit 1
+          fi
+
+      - name: Mint the render-log App's token
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.RENDER_LOG_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RENDER_LOG_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
           ref: main
+          token: ${{ steps.app.outputs.token }}
 
       - name: Render docs/log.md and land it through a bot pull request if it changed
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
         run: bash hack/render-log-pr.sh .

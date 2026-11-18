@@ -34,16 +34,43 @@ ambiguous; CI checks the pull request merged with current main, so this fires wh
 number), when an entry lacks the front matter or does not start with "- **",
 when a relative link in an entry does not resolve from docs/log.d (and so would not after rebasing), and when there is
 no entry at all (no input is not a pass). It does not read docs/log.md, which on a pull request is main's.
+
+Arguments are parsed strictly, BEFORE anything is read or written: an unknown flag (a typo such as --chek, or --help
+read as "not a check"), two roots, or both modes at once are refused, and so is a root that is not an existing
+directory holding docs/log.d. The parser used to drop every argument starting with "--" that it did not know and
+fall through to WRITE mode, so `render-log.py --help` rewrote docs/log.md in the working tree, and a pull request
+must never carry that file (hack/validate-log-untouched.py). hack/validate-render-log-args.py checks each refusal
+writes nothing.
 """
+import argparse
 import datetime
 import difflib
 import os
 import re
 import sys
 
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
-FLAGS = {a for a in sys.argv[1:] if a.startswith("--")}
-ROOT = os.path.abspath(args[0] if args else ".")
+
+def parse_args(argv):
+    ap = argparse.ArgumentParser(
+        prog="hack/render-log.py",
+        description="Render docs/log.md from docs/log.d/ (write mode, the default), or validate docs/log.d.")
+    ap.add_argument("root", nargs="?", default=".",
+                    help="the repository root: an existing directory holding docs/log.d (default: .)")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true",
+                      help="validate docs/log.d alone and write nothing (the pull-request gate)")
+    mode.add_argument("--check-rendered", action="store_true",
+                      help="also fail if docs/log.md is not the render; write nothing")
+    a = ap.parse_args(argv)
+    root = os.path.abspath(a.root)
+    if not os.path.isdir(root):
+        ap.error("root %r is not an existing directory" % a.root)
+    if not os.path.isdir(os.path.join(root, "docs", "log.d")):
+        ap.error("root %r holds no docs/log.d, so it is not this repository" % a.root)
+    return root, a
+
+
+ROOT, ARGS = parse_args(sys.argv[1:]) if __name__ == "__main__" else (os.path.abspath("."), None)
 DOCS = os.path.join(ROOT, "docs")
 LOGD = os.path.join(DOCS, "log.d")
 OUT = os.path.join(DOCS, "log.md")
@@ -153,10 +180,10 @@ def main():
             print("FAIL: " + p)
         return 1
     n = len([f for f in os.listdir(LOGD) if f not in FIXED])
-    if "--check" in FLAGS:
+    if ARGS.check:
         print("OK: %d docs/log.d entries are well formed and render (docs/log.md is rendered on main, not here)" % n)
         return 0
-    if "--check-rendered" in FLAGS:
+    if ARGS.check_rendered:
         have = open(OUT).read() if os.path.exists(OUT) else ""
         if have != out:
             print("FAIL: docs/log.md is not what docs/log.d renders")

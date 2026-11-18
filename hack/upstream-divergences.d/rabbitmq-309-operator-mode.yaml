@@ -1,0 +1,19 @@
+component: rabbitmq
+issue: 309
+reason: >-
+  With operator.enabled (the umbrella's messaging.backend operator) the broker is a RabbitmqCluster run by the RabbitMQ
+  cluster-operator, and every chart-mode object is off. Upstream has no such mode. Off, the chart renders as upstream's.
+assertions:
+  - file: templates/rabbitmqcluster.yaml
+    present: "kind: RabbitmqCluster"
+    why: >-
+      The broker in operator mode. hack/validate-messaging-operator.py renders it, its refusals (no CRD, an existing
+      chart-mode StatefulSet) and the absence of every chart-mode object.
+  - file: templates/statefulset.yaml
+    present: include "rabbitmq.chart_mode" .
+    why: >-
+      Without the guard, operator mode would render the chart's StatefulSet next to the RabbitmqCluster: two brokers,
+      and the clients listing only one of them.
+  - file: templates/_operator.tpl
+    present: define "rabbitmq.chart_mode"
+    why: The switch every chart-mode template guards on.

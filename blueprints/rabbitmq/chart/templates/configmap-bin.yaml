@@ -18,7 +18,7 @@ limitations under the License.
 {{- $_ := set . "deployment_name" .Release.Name }}
 {{- end }}
 
-{{- if .Values.manifests.configmap_bin }}
+{{- if and (.Values.manifests.configmap_bin) (include "rabbitmq.chart_mode" .) }}
 {{- $envAll := . }}
 ---
 apiVersion: v1

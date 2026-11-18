@@ -24,7 +24,7 @@ The gate has two halves, because one cannot do the job.
 HALF A -- the UDP_ONLY registry, below. Whether a daemon is UDP-only is a property of the
 application's source code, not of anything in the chart, so no rule over the chart can derive it.
 The registry is where that evidence lives: each entry names the image it was measured in and the
-source lines that settle it, the same way hack/upstream-divergences.yaml holds the reasoning for a
+source lines that settle it, the same way hack/upstream-divergences.d holds the reasoning for a
 divergence. For each entry this asserts the ServicePort is UDP, the container's port is UDP, the
 two actually resolve to each other, the Service selects the workload, no TCP port is advertised on
 the same number, and no probe on that container tries to connect to it -- a tcpSocket or httpGet

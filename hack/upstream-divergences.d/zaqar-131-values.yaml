@@ -1,0 +1,28 @@
+component: zaqar
+issue: 131
+reason: >-
+  Upstream hardcodes zaqar's message-store uri as `redis://redis:6379` in values and
+  declares no endpoint and no dependency wait for it, so the host it names is written in
+  exactly one place and in no place a kubernetes-entrypoint wait can read. Until #131 this
+  blueprint shipped no redis component at all, so that host did not resolve -- the same
+  defect as gnocchi's postgresql indexer in #115.
+assertions:
+  - file: values.yaml
+    absent: redis://redis:6379
+    why: >-
+      The hardcoded uri. endpoints.message_store is now the single value that both the
+      rendered uri and the api pod's wait on the redis Service resolve from; restoring the
+      literal makes them two values that can disagree, and the config-closure gate would
+      still pass because the scheme it checks is unchanged.
+  - file: values.yaml
+    present: "service: message_store"
+    why: >-
+      The kubernetes-entrypoint wait that makes a STANDALONE Zaqar Composition order itself
+      behind redis. The umbrella's creation gate covers the orchestrated case; nothing
+      covers the standalone one but this.
+  - file: templates/configmap-etc.yaml
+    present: "drivers:message_store:redis"
+    why: >-
+      Derives the uri from endpoints.message_store, exactly as the block above it derives
+      the management store's uri from endpoints.oslo_db. Without it the uri renders empty
+      and zaqar's redis driver gets no host at all.

@@ -13,6 +13,287 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **RabbitMQ cluster-operator mode for fresh installs (#309, H2b).** `messaging.backend: operator`, opt-in, with
+  `chart` the default.
+  - **The broker:** a RabbitmqCluster `openstack-mq`, run by the cluster-operator from
+    krateo-blueprints/rabbitmq-operator-blueprint. The image is pinned to `rabbitmq:4.3.4-management`, the replicas come
+    from the one existing source, and persistence uses the default StorageClass unless set.
+  - **Credentials:** the administrator comes from the generated root, through `secretBackend.externalSecret`. The
+    rabbitmq chart renders nothing of chart mode.
+  - **Refusals:** the chart refuses a cluster that doesn't serve `rabbitmqclusters.rabbitmq.com`, and an install
+    already running the chart-mode broker; migrating one is H2c.
+  - **Clients:** every component that lists RabbitMQ hosts lists the cluster's pods
+    (`openstack-mq-server-N.openstack-mq-nodes`); watcher lists the headless Service.
+  - **Quorum queues:** every component that builds a transport URL gets them (`rabbit_quorum_queue`,
+    `rabbit_transient_quorum_queue`, `use_queue_manager`, `rabbit_stream_fanout`, prefetch 1, `rabbit_ha_queues`
+    false), because RabbitMQ 4.x refuses the classic transient queues. Their rabbit-init policies lose the `ha-*`
+    keys 4.x refuses and keep `message-ttl`.
+  - **Overrides refused:** a per-component `rabbit_ha_queues: true` or statefulset override.
+  - **Chart mode:** every render is unchanged.
+  - **New gate:** `hack/validate-messaging-operator.py`.
+
+- **Custom-resource waits may read their resource (#309).** helm-toolkit's `kubernetes_pod_rbac_serviceaccount` now
+  renders, for a component whose dependencies list `custom_resources`, a Role granting `get` on exactly each named
+  object (its group, its `resource` plural, `resourceNames`) and a RoleBinding to the pod's ServiceAccount.
+  kubernetes-entrypoint (pinned `c606628c`) already waits on custom resources by `status.conditions`, but the dependency
+  Role covered only core, batch, apps and discovery resources, so every such wait would have been Forbidden. An entry
+  without `resource`, or with a core apiVersion, is refused at render time. No chart declares `custom_resources` yet:
+  every render is unchanged. It unblocks the operator CRs that replace db-init and rabbit-init (#309, H2b/H3b). New gate:
+  `hack/validate-custom-resource-wait-rbac.py`.
+
+- **Upstream divergences, one file per entry.** Every change that diverged from upstream appended to
+  `hack/upstream-divergences.yaml`, so each merge re-conflicted the branches in flight (#352, #353, #355, #344 and
+  #357 on 2026-11-18). Each divergence is now `hack/upstream-divergences.d/<component>-<slug>.yaml`, holding one
+  entry. The 19 entries were split out with their text and the comments above them, including #344's three. Loaded
+  from the directory, they are the same 19 entries and the same 81 assertions as the old file at 9c177be. The old file is removed.
+  - **Refusals:** `hack/validate-upstream-divergences.py` reads the directory and refuses, before checking anything:
+    - a file that isn't exactly one mapping of `component`, `issue`, `reason` and `assertions` (two entries, a list,
+      or a second YAML document);
+    - a duplicate key;
+    - a file whose name doesn't start with its component;
+    - an assertion already declared in another file;
+    - an empty directory;
+    - the old file coming back.
+  - [release.md](release.md) says how to add one.
+  - The case lists of `hack/validate-removed-values.sh` stay as they are for now.
+
+- **Publisher 1.1.0 and the release preflight.** `release-tag.yaml` pins krateo-blueprints/charts 1.1.0 (`788f1a6`).
+  - **Publisher:** from 1.1.0 it refuses any version that is not plain `X.Y.Z` (its rule 13).
+  - **Preflight (rule 12):** a new `preflight` job calls the `release-preflight.yaml` reusable, and `package-and-push`
+    `needs:` it, so a refusal publishes nothing.
+  - **The hook:** `hack/release-preflight` refuses a tag whose commit has no `X.Y.Z-main.g<sha7>` pre-release in GHCR.
+    It also refuses when GHCR cannot be asked.
+  - **Why the hook:** nothing else stopped a tag on a commit that skipped the pre-release channel, or a tag on a
+    branch commit. Lint runs on every pull request, so a branch commit passed the lint check too.
+  - **What it cannot prove:** that the GKE pair passed.
+  - **Gate:** `hack/validate-prerelease-channel.py` checks the pins, the `needs:` chain and the hook's behaviour
+    against a stubbed GHCR. All 45 mutations are caught. See [release.md](release.md).
+
+- **render-log.py refuses arguments it does not know.**
+  - **What happened:** `hack/render-log.py` ignored every `--` argument it did not recognise and fell through to write
+    mode. So `render-log.py --help`, or a typo such as `--chek`, rewrote `docs/log.md` in the working tree, a file a
+    pull request must never carry (`hack/validate-log-untouched.py`). `-h` was taken as the repository root.
+  - **The fix:** arguments are now parsed with argparse before anything is read or written. Only the root and
+    `--check` or `--check-rendered` (one of them) are accepted. Unknown flags, two roots and both modes at once are
+    refused, and so is a root that is not an existing directory holding `docs/log.d`. `--help` prints the usage.
+  - **The new gate:** `hack/validate-render-log-args.py` runs the renderer in a throwaway copy and checks:
+    - each refusal exits non-zero with its reason and leaves `docs/log.md` byte-identical;
+    - `--help` and `-h` only print the usage;
+    - as positive controls, write mode, both `--check` orders and `--check-rendered` still work.
+
+    Against the previous renderer it fails on the unknown-flag, two-roots, both-modes and `--help` cases, which
+    rewrote `docs/log.md`, and on `-h`.
+
+- **Merge queue on main, drafted.** Diego approved GitHub's merge queue (2026-11-18), so every commit that lands is
+  tested as it will exist on main. Until now each pull request was brought up to date with main and waited for, one
+  at a time. Nothing is applied to the repository settings yet.
+  - **lint.yaml** runs on `merge_group`. The job-hooks base comes from `merge_group.base_sha`.
+    `hack/validate-log-untouched.py` and `hack/validate-no-skip-markers.py` read a merge group commit by commit, as
+    a push. Each queued pull request is its squash commit there, so the message that would land is checked.
+  - **The ruleset draft**, `hack/merge-queue-ruleset.json`, adds a merge queue (squash, ALLGREEN, groups of up to 5,
+    a 60-minute check timeout) and requires the 12 checks lint.yaml reports, from GitHub Actions. The informational
+    `lint` job is left out. `hack/validate-merge-queue-ruleset.py` fails when the two drift apart.
+  - **Not gating:** image-scan (it scans every image, not the changed ones) and the security workflow.
+  - **Releases:** `hack/require-lint-passed.sh`, extracted from release-tag.yaml, accepts a successful lint run on
+    the exact commit from its merge group, its push to main, or a dispatch. A pull request's run is no longer
+    counted, and each run's `head_sha` is re-checked. `hack/validate-require-lint-passed.py` covers 8 cases.
+  - **The render-log bot** enables auto-merge when main has a merge queue, instead of merging (a new case in
+    `hack/validate-render-log-pr.py`). A queue entry made with `GITHUB_TOKEN` would start no `merge_group` run, so
+    the App token (#356) comes first, then the ruleset.
+  - [release.md](release.md) has "How a pull request merges".
+
+- **The render-log bot acts as a GitHub App; no skip markers.** The first bot render landed (d1cb62b) with two
+  defects, measured 2026-11-18:
+  - **Skipped workflows.** #347's squash message quoted the bot's skip marker, so GitHub skipped every push workflow
+    on main for that commit, lint included.
+  - **Unlinted bot commits.** The bot merged with `GITHUB_TOKEN`, and GitHub starts no workflow for a `GITHUB_TOKEN`
+    event, so its render commits on main got no lint run. prerelease and release-tag require a green lint on the
+    exact commit.
+
+  Diego chose a GitHub App:
+  - `render-log.yaml` mints the App's token with `actions/create-github-app-token`, pinned to a commit. It refuses
+    without `RENDER_LOG_APP_CLIENT_ID` and `RENDER_LOG_APP_PRIVATE_KEY`, and gives `GITHUB_TOKEN` no write
+    permission.
+  - `hack/render-log-pr.sh` refuses an App whose slug isn't `hack/render-log-app.yaml`'s, commits as
+    `<slug>[bot]`, and drops the skip marker. The loop guard is the paths filter alone: the bot's commit changes
+    `docs/log.md`, which the filter leaves out.
+  - `hack/validate-log-untouched.py` now exempts only `krateo-openstack-render-log[bot]` on a `bot/render-log-*`
+    branch. The retired `github-actions[bot]` login is refused.
+  - New gate `hack/validate-no-skip-markers.py` refuses any skip marker GitHub honours in a pull request's title,
+    body or commit messages. That covers the bracketed "skip ci" family and the `skip-checks: true` trailer, in any
+    case, quoted or not.
+  - `hack/validate-render-log-pr.py` adds two cases. One reads the workflow: the paths leave `docs/log.md` out, the
+    action is pinned, the job refuses without the App's secrets, and nothing has write permission. The other checks
+    that another App's token is refused.
+  - [release.md](release.md) lists the App's permissions and the steps to create it.
+
+- **mariadb's remote backup and its ks-user Job removed (#302).** Turning on `manifests.job_ks_user` deadlocked a
+  first install. The Job creates the Keystone user that Swift/RGW remote backups authenticate as. It is a
+  post-install hook that waits on keystone (#301), and keystone waits on mariadb. The user it created also had role
+  admin and OpenStack-Helm's published password. Diego decided (2026-11-17) to remove the path rather than move it.
+  - **Removed:** the ks-user Job and script, the RGW Secret, `endpoints.identity` with `mariadb-backup-user`,
+    `conf.backup.remote_backup`, and the backup CronJob's remote environment and Keystone credentials. The CronJob's
+    wait on `mariadb-ks-user` is gone too.
+  - **Refused:** `manifests.job_ks_user: true` and any `conf.backup.remote_backup` other than `enabled: false`, by the
+    schema and by `templates/removed-values.yaml` when the schema is skipped. `false` stays accepted for older
+    Compositions.
+  - **Local backups are unaffected.** With `manifests.cron_job_mariadb_backup` and `conf.backup.enabled` on, the
+    CronJob renders with `REMOTE_BACKUP_ENABLED=false` and waits only on mariadb.
+  - **Gates:**
+    - `hack/validate-removed-values.sh` gains nine mariadb cases.
+    - `hack/validate-readiness-deadlock.py` now also renders every chart with every `manifests.job_*` switch on. It
+      fails on a cycle that appears only with an opt-in Job on, which is how the ks-user Job got past it.
+    - An upstream-divergences entry keeps the script, the user and the remote settings out across a re-vendor.
+
+- **Uninstall deletes a component's hook Jobs (#206).** Since 0.3.41 every Job is a `post-install,post-upgrade` hook
+  (#179), and Helm never deletes hook resources at uninstall: cinder's removal left six completed Jobs and their pods,
+  and a full teardown 156 pods (#204). `hook-succeeded` can't be used, because kubernetes-entrypoint waits on dependency
+  Jobs by name while the component is installed. Each of the 32 charts that render hook Jobs now includes
+  helm-toolkit's `job_hook_cleanup`. It is a `pre-delete` hook, weight 100, so it runs after db-drop and the clean
+  Jobs. It selects `release_group=<release>`, leaves out itself, and deletes the Jobs whose `helm.sh/hook` names
+  post-install or post-upgrade, with background propagation so their pods go too. Its ServiceAccount, Role (list and
+  delete on Jobs, nothing else) and RoleBinding are plain release objects, so they exist while it runs. It uses the
+  chart's own ks-user (or db-init, or rabbit-init) image, which has python, and always exits 0, so a failed cleanup
+  leaves Jobs behind rather than blocking the uninstall. That pre-delete hooks run under the controller was measured in
+  #204 (glance-clean ran at teardown); this hook itself hasn't been run on a cluster yet. New gate
+  `hack/validate-hook-cleanup.py` renders each chart at defaults and with every Job on. For every render with a hook
+  Job, it requires exactly one cleanup, last among pre-delete hooks, with that RBAC and a selector matching every hook
+  Job but not itself. It also runs the script against a stand-in API, with another release's Job and a non-hook Job
+  next to the render's, and against a failing API. Its first CI run found four hook Jobs with no labels at all
+  (cloudkitty-storage-init, ironic-manage-cleaning-network, magnum-domain-ks-user, masakari-db-sync), which no
+  selector can reach. They now carry helm-toolkit's labels; their pod templates are unchanged. libvirt, memcached, openvswitch and redis render no hook Job unless
+  `images.local_registry.active` turns on image-repo-sync, and have no python image, so they get no cleanup.
+
+- **trove's db-purge CronJob removed (#289).** It rendered by default and ran `trove-manage db_purge --age_in_days 30`.
+  trove-manage on stable/2026.1 has no `db_purge`: `trove/cmd/manage.py` registers 12 commands, none a purge, and no
+  file in trove's tree defines a database purge. Every scheduled run would have failed at argument parsing, and a
+  failing CronJob, unlike a failing hook, blocks nothing that anyone sees. With no command to point it at, the CronJob,
+  its script and values are gone. `manifests.cron_job_db_purge: true` is refused by the schema and by
+  `templates/removed-values.yaml`; `false` is still accepted for older Compositions (`hack/validate-removed-values.sh`
+  covers both). New gate `hack/validate-cron-commands.py`: every `<project>-*` program that a CronJob's script starts,
+  in every chart and whether or not the CronJob is on by default, must be given a command listed for it in
+  `hack/cron-program-commands.yaml`, measured from the program's stable/2026.1 source. It is static, since the command
+  is in the script text. It found no other CronJob running a missing command (15 CronJobs, 20 commands).
+
+- **ceilometer publishes only to gnocchi (#294).** Both pipelines listed `notifier://` next to `gnocchi://`. The
+  notifier publisher sends every sample and event back onto ceilometer's vhost, as topics `metering` and `event`
+  (stable/2026.1 `ceilometer/publisher/messaging.py`), and nothing in this blueprint listens there: their consumers, the
+  collector and panko, are retired. On GKE (2026-11-17) `event.sample` went from 954 to 1062 messages in 10 minutes
+  with 0 consumers, and `metering.sample` grew too. The sinks now publish to `gnocchi://` alone. New gate
+  `hack/validate-ceilometer-publishers.py` renders ceilometer and requires each publisher to reach a consumer in its
+  `deps` closure: gnocchi's API, or a listener on that topic and vhost other than ceilometer's own agent (which would
+  re-ingest its own samples). Any other publisher fails until its consumer is measured. An upstream-divergences entry
+  keeps `notifier://` out across a re-vendor. On an existing install the two queues stop growing but keep what they
+  hold until deleted (`rabbitmqctl delete_queue -p ceilometer event.sample`, and `metering.sample`). ceilometer.conf
+  sets no `[oslo_messaging_rabbit]`, so at oslo.messaging's defaults they're non-durable and a RabbitMQ restart also
+  drops them (read from the defaults, not measured live).
+
+- **High availability, first phases (#309), and nova-compute liveness (#146).**
+  - **`ha.enabled` (opt-in):** memcached as 3 replicas behind a headless Service, every component listing each
+    replica, and a refusal while fewer than 3 nodes carry `openstack-control-plane=enabled`. More than one memcached
+    replica without `ha` is refused. Off renders as before.
+  - **RabbitMQ's host count** comes from `componentValues.rabbitmq.pod.replicas.server` alone and reaches every
+    transport URL and ceilometer's notification URLs; a conflicting per-component count is refused.
+  - **nova-compute** liveness and startup check the process only; readiness keeps the RPC check.
+  - **New gates:** `hack/validate-ha-propagation.py` and `hack/validate-nova-compute-liveness.py`.
+
+- **image-scan retries a scan cut short by a layer download (#316, #334).**
+  - **What failed:** image-scan run 44202269356 (on `feat/309-h0-h1`) failed in
+    `scan (quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble)`. The cause was no new CVE: Trivy stopped
+    with `failed to analyze layer ... unable to read the file: unexpected EOF`, a layer download cut short. The gate
+    then failed, correctly, on the image's missing report.
+  - **Measured on 2026-11-18:** the waived series tag still serves the recorded digest (`sha256:12c53f1f…`), so it
+    had not moved upstream. Main's image-scan on `08ec684`, a few minutes later, scanned the same digest with no
+    finding outside the allowlist.
+  - **The fix:** the scan step now tries up to three times and drops only the layer-analysis cache between attempts.
+    A real finding can't be retried away, because findings are judged from the report. An image that fails all
+    three attempts still has no report, and the gate fails it by name.
+  - **The allowlist doesn't change:** there was no new finding, and entries are only made for measured findings.
+
+- **Pre-release channel: verify a commit on GKE before its tag exists (#342 follows).** Every `X.Y.Z` tag reaches the
+  Marketplace, so `prerelease.yaml` (dispatch, input `ref`) publishes a commit's charts to GHCR at `X.Y.Z-main.g<sha7>`.
+  It attaches the stamped CompositionDefinitions, RBAC grants and examples as the run artifact `prerelease-<version>`.
+  It cannot write the Marketplace index, a tag or a release: it calls no reusable workflow, uses no secret but
+  `GITHUB_TOKEN`, and holds `contents: read`. The index's only writer is krateo-blueprints/charts
+  `publish-chart.yaml`, fed from its caller's own run with `CHARTS_PUBLISH_TOKEN`, measured on 2026-11-17 through the
+  portal and the marketplace catalog. `release-tag.yaml` and `prerelease.yaml` now run the same scripts
+  (`hack/publish-charts.sh`, `hack/stage-release-assets.sh`, `hack/require-lint-passed.sh`). `hack/release-version.sh`
+  refuses a version of the wrong shape before anything is stamped. `prune-prereleases.yaml` keeps the newest 5
+  pre-releases and never deletes a release. It needs the repository secret `PRERELEASE_PRUNE_TOKEN`, and a manual run
+  is a dry run by default. `hack/validate-prerelease-channel.py` gates all of it, with 32 mutations. Also: releases up
+  to 0.3.73 carried a stray `compositiondefinition-chart.yaml` asset (cyborg's CD), now gone. The flow is in
+  [release.md](release.md).
+
+- **Public endpoints over HTTPS through the Gateway API (#311, phase 1).**
+  - **Umbrella `publicEndpoints`:** off by default, and off renders byte-identical. When on, the umbrella renders:
+    - one Gateway (`gatewayClassName`, default `agentgateway`, which Krateo's `features.ingress` installs);
+    - an HTTPRoute per public endpoint of every selected component;
+    - an HTTP-to-HTTPS redirect;
+    - a cert-manager Certificate from `tls.issuerRef`;
+    - an ingress NetworkPolicy set: deny by default, allow the namespace, `nodeCIDRs`, the Gateway proxy, and
+      `allowNamespaces`. The policies select every pod without the label `krateo.io/networkpolicy-exempt`, in block
+      style; the label is an explicit opt-out.
+  - **The components:**
+    - Each public catalog URL becomes `https://<service>.<baseDomain>`, with proxy-header parsing set.
+    - The charts' inert Ingress switches go off (upstream removed those templates in 6ec1132485).
+    - Horizon becomes ClusterIP with Secure cookies.
+    - Routes set HSTS, and overwrite X-Forwarded-Proto with `https`.
+    - Never routed: metadata, RabbitMQ, MariaDB, memcached.
+  - **Refused on a live cluster** without the Gateway API or cert-manager CRDs, and on a missing input.
+  - **The new gate:** `hack/validate-public-endpoints.py` checks:
+    - off equals before;
+    - the routes against what each chart registers;
+    - the deny list, HSTS and redirect, and the policy's exact peers;
+    - the refusals;
+    - every routed chart rendered with the values the umbrella gives it (backend Service, catalog URL, no Ingress,
+      proxy headers, Horizon);
+    - the tables against the charts.
+
+    It also runs thirteen mutations, each of which must be reported as the defect it plants.
+  - **Not yet verified on a cluster.** The live checks are in the README. Follow-ups: #325, #326, #327.
+
+- **Consume a Ceph cluster without client.admin (#308 phase P1, steps 1-3; rendered and gated, not yet run live).**
+  - **Copied keys:** a third credential kind, `source: provided`. With `storage.backend` ceph-rook or ceph-external, the
+    umbrella copies each Ceph user's key and `mon_host` from where Ceph keeps them (Rook's `rook-ceph-client-<name>`
+    and `rook-ceph-config`, or the operator-named `storage.ceph.keys`) through a SecretStore limited to exactly those
+    Secrets. Copies refresh every 5 minutes and are not kept past the release.
+  - **Charts:** cinder, libvirt and (with `storage.ceph.glanceStore: rbd`) glance project the copies. No client.admin
+    keyring is rendered, no `ceph auth` runs and no pool is created: storage-init checks the pool with the user's own
+    key. Each reader carries a live checksum of its key, so it restarts when Ceph's side rotates it. Without a Ceph
+    backend every chart renders as before.
+  - **One source:** pools, users and the libvirt secret UUID reach cinder, glance, libvirt and nova from
+    `storage.ceph` only; `componentValues` may not set them, nor wire Ceph by hand.
+  - **Held, refused, never stuck:** a Ceph consumer is created only once the copies of its keys report Ready; the
+    Openstack Composition refuses while ESO reports the copy store unable to read the source Secrets, naming the grant;
+    glance refuses to move its store to `rbd` off a live `glance-images` claim until `storage.ceph.glanceImagesMigrated`.
+  - **Gates:** the new `hack/validate-ceph-consumer.py` (27 copied roots, P projections, 22c reader closure against
+    the measured `hack/ceph-readers.yaml`, 18c readers restart, 18d the checksum can read its Secret, 28 no
+    client.admin, 29 delivery and consistency through `hack/umbrella_spec.py`, 30 the hold and the read-grant refusal);
+    `hack/validate-glance-store.py` adds the migration refusal on the same single claim lookup. `validate-pod-references` renders the storage-dependent charts as the umbrella
+    delivers them.
+
+- **cinder refuses to render without a block-storage backend (#196, phase P0 of #308).**
+  - **What was wrong:** cinder's only backend is Ceph RBD. With no Ceph, `cinder-volume` and `cinder-storage-init`
+    waited in `Init` forever on `ceph-etc` and keyring Secrets nothing creates. That was the state on every default
+    install (#179, #204).
+  - **Now:** the Openstack Composition has `storage.backend`, `none` by default, typed by the generated schema. The
+    umbrella passes it to every component that requires block-storage (cinder) as `krateo.storageBackend`, and refuses a
+    `componentValues` override. With `none`, cinder fails its render and names the value. The Ceph backends
+    (`ceph-rook`, `ceph-external`) are accepted by the schema and refused by cinder until #308 implements them.
+  - **Selection:** `requiresProvisioning` became `components[].requires`, a capability list (`block-storage`,
+    `pxe-interface`, `lb-mgmt-net`, `rwx-storage-class`). `full-strict` selects a component only when the install
+    provides everything it requires; only `block-storage` can be provided, by `storage.backend`. `full` is unchanged.
+  - **Gates:**
+    - `hack/validate-provisioning-preconditions.py` also renders `full-strict` with every non-`none` backend. That is
+      the positive control: it must add cinder and nothing else.
+    - The new `hack/validate-storage-backend.py` checks that the value reaches cinder alone, that the umbrella is the
+      one place that sets it, and that cinder refuses without a backend.
+    - `hack/validate-pod-references.py` renders cinder once per backend the umbrella can deliver. Its #196 allowlist
+      entries are gone.
+  - **Also:** nova-compute's `LIBVIRT_CEPH_SECRET_UUID` read the undefined `conf.ceph.secret_uuid` (an upstream defect),
+    so it rendered with no value. It now reads `conf.ceph.cinder.secret_uuid`, and the new gate renders it with a
+    sentinel.
+
 - **docs/log.md is rendered on main, by a bot pull request.** After #340, every branch still committed a regenerated
   `docs/log.md`, so merges kept conflicting on it (#322, #320).
   - **Pull requests:** a pull request now adds its `docs/log.d` entry and nothing else.

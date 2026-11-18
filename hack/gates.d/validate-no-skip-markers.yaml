@@ -1,0 +1,14 @@
+# GitHub skips every workflow for a commit whose message carries a skip marker, anywhere, even quoted: #347's squash
+# message quoted one and main ran nothing for that commit, lint included. A squash message is the pull request's title
+# and body, or its commit messages, so none of them may carry one.
+name: "No pull request title, body or commit message carries a workflow skip marker"
+job: job-hooks
+order: 6
+# Set by this job's runner step in lint.yaml, from a GitHub expression the runner cannot evaluate.
+workflow-env:
+  - BASE
+  - EVENT_NAME
+  - PR_TITLE
+  - PR_BODY
+run: |
+  python3 hack/validate-no-skip-markers.py .

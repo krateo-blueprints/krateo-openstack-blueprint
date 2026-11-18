@@ -1,7 +1,12 @@
-# Components that `profile: full-strict` omits because they wait on infrastructure that no
+# Components that `profile: full-strict` omits unless the install provides what they require:
+# each one's components[].requires in the umbrella names a capability (`capability` below) that no
 # Kubernetes cluster provides and this blueprint does not create. `profile: full` is unchanged
 # and still selects all of them, and `enabled:` names any one of them explicitly -- they are
 # fully supported, just not promised by the profile that promises only what starts unaided.
+#
+# One capability can be provided by the umbrella itself: block-storage, by storage.backend when it
+# is not none (#196, #308). full-strict then selects cinder. The others have no umbrella setting
+# yet, so full-strict always leaves their components out.
 #
 # Each entry states what must exist, the exact symptom when it does not, and a command an
 # operator can run to check. The symptom matters as much as the requirement: every one of these
@@ -13,20 +18,27 @@
 # goes with it.
 preconditions:
   - component: cinder
+    capability: block-storage
     requires: >-
-      A Ceph cluster reachable from the nodes, plus, in the openstack namespace, the ConfigMap
-      ceph-etc (ceph.conf) and the Secrets pvc-ceph-client-key and cinder-volume-rbd-keyring,
-      for the default rbd1 backend. No other volume backend ships with this blueprint: LVM needs
-      a prepared volume group and an iSCSI target on the host, and NFS needs an NFS server.
+      A block-storage backend, named by the Openstack Composition's storage.backend: ceph-rook (a Ceph run by Rook) or
+      ceph-external (an existing Ceph), configured under storage.ceph (#308). On Ceph's side -- Rook CephBlockPool and
+      CephClient resources, or the Ceph admin -- the pool storage.ceph.pools.volumes and the user
+      client.<storage.ceph.clients.cinder> with `profile rbd` on that pool must exist, and the Secrets holding the user's
+      key and mon_host must be readable by the umbrella's copy store (in another namespace, its owner grants the
+      ServiceAccount <credentials.store>-ceph-reader get on exactly those Secrets; see the README). No client.admin key
+      is used. A standalone Cinder Composition at its own default (krateo.storageBackend: unmanaged) still renders
+      upstream's rbd1 backend, with its ceph-etc, pvc-ceph-client-key and cinder-volume-rbd-keyring precondition.
     symptom: >-
-      cinder-storage-init and cinder-volume never start: FailedMount on "ceph-etc" and on the
-      keyring Secret, and the pods stay in Init. cinder-api, cinder-scheduler and
-      cinder-bootstrap wait on cinder-volume. Since every Job became a Helm hook (0.3.41),
-      storage-init holds the release in pending-install until its activeDeadlineSeconds expires
-      (0.3.43). Measured on #179 and on a cold 0.3.42 install (#204).
-    check: kubectl -n openstack get configmap ceph-etc && kubectl -n openstack get secret pvc-ceph-client-key cinder-volume-rbd-keyring
+      With storage.backend none, profile full-strict leaves cinder out, and a cinder selected anyway (profile full, or
+      enabled:) does not install: its Composition reports the render error "cinder needs a volume backend, and
+      storage.backend is none (#196)". With a ceph backend whose read grant is missing, the Openstack Composition
+      refuses to render, naming the namespace, the ServiceAccount and the Secrets to grant; while a source Secret is
+      missing, cinder is held in openstack-install-pending; and cinder-storage-init fails with "client.<user> cannot list
+      pool <pool>" when the pool or the user's caps are missing. Before the #196 fix the same install sat in Init forever on FailedMount for ceph-etc (#179, #204).
+    check: kubectl get externalsecret openstack-credential-ceph-client-cinder openstack-credential-ceph-mon-host
     issue: 196
   - component: ironic
+    capability: pxe-interface
     requires: >-
       A network interface named `ironic-pxe` on every node that will run ironic-conductor, being
       the bare-metal provisioning NIC that PXE and TFTP bind to.
@@ -39,6 +51,7 @@ preconditions:
     check: ip -o addr show ironic-pxe
     issue: 163
   - component: octavia
+    capability: lb-mgmt-net
     requires: >-
       The load-balancer management network (lb-mgmt-net) and one Neutron port per node, named
       octavia-worker-port-<hostname> and octavia-health-manager-port-<hostname>.
@@ -49,6 +62,7 @@ preconditions:
     check: openstack port show octavia-worker-port-$(hostname -s) -c id -f value
     issue: 163
   - component: swift
+    capability: rwx-storage-class
     requires: >-
       A StorageClass that provides ReadWriteMany, for the swift-shared-storage PVC. Upstream
       satisfies this with an nfs-provisioner default that this repo does not ship, and GKE's

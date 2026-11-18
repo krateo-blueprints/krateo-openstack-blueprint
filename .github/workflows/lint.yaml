@@ -25,11 +25,25 @@ on:
   push:
     branches:
       - main
+  # The merge queue (docs/release.md, "How a pull request merges"): each merge group is tested as it will exist on
+  # main before it lands, and these jobs are its required checks (hack/merge-queue-ruleset.json). paths filters do not
+  # apply here; every job runs, as on pull_request.
+  merge_group:
+    types:
+      - checks_requested
   workflow_dispatch:
 
 jobs:
+  # krateo-blueprints/charts PUBLISHING.md rule 9: every reusable workflow this repository calls is pinned by
+  # commit SHA with a version comment (or `# main YYYY-MM-DD` for krateo-platformops/.github, which has no tags
+  # yet). The shared check refuses any that is not.
+  pinned-uses:
+    permissions:
+      contents: read
+    uses: krateo-blueprints/charts/.github/workflows/pinned-uses.yaml@33c79510d5042e0fcb5227176bd138d993cb4ef6 # 1.2.0
+
   lint-docs:
-    uses: krateo-platformops/.github/.github/workflows/lint-docs.yaml@main
+    uses: krateo-platformops/.github/.github/workflows/lint-docs.yaml@f25d6b526bde39f37bca6a4eb8c493bf4c2bbec1 # main 2026-11-17
 
   values-schema:
     # Gating. A chart whose own defaults violate its own schema cannot be installed at all:
@@ -181,10 +195,12 @@ jobs:
       # Checks: hack/gates.d/*.yaml with `job: job-hooks`. Add a file there, never a step here.
       - name: Gates (hack/gates.d, job job-hooks)
         env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REF: ${{ github.head_ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: python3 hack/run-gates.py --job job-hooks .
 
   capability-roles:

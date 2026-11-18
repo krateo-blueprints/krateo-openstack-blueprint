@@ -1,0 +1,125 @@
+{{/*
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{- /* Krateo (#309 H2b): the broker as a RabbitmqCluster, run by the RabbitMQ cluster-operator
+       (krateo-blueprints/rabbitmq-operator-blueprint), with operator.enabled. See templates/_operator.tpl. */}}
+{{- if (.Values.global).subchart_release_name }}
+{{- $_ := set . "deployment_name" .Chart.Name }}
+{{- else }}
+{{- $_ := set . "deployment_name" .Release.Name }}
+{{- end }}
+{{- if (.Values.operator | default dict).enabled }}
+{{- $envAll := . }}
+{{- $op := .Values.operator }}
+{{- $user := .Values.endpoints.oslo_messaging.auth.user }}
+{{- if not (include "rabbitmq.admin_from" .) }}
+{{- fail "\n\noperator.enabled needs endpoints.oslo_messaging.auth.user.passwordFrom: the RabbitMQ administrator comes from the install's generated root (#228), never from a value. The umbrella passes it.\n" }}
+{{- end }}
+{{- range $field := list "store" "secret" "key" }}
+{{- if not (index $user.passwordFrom $field) }}
+{{- fail (printf "endpoints.oslo_messaging.auth.user.passwordFrom.%s is required" $field) }}
+{{- end }}
+{{- end }}
+{{- if include "rabbitmq.operator_live" . }}
+{{- if not (include "rabbitmq.operator_crd" . | fromJson) }}
+{{- fail "\n\nmessaging.backend operator needs the RabbitMQ cluster-operator: this cluster does not serve rabbitmqclusters.rabbitmq.com.\n\nInstall krateo-blueprints/rabbitmq-operator-blueprint (its rabbitmq-cluster-operator Composition) and the next reconcile renders. #309.\n" }}
+{{- end }}
+{{- with (include "rabbitmq.operator_chart_sts" . | fromJson) }}
+{{- fail (printf "\n\nmessaging.backend operator is for fresh installs: this install already runs the chart-mode broker (StatefulSet %s). Moving its users, vhosts and clients to a RabbitmqCluster is the separate migration (#309 H2c); switching here would leave every client on a broker that is being removed. Set messaging.backend: chart.\n" .metadata.name) }}
+{{- end }}
+{{- end }}
+{{- $defaultUser := printf "%s-default-user" $op.name }}
+---
+# The administrator, from the generated root, in the format the cluster-operator reads for spec.secretBackend.externalSecret
+# (its default-user Secret). The operator then creates no credentials of its own for it.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ $defaultUser }}
+  annotations:
+    # Deleted by helm WITH the release, after its pre-delete hooks (#254).
+    krateo.io/teardown: with-release
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: {{ $user.passwordFrom.store | quote }}
+  target:
+    name: {{ $defaultUser }}
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      engineVersion: v2
+      data:
+        default_user.conf: {{ printf "default_user = %s\ndefault_pass = {{ .password }}\n" $user.username | quote }}
+        username: {{ $user.username | quote }}
+        password: {{ "{{ .password }}" | quote }}
+        host: {{ printf "%s.%s.svc" $op.name $envAll.Release.Namespace | quote }}
+        port: "5672"
+        provider: rabbitmq
+        type: rabbitmq
+  data:
+    - secretKey: password
+      remoteRef:
+        key: {{ $user.passwordFrom.secret | quote }}
+        property: {{ $user.passwordFrom.key | quote }}
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: RabbitmqCluster
+metadata:
+  name: {{ $op.name }}
+  annotations:
+    krateo.io/teardown: with-release
+spec:
+  replicas: {{ .Values.pod.replicas.server }}
+  image: {{ $op.image | quote }}
+  secretBackend:
+    externalSecret:
+      name: {{ $defaultUser }}
+  persistence:
+    storage: {{ $op.storage | quote }}
+{{- if ne (.Values.volume.class_name | toString) "default" }}
+    storageClassName: {{ .Values.volume.class_name | quote }}
+{{- end }}
+  affinity:
+    podAntiAffinity:
+{{- if ge (int .Values.pod.replicas.server) 3 }}
+      # Three or more quorum members: one per node, or a single node's loss takes a majority with it.
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $op.name }}
+{{- else }}
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: {{ $op.name }}
+{{- end }}
+{{- if .Values.pod.tolerations.rabbitmq.enabled }}
+  tolerations:
+{{ toYaml .Values.pod.tolerations.rabbitmq.tolerations | indent 4 }}
+{{- end }}
+  override:
+    statefulSet:
+      spec:
+        template:
+          spec:
+            # The same node label as every other control-plane pod (the umbrella's node-label precondition).
+            nodeSelector:
+              {{ .Values.labels.server.node_selector_key }}: {{ .Values.labels.server.node_selector_value | quote }}
+{{- end }}

@@ -24,6 +24,7 @@ with the reason, so it is a reviewed decision and not a silent exception.
 It fails when it measured nothing: a chart that does not render, or a run that found no pod
 templates at all, is a failed measurement, not a pass.
 """
+import json
 import shutil
 import subprocess
 import sys
@@ -62,32 +63,61 @@ ALLOWED = {
 # the chart; until then the issue says why the object is still dangling.
 KNOWN_DEFECTS = {}
 
-# Objects the operator provides, for components the umbrella flags `requiresProvisioning: true`
-# and declares in hack/provisioning-preconditions.yaml. `profile: full-strict` leaves those
-# components out, so these references are a documented precondition, not a defect. Each entry
-# holds only while its component is still flagged: if the flag comes off, the component installs
-# by default again and these become dangling references, so the gate fails (#196, #204).
-PROVISIONED_BY_OPERATOR = {
-    ("cinder", "ConfigMap", "ceph-etc"): "#196",
-    ("cinder", "Secret", "cinder-volume-rbd-keyring"): "#196",
-    ("cinder", "Secret", "pvc-ceph-client-key"): "#196",
+# A chart whose spec from the umbrella depends on storage.backend (cinder; libvirt, nova and glance with a ceph backend,
+# #196 and #308) is not rendered at its chart default -- cinder's (krateo.storageBackend: unmanaged) is upstream's rbd1
+# wiring, which names the ConfigMap ceph-etc and the Secrets pvc-ceph-client-key and cinder-volume-rbd-keyring that only a
+# standalone install's operator provides. It is rendered with exactly what the umbrella hands it (hack/umbrella_spec.py,
+# the umbrella's own spec-building lines), once per storage.backend its schema accepts, and checked like every other
+# chart; an ExternalSecret's target counts as a rendered Secret, since External Secrets Operator creates it. The one
+# designed refusal: with none, cinder must refuse with its own message. Until #196 there was an allowlist here for those
+# three objects; the refusal, and since #308 the projections, replaced it.
+REFUSALS = {
+    "none": "storage.backend is none (#196)",
 }
 
 
-def flagged_components(root: Path):
-    """Components the umbrella marks requiresProvisioning: true."""
-    values = yaml.safe_load((root / "blueprints" / "openstack" / "chart" / "values.yaml").read_text()) or {}
-    return {c["name"] for c in values.get("components") or [] if c.get("requiresProvisioning") is True}
+def umbrella(root: Path):
+    return yaml.safe_load((root / "blueprints" / "openstack" / "chart" / "values.yaml").read_text()) or {}
+
+
+def block_storage_components(root: Path):
+    """Components the umbrella lists as requiring block-storage."""
+    return {c["name"] for c in umbrella(root).get("components") or [] if "block-storage" in (c.get("requires") or [])}
+
+
+def load_umbrella_spec(root: Path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("umbrella_spec", root / "hack" / "umbrella_spec.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def backend_values(us, backend):
+    """The umbrella values for one storage.backend: ceph-rook with glance's rbd store too, so every Ceph consumer is
+    rendered managed once; ceph-external with the source Secrets it requires."""
+    if backend == "none":
+        return {}
+    if backend == "ceph-rook":
+        return {"storage": {"backend": backend, "ceph": {"glanceStore": "rbd"}}}
+    if backend == "ceph-external":
+        return {"storage": us.ceph_external_values()}
+    sys.exit(f"FAIL: storage.backend {backend!r} is in the umbrella schema and this gate does not know how to render it")
+
+
+def storage_backends(root: Path):
+    import json
+    schema = json.loads((root / "blueprints" / "openstack" / "chart" / "values.schema.json").read_text())
+    return (((schema.get("properties") or {}).get("storage") or {}).get("properties") or {}).get("backend", {}).get("enum") or []
 
 KINDS = ("Secret", "ConfigMap", "PersistentVolumeClaim", "ServiceAccount")
 
 
-FLAGGED = set()
 
-
-def stage_and_render(chart: Path, component: str, workdir: Path) -> str:
+def stage_and_render(chart: Path, component: str, workdir: Path, values=None) -> str:
     staged = workdir / component
-    shutil.copytree(chart, staged)
+    if not staged.exists():
+        shutil.copytree(chart, staged)
     cm = staged / "Chart.yaml"
     cm.write_text(cm.read_text().replace("CHART_VERSION", "0.0.0-gate"))
     toolkit = chart.parent.parent.parent / "charts" / "helm-toolkit"
@@ -96,8 +126,11 @@ def stage_and_render(chart: Path, component: str, workdir: Path) -> str:
         if not (staged / "charts" / "helm-toolkit").exists():
             shutil.copytree(toolkit, staged / "charts" / "helm-toolkit")
     release = f"{component}-{RELEASE_SUFFIX}"
+    vf = workdir / f"{component}-values.yaml"
+    if values:
+        vf.write_text(yaml.safe_dump(values))
     r = subprocess.run(
-        ["helm", "template", release, str(staged), "--namespace", "openstack"],
+        ["helm", "template", release, str(staged), "--namespace", "openstack"] + (["-f", str(vf)] if values else []),
         capture_output=True, text=True,
     )
     if r.returncode != 0:
@@ -181,9 +214,18 @@ def self_inconsistent(pod, claim_templates=()):
                 yield m.get("name"), f"container {cname} mounts volume {m.get('name')!r}, which the pod does not declare"
 
 
+# The umbrella's credential roots (credentials.items[].secret), which its own ExternalSecrets create in the namespace every
+# component shares. A chart rendered with the umbrella's references may name one directly: a ks-user Job reads its user's
+# root, so the password moves before its readers (#228, check 17).
+UMBRELLA_ROOTS = set()
+
+
 def check(component, rendered):
     docs = [d for d in yaml.safe_load_all(rendered) if isinstance(d, dict)]
     have = {(d.get("kind"), (d.get("metadata") or {}).get("name")) for d in docs}
+    # External Secrets Operator creates each ExternalSecret's target Secret.
+    have |= {("Secret", ((d.get("spec") or {}).get("target") or {}).get("name") or d["metadata"]["name"])
+             for d in docs if d.get("kind") == "ExternalSecret"}
     pods, dangling, known = 0, [], []
     for d in docs:
         claims = [(t.get("metadata") or {}).get("name")
@@ -196,14 +238,10 @@ def check(component, rendered):
                 if not name:
                     dangling.append((owner, kind, "(empty name)", where))
                     continue
-                if (kind, name) in have or (component, kind, name) in ALLOWED:
+                if (kind, name) in have or (component, kind, name) in ALLOWED or (kind == "Secret" and name in UMBRELLA_ROOTS):
                     continue
                 if (component, kind, name) in KNOWN_DEFECTS:
                     known.append(("KNOWN", owner, kind, name, where, KNOWN_DEFECTS[(component, kind, name)]))
-                    continue
-                if (component, kind, name) in PROVISIONED_BY_OPERATOR and component in FLAGGED:
-                    known.append(("PROVISIONED", owner, kind, name, where,
-                                  "requires provisioning, " + PROVISIONED_BY_OPERATOR[(component, kind, name)]))
                     continue
                 dangling.append((owner, kind, name, where))
     return pods, dangling, known
@@ -218,29 +256,54 @@ def main() -> int:
         charts = [c for c in charts if c.parent.name in only]
     if not charts:
         sys.exit("FAIL: no component charts found -- nothing was measured")
-    global FLAGGED
-    FLAGGED = flagged_components(root)
+    block = block_storage_components(root)
+    backends = storage_backends(root)
+    if block and "none" not in backends:
+        sys.exit(f"FAIL: the umbrella schema's storage.backend enum is {backends}, without none, so "
+                 f"{sorted(block)} cannot be rendered the way the umbrella delivers them")
+    UMBRELLA_ROOTS.update(i["secret"] for i in (umbrella(root).get("credentials") or {}).get("items") or [])
+    us = load_umbrella_spec(root)
+    try:
+        delivered = {b: us.specs(str(root), backend_values(us, b)) for b in backends}
+    except us.SpecError as e:
+        sys.exit(f"FAIL: {e}")
+    vary = {c for c in delivered[backends[0]]
+            if len({json.dumps(delivered[b].get(c), sort_keys=True) for b in backends}) > 1}
+    if block - vary:
+        sys.exit(f"FAIL: {sorted(block - vary)} require block-storage and their spec does not depend on storage.backend")
 
-    total_pods, failures, unrendered = 0, [], []
+    total_pods, failures, unrendered, not_refused = 0, [], [], []
     with tempfile.TemporaryDirectory() as td:
         for chart in charts:
             component = chart.parent.name
-            try:
-                rendered = stage_and_render(chart, component, Path(td))
-            except RuntimeError as e:
-                unrendered.append((component, str(e)))
-                continue
-            pods, dangling, known = check(component, rendered)
-            total_pods += pods
-            status = "OK  " if not dangling else "FAIL"
-            print(f"{status} {component}: {pods} pod templates, {len(dangling)} dangling")
-            for label, owner, kind, name, where, issue in known:
-                print(f"{label} {component}: {owner} {where} names {kind} {name!r} ({issue})")
-            for owner, kind, name, where in dangling:
-                failures.append((component, owner, kind, name, where))
+            modes = [(f"storage.backend {b}", b, delivered[b].get(component) or {}) for b in backends] \
+                if component in vary else [("", None, None)]
+            for label, backend, values in modes:
+                tag = f"{component} ({label})" if label else component
+                try:
+                    rendered = stage_and_render(chart, component, Path(td), values)
+                except RuntimeError as e:
+                    want = REFUSALS.get(backend) if component in block else None
+                    if want and want in str(e):
+                        print(f"REFUSED {tag}: renders nothing, as designed: {want!r}")
+                        continue
+                    unrendered.append((tag, str(e)))
+                    continue
+                if component in block and backend in REFUSALS:
+                    not_refused.append((tag, REFUSALS[backend]))
+                pods, dangling, known = check(component, rendered)
+                total_pods += pods
+                status = "OK  " if not dangling else "FAIL"
+                print(f"{status} {tag}: {pods} pod templates, {len(dangling)} dangling")
+                for lbl, owner, kind, name, where, issue in known:
+                    print(f"{lbl} {tag}: {owner} {where} names {kind} {name!r} ({issue})")
+                for owner, kind, name, where in dangling:
+                    failures.append((tag, owner, kind, name, where))
 
     for component, err in unrendered:
         print(f"FAIL {component}: did not render, so nothing was measured: {err}")
+    for tag, want in not_refused:
+        print(f"FAIL {tag}: renders, and must refuse with {want!r}: with no backend its pods wait in Init forever")
     if total_pods == 0:
         print("FAIL: no pod templates rendered in any chart -- nothing was measured")
         return 1
@@ -251,7 +314,7 @@ def main() -> int:
         print("\nA pod naming an object nobody creates waits forever (FailedMount, or a container")
         print("that never starts) and nothing reports it. Render it from the chart, or, if another")
         print("component creates it, add it to ALLOWED in this script with the reason.")
-    if failures or unrendered:
+    if failures or unrendered or not_refused:
         return 1
     print(f"\nOK: {len(charts)} charts, {total_pods} pod templates, every reference rendered")
     return 0
