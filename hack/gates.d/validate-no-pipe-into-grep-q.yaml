@@ -1,0 +1,8 @@
+# Under pipefail, `producer | grep -q` fails when grep exits on its match before the producer has written the rest
+# (SIGPIPE, rc 141), so a found line reads as missing: a race that passes for months, then fails a release
+# (nova-kog #183, 2026-11-18). Capture, then match with <<<. Offline and quick.
+name: "No shell line pipes a producer into grep -q"
+job: job-hooks
+order: 206
+run: |
+  python3 hack/validate-no-pipe-into-grep-q.py .
