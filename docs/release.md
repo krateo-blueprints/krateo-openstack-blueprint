@@ -72,14 +72,22 @@ those are the repo's own registrations and must point at a version that exists.
 
 Branches in flight used to collide on two files every pull request edited in the same place:
 the top of `docs/log.md` and the step list in `lint.yaml`. Both are now one file per change.
-**Never edit `docs/log.md` or the check steps in `lint.yaml` by hand.**
+**Never edit or regenerate `docs/log.md` in a pull request, and never add a check step to
+`lint.yaml` by hand.**
 
-- **Log entry:** add `docs/log.d/<yyyy-mm-dd>-<nn>-<slug>.md`, with front matter (`type: Log`,
-  `title`, `description`) and then the entry's bullet (`- **Title (#issue).** ...`). Write
-  relative links from `docs/log.d/` (`../supply-chain.md`). Then run
-  `python3 hack/render-log.py .`, which regenerates `docs/log.md` (newest first; on one day the
-  higher `<nn>` is the later change), and commit both. CI fails when `docs/log.md` is not the
-  render (`hack/render-log.py . --check`).
+- **Log entry:** add `docs/log.d/<yyyy-mm-dd>-<nn>-<slug>.md`, and nothing else: with front
+  matter (`type: Log`, `title`, `description`) and then the entry's bullet
+  (`- **Title (#issue).** ...`). Write relative links from `docs/log.d/` (`../supply-chain.md`).
+  On one day the higher `<nn>` is the later change. **Don't run the renderer or commit
+  `docs/log.md`:** a pull request whose diff touches it fails (`hack/validate-log-untouched.py`),
+  and CI checks only the entry (`hack/render-log.py . --check`). To preview, run
+  `python3 hack/render-log.py .` and discard the result (`git checkout -- docs/log.md`).
+  After the merge, `.github/workflows/render-log.yaml` renders `docs/log.md` on main and lands it
+  through a pull request of its own, from `bot/render-log-<sha7>` by `github-actions[bot]`, which
+  it squash-merges at once. That bot pull request is the only one allowed to change
+  `docs/log.md`. main's ruleset requires a pull request with no bypass, which is why the bot
+  doesn't push to main. It needs the org and repo setting "Allow GitHub Actions to create and
+  approve pull requests".
 - **Gate:** add `hack/gates.d/<gate>.yaml` with `name`, `job` (an existing `lint.yaml` job, for
   the tools it installs), `order` and `run` (a block scalar), plus, if needed, `setup`,
   `working-directory` and `workflow-env`. Say in a comment above the keys what defect it
