@@ -1,0 +1,18 @@
+component: nova
+issue: 146
+reason: >-
+  Upstream's nova-compute liveness and startup probes ping the service over RPC, so a RabbitMQ outage fails them on
+  every node at once and the kubelet restarts the whole compute fleet, which cannot repair RabbitMQ (observed: 9
+  restarts on each nova-compute while RabbitMQ's release was wedged). Liveness and startup check the process only;
+  readiness keeps the RPC check, so the outage still shows.
+assertions:
+  - file: templates/daemonset-compute.yaml
+    present: define "novaComputeProcessProbe"
+    why: >-
+      The process-only check that liveness and startup include. hack/validate-nova-compute-liveness.py renders the
+      chart and runs the rendered command against stand-in processes.
+  - file: templates/daemonset-compute.yaml
+    absent: --liveness-probe
+    why: >-
+      health-probe.py's liveness mode, which still makes the RPC call. Its return means a probe that restarts
+      nova-compute depends on RabbitMQ again.

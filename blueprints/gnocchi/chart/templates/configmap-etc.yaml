@@ -74,7 +74,7 @@ verified in quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble, where
 gnocchi.common.redis.OPTS is exactly one StrOpt named redis_url.
 
 Upstream's chart ships `storage.driver: ceph` and fills nothing here, so this block is a
-deliberate divergence recorded in hack/upstream-divergences.yaml. Without it `driver: redis`
+deliberate divergence recorded in hack/upstream-divergences.d. Without it `driver: redis`
 would silently fall back to gnocchi's own default, `redis://localhost:6379/` -- which resolves
 inside the gnocchi pod itself, where no redis is listening, and which no dependency wait could
 ever have told you about.

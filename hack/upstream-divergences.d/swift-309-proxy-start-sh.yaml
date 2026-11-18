@@ -1,0 +1,12 @@
+component: swift
+issue: 309
+reason: >-
+  swift's proxy start pins the memcached Service's address in /etc/hosts (an eventlet DNS workaround). With
+  memcached's replicas listed one by one (ha), proxy-server.conf names each pod, so each pod is pinned the same way;
+  without the list nothing changes.
+assertions:
+  - file: templates/bin/_proxy-start.sh.tpl
+    present: if .Values.endpoints.oslo_cache.statefulset
+    why: >-
+      Without it the proxy's memcache list names pods that the workaround never resolved, which is the state the
+      workaround exists to avoid.
