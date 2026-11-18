@@ -1,0 +1,8 @@
+# neutron's tunnel interface defaults to empty, so the OVS agent uses the default route's NIC on any node, not a
+# provider's NIC name (ens4 was GCE's, and on any other node the agent's init stopped at "Var LOCAL_IP is empty").
+# The rendered fallback is run against a stand-in `ip`.
+name: "neutron's tunnel interface is detected, not assumed"
+job: capability-roles
+order: 146
+run: |
+  python3 hack/validate-neutron-tunnel-interface.py .
