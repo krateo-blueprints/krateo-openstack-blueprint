@@ -21,6 +21,13 @@ checked, case by case:
   - a live 10240Mi claim, volume.size 10Gi     -> 10Gi (equal)
   - volume.size `lots`                         -> refused (by the schema, or the chart), naming it
 
+And the store moving to Ceph (#308: storage rbd with the umbrella's krateo.ceph references), which stops glance
+mounting the claim and leaves every image on it unreadable, reads the same one lookup:
+
+  - a live claim, images not migrated          -> refused, naming storage.ceph.glanceImagesMigrated
+  - a live claim, krateo.imagesMigratedFromPvc -> renders, no glance-images claim
+  - no live claim                              -> renders, no glance-images claim
+
 Fails when helm or PyYAML is missing, and when the chart no longer looks the claim up exactly once.
 """
 import os
@@ -78,6 +85,15 @@ def render(w, values):
     return r
 
 
+def ceph_rbd(migrated=False):
+    ref = lambda secret, key: {"store": "openstack-credentials", "secret": secret, "key": key}
+    v = {"storage": "rbd", "krateo": {"ceph": {"keyringFrom": ref("openstack-credential-ceph-client-glance", "key"),
+                                               "monHostFrom": ref("openstack-credential-ceph-mon-host", "mon_host")}}}
+    if migrated:
+        v["krateo"]["imagesMigratedFromPvc"] = True
+    return v
+
+
 def main():
     vol = (yaml.safe_load(open(os.path.join(CHART, "values.yaml"))) or {}).get("volume") or {}
     if vol.get("defaultSize") != DEFAULT or vol.get("size") not in ("", None):
@@ -91,7 +107,10 @@ def main():
              ("a live 2Gi claim, volume.size 10Gi", "2Gi", {"volume": {"size": "10Gi"}}, "10Gi"),
              ("a live 20Gi claim, volume.size 10Gi", "20Gi", {"volume": {"size": "10Gi"}}, "20Gi"),
              ("a live 10240Mi claim, volume.size 10Gi", "10240Mi", {"volume": {"size": "10Gi"}}, "10Gi"),
-             ("volume.size 'lots'", "2Gi", {"volume": {"size": "lots"}}, "refused")]
+             ("volume.size 'lots'", "2Gi", {"volume": {"size": "lots"}}, "refused"),
+             ("ceph rbd, a live 2Gi claim, images not migrated", "2Gi", ceph_rbd(), "refused-migrate"),
+             ("ceph rbd, a live 2Gi claim, images migrated", "2Gi", ceph_rbd(True), "no-claim"),
+             ("ceph rbd, no live claim", None, ceph_rbd(), "no-claim")]
     checked = 0
     with tempfile.TemporaryDirectory() as tmp:
         for n, (label, live, values, want) in enumerate(cases):
@@ -102,6 +121,19 @@ def main():
                                 "is refused" % (len(hits), LOOKUP))
                 break
             r = render(w, values)
+            if want == "refused-migrate":
+                if r.returncode == 0 or "storage.ceph.glanceImagesMigrated" not in r.stderr:
+                    failures.append("%s: renders (rc=%d) or does not name storage.ceph.glanceImagesMigrated; moving the "
+                                    "store off a live claim would leave its images unreadable" % (label, r.returncode))
+                checked += 1
+                continue
+            if want == "no-claim":
+                if r.returncode != 0:
+                    failures.append("%s: does not render: %s" % (label, r.stderr.strip()[-200:]))
+                elif [d for d in yaml.safe_load_all(r.stdout) if d and d.get("kind") == "PersistentVolumeClaim"]:
+                    failures.append("%s: renders a claim; the store is Ceph" % label)
+                checked += 1
+                continue
             if want == "refused":
                 if r.returncode == 0 or "lots" not in r.stderr:
                     failures.append("%s: renders (rc=%d); a size it cannot compare must be refused, naming it"

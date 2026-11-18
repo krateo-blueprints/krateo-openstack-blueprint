@@ -1,0 +1,10 @@
+{{/*
+Krateo blueprint addition (#206): at uninstall, delete this release's completed install/upgrade hook Jobs, which Helm
+never deletes (helm-toolkit.manifests.job_hook_cleanup). Its image is images.tags.hook_cleanup, the openstack-client
+image this chart's helm test runs, for python (the ks-user Job that ran it went with #302).
+*/}}
+{{- $job := dict "envAll" . "serviceName" "mariadb" "image" .Values.images.tags.hook_cleanup -}}
+{{- if .Values.pod.tolerations.mariadb.enabled -}}
+{{- $_ := set $job "tolerationsEnabled" true -}}
+{{- end -}}
+{{ $job | include "helm-toolkit.manifests.job_hook_cleanup" }}

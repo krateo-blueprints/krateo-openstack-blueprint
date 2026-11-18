@@ -1,0 +1,11 @@
+# Gating. Every X.Y.Z tag reaches the Marketplace, so a change is verified on GKE from a pre-release
+# before the tag exists (docs/release.md). prerelease.yaml is safe only while it cannot write the
+# index (no secret but GITHUB_TOKEN, no reusable workflow, contents: read) and release-tag.yaml
+# stamps only plain X.Y.Z; prune-prereleases.yaml deletes only pre-releases, with its one secret
+# and a dry-run default. One-line edits break any of them; this checks all three, and mutates the
+# files to prove each check fires.
+name: "A pre-release cannot reach the Marketplace index, a release is never a pre-release, and pruning deletes only pre-releases"
+job: capability-roles
+order: 375
+run: |
+  python3 hack/validate-prerelease-channel.py .

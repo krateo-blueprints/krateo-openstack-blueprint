@@ -121,11 +121,30 @@ jobs:
           mkdir -p "$RUNNER_TEMP/report"
           # Straight from the registry (no docker daemon), as linux/amd64, the platform every cluster here runs.
           # HIGH is reported for the record; only CRITICAL is judged (hack/check-image-cves.py).
-          "$RUNNER_TEMP/trivy-bin/trivy" image "$IMAGE" \
-            --cache-dir "$RUNNER_TEMP/trivy-cache" \
-            --image-src remote --platform linux/amd64 --scanners vuln \
-            --severity CRITICAL,HIGH --timeout 30m \
-            --format json --output "$RUNNER_TEMP/report/trivy.json" --exit-code 0
+          #
+          # Up to three attempts, because a layer download can be cut short. Run 44202269356 lost
+          # gnocchi-metricd that way: "failed to analyze layer ... unable to read the file: unexpected EOF".
+          # The digest was the recorded one, and the same digest scanned clean before and after, but the gate
+          # rightly failed on the missing report. A retry can't hide a real finding: findings are judged from
+          # the report, and an image that fails all three attempts still has none, which the gate fails by
+          # name. Between attempts only the layer-analysis cache is dropped; the vulnerability DB is kept.
+          for attempt in 1 2 3; do
+            if "$RUNNER_TEMP/trivy-bin/trivy" image "$IMAGE" \
+                --cache-dir "$RUNNER_TEMP/trivy-cache" \
+                --image-src remote --platform linux/amd64 --scanners vuln \
+                --severity CRITICAL,HIGH --timeout 30m \
+                --format json --output "$RUNNER_TEMP/report/trivy.json" --exit-code 0; then
+              break
+            fi
+            rm -f "$RUNNER_TEMP/report/trivy.json"
+            if [ "$attempt" = 3 ]; then
+              echo "::error::trivy could not scan $IMAGE in 3 attempts"
+              exit 1
+            fi
+            echo "::warning::trivy attempt $attempt for $IMAGE failed; retrying"
+            rm -rf "$RUNNER_TEMP/trivy-cache/fanal"
+            sleep $((attempt * 15))
+          done
           python3 - "$RUNNER_TEMP/report/trivy.json" <<'EOF'
           import json, sys, collections
           rep = json.load(open(sys.argv[1]))

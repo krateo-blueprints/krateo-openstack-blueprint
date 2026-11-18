@@ -34,7 +34,7 @@ None, as measured.
 
 **#115, gnocchi:** upstream OpenStack-Helm points gnocchi at `quay.io/attcomdev/ubuntu-source-gnocchi-*:3.0.3`,
 which are Docker Registry v1 manifests: the tags resolve and no current docker can pull them. This repo
-repointed gnocchi at the OpenStack Kolla images (#117, kept by `hack/upstream-divergences.yaml`); their rows
+repointed gnocchi at the OpenStack Kolla images (#117, kept by `hack/upstream-divergences.d`); their rows
 below are measured like every other. The registry check above fails on a v1 manifest, so a return of that
 format is a finding here, not a surprise at install time.
 
@@ -86,7 +86,7 @@ digest); the digest each tag served when recorded is in `hack/images.yaml`, and 
 | `quay.io/airshipit/neutron:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | neutron (d) |
 | `quay.io/airshipit/nova:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | nova (d) |
 | `quay.io/airshipit/octavia:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | octavia (d) |
-| `quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), freezer (d), glance (d), gnocchi (d), heat (d), horizon (d), keystone (d), magnum (d), manila (d), mariadb (x), masakari (d), mistral (d), neutron (d), nova (d), octavia (d), placement (d), powerdns (d), rabbitmq (d), skyline (d), tacker (d), watcher (d), zaqar (d) |
+| `quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), freezer (d), glance (d), gnocchi (d), heat (d), horizon (d), keystone (d), magnum (d), manila (d), mariadb (d), masakari (d), mistral (d), neutron (d), nova (d), octavia (d), placement (d), powerdns (d), rabbitmq (d), skyline (d), tacker (d), watcher (d), zaqar (d) |
 | `quay.io/airshipit/openvswitch:ubuntu_jammy-20261018` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | octavia (d) |
 | `quay.io/airshipit/openvswitch:ubuntu_noble-20261030` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | openvswitch (d) |
 | `quay.io/airshipit/osh-selenium:ubuntu_noble-20261030` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | horizon (m) |

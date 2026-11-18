@@ -44,7 +44,7 @@ images:
     # `latest` -- so it can never satisfy hack/preflight-refs.py --mutable-only (#69). The
     # test is kept and rewritten against redis-cli, which the server image already carries,
     # rather than disabled: a test that is switched off to dodge an unpinnable image is not a
-    # fix. See hack/upstream-divergences.yaml.
+    # fix. See hack/upstream-divergences.d.
     helm_tests: docker.io/library/redis:7.2.17
     # Upstream's `latest-ubuntu_noble` is a rebuildable tag. This is the digest-era tag every
     # other chart in this repo pins.

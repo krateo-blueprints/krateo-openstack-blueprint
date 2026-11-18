@@ -1,0 +1,7 @@
+# Helm never deletes hook resources at uninstall, so a removed component left its completed hook Jobs and pods
+# behind (#206). Each chart's pre-delete cleanup must delete exactly its release's install/upgrade hook Jobs.
+name: "Uninstalling a component deletes its hook Jobs"
+job: job-hooks
+order: 15
+run: |
+  python3 hack/validate-hook-cleanup.py .

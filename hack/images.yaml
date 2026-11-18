@@ -1412,8 +1412,9 @@ images:
     - ks_service
     - ks_user
   - chart: mariadb
-    rendered: declared-only
+    rendered: defaults
     keys:
+    - hook_cleanup
     - prometheus_mysql_exporter_helm_tests
   - chart: masakari
     rendered: defaults

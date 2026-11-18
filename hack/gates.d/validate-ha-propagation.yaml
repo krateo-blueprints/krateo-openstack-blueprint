@@ -1,0 +1,8 @@
+# One source for each stateful host list (#309): the RabbitMQ server count reaches every transport URL, and with
+# ha.enabled memcached's replicas reach every memcache server list; ha off passes nothing; the refusals (memcached
+# replicas without ha, a conflicting per-component count, fewer than 3 control-plane nodes) hold.
+name: "High availability reaches every reader, and off changes nothing"
+job: capability-roles
+order: 144
+run: |
+  python3 hack/validate-ha-propagation.py .
