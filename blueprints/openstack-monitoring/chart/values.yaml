@@ -26,7 +26,8 @@ images:
     # 2.0.0-alpha (2026-08-02), built with Go 1.26.5: GitHub publishes it as a full release, not a pre-release, despite its
     # name. 1.7.0 (2024) is built with Go 1.18 and carries four CRITICAL stdlib CVEs fixed in later Go (the image scan of
     # 2026-11-18: CVE-2023-24538, CVE-2023-24540, CVE-2024-24790, CVE-2025-68121). The metric names the alerts use are
-    # unchanged, and cited against this tag's source in files/alerts.yaml.
+    # unchanged, and cited against this tag's source in files/alerts.yaml. A recorded exception (hack/app-versions.yaml,
+    # Diego 2026-11-18): no plain release since 1.7.0. Move to a plain 2.x when upstream cuts one (#348).
     openstack_exporter: ghcr.io/openstack-exporter/openstack-exporter:2.0.0-alpha
     mysqld_exporter: quay.io/prometheus/mysqld-exporter:v0.21.0
     # The Kubernetes distribution of the collector, not contrib: it holds the prometheus receiver and every processor this

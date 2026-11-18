@@ -24,7 +24,9 @@ alert-provider CRs. Everything below is checked on what the charts RENDER, not o
         converted by the collector (convert_sum_to_gauge on exactly its name);
      f. SELECTION: rendered for an install of keystone and mariadb alone, no alert needs an absent component, no
         companion or scrape job exists for rabbitmq, and openstack-exporter disables the absent services; with
-        alerts.enabled false no Metric or Alert renders.
+        alerts.enabled false no Metric or Alert renders;
+     g. PRE-RELEASE: an image tag named alpha, beta or rc runs only as an exception recorded in hack/app-versions.yaml, with
+        a reason and an issue (openstack-exporter 2.0.0-alpha, #348).
   2. READERS (the chart, and mariadb with krateo.exporterUser, in values mode and with the umbrella's references):
      a. each credential Secret is referenced by exactly its readers' pods: the exporter user's openrc (which carries its
         clouds.yaml) by openstack-exporter, the .my.cnf by mysqld-exporter, the admin openrc and the exporter user's root by the ks-user Job, mariadb's
@@ -388,6 +390,20 @@ def part_alerts(root, tmp, counts):
                 fails.append("1f: openstack-exporter scrapes %s although its component is not selected" % svc)
         if "--disable-service.identity" in (args or []):
             fails.append("1f: openstack-exporter disables identity although keystone is selected")
+    # g. a pre-release-named image (alpha, beta, rc) runs only as a recorded exception: a reason and an issue in
+    #    hack/app-versions.yaml, on the entry of this chart whose image it is.
+    av = (yaml.safe_load(open(P(root, "hack", "app-versions.yaml"))) or {}).get("charts") or {}
+    entry = av.get("blueprints/%s/chart" % CHART) or {}
+    pre = 0
+    for key, ref in ((vals.get("images") or {}).get("tags") or {}).items():
+        tag = ref.rsplit(":", 1)[1] if ":" in ref.rsplit("/", 1)[-1] else ""
+        if re.search(r"(^|[-.])(alpha|beta|rc)[0-9.]*$", tag, re.I):
+            pre += 1
+            exc = entry.get("exception") or {}
+            if entry.get("image") != key or not str(exc.get("reason") or "").strip() or not str(exc.get("issue") or "").strip():
+                fails.append("1g: images.tags.%s is the pre-release-named %s, and hack/app-versions.yaml records no exception "
+                             "for it with a reason and an issue" % (key, ref))
+    counts["1g"] = pre
     rc, out3, err = helm_template(w, CHART + "-gate1234", {"alerts": {"enabled": False}})
     if rc != 0 or by_kind(docs_of(out3), "Alert") or by_kind(docs_of(out3), "Metric"):
         fails.append("1f: with alerts.enabled false the chart still renders Alert or Metric CRs (or fails to render)")
@@ -660,6 +676,8 @@ def mutations(r):
                      "      kind: guessed\n      pinnedTo: openstack-monitoring:mysqld_exporter")),
         ("a metric is cited at a branch", part_alerts,
          lambda: sub(P(osm, "files", "alerts.yaml"), "rabbitmq-server/blob/v3.10.18/", "rabbitmq-server/blob/main/")),
+        ("the alpha-tag exception loses its issue", part_alerts,
+         lambda: sub(P(r, "hack", "app-versions.yaml"), '      issue: "348"\n', "")),
         ("the exporter image moves without re-citing", part_alerts,
          lambda: sub(P(osm, "values.yaml"), "openstack-exporter:2.0.0-alpha", "openstack-exporter:2.0.1")),
         ("a counter is recorded as a gauge without conversion", part_alerts,
@@ -703,6 +721,8 @@ def copy_tree(dst):
                 os.path.join("blueprints", "mariadb"), os.path.join("blueprints", "rabbitmq"),
                 os.path.join("charts", "helm-toolkit"), os.path.join("docs", "runbooks")):
         shutil.copytree(P(ROOT, rel), P(dst, rel))
+    os.makedirs(P(dst, "hack"), exist_ok=True)
+    shutil.copy(P(ROOT, "hack", "app-versions.yaml"), P(dst, "hack", "app-versions.yaml"))
 
 
 def main():
@@ -728,7 +748,7 @@ def main():
                 failures.append("4: mutation %r passed %s: the part cannot see its own defect" % (name, part.__name__))
             shutil.rmtree(mroot, ignore_errors=True)
         counts["4"] = caught
-    for k in ("1a", "1b", "1c", "1d", "1e", "2a", "2c", "2d", "3ab", "3d", "3e", "4"):
+    for k in ("1a", "1b", "1c", "1d", "1e", "1g", "2a", "2c", "2d", "3ab", "3d", "3e", "4"):
         if not counts.get(k):
             failures.append("%s: nothing was checked" % k)
     if failures:
