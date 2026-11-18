@@ -97,8 +97,17 @@ def render_probe(values):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def storage_values(backend):
+    """storage values that render with `backend`: ceph-external names its source Secrets or is refused (#308), so the
+    selection probe gives it placeholders; they select nothing."""
+    v = {"backend": backend}
+    if backend == "ceph-external":
+        v["ceph"] = {"keys": {k: {"secret": "gate-" + k, "key": "key"} for k in ("cinder", "glance", "monHost")}}
+    return v
+
+
 def selection_for_profile(profile, backend="none"):
-    r = render_probe({"profile": profile, "storage": {"backend": backend}})
+    r = render_probe({"profile": profile, "storage": storage_values(backend)})
     return None if r is None else r[0]
 
 
@@ -184,7 +193,7 @@ def main():
                         "positive control proves nothing")
     controls = 0
     for b in others:
-        r = render_probe({"profile": "full-strict", "storage": {"backend": b}})
+        r = render_probe({"profile": "full-strict", "storage": storage_values(b)})
         if r is None or strict is None:
             problems.append(f"could not render full-strict with storage.backend {b}, so the positive control "
                             "did not run")

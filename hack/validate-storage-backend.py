@@ -12,13 +12,15 @@ without a backend, naming the value. Each half is checked here, by rendering:
   1. THE UMBRELLA DELIVERS IT. The lines of compositions.yaml that build a component's spec (from `{{- $ov := ` through
      the storageBackend merge) are rendered for every component, once per storage.backend the schema accepts: each
      component whose components[].requires names block-storage receives exactly that value as krateo.storageBackend,
-     none included, and every other component's spec is the same for every backend and carries no storageBackend. The
-     component set must be non-empty and every backend must render, or nothing was measured.
+     none included, and no other component carries one. Which specs a ceph backend changes at all (the Ceph consumers'
+     references and storage values, #308) is hack/validate-ceph-consumer.py's check 29. The component set must be
+     non-empty and every backend must render, or nothing was measured.
   2. ONE PLACE SAYS IT. A componentValues.<component>.krateo.storageBackend is refused for each such component, with a
      message naming storage.backend, whatever its value (unmanaged included: it would install upstream's wiring under a
      full-strict that left cinder out). The umbrella's schema refuses a backend it does not list.
   3. THE CHART REFUSES. Rendered with krateo.storageBackend none, cinder fails, naming storage.backend and #196; with each
-     other backend the umbrella accepts and the chart cannot render yet, it fails naming that backend and #308. Its own
+     ceph backend but without the krateo.ceph references the umbrella passes with it, it fails naming that backend and
+     the references (#308); with them it renders, which hack/validate-ceph-consumer.py checks. Its own
      default is `unmanaged` (the chart as OpenStack-Helm ships it, for a standalone install), which renders
      cinder-volume: the other gates render each chart at its defaults and must keep seeing cinder's pods.
   4. ONE LIBVIRT SECRET UUID. nova-compute's DaemonSet read `.Values.conf.ceph.secret_uuid`, which nova's values never
@@ -53,7 +55,7 @@ if shutil.which("helm") is None:
 
 SENTINEL_UUID = "0b5e7a1c-5e47-4c1e-9f00-196196196196"
 REFUSE_NONE = "storage.backend is none (#196)"
-REFUSE_LATER = "is not implemented in this release (#308)"
+REFUSE_LATER = "renders only with krateo.ceph.keyringFrom and krateo.ceph.monHostFrom (#308)"
 failures = []
 counts = {}
 
@@ -108,6 +110,14 @@ def env_values(docs, name):
     return out
 
 
+def storage_values(backend):
+    """storage values that render with `backend`: ceph-external names its source Secrets or is refused (#308)."""
+    v = {"backend": backend}
+    if backend == "ceph-external":
+        v["ceph"] = {"keys": {k: {"secret": "gate-" + k, "key": "key"} for k in ("cinder", "glance", "monHost")}}
+    return v
+
+
 def dig(d, path):
     for k in path.split("."):
         if not isinstance(d, dict) or k not in d:
@@ -146,7 +156,7 @@ def main():
                 '# SBSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n')
             specs = {}
             for b in backends:
-                rc, out, err = helm_template(u, "openstack-gate", {"profile": "full", "storage": {"backend": b}})
+                rc, out, err = helm_template(u, "openstack-gate", {"profile": "full", "storage": storage_values(b)})
                 if rc != 0:
                     fail("1: the umbrella probe does not render with storage.backend %s: %s" % (b, err.strip()[:300]))
                     continue
@@ -163,9 +173,6 @@ def main():
                             fail("1: with storage.backend %s, %s receives krateo.storageBackend %r" % (b, n, sb))
                     elif sb is not None:
                         fail("1: %s requires no block-storage and still receives krateo.storageBackend %r" % (n, sb))
-                    elif got.get(n) != specs[backends[0]].get(n):
-                        fail("1: %s's spec changes with storage.backend (%s): only block-storage consumers may move"
-                             % (n, b))
                     count("1")
             os.unlink(probe)
         # 2. one place says it

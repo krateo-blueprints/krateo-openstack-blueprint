@@ -1,0 +1,11 @@
+# #308: with a ceph storage.backend the install consumes Ceph through COPIES of the keys Ceph mints (a Rook
+# CephClient, or the Ceph admin), never through client.admin. 27: the copied roots, refreshed, torn down with the
+# release, read through a store limited to exactly the source Secrets, and nothing for an install without Ceph.
+# P/22c/18c/18d/28: the charts project the copies to exactly the measured readers, restart on a key change, never
+# render client.admin. 29: one set of pools, users and UUID delivered by the umbrella's own lines. 30: a consumer is
+# held until its copies are Ready, and a missing read grant refuses the render, naming it.
+name: "Ceph is consumed through copies of the keys it mints, never client.admin"
+job: capability-roles
+order: 352
+run: |
+  python3 hack/validate-ceph-consumer.py .

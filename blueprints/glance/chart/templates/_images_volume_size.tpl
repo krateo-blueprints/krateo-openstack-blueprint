@@ -31,10 +31,18 @@ claim itself, in its own namespace, which helm reads anyway to upgrade it; it ca
 {{- end -}}
 {{- end -}}
 
+{{/* The live glance-images claim, as JSON ("{}" when there is none): the chart's ONE read of it. The size above uses it
+     when the store is the claim (storage pvc), and the refusal to move images off it uses it when the store is Ceph
+     (#308, templates/secret-ceph-projections.yaml); the two never render together, so a render reads the claim at most
+     once. hack/validate-glance-store.py replaces this lookup with stand-in claims. */}}
+{{- define "glance.images_claim" -}}
+{{- lookup "v1" "PersistentVolumeClaim" .Release.Namespace "glance-images" | default dict | toJson -}}
+{{- end -}}
+
 {{- define "glance.images_volume_size" -}}
 {{- $user := .Values.volume.size | default "" | toString | trim -}}
 {{- if $user -}}{{- $_ := include "glance.quantity_bytes" $user -}}{{- end -}}
-{{- $live := lookup "v1" "PersistentVolumeClaim" .Release.Namespace "glance-images" -}}
+{{- $live := include "glance.images_claim" . | fromJson -}}
 {{- $requests := (((($live).spec | default dict).resources | default dict).requests | default dict) -}}
 {{- $liveSize := index $requests "storage" | default "" | toString -}}
 {{- if not $liveSize -}}

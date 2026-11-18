@@ -1,0 +1,85 @@
+# Which containers receive each Ceph projection when a chart is ceph-managed (#308): the key of the chart's Ceph user
+# (`keyring`) and ceph.conf with mon_host (`etc`). hack/validate-ceph-consumer.py (check 22c) renders each chart in each
+# listed mode and requires exactly these containers to mount each projection -- every listed one, and no other.
+#
+# Measured from the renders, per program, 2026-11-17: what each container runs and why it needs the file. A container
+# is listed because its program opens librbd (or the rbd CLI) as that user, or writes the keyring file a program in its
+# pod reads. cinder-api, cinder-scheduler, the db/ks/rabbit Jobs, glance's other Jobs and nova receive neither: none of
+# them opens Ceph. An entry is not proof by its name -- it was read from what the container's command does.
+readers:
+  cinder:
+    modes:
+      - deployment
+      - statefulset
+    keyring:
+      - container: ceph-keyring-placement-rbd1
+        workloads:
+          - Deployment/cinder-volume
+          - StatefulSet/cinder-volume
+        why: >-
+          bin/_ceph-keyring.sh.tpl writes /etc/ceph/ceph.client.<rbd_user>.keyring from it into the pod's etcceph
+          emptyDir, which cinder-volume's RBD driver reads.
+      - container: cinder-volume
+        workloads:
+          - Deployment/cinder-volume
+          - StatefulSet/cinder-volume
+        why: >-
+          cinder-volume runs the RBDDriver (librbd as client.<rbd_user>); upstream mounts the key at
+          /tmp/client-keyring as well as reading the keyring file.
+      - container: ceph-keyring-placement
+        workloads:
+          - Job/cinder-storage-init
+        why: Writes the keyring file for the check below.
+    etc:
+      - container: cinder-volume
+        workloads:
+          - Deployment/cinder-volume
+          - StatefulSet/cinder-volume
+        why: librbd reads /etc/ceph/ceph.conf for mon_host.
+      - container: cinder-storage-init-rbd1
+        workloads:
+          - Job/cinder-storage-init
+        why: >-
+          Runs `rbd --id <rbd_user> --pool <pool> ls`, the ceph-managed check that the pool exists and the user can use
+          it.
+  glance:
+    modes:
+      - rbd
+    keyring:
+      - container: ceph-keyring-placement
+        workloads:
+          - Deployment/glance-api
+          - Job/glance-storage-init
+        why: bin/_ceph-keyring.sh.tpl writes /etc/ceph/ceph.client.<rbd_store_user>.keyring into the pod's etcceph.
+      - container: glance-api
+        workloads:
+          - Deployment/glance-api
+        why: glance_store's rbd driver (librbd as client.<rbd_store_user>); upstream also mounts the key itself.
+    etc:
+      - container: glance-api
+        workloads:
+          - Deployment/glance-api
+        why: librbd reads /etc/ceph/ceph.conf for mon_host.
+      - container: glance-storage-init
+        workloads:
+          - Job/glance-storage-init
+        why: Runs the ceph-managed `rbd --id <rbd_store_user> --pool <pool> ls` check.
+  libvirt:
+    modes:
+      - daemonset
+    keyring:
+      - container: ceph-keyring-placement
+        workloads:
+          - DaemonSet/libvirt-libvirt-default
+        why: >-
+          bin/_ceph-keyring.sh.tpl writes /etc/ceph/ceph.client.<conf.ceph.cinder.user>.keyring on the hypervisor's
+          etcceph hostPath, from which libvirt.sh defines the libvirt secret qemu's librbd authenticates with.
+      - container: libvirt
+        workloads:
+          - DaemonSet/libvirt-libvirt-default
+        why: Upstream mounts the key in libvirtd's container too; libvirt.sh reads the keyring file the init wrote.
+    etc:
+      - container: ceph-keyring-placement
+        workloads:
+          - DaemonSet/libvirt-libvirt-default
+        why: Copies ceph.conf.template to /etc/ceph/ceph.conf on the hypervisor, which qemu's librbd reads.
