@@ -24,3 +24,9 @@ spec:
     - forPath: credentialDrift
       preserveUnknownFields: true
       expression: '${ [(.status.managed // [])[] | select(.resource == "configmaps" and (.name | startswith("openstack-credential-drift-"))) | .name | ltrimstr("openstack-credential-drift-")] }'
+    # #309 C2: the RabbitMQ user rotations in progress (rotate.<id> minting or draining a generation), by credential id;
+    # ConfigMap openstack-credential-rotation-<id> says the phase and what each waits on (templates/compositions.yaml).
+    # [] when none.
+    - forPath: credentialRotation
+      preserveUnknownFields: true
+      expression: '${ [(.status.managed // [])[] | select(.resource == "configmaps" and (.name | startswith("openstack-credential-rotation-"))) | .name | ltrimstr("openstack-credential-rotation-")] }'

@@ -117,15 +117,38 @@
 {{- $approved := include "osh.migrationApprovedFor" (list $ $cd) }}
 {{- $emitVer := include "osh.emitVersion" (list $ $c.kind $c.name $crds $exists $approved) }}
 {{- $crd := include "osh.crdExists" (list $c.kind $emitVer $crds) }}
-{{- /* #309 C: a component's RabbitMQ user rotation (osh.messagingRotation), derived from the live Composition and the
-       target root's stamps. A token that cannot be honoured refuses the render, naming why, on the umbrella's status. */ -}}
-{{- if (include "osh.messagingProjection" (list $ $c) | fromJson).secret }}
-{{- $rotLive := dict }}
-{{- if eq $exists "true" }}{{- with include "osh.liveState" (list $ $c.kind $c.name $emitVer $crds) }}{{- $rotLive = (fromJson .).spec | default dict }}{{- end }}{{- end }}
-{{- $rot := include "osh.messagingRotation" (list $ $c $rotLive) | fromJson }}
+{{- /* #309 C: a component's RabbitMQ user rotation (osh.messagingRotation), derived from the live Composition (its spec
+       and status.managed) and the generation roots' stamps. A token that cannot be honoured refuses the render, naming
+       why, on the umbrella's status. C2: the umbrella projection of every generation still in use, and while a rotation
+       is not steady a ConfigMap openstack-credential-rotation-<id> saying what it waits on (status.credentialRotation). */ -}}
+{{- $rot := dict }}
+{{- $mp := include "osh.messagingProjection" (list $ $c) | fromJson }}
+{{- if $mp.secret }}
+{{- $rotLive := dict }}{{- $rotManaged := list }}
+{{- if eq $exists "true" }}{{- with include "osh.liveState" (list $ $c.kind $c.name $emitVer $crds) }}{{- $ls := fromJson . }}{{- $rotLive = $ls.spec | default dict }}{{- $rotManaged = $ls.managed | default list }}{{- end }}{{- end }}
+{{- $rot = include "osh.messagingRotation" (list $ $c $rotLive $rotManaged) | fromJson }}
 {{- if $rot.refuse }}{{- fail (printf "\n\n%s\n" $rot.refuse) }}{{- end }}
 {{- if ne $rot.target $rot.base }}
 {{- include "osh.generationRoot" (list $ $rot) }}
+{{- end }}
+{{- range $root := ($rot.roots | default list) }}
+{{- include "osh.messagingProjectionES" (list $ $c $mp (include "osh.generationSuffix" (list $rot.base $root)) $root) }}
+{{- end }}
+{{- if ne (toString $rot.phase) "steady" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "openstack-credential-rotation-%s" $rot.id }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    krateo.io/credential-rotation: {{ $rot.id }}
+data:
+  credential: {{ $rot.id | quote }}
+  phase: {{ $rot.phase | quote }}
+  active: {{ $rot.activeRoot | quote }}
+  target: {{ $rot.target | quote }}
+  blockers: {{ join "\n" $rot.blockers | quote }}
 {{- end }}
 {{- end }}
 {{- /* Partition this component's dependencies by the gate each edge is in, so that which
@@ -298,6 +321,18 @@
 {{- $emitVer = include "osh.holdVersion" (list ($state.version | default "") $emitVer $c.kind $crds) }}
 {{- end }}
 {{- end }}
+{{- /* RabbitMQ user rotation (#309 C2, osh.messagingRotation): once a component has been rotated, the generation it
+       connects as (username and root), the users its release renders (the active one, and the previous or next one
+       while a switch drains or prepares) and the active suffix its waits and pod annotation name. Merged OVER
+       componentValues, which may not set this passwordFrom while a token is set (refused). Nothing before a first
+       rotation, and nothing while the component's values are held (TWO PHASES): its live spec is re-emitted as it is.
+       After the hold, so the spec-building probes (hack/umbrella_spec.py and the per-span gates), which have no live
+       state, never reach it. hack/validate-messaging-rotation.py renders this span. */ -}}
+{{- if and $rot.pass (ne $hold "true") }}
+{{- $rotAuth := dict $c.name (dict "username" $rot.username "passwordFrom" (dict "secret" $rot.activeRoot)) }}
+{{- $ov = mergeOverwrite (deepCopy $ov) (dict "endpoints" (dict "oslo_messaging" (dict "auth" $rotAuth "operator" (dict "users" $rot.users "activeSuffix" $rot.activeSuffix)))) }}
+{{- end }}
+{{- /* end of the rotation span */ -}}
 {{- /* The apiVersion is PINNED to the version this object was born at, when it has one.
 
        A new component renders at the current version. One that already exists renders at its

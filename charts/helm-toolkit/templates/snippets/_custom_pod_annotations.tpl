@@ -60,6 +60,7 @@ examples:
 {{- define "helm-toolkit.snippets.custom_pod_annotations" -}}
 {{- $component := index . 0 -}}
 {{- $envAll := index . 1 -}}
+{{- $annotations := dict -}}
 {{- if (hasKey $envAll.Values "annotations") -}}
 {{- if (hasKey $envAll.Values.annotations "pod") -}}
 {{- $annotationsMap := $envAll.Values.annotations.pod -}}
@@ -67,10 +68,20 @@ examples:
 {{- if (hasKey $annotationsMap "default" ) -}}
 {{- $defaultAnnotations = $annotationsMap.default -}}
 {{- end -}}
-{{- $annotations := index $annotationsMap $component | default $defaultAnnotations -}}
+{{- $annotations = index $annotationsMap $component | default $defaultAnnotations | default dict -}}
+{{- end -}}
+{{- end -}}
+{{- /* Krateo (#309 C2): the RabbitMQ user generation this component's pods connect as. A rotation switches
+       endpoints.oslo_messaging.auth.<component> to a new root and username, which reaches the pods only through Secrets
+       ESO projects: no pod template changes with it (no hash covers a projected Secret), so without this a pod would
+       keep the retired credential until it restarted for some other reason, and be locked out when its user is
+       deleted. Every pod template of the chart includes this snippet, so every pod rolls on a switch
+       (hack/validate-messaging-rotation.py renders that). Absent until a first rotation: an upgrade rolls nothing. */ -}}
+{{- $sfx := (((($envAll.Values.endpoints | default dict).oslo_messaging | default dict).operator | default dict).activeSuffix | default "") | toString -}}
+{{- if $sfx -}}
+{{- $annotations = mergeOverwrite (deepCopy $annotations) (dict "krateo.io/messaging-generation" $sfx) -}}
+{{- end -}}
 {{- if (not (empty $annotations)) -}}
 {{- toYaml $annotations -}}
-{{- end -}}
-{{- end -}}
 {{- end -}}
 {{- end -}}
