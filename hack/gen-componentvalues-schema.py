@@ -101,6 +101,53 @@ def main():
         "properties": {n: {"type": "string", "minLength": 1,
                            "description": f"Token for {n}: any change re-runs {n}'s hooks."} for n in props},
     }
+    # storage (#196, #308): the block-storage backend, passed to each component that requires block-storage as its
+    # krateo.storageBackend. Each must declare that key with every backend the umbrella accepts (a key the CRD does not
+    # declare is pruned, and a value its enum lacks is refused by the component's CRD instead of its chart's message).
+    backends = {
+        "none": "no backend (the default): profile full-strict leaves cinder out, and a cinder selected anyway "
+                "refuses to render, naming this value",
+        "ceph-rook": "Ceph run by the rook-ceph blueprint, which mints the client keys (#308); not implemented yet, "
+                     "so cinder refuses it",
+        "ceph-external": "an existing Ceph whose admin provides the client keys (#308); not implemented yet, so cinder "
+                         "refuses it",
+    }
+    consumers = [c["name"] for c in vals["components"] if "block-storage" in (c.get("requires") or [])]
+    if not consumers:
+        sys.exit("ERROR: no component requires block-storage, so storage.backend would reach nothing")
+    for n in consumers:
+        decl = (((json.load(open(os.path.join(ROOT, f"blueprints/{n}/chart/values.schema.json")))["properties"]
+                  .get("krateo") or {}).get("properties") or {}).get("storageBackend") or {})
+        lacking = [b for b in backends if b not in (decl.get("enum") or [])]
+        if not decl or lacking:
+            sys.exit(f"ERROR: {n} requires block-storage, and its values.schema.json krateo.storageBackend "
+                     f"{'is not declared' if not decl else 'lacks ' + ', '.join(lacking)}: the umbrella's "
+                     "storage.backend would be pruned or refused by its CRD")
+    if (vals.get("storage") or {}).get("backend") not in backends:
+        sys.exit(f"ERROR: the umbrella's values.yaml storage.backend {(vals.get('storage') or {}).get('backend')!r} "
+                 f"is not one of {list(backends)}")
+    schema["properties"]["storage"] = {
+        "type": ["object", "null"],
+        "title": "Storage backend",
+        "description": (
+            "The backend that provides block storage, the `block-storage` capability "
+            + ", ".join(consumers) + " requires (#196, #308). Profile full-strict selects "
+            + ", ".join(consumers) + " only when storage.backend is not none, and the umbrella passes the value to "
+            "each as its krateo.storageBackend (a componentValues override of that key is refused). With none, a "
+            + ", ".join(consumers) + " selected anyway (profile full, or enabled) refuses to render, naming this "
+            "value. Only none is functional in this release. See hack/provisioning-preconditions.yaml."
+        ),
+        "additionalProperties": False,
+        "properties": {
+            "backend": {
+                "type": "string",
+                "title": "Block-storage backend",
+                "description": "; ".join(f"{k} = {v}" for k, v in backends.items()) + ".",
+                "enum": list(backends),
+                "default": "none",
+            },
+        },
+    }
     json.dump(schema, open(sp, "w"), indent=2)
     open(sp, "a").write("\n")
     print(f"\nwrote componentValues for {len(props)} components -> {sp}")

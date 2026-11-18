@@ -4,8 +4,8 @@
 Two rules, checked on each component chart rendered with its defaults under a release name
 unlike its chart name, as Krateo renders it:
 
-1. A default cluster's StorageClass is ReadWriteOnce. A component that is not flagged
-   `requiresProvisioning` in the umbrella must not render a ReadWriteMany claim by default:
+1. A default cluster's StorageClass is ReadWriteOnce. A component that `requires` nothing in the
+   umbrella (components[].requires, #196) must not render a ReadWriteMany claim by default:
    tacker's three claims asked for ReadWriteMany on a class named `general` that no target
    cluster has, and stayed Pending on every install from 0.3.34 to 0.3.43 (#201).
 
@@ -15,7 +15,7 @@ unlike its chart name, as Krateo renders it:
    anchor's pod labels, and the anchor must carry no required affinity to any of the others,
    which would leave each waiting for the other to schedule first.
 
-3. A component that is not flagged `requiresProvisioning` must not name a storageClassName in a
+3. A component that `requires` nothing must not name a storageClassName in a
    default render: unset is what takes the cluster's default class. glance-images named
    `standard`, which exists only on clusters that happen to call a class that, and tacker named
    `general`, which exists on none (#201). This covers standalone claims and StatefulSet
@@ -47,7 +47,7 @@ def provisioning_flagged(root: Path):
     values = yaml.safe_load((root / "blueprints/openstack/chart/values.yaml").read_text()) or {}
     flagged = set()
     for entry in values.get("components") or []:
-        if isinstance(entry, dict) and entry.get("requiresProvisioning"):
+        if isinstance(entry, dict) and entry.get("requires"):
             flagged.add(entry.get("name"))
     return flagged
 
@@ -109,15 +109,16 @@ def check(component, docs, flagged):
             if spec.get("storageClassName") and component not in flagged:
                 problems.append(f"{component}: {what} names storageClassName "
                                 f"{spec['storageClassName']!r} by default; leave it unset so the claim "
-                                "takes the cluster's default class (#201), or flag the component "
-                                "requiresProvisioning")
+                                "takes the cluster's default class (#201), or declare what the component "
+                                "requires (components[].requires)")
         if d.get("kind") == "PersistentVolumeClaim":
             name = d["metadata"]["name"]
             modes[name] = set((d.get("spec") or {}).get("accessModes") or [])
             if "ReadWriteMany" in modes[name] and component not in flagged:
                 problems.append(f"{component}: PersistentVolumeClaim/{name} asks for ReadWriteMany by default, "
                                 "and a default cluster's StorageClass offers ReadWriteOnce only (#201); "
-                                "default to ReadWriteOnce or flag the component requiresProvisioning")
+                                "default to ReadWriteOnce or declare what the component requires "
+                                "(components[].requires)")
     workloads = []
     for d in docs:
         if d.get("kind") in WORKLOADS:

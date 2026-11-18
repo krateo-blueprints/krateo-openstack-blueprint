@@ -466,6 +466,41 @@ divergences:
           traverses a worker, and / is in cyborg's acl_public_routes so it needs no token.
           hack/validate-uwsgi-probe-traverses-worker.py enforces this for all 16 uwsgi-served
           containers; this entry keeps it true for cyborg across a re-vendor.
+  - component: cinder
+    issue: 196
+    reason: >-
+      Upstream's only shipped volume backend is Ceph RBD, and with no Ceph cinder-volume waits in
+      Init forever on objects nothing creates. Under the umbrella, cinder renders only with a
+      backend the umbrella's storage.backend names, and refuses otherwise, naming the value.
+    assertions:
+      - file: templates/krateo-storage-backend.yaml
+        present: eq $backend "none"
+        why: >-
+          The refusal. Without it, an install with storage.backend none renders upstream's rbd1
+          wiring again, and cinder-volume sits in Init on FailedMount for ceph-etc, the state #196
+          was filed for. hack/validate-storage-backend.py renders it.
+      - file: values.yaml
+        present: "storageBackend: unmanaged"
+        why: >-
+          The value the umbrella sets. A re-vendor keeps values overrides, but this key and its
+          template are one fix; if the key goes, the CRD prunes the umbrella's value and every
+          umbrella install renders as unmanaged.
+  - component: nova
+    issue: 196
+    reason: >-
+      Upstream's nova-compute DaemonSet reads `.Values.conf.ceph.secret_uuid`, which its values
+      never define (the UUID lives at conf.ceph.cinder.secret_uuid, as in the libvirt chart), so
+      LIBVIRT_CEPH_SECRET_UUID renders with no value whenever conf.ceph.enabled is true.
+    assertions:
+      - file: templates/daemonset-compute.yaml
+        absent: .Values.conf.ceph.secret_uuid
+        why: >-
+          The undefined path. Restoring it renders LIBVIRT_CEPH_SECRET_UUID with no value on both the
+          ceph-keyring-placement init container and nova-compute. hack/validate-storage-backend.py
+          renders nova with a sentinel UUID and fails if any LIBVIRT_CEPH_SECRET_UUID differs.
+      - file: templates/daemonset-compute.yaml
+        present: .Values.conf.ceph.cinder.secret_uuid
+        why: The path the chart's values define, and the one libvirt reads for the same UUID.
 
   - component: trove
     issue: 289
