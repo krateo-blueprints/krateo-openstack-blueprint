@@ -236,8 +236,8 @@ def main():
     print("OK: %d rabbitmq.com object(s) (%s) admitted by the API server serving the CRDs of %s@%s; %d control(s) "
           "refused as expected" % (admitted, ", ".join("%s %d" % (k, len(by_kind[k])) for k in sorted(by_kind)),
                                    pins["source"]["repository"], pins["source"]["commit"][:7], controls))
-    print("OK: phase 2, the operators' webhooks: %d object(s) admitted, %d Secret(s) modelled from ExternalSecrets, "
-          "%d control(s) refused for their own reason" % phase2)
+    print("OK: phase 2, the operators' webhooks: %d object(s) admitted, %d imported Secret(s) modelled from their "
+          "ExternalSecrets, %d control(s) refused for their own reason" % phase2)
 
 
 WEBHOOK_DOWN = ("failed calling webhook", "connection refused", "no endpoints available", "x509", "context deadline",
@@ -277,9 +277,29 @@ def webhooks(kc, tmp, pins, objs, externals, by_kind):
     if r.returncode != 0:
         print("FAILED MEASUREMENT: the operators did not become Available: %s" % r.stderr[-400:])
         sys.exit(2)
-    # The Secrets ESO would write, created for real: the webhooks read them through the operator's cache.
+    # The Secrets the rabbitmq.com objects import (a User's importCredentialsSecret, a RabbitmqCluster's
+    # secretBackend.externalSecret), each written as ESO would write it from the ExternalSecret that renders it, and
+    # created for real: the webhooks read them through the operator's cache. Only those are modelled.
+    def target_name(e):
+        return ((e.get("spec") or {}).get("target") or {}).get("name") or e["metadata"]["name"]
+    imports = {}
+    for tag, d in objs:
+        n = ((d.get("spec") or {}).get("importCredentialsSecret") or {}).get("name") if d["kind"] == "User" else \
+            (((d.get("spec") or {}).get("secretBackend") or {}).get("externalSecret") or {}).get("name") \
+            if d["kind"] == "RabbitmqCluster" else None
+        if n:
+            imports.setdefault(n, "%s %s (%s)" % (d["kind"], d["metadata"]["name"], tag))
+    by_target = {}
+    for tag, e in externals:
+        by_target.setdefault(target_name(e), (tag, e))
+    orphans = sorted(n for n in imports if n not in by_target)
+    for n in orphans:
+        failures.append("phase 2: %s imports Secret %s, which no rendered ExternalSecret writes" % (imports[n], n))
+    if not imports:
+        print("FAILED MEASUREMENT: no rabbitmq.com object imports a Secret, so no import Secret can be modelled")
+        sys.exit(2)
     secrets = 0
-    for tag, es in externals:
+    for tag, es in [by_target[n] for n in sorted(imports) if n in by_target]:
         try:
             sec = eso.secret(es, NS)
         except eso.Unmodelled as e:
@@ -331,11 +351,11 @@ def webhooks(kc, tmp, pins, objs, externals, by_kind):
             controls += 1
     user = json.loads(json.dumps(by_kind["User"][0][1]))
     imported = (user["spec"].get("importCredentialsSecret") or {}).get("name")
-    if not imported:
-        failures.append("phase 2: the first User imports no Secret, so the label controls cannot be built")
+    if not imported or imported not in by_target:
+        failures.append("phase 2: the first User imports %r, which no rendered ExternalSecret writes, so the label "
+                        "controls cannot be built" % imported)
     else:
-        unlabelled = json.loads(json.dumps(eso.secret([e for _, e in externals
-                                                        if ((e["spec"].get("target") or {}).get("name") or e["metadata"]["name"]) == imported][0], NS)))
+        unlabelled = json.loads(json.dumps(eso.secret(by_target[imported][1], NS)))
         unlabelled["metadata"]["name"] = imported + "-gate-nolabel"
         unlabelled["metadata"]["labels"].pop("rabbitmq.com/topology-operator", None)
         f = os.path.join(tmp, "nolabel.yaml")

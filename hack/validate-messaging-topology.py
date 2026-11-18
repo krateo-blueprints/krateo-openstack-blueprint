@@ -242,7 +242,7 @@ def main():
             topo_docs = [d for d in docs if d.get("apiVersion", "").startswith("rabbitmq.com/") and d.get("kind") in KINDS]
             for d in topo_docs:
                 rendered_crs.add((d["kind"], d["metadata"]["name"]))
-            emit(chart, topo_docs)
+            emit(chart, docs)   # emit() keeps the rabbitmq.com objects and the ExternalSecrets (the projections)
             # helm install refuses a release holding two resources of one identity ("rendered manifest contains
             # duplicate resource"); helm template does not, so this gate must (H2 run 2: the topology projection and
             # the chart's own connection Secret were both ExternalSecret <svc>-rabbitmq-user).
