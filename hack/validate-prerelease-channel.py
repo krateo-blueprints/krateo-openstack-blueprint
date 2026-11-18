@@ -68,6 +68,19 @@ RELEASE_GLOB = "[0-9]+.[0-9]+.[0-9]+"
 EXPR = re.compile(r"\$\{\{(.*?)\}\}", re.S)
 
 
+def current_pin(name, target):
+    """`(<target>@<40-hex>, " # <comment>")` as the workflow pins it now. The pin mutations below are anchored on it,
+    not on a SHA written here, so bumping a pin cannot break a mutation (krateo-openstack-blueprint#403: the anchors
+    named release-preflight@788f1a6 after the pin moved to 1.4.2). No pin found gives an anchor no file contains, so
+    mutate() fails loudly instead of skipping."""
+    try:
+        text = open(os.path.join(WF, name), encoding="utf-8").read()
+    except OSError:
+        return "%s@<%s unreadable>" % (target, name), ""
+    m = re.search(re.escape(target) + r"@([0-9a-f]{40})((?: # [^\n]*)?)", text)
+    return ("%s@%s" % (target, m.group(1)), m.group(2)) if m else ("%s@<no pin in %s>" % (target, name), "")
+
+
 def measurement_failed(msg):
     print(f"FAIL: {msg} -- nothing was measured", file=sys.stderr)
     sys.exit(2)
@@ -589,6 +602,10 @@ PUSH_STEP = ('      - name: Package and push every chart\n'
              '          REGISTRY_USERNAME: ${{ github.actor }}\n'
              '          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}\n'
              '        run: hack/publish-charts.sh release "${VERSION}" "${OCI_REPO}" charts-dist\n')
+PRE_PIN, PRE_COMMENT = current_pin(REL, "release-preflight.yaml")
+PUB_PIN, PUB_COMMENT = current_pin(REL, "publish-chart.yaml")
+CP_PIN, CP_COMMENT = current_pin(REL, "actions/chart-push")
+OTHER_COMMIT = "0" * 40  # a commit no pin names, so "different commits" always differs
 REL_PUSH_MUTATIONS = [
     ("the push step removed", PUSH_STEP, ""),
     ("the push step only a comment", 'run: hack/publish-charts.sh release "${VERSION}" "${OCI_REPO}" charts-dist',
@@ -596,10 +613,8 @@ REL_PUSH_MUTATIONS = [
     ("helm push beside the script", 'run: hack/publish-charts.sh release "${VERSION}" "${OCI_REPO}" charts-dist',
      'run: |\n          hack/publish-charts.sh release "${VERSION}" "${OCI_REPO}" charts-dist\n'
      '          helm push extra.tgz "${OCI_REPO}"'),
-    ("chart-push pinned to a branch", "actions/chart-push@e1d3e99215e80ae56eca4a67e9e061b2c73168b8 # 1.0.0",
-     "actions/chart-push@main"),
-    ("chart-push pin without its comment", "actions/chart-push@e1d3e99215e80ae56eca4a67e9e061b2c73168b8 # 1.0.0",
-     "actions/chart-push@e1d3e99215e80ae56eca4a67e9e061b2c73168b8"),
+    ("chart-push pinned to a branch", CP_PIN + CP_COMMENT, "actions/chart-push@main"),
+    ("chart-push pin without its comment", CP_PIN + CP_COMMENT, CP_PIN),
     ("no chart-push step", "        id: chart-push\n", ""),
     ("CHART_PUSH not passed", "          CHART_PUSH: ${{ steps.chart-push.outputs.path }}\n", ""),
     ("no registry password for the read-back", "          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}\n", ""),
@@ -614,12 +629,10 @@ REL_MUTATIONS = [
     ("stage-release-assets with the prerelease channel", "hack/stage-release-assets.sh release",
      "hack/stage-release-assets.sh prerelease"),
     ("preflight dropped from needs", "    needs:\n      - preflight\n", ""),
-    ("preflight pinned to a branch", "release-preflight.yaml@788f1a6c106707ada89792f499afdcf3bc0b5d13", "release-preflight.yaml@main"),
-    ("publisher pinned to a tag", "publish-chart.yaml@788f1a6c106707ada89792f499afdcf3bc0b5d13 # 1.1.0", "publish-chart.yaml@1.1.0"),
-    ("publisher and preflight at different commits", "publish-chart.yaml@788f1a6c106707ada89792f499afdcf3bc0b5d13",
-     "publish-chart.yaml@1e6210ab2a8b66ff1a8d6da86287e671154f44a2"),
-    ("preflight version comment dropped", "release-preflight.yaml@788f1a6c106707ada89792f499afdcf3bc0b5d13 # 1.1.0",
-     "release-preflight.yaml@788f1a6c106707ada89792f499afdcf3bc0b5d13"),
+    ("preflight pinned to a branch", PRE_PIN, "release-preflight.yaml@main"),
+    ("publisher pinned to a tag", PUB_PIN + PUB_COMMENT, "publish-chart.yaml@" + PUB_COMMENT.replace("#", "").strip()),
+    ("publisher and preflight at different commits", PUB_PIN, "publish-chart.yaml@" + OTHER_COMMIT),
+    ("preflight version comment dropped", PRE_PIN + PRE_COMMENT, PRE_PIN),
     ("preflight given a fixed version", "      version: ${{ github.ref_name }}\n",
      "      version: main\n"),
     ("publish-index no longer needs package-and-push", "    needs: package-and-push\n", ""),
