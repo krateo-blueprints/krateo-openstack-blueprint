@@ -1,0 +1,7 @@
+# trove's db-purge CronJob ran `trove-manage db_purge`, which 2026.1 does not have (#289), and a failing CronJob
+# tells nobody. Every OpenStack program a CronJob starts must get a command measured in its source.
+name: "Every CronJob runs a command its program has"
+job: job-hooks
+order: 155
+run: |
+  python3 hack/validate-cron-commands.py .

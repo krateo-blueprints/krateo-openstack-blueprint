@@ -25,6 +25,12 @@ on:
   push:
     branches:
       - main
+  # The merge queue (docs/release.md, "How a pull request merges"): each merge group is tested as it will exist on
+  # main before it lands, and these jobs are its required checks (hack/merge-queue-ruleset.json). paths filters do not
+  # apply here; every job runs, as on pull_request.
+  merge_group:
+    types:
+      - checks_requested
   workflow_dispatch:
 
 jobs:
@@ -181,10 +187,12 @@ jobs:
       # Checks: hack/gates.d/*.yaml with `job: job-hooks`. Add a file there, never a step here.
       - name: Gates (hack/gates.d, job job-hooks)
         env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REF: ${{ github.head_ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: python3 hack/run-gates.py --job job-hooks .
 
   capability-roles:

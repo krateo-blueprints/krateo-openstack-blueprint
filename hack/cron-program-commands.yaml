@@ -1,0 +1,91 @@
+# The commands each OpenStack program that a chart's CronJob runs actually has. Read by hack/validate-cron-commands.py.
+#
+# trove's db-purge CronJob, rendered by default, ran `trove-manage db_purge --age_in_days 30`, and trove-manage has no
+# db_purge (#289): it would fail at argument parsing on every schedule, and a failing CronJob tells nobody. A Job's
+# failure blocks its release and is seen; a CronJob's is not. So every <project>-* program a CronJob's script starts is
+# listed here from its source, with the command chains it accepts, and an unlisted program or chain fails the gate.
+#
+# Measured 2026-11-17 from each project's stable/2026.1 source on opendev.org (the console_scripts entry point in
+# setup.cfg or pyproject.toml, followed into its argument parser):
+#   - <category> <action> programs (cinder-manage, manila-manage, nova-manage) register CATEGORIES and one action per
+#     public method of the category's class (cmd/manage.py add_command_parsers / methods_of);
+#   - designate-manage loads its categories from the designate.manage entry points (setup.cfg) and one action per
+#     public method (designate/manage/<category>.py);
+#   - heat-manage and trove-manage register each command with subparsers.add_parser (heat/cmd/manage.py,
+#     trove/cmd/manage.py).
+# `commands: none` marks a program with no subcommand (its argv is options only). `lacks` records a command a chart once
+# ran and the program does not have, with where that was measured, so its return fails by name.
+# A new program, a new command, or a new image series is measured the same way before it is added.
+programs:
+  aodh-expirer:
+    source: aodh setup.cfg console_scripts (aodh.cmd.storage:expirer)
+    commands: none
+  cinder-manage:
+    source: cinder/cmd/manage.py (CATEGORIES db -> DbCommands.purge)
+    commands:
+      - db purge
+  cinder-volume-usage-audit:
+    source: cinder pyproject.toml (cinder.cmd.volume_usage_audit:main)
+    commands: none
+  designate-manage:
+    source: designate setup.cfg designate.manage service -> designate/manage/service.py ServiceCommands.clean
+    commands:
+      - service clean
+  heat-manage:
+    source: heat/cmd/manage.py (add_parser service -> clean; add_parser purge_deleted)
+    commands:
+      - service clean
+      - purge_deleted
+  keystone-manage:
+    source: keystone/cmd/cli.py (CMDS; each command class's name)
+    commands:
+      - fernet_setup
+      - fernet_rotate
+      - credential_setup
+      - credential_rotate
+      - credential_migrate
+  manila-manage:
+    source: manila/cmd/manage.py (CATEGORIES db -> DbCommands.purge)
+    commands:
+      - db purge
+  neutron-ovn-db-sync-util:
+    source: neutron pyproject.toml (neutron.cmd.ovn.neutron_ovn_db_sync_util:main)
+    commands: none
+  nova-manage:
+    source: nova/cmd/manage.py (CATEGORIES db -> DbCommands.archive_deleted_rows, cell_v2 -> CellV2Commands.discover_hosts)
+    commands:
+      - db archive_deleted_rows
+      - cell_v2 discover_hosts
+  trove-manage:
+    source: trove/cmd/manage.py main() actions (every subparsers.add_parser)
+    commands:
+      - db_sync
+      - db_upgrade
+      - datastore_update
+      - datastore_version_update
+      - db_recreate
+      - db_load_datastore_config_parameters
+      - db_remove_datastore_config_parameters
+      - datastore_version_flavor_add
+      - datastore_version_flavor_delete
+      - datastore_version_volume_type_add
+      - datastore_version_volume_type_delete
+      - datastore_version_volume_type_list
+    lacks:
+      - command: db_purge
+        measured: >-
+          trove/cmd/manage.py registers no db_purge, and no file of trove's stable/2026.1 tree defines a database purge
+          (searched for "purge"). The trove-db-purge CronJob that ran it was removed (#289).
+# Scripts that pass a program its command in a variable: every command the script can pass, read from the script.
+indirect:
+  - chart: keystone
+    script: fernet-manage.py
+    program: keystone-manage
+    # execute_command(args.command), whose argparse choices are the first four, and execute_command('credential_migrate')
+    # after credential_rotate (templates/bin/_fernet-manage.py.tpl).
+    commands:
+      - fernet_setup
+      - fernet_rotate
+      - credential_setup
+      - credential_rotate
+      - credential_migrate
