@@ -17,4 +17,4 @@ limitations under the License.
 set -ex
 exec mistral-server \
       --server event-engine \
-      --config-file /etc/mistral/mistral.conf $([ -d /etc/mistral/mistral.conf.d ] && echo --config-dir /etc/mistral/mistral.conf.d)
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "mistral.config_args.server" . | fromYamlArray) "format" "shell" "indent" 6) }}

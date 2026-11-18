@@ -103,7 +103,7 @@ spec:
               mountPath: /run
       containers:
         - name: octavia-worker
-{{ dict "envAll" $envAll "component" "worker" "container" "default" "args" (list "--process" "octavia-worker" "--exchange" "octavia" "--rpc-topic" "octavia_provisioning_v2") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "worker" "container" "default" "args" (list "--process" "octavia-worker" "--exchange" "octavia" "--rpc-topic" "octavia_provisioning_v2") "config" (include "octavia.config_args.worker" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "octavia_worker" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.worker | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "octavia_worker" "container" "octavia_worker" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}

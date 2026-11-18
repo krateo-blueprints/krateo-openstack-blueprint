@@ -161,7 +161,7 @@ spec:
 {{- end }}
       containers:
         - name: cinder-volume
-{{ dict "envAll" $envAll "component" "volume" "container" "default" "args" (list "--process" "cinder-volume" "--exchange" "openstack" "--rpc-topic" "cinder-volume" "--rpc-backends" "DEFAULT.enabled_backends" "--rpc-backend-host-opt" "backend_host") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "volume" "container" "default" "args" (list "--process" "cinder-volume" "--exchange" "openstack" "--rpc-topic" "cinder-volume" "--rpc-backends" "DEFAULT.enabled_backends" "--rpc-backend-host-opt" "backend_host") "config" (include "cinder.config_args.volume" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "cinder_volume" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.volume | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "cinder_volume" "container" "cinder_volume" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}

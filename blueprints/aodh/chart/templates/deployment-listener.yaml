@@ -66,7 +66,7 @@ spec:
 {{ tuple $envAll "listener" $mounts_aodh_listener_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: aodh-listener
-{{ dict "envAll" $envAll "component" "listener" "container" "default" "args" (list "--process" "aodh-listener" "--broker") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "listener" "container" "default" "args" (list "--process" "aodh-listener" "--broker") "config" (include "aodh.config_args.listener" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "aodh_listener" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.listener | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "aodh" "container" "aodh_listener" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}

@@ -17,4 +17,4 @@ limitations under the License.
 set -ex
 
 exec trove-conductor \
-  --config-file /etc/trove/trove.conf $([ -d /etc/trove/trove.conf.d ] && echo --config-dir /etc/trove/trove.conf.d)
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "trove.config_args.conductor" . | fromYamlArray) "format" "shell" "indent" 2) }}

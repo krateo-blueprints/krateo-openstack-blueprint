@@ -20,8 +20,7 @@ COMMAND="${@:-start}"
 
 function start () {
     exec cloudkitty-processor \
-        --config-file /etc/cloudkitty/cloudkitty.conf \
-        --config-dir /etc/cloudkitty/cloudkitty.conf.d
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "cloudkitty.config_args.processor" . | fromYamlArray) "format" "shell" "indent" 8) }}
 }
 
 function stop () {
