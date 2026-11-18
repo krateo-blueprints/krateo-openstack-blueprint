@@ -66,7 +66,42 @@ check_trove "cron_job_db_purge: false"                 ok     --set manifests.cr
 check_trove "cron_job_db_purge: true"                  schema --set manifests.cron_job_db_purge=true
 check_trove "cron_job_db_purge: true, schema skipped"  guard  --set manifests.cron_job_db_purge=true --skip-schema-validation
 
+# mariadb's Swift remote-backup path and ks-user Job (#302): absent or false render with no ks-user Job and no RGW
+# Secret; anything else is refused by the schema and, with the schema skipped, by templates/removed-values.yaml.
+MARIADB="$ROOT/blueprints/mariadb/chart"
+[ -f "$MARIADB/Chart.yaml" ] || { echo "FAILED MEASUREMENT: no mariadb chart at $MARIADB"; exit 2; }
+cp -R "$MARIADB" "$work/mariadb"
+sed 's/CHART_VERSION/0.0.0-ci/g' "$work/mariadb/Chart.yaml" > "$work/Chart.yaml" && mv "$work/Chart.yaml" "$work/mariadb/Chart.yaml"
+mkdir -p "$work/mariadb/charts" && cp -R "$ROOT/charts/helm-toolkit" "$work/mariadb/charts/helm-toolkit"
+check_mariadb() { # name, expect (ok|schema|guard), helm args...
+  local name=$1 expect=$2; shift 2; n=$((n + 1))
+  local out rc got left
+  out=$(helm template mariadb-gate1234 "$work/mariadb" "$@" 2>&1); rc=$?
+  left=$(grep -cE '^  name: (mariadb-ks-user|mariadb-backup-user|.*-rgw)$|mariadb-backup-user' <<<"$out")
+  if [ $rc -eq 0 ]; then got=ok
+  elif grep -q "values don't meet the specifications of the schema" <<<"$out" \
+    && grep -qE 'job_ks_user|remote_backup' <<<"$out"; then got=schema
+  elif grep -q "was removed (#302)" <<<"$out"; then got=guard
+  else got="other: $(grep -m1 'Error' <<<"$out" | cut -c1-160)"; fi
+  if [ "$got" = "$expect" ] && [ "$left" = 0 ]; then echo "ok    mariadb $name -> $got"
+  else echo "FAIL  mariadb $name: expected $expect with no ks-user or backup user, got $got with $left"
+    fails=$((fails + 1)); fi
+}
+BK=(--set manifests.cron_job_mariadb_backup=true --set conf.backup.enabled=true --set manifests.secret_backup_restore=true)
+check_mariadb "local backups, nothing remote"            ok     "${BK[@]}"
+check_mariadb "job_ks_user: false"                       ok     "${BK[@]}" --set manifests.job_ks_user=false
+check_mariadb "remote_backup.enabled: false"             ok     "${BK[@]}" --set conf.backup.remote_backup.enabled=false
+check_mariadb "job_ks_user: true"                        schema --set manifests.job_ks_user=true
+check_mariadb "job_ks_user: true, schema skipped"        guard  --set manifests.job_ks_user=true --skip-schema-validation
+check_mariadb "remote_backup.enabled: true"              schema --set conf.backup.remote_backup.enabled=true
+check_mariadb "remote_backup.enabled: true, no schema"   guard  --set conf.backup.remote_backup.enabled=true \
+  --skip-schema-validation
+check_mariadb "another remote_backup key"                schema --set conf.backup.remote_backup.container_name=x
+check_mariadb "another remote_backup key, no schema"     guard  --set conf.backup.remote_backup.container_name=x \
+  --skip-schema-validation
+
 [ $n -gt 0 ] || { echo "FAILED MEASUREMENT: no case ran"; exit 2; }
 [ $fails -eq 0 ] || { echo "FAIL: $fails of $n removed-value case(s) wrong"; exit 1; }
 echo "OK: $n removed-value cases: absent and enabled:false render, every other contractEmitter value is refused;" \
-  "trove's cron_job_db_purge renders only absent or false"
+  "trove's cron_job_db_purge renders only absent or false;" \
+  "mariadb renders local backups only, and its remote-backup values are refused"
