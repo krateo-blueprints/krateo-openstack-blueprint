@@ -290,6 +290,18 @@ data:
 {{- end }}
 {{- end }}
 {{- /* end of the monitoring span (#312): hack/validate-openstack-monitoring.py renders from `$ov :=` to here. */ -}}
+{{- /* RabbitMQ user rotation (#309 C2, osh.messagingRotation): once a component has been rotated, the generation it
+       connects as (username and root), the users its release renders (the active one, and the previous or next one
+       while a switch drains or prepares) and the active suffix its waits and pod annotation name. Merged OVER
+       componentValues, which may not set this passwordFrom while a token is set (refused). Nothing before a first
+       rotation; while the component's values are held (TWO PHASES, below) its live spec replaces all of this. Offline
+       nothing is live, so $rot is empty (hack/umbrella_spec.py's probe defines it so). hack/validate-messaging-rotation.py
+       renders this span with the lookups stood in. */ -}}
+{{- if $rot.pass }}
+{{- $rotAuth := dict $c.name (dict "username" $rot.username "passwordFrom" (dict "secret" $rot.activeRoot)) }}
+{{- $ov = mergeOverwrite (deepCopy $ov) (dict "endpoints" (dict "oslo_messaging" (dict "auth" $rotAuth "operator" (dict "users" $rot.users "activeSuffix" $rot.activeSuffix)))) }}
+{{- end }}
+{{- /* end of the rotation span */ -}}
 {{- /* TWO PHASES: a live component's NEW values are written only at the new apiVersion, and only
        once its CompositionDefinition serves it (status.apiVersion at the current version, Ready
        status True). Until then the object is not changed at all: its live spec is re-emitted at the
@@ -321,18 +333,6 @@ data:
 {{- $emitVer = include "osh.holdVersion" (list ($state.version | default "") $emitVer $c.kind $crds) }}
 {{- end }}
 {{- end }}
-{{- /* RabbitMQ user rotation (#309 C2, osh.messagingRotation): once a component has been rotated, the generation it
-       connects as (username and root), the users its release renders (the active one, and the previous or next one
-       while a switch drains or prepares) and the active suffix its waits and pod annotation name. Merged OVER
-       componentValues, which may not set this passwordFrom while a token is set (refused). Nothing before a first
-       rotation, and nothing while the component's values are held (TWO PHASES): its live spec is re-emitted as it is.
-       After the hold, so the spec-building probes (hack/umbrella_spec.py and the per-span gates), which have no live
-       state, never reach it. hack/validate-messaging-rotation.py renders this span. */ -}}
-{{- if and $rot.pass (ne $hold "true") }}
-{{- $rotAuth := dict $c.name (dict "username" $rot.username "passwordFrom" (dict "secret" $rot.activeRoot)) }}
-{{- $ov = mergeOverwrite (deepCopy $ov) (dict "endpoints" (dict "oslo_messaging" (dict "auth" $rotAuth "operator" (dict "users" $rot.users "activeSuffix" $rot.activeSuffix)))) }}
-{{- end }}
-{{- /* end of the rotation span */ -}}
 {{- /* The apiVersion is PINNED to the version this object was born at, when it has one.
 
        A new component renders at the current version. One that already exists renders at its

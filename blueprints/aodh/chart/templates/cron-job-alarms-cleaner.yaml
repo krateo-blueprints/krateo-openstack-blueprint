@@ -48,6 +48,10 @@ spec:
         metadata:
           labels:
 {{ tuple $envAll "aodh" "alarms-cleaner" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 12 }}
+{{- with (tuple "aodh_alarms_cleaner" . | include "helm-toolkit.snippets.custom_pod_annotations") }}
+          annotations:
+{{ . | indent 12 }}
+{{- end }}
         spec:
           serviceAccountName: {{ $serviceAccountName }}
           restartPolicy: OnFailure

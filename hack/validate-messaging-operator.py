@@ -272,7 +272,8 @@ def part2(uv, tmp):
                 om["hosts"] = {"default": "%s-nodes" % name}
             if n in topo["messagingQuorum"]:
                 om["quorum_queues"] = True
-                om["operator"] = {"cluster": name}
+                # Its service user (#309 C2): its entrypoint waits name its own User and Permission only.
+                om["operator"] = {"cluster": name, "serviceUser": n.replace("_", "-")}
                 # The umbrella writes this component's user projection when its rabbit-init runs (components[]
                 # rabbitmqInit and rabbitmqSecret not false; option 4), and passes the name the chart imports.
                 cc = next((c for c in uv["components"] if c["name"] == n), {})

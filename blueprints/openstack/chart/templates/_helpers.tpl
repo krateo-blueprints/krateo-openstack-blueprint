@@ -914,7 +914,8 @@ true
 {{- end -}}
 
 {{/* (list $ <name>): the ExternalSecret <name> in this namespace, as JSON ("{}" when absent). One named GET; the umbrella
-     renders these objects, so its render identity may read them. The only ExternalSecret read in the chart. */}}
+     renders these objects (the generation roots), so its render identity may read them. A rotation also reads the
+     component's own projections through osh.lookupNamed (osh.generationRolled). */}}
 {{- define "osh.lookupExternalSecret" -}}
 {{- $top := index . 0 -}}
 {{- lookup "external-secrets.io/v1" "ExternalSecret" $top.Release.Namespace (index . 1) | default dict | toJson -}}
@@ -2139,6 +2140,10 @@ spec:
 {{- $_ := set $om "operator" (dict "cluster" $name) -}}
 {{- /* Its user projection is the umbrella's (osh.messagingProjection): the chart imports this name and renders none. */ -}}
 {{- with (include "osh.messagingProjection" (list $top $c) | fromJson).secret -}}{{- $_ := set $om.operator "userSecret" . -}}{{- end -}}
+{{- /* Its service user (#309 C2): its entrypoint waits name ITS User and Permission (of the active generation), and only
+       the vhost and the administrator's permission of any other service's rabbit-init it waits on, whose generation it
+       cannot know (helm-toolkit.utils.rabbitmq_topology_waits). */ -}}
+{{- $_ := set $om.operator "serviceUser" ($c.name | replace "_" "-") -}}
 {{- $_ := set $out "conf" (dict $c.name (dict "oslo_messaging_rabbit" (deepCopy $topo.messagingQuorumConf))) -}}
 {{- end -}}
 {{- if $om -}}{{- $_ := set $out "endpoints" (dict "oslo_messaging" $om) -}}{{- end -}}

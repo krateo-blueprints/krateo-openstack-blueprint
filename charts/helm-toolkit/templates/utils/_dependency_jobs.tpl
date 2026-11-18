@@ -36,7 +36,7 @@ snake_case. If no matching manifest key exists, the job is kept.
 {{- range $job := $deps.jobs -}}
 {{- if not (hasSuffix "-rabbit-init" $job) -}}{{- $kept = append $kept $job -}}{{- end -}}
 {{- end -}}
-{{- range $cr := include "helm-toolkit.utils.rabbitmq_topology_waits" (dict "jobs" $deps.jobs "suffix" (($envAll.Values.endpoints.oslo_messaging.operator | default dict).activeSuffix | default "")) | fromJsonArray -}}
+{{- range $cr := include "helm-toolkit.utils.rabbitmq_topology_waits" (dict "jobs" $deps.jobs "suffix" (($envAll.Values.endpoints.oslo_messaging.operator | default dict).activeSuffix | default "") "own" (($envAll.Values.endpoints.oslo_messaging.operator | default dict).serviceUser | default "")) | fromJsonArray -}}
 {{- $seen := false -}}
 {{- range $have := $crs -}}{{- if and (eq $have.kind $cr.kind) (eq $have.name $cr.name) -}}{{- $seen = true -}}{{- end -}}{{- end -}}
 {{- if not $seen -}}{{- $crs = append $crs $cr -}}{{- end -}}
@@ -70,16 +70,26 @@ snake_case. If no matching manifest key exists, the job is kept.
      for the wait, and by kubernetes_pod_rbac_serviceaccount for the grant of rabbit-init waits that only the init
      container adds (dependencies.dynamic.job_rabbit_init). */}}
 {{- define "helm-toolkit.utils.rabbitmq_topology_waits" -}}
-{{- /* (jobs) or (dict "jobs" jobs "suffix" activeSuffix): the topology-resource waits replacing each *-rabbit-init Job
-       wait. They name the ACTIVE generation's User and Permission (<su>-rabbitmq-user<suffix>, #309 C2: during and after
-       a rotation the generation-0 user is deleted, and a pod waiting on it would stay in Init forever). */ -}}
-{{- $jobs := . -}}{{- $sfx := "" -}}
-{{- if kindIs "map" . -}}{{- $jobs = .jobs -}}{{- $sfx = (.suffix | default "") | toString -}}{{- end -}}
+{{- /* (jobs) or (dict "jobs" jobs "suffix" activeSuffix "own" serviceUser): the topology-resource waits replacing each
+       *-rabbit-init Job wait, Ready-conditioned. For the chart's OWN service user (endpoints.oslo_messaging.operator
+       .serviceUser, which the umbrella passes): its User and Permission of the ACTIVE generation
+       (<su>-rabbitmq-user<suffix>, #309 C2: a rotation deletes the previous generation's user, and a pod waiting on it
+       would stay in Init forever), its Vhost and admin Permission. For ANOTHER service's rabbit-init (ceilometer's
+       notification agent waits on the services whose vhosts it consumes, as the administrator, #281): that vhost and
+       the administrator's permission on it only, never that service's User, whose generation this chart cannot know.
+       Without serviceUser (a chart installed standalone): every service's four, as before. */ -}}
+{{- $jobs := . -}}{{- $sfx := "" -}}{{- $own := "" -}}
+{{- if kindIs "map" . -}}{{- $jobs = .jobs -}}{{- $sfx = (.suffix | default "") | toString -}}{{- $own = (.own | default "") | toString -}}{{- end -}}
 {{- $out := list -}}
 {{- range $job := ($jobs | default list) -}}
 {{- if and (kindIs "string" $job) (hasSuffix "-rabbit-init" $job) -}}
 {{- $su := trimSuffix "-rabbit-init" $job -}}
-{{- range $r := list (list "User" "users" (printf "user%s" $sfx)) (list "Vhost" "vhosts" "vhost") (list "Permission" "permissions" (printf "permission%s" $sfx)) (list "Permission" "permissions" "admin-permission") -}}
+{{- $rs := list (list "Vhost" "vhosts" "vhost") (list "Permission" "permissions" "admin-permission") -}}
+{{- if or (not $own) (eq $su $own) -}}
+{{- $s := ternary $sfx "" (eq $su $own) -}}
+{{- $rs = list (list "User" "users" (printf "user%s" $s)) (index $rs 0) (list "Permission" "permissions" (printf "permission%s" $s)) (index $rs 1) -}}
+{{- end -}}
+{{- range $r := $rs -}}
 {{- $out = append $out (dict "apiVersion" "rabbitmq.com/v1beta1" "kind" (index $r 0) "resource" (index $r 1) "name" (printf "%s-rabbitmq-%s" $su (index $r 2)) "conditions" (list (dict "type" "Ready"))) -}}
 {{- end -}}
 {{- end -}}
