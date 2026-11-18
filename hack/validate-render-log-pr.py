@@ -18,8 +18,10 @@ script:
      opened, and that number is merged;
   4. once the render has landed on main: nothing again (idempotent);
   5. a token from an App with another slug: refused before anything is committed;
-  6. a merge queue on main (a merge_queue rule): auto-merge is enabled, so the pull request joins the queue, and the
-     bot merges nothing itself.
+  6. a merge queue on main (a merge_queue rule): the bot waits for the pull request's required checks, then adds it to
+     the queue with the GraphQL enqueuePullRequest mutation and its node id, and never runs gh pr merge (auto-merge is
+     disabled on this repository, and gh pr merge, with or without --auto, calls enablePullRequestAutoMerge);
+  7. a merge queue, and a required check fails on the bot's pull request: nothing is enqueued or merged.
 
 Fails when git is missing or a case cannot be set up.
 """
@@ -48,6 +50,9 @@ echo "$*" >> "$GH_LOG"
 case "$1 $2" in
   "api users/"*) echo "$GH_BOT_ID" ;;
   "api repos/"*"/rules/branches/"*) echo "${GH_QUEUE:-0}" ;;
+  "api graphql") echo '{"data":{"enqueuePullRequest":{"mergeQueueEntry":{"position":1}}}}' ;;
+  "pr checks") exit "${GH_CHECKS_RC:-0}" ;;
+  "pr view") echo "PR_kwDOGATE42" ;;
   "pr list") printf '%s\n' "$GH_OPEN" ;;
   "pr create") echo "https://github.com/o/r/pull/42" ;;
   "pr merge") exit 0 ;;
@@ -95,15 +100,17 @@ def setup(tmp):
     return remote, work, bindir
 
 
-def script(work, bindir, tmp, open_pr="", slug=None, queue="0"):
+def script(work, bindir, tmp, open_pr="", slug=None, queue="0", checks_rc="0"):
     log = os.path.join(tmp, "gh.log")
     open(log, "w").close()
     env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"], GH_LOG=log, GH_OPEN=open_pr,
-               GH_BOT_ID=BOT_ID, APP_SLUG=SLUG if slug is None else slug, GH_QUEUE=queue)
+               GH_BOT_ID=BOT_ID, APP_SLUG=SLUG if slug is None else slug, GH_QUEUE=queue,
+               GH_CHECKS_RC=checks_rc)
     env.pop("BOT_USER_ID", None)
     r = run(["bash", "hack/render-log-pr.sh", "."], work, env=env, check=False)
-    # the bot account's id and the branch's rules are lookups, not pull-request calls
-    return r, [l for l in open(log).read().splitlines() if l and not l.startswith("api ")]
+    # the bot account's id and the branch's rules are lookups, not pull-request calls; the enqueue mutation is one
+    return r, [l for l in open(log).read().splitlines()
+               if l and (not l.startswith("api ") or l.startswith("api graphql"))]
 
 
 def workflow_check():
@@ -229,13 +236,27 @@ def main():
         if r.returncode != 0 or calls or remote_branches(remote) != branches or git(remote, "rev-parse", "main") != head:
             failures.append("4 (after landing): rc %d, gh calls %s; want rc 0 and nothing done" % (r.returncode, calls))
         checked += 1
-        # 6. a merge queue on main: the bot enables auto-merge (it joins the queue) and merges nothing itself
+        # 6. a merge queue on main: the bot waits for the required checks, then enqueues with the GraphQL
+        #    enqueuePullRequest mutation and the pull request's node id; it never runs gh pr merge (auto-merge is off
+        #    on this repository, and gh pr merge, with or without --auto, calls enablePullRequestAutoMerge)
         add_entry(work, "2099-01-04-01-gate-entry.md")
         r, calls = script(work, bindir, tmp, queue="1")
         merges = [c for c in calls if c.startswith("pr merge")]
-        if r.returncode != 0 or len(merges) != 1 or "--auto" not in merges[0] or "--delete-branch" in merges[0]:
-            failures.append("6 (merge queue): rc %d, merge calls %s; want one `pr merge <n> --auto`, no direct merge"
-                            % (r.returncode, merges))
+        enq = [c for c in calls if c.startswith("api graphql")]
+        checks = [c for c in calls if c.startswith("pr checks")]
+        order = [c.split()[0] + " " + c.split()[1] for c in calls if c.split()[:2] in (["pr", "checks"], ["api", "graphql"])]
+        if (r.returncode != 0 or merges or len(enq) != 1 or "enqueuePullRequest" not in enq[0]
+                or "id=PR_kwDOGATE42" not in enq[0] or len(checks) != 1 or "--required" not in checks[0]
+                or order != ["pr checks", "api graphql"]):
+            failures.append("6 (merge queue): rc %d, calls %s; want gh pr checks --required, then one api graphql "
+                            "enqueuePullRequest with the node id, and no gh pr merge" % (r.returncode, calls))
+        checked += 1
+        # 7. a merge queue, and a required check fails on the bot's pull request: it is not enqueued
+        add_entry(work, "2099-01-05-01-gate-entry.md")
+        r, calls = script(work, bindir, tmp, queue="1", checks_rc="1")
+        if r.returncode == 0 or [c for c in calls if c.startswith("api graphql") or c.startswith("pr merge")]:
+            failures.append("7 (merge queue, failed check): rc %d, calls %s; want a failure and no enqueue or merge"
+                            % (r.returncode, calls))
         checked += 1
         # 5. a token from another App: refused before anything is committed or called
         add_entry(work, "2099-01-03-01-gate-entry.md")
@@ -253,7 +274,7 @@ def main():
     print("OK: render-log-pr.sh, %d cases: nothing when current; one bot branch, commit and squash-merged pull request "
           "for a new entry, by the App's bot with no skip marker; an open bot pull request updated, never a second; "
           "idempotent once landed; another App refused; the workflow cannot re-trigger itself; under a merge queue it "
-          "enqueues instead of merging" % checked)
+          "enqueues through enqueuePullRequest instead of merging" % checked)
     return 0
 
 

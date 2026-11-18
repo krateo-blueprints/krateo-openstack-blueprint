@@ -301,7 +301,9 @@ needs the repo ruleset in `hack/merge-queue-ruleset.json` applied; until then, p
 as before.
 
 1. A pull request runs lint on `pull_request`. Its checks must pass before it can join the queue.
-2. **Merge when ready** (or `gh pr merge --auto --squash`) adds it to the queue. The queue builds
+2. **Merge when ready** adds it to the queue. Auto-merge is disabled on this repository, so
+   `gh pr merge` (with or without `--auto`) fails. From a script, use the GraphQL
+   `enqueuePullRequest` mutation with the pull request's node id. The queue builds
    a merge group: main plus every pull request queued ahead, plus this one, each squashed. It runs
    lint on that group (`merge_group`), the commit exactly as it will exist on main.
 3. When the group's required checks pass, main moves to that commit. Then lint runs again on the
@@ -320,7 +322,8 @@ A release (release-tag.yaml, and prerelease.yaml) needs a successful lint run on
 commit it publishes, from that commit's merge group, its push to main, or a dispatch
 (`hack/require-lint-passed.sh`). A pull request's run is for another commit and doesn't count.
 
-The render-log bot enables auto-merge under a queue instead of merging. That needs the App token
+Under a queue, the render-log bot waits for its pull request's required checks and then enqueues
+it with `enqueuePullRequest`, instead of merging. That needs the App token
 from "The render-log GitHub App" below: GitHub's `GITHUB_TOKEN` rule starts no workflow for an
 event the token caused, and lists no `merge_group` exception. So a queue entry made with it would
 wait out the timeout with no lint run. The App comes first, then the ruleset.
