@@ -455,15 +455,36 @@ else:
     # /releases/download/<version>/node-reader-rbac.yaml, and a file that only exists in the
     # tree makes that a 404 -- which is precisely #50, where the CompositionDefinitions the docs
     # told a reader to apply were not published either.
+    #
+    # Measured by RUNNING what the release runs, not by finding the file name in the workflow:
+    # since 2026-11-17 release-tag.yaml calls hack/stage-release-assets.sh and uploads its
+    # dist/*.yaml, so the name is no longer in the workflow at all, and a name in a file was
+    # never proof it was copied anywhere.
+    stage = ROOT / "hack/stage-release-assets.sh"
     if not RELEASE_WORKFLOW.is_file():
         problems.append("no .github/workflows/release-tag.yaml, so this gate cannot tell whether "
                         "the node-read grant is published as a release asset")
-    elif RBAC.name not in RELEASE_WORKFLOW.read_text():
+    elif not re.search(r'hack/stage-release-assets\.sh release "\$\{VERSION\}" dist\b',
+                       RELEASE_WORKFLOW.read_text()) \
+            or "gh release upload \"${VERSION}\" dist/*.yaml" not in RELEASE_WORKFLOW.read_text():
         problems.append(
-            f"release-tag.yaml never publishes {RBAC.name}, so the asset exists in the tree and "
-            "not in any release. The documented `kubectl apply -f "
-            ".../releases/download/<version>/node-reader-rbac.yaml` would 404 and the check "
-            "would be unenforceable by anyone following the README -- the same defect as #50")
+            "release-tag.yaml no longer stages its assets with `hack/stage-release-assets.sh "
+            "release \"${VERSION}\" dist` and uploads dist/*.yaml, so this gate cannot tell whether "
+            f"{RBAC.name} is published; update this check to what the release now runs")
+    else:
+        with tempfile.TemporaryDirectory() as out:
+            run = subprocess.run(["bash", str(stage), "release", "0.0.0", out],
+                                 cwd=ROOT, capture_output=True, text=True)
+            if run.returncode != 0:
+                problems.append(f"hack/stage-release-assets.sh failed, so no asset is published: "
+                                f"{run.stderr.strip()[-400:]}")
+            elif not (Path(out) / RBAC.name).is_file():
+                problems.append(
+                    f"the release's assets do not include {RBAC.name}, so the asset exists in the "
+                    "tree and not in any release. The documented `kubectl apply -f "
+                    ".../releases/download/<version>/node-reader-rbac.yaml` would 404 and the "
+                    "check would be unenforceable by anyone following the README -- the same "
+                    "defect as #50")
 
 
 

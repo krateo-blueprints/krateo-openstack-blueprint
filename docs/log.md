@@ -13,6 +13,125 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Upstream divergences, one file per entry.** Every change that diverged from upstream appended to
+  `hack/upstream-divergences.yaml`, so each merge re-conflicted the branches in flight (#352, #353, #355, #344 and
+  #357 on 2026-11-18). Each divergence is now `hack/upstream-divergences.d/<component>-<slug>.yaml`, holding one
+  entry. The 19 entries were split out with their text and the comments above them, including #344's three. Loaded
+  from the directory, they are the same 19 entries and the same 81 assertions as the old file at 9c177be. The old file is removed.
+  - **Refusals:** `hack/validate-upstream-divergences.py` reads the directory and refuses, before checking anything:
+    - a file that isn't exactly one mapping of `component`, `issue`, `reason` and `assertions` (two entries, a list,
+      or a second YAML document);
+    - a duplicate key;
+    - a file whose name doesn't start with its component;
+    - an assertion already declared in another file;
+    - an empty directory;
+    - the old file coming back.
+  - [release.md](release.md) says how to add one.
+  - The case lists of `hack/validate-removed-values.sh` stay as they are for now.
+
+- **Uninstall deletes a component's hook Jobs (#206).** Since 0.3.41 every Job is a `post-install,post-upgrade` hook
+  (#179), and Helm never deletes hook resources at uninstall: cinder's removal left six completed Jobs and their pods,
+  and a full teardown 156 pods (#204). `hook-succeeded` can't be used, because kubernetes-entrypoint waits on dependency
+  Jobs by name while the component is installed. Each of the 32 charts that render hook Jobs now includes
+  helm-toolkit's `job_hook_cleanup`. It is a `pre-delete` hook, weight 100, so it runs after db-drop and the clean
+  Jobs. It selects `release_group=<release>`, leaves out itself, and deletes the Jobs whose `helm.sh/hook` names
+  post-install or post-upgrade, with background propagation so their pods go too. Its ServiceAccount, Role (list and
+  delete on Jobs, nothing else) and RoleBinding are plain release objects, so they exist while it runs. It uses the
+  chart's own ks-user (or db-init, or rabbit-init) image, which has python, and always exits 0, so a failed cleanup
+  leaves Jobs behind rather than blocking the uninstall. That pre-delete hooks run under the controller was measured in
+  #204 (glance-clean ran at teardown); this hook itself hasn't been run on a cluster yet. New gate
+  `hack/validate-hook-cleanup.py` renders each chart at defaults and with every Job on. For every render with a hook
+  Job, it requires exactly one cleanup, last among pre-delete hooks, with that RBAC and a selector matching every hook
+  Job but not itself. It also runs the script against a stand-in API, with another release's Job and a non-hook Job
+  next to the render's, and against a failing API. Its first CI run found four hook Jobs with no labels at all
+  (cloudkitty-storage-init, ironic-manage-cleaning-network, magnum-domain-ks-user, masakari-db-sync), which no
+  selector can reach. They now carry helm-toolkit's labels; their pod templates are unchanged. libvirt, memcached, openvswitch and redis render no hook Job unless
+  `images.local_registry.active` turns on image-repo-sync, and have no python image, so they get no cleanup.
+
+- **High availability, first phases (#309), and nova-compute liveness (#146).**
+  - **`ha.enabled` (opt-in):** memcached as 3 replicas behind a headless Service, every component listing each
+    replica, and a refusal while fewer than 3 nodes carry `openstack-control-plane=enabled`. More than one memcached
+    replica without `ha` is refused. Off renders as before.
+  - **RabbitMQ's host count** comes from `componentValues.rabbitmq.pod.replicas.server` alone and reaches every
+    transport URL and ceilometer's notification URLs; a conflicting per-component count is refused.
+  - **nova-compute** liveness and startup check the process only; readiness keeps the RPC check.
+  - **New gates:** `hack/validate-ha-propagation.py` and `hack/validate-nova-compute-liveness.py`.
+
+- **image-scan retries a scan cut short by a layer download (#316, #334).**
+  - **What failed:** image-scan run 44202269356 (on `feat/309-h0-h1`) failed in
+    `scan (quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble)`. The cause was no new CVE: Trivy stopped
+    with `failed to analyze layer ... unable to read the file: unexpected EOF`, a layer download cut short. The gate
+    then failed, correctly, on the image's missing report.
+  - **Measured on 2026-11-18:** the waived series tag still serves the recorded digest (`sha256:12c53f1f…`), so it
+    had not moved upstream. Main's image-scan on `08ec684`, a few minutes later, scanned the same digest with no
+    finding outside the allowlist.
+  - **The fix:** the scan step now tries up to three times and drops only the layer-analysis cache between attempts.
+    A real finding can't be retried away, because findings are judged from the report. An image that fails all
+    three attempts still has no report, and the gate fails it by name.
+  - **The allowlist doesn't change:** there was no new finding, and entries are only made for measured findings.
+
+- **Pre-release channel: verify a commit on GKE before its tag exists (#342 follows).** Every `X.Y.Z` tag reaches the
+  Marketplace, so `prerelease.yaml` (dispatch, input `ref`) publishes a commit's charts to GHCR at `X.Y.Z-main.g<sha7>`.
+  It attaches the stamped CompositionDefinitions, RBAC grants and examples as the run artifact `prerelease-<version>`.
+  It cannot write the Marketplace index, a tag or a release: it calls no reusable workflow, uses no secret but
+  `GITHUB_TOKEN`, and holds `contents: read`. The index's only writer is krateo-blueprints/charts
+  `publish-chart.yaml`, fed from its caller's own run with `CHARTS_PUBLISH_TOKEN`, measured on 2026-11-17 through the
+  portal and the marketplace catalog. `release-tag.yaml` and `prerelease.yaml` now run the same scripts
+  (`hack/publish-charts.sh`, `hack/stage-release-assets.sh`, `hack/require-lint-passed.sh`). `hack/release-version.sh`
+  refuses a version of the wrong shape before anything is stamped. `prune-prereleases.yaml` keeps the newest 5
+  pre-releases and never deletes a release. It needs the repository secret `PRERELEASE_PRUNE_TOKEN`, and a manual run
+  is a dry run by default. `hack/validate-prerelease-channel.py` gates all of it, with 32 mutations. Also: releases up
+  to 0.3.73 carried a stray `compositiondefinition-chart.yaml` asset (cyborg's CD), now gone. The flow is in
+  [release.md](release.md).
+
+- **Public endpoints over HTTPS through the Gateway API (#311, phase 1).**
+  - **Umbrella `publicEndpoints`:** off by default, and off renders byte-identical. When on, the umbrella renders:
+    - one Gateway (`gatewayClassName`, default `agentgateway`, which Krateo's `features.ingress` installs);
+    - an HTTPRoute per public endpoint of every selected component;
+    - an HTTP-to-HTTPS redirect;
+    - a cert-manager Certificate from `tls.issuerRef`;
+    - an ingress NetworkPolicy set: deny by default, allow the namespace, `nodeCIDRs`, the Gateway proxy, and
+      `allowNamespaces`. The policies select every pod without the label `krateo.io/networkpolicy-exempt`, in block
+      style; the label is an explicit opt-out.
+  - **The components:**
+    - Each public catalog URL becomes `https://<service>.<baseDomain>`, with proxy-header parsing set.
+    - The charts' inert Ingress switches go off (upstream removed those templates in 6ec1132485).
+    - Horizon becomes ClusterIP with Secure cookies.
+    - Routes set HSTS, and overwrite X-Forwarded-Proto with `https`.
+    - Never routed: metadata, RabbitMQ, MariaDB, memcached.
+  - **Refused on a live cluster** without the Gateway API or cert-manager CRDs, and on a missing input.
+  - **The new gate:** `hack/validate-public-endpoints.py` checks:
+    - off equals before;
+    - the routes against what each chart registers;
+    - the deny list, HSTS and redirect, and the policy's exact peers;
+    - the refusals;
+    - every routed chart rendered with the values the umbrella gives it (backend Service, catalog URL, no Ingress,
+      proxy headers, Horizon);
+    - the tables against the charts.
+
+    It also runs thirteen mutations, each of which must be reported as the defect it plants.
+  - **Not yet verified on a cluster.** The live checks are in the README. Follow-ups: #325, #326, #327.
+
+- **Consume a Ceph cluster without client.admin (#308 phase P1, steps 1-3; rendered and gated, not yet run live).**
+  - **Copied keys:** a third credential kind, `source: provided`. With `storage.backend` ceph-rook or ceph-external, the
+    umbrella copies each Ceph user's key and `mon_host` from where Ceph keeps them (Rook's `rook-ceph-client-<name>`
+    and `rook-ceph-config`, or the operator-named `storage.ceph.keys`) through a SecretStore limited to exactly those
+    Secrets. Copies refresh every 5 minutes and are not kept past the release.
+  - **Charts:** cinder, libvirt and (with `storage.ceph.glanceStore: rbd`) glance project the copies. No client.admin
+    keyring is rendered, no `ceph auth` runs and no pool is created: storage-init checks the pool with the user's own
+    key. Each reader carries a live checksum of its key, so it restarts when Ceph's side rotates it. Without a Ceph
+    backend every chart renders as before.
+  - **One source:** pools, users and the libvirt secret UUID reach cinder, glance, libvirt and nova from
+    `storage.ceph` only; `componentValues` may not set them, nor wire Ceph by hand.
+  - **Held, refused, never stuck:** a Ceph consumer is created only once the copies of its keys report Ready; the
+    Openstack Composition refuses while ESO reports the copy store unable to read the source Secrets, naming the grant;
+    glance refuses to move its store to `rbd` off a live `glance-images` claim until `storage.ceph.glanceImagesMigrated`.
+  - **Gates:** the new `hack/validate-ceph-consumer.py` (27 copied roots, P projections, 22c reader closure against
+    the measured `hack/ceph-readers.yaml`, 18c readers restart, 18d the checksum can read its Secret, 28 no
+    client.admin, 29 delivery and consistency through `hack/umbrella_spec.py`, 30 the hold and the read-grant refusal);
+    `hack/validate-glance-store.py` adds the migration refusal on the same single claim lookup. `validate-pod-references` renders the storage-dependent charts as the umbrella
+    delivers them.
+
 - **cinder refuses to render without a block-storage backend (#196, phase P0 of #308).**
   - **What was wrong:** cinder's only backend is Ceph RBD. With no Ceph, `cinder-volume` and `cinder-storage-init`
     waited in `Init` forever on `ceph-etc` and keyring Secrets nothing creates. That was the state on every default

@@ -1,0 +1,20 @@
+component: neutron
+issue: 110
+reason: >-
+  Upstream points neutron-server's liveness probe at uwsgi's stats socket (1717, with
+  stats-http) via pod.probes.server.server.liveness.port. A hung neutron-server then presents
+  as endpoints empty, pod Running, zero restarts -- readiness withdraws it from the Service
+  while liveness reports healthy forever.
+assertions:
+  - file: templates/deployment-server.yaml
+    absent: liveness.port
+    why: >-
+      Restoring the knob in serverLivenessProbeTemplate restores the stats-port target. The
+      api-paste `/` pipeline carries no authtoken, so GET / on the network endpoint port
+      needs no token and no backend -- only a worker.
+  - file: values.yaml
+    present: failureThreshold
+    why: >-
+      neutron's probe params come from values, not from the template, so this is where its
+      liveness slack lives. Without it the probe inherits the default threshold of 3 and
+      restarts a merely busy single-worker API.

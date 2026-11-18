@@ -13,6 +13,20 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */}}
+{{- if eq (include "helm-toolkit.utils.ceph_managed" .) "true" }}
+
+# Krateo (#308): ceph-managed. The pool and client.${RBD_POOL_USER} are made on Ceph's side (a Rook CephBlockPool and
+# CephClient, or the Ceph admin), so nothing is created here and no client.admin key is present. With the user's own key,
+# check that the pool exists and the user can use it.
+set -ex
+if [ "x$STORAGE_BACKEND" == "xcinder.volume.drivers.rbd.RBDDriver" ]; then
+  if ! rbd --id "${RBD_POOL_USER}" --pool "${RBD_POOL_NAME}" ls > /dev/null; then
+    echo "client.${RBD_POOL_USER} cannot list pool ${RBD_POOL_NAME}: create the pool, and give the user" \
+      "'profile rbd pool=${RBD_POOL_NAME}', on Ceph's side (a CephBlockPool and CephClient, or the Ceph admin) (#308)"
+    exit 1
+  fi
+fi
+{{- else }}
 
 set -x
 if [ "x$STORAGE_BACKEND" == "xcinder.volume.drivers.rbd.RBDDriver" ]; then
@@ -68,3 +82,4 @@ EOF
   kubectl apply --namespace ${NAMESPACE} -f ${SECRET}
 
 fi
+{{- end }}

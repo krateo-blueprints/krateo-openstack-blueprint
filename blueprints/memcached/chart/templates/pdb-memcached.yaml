@@ -1,0 +1,29 @@
+{{/*
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{- /* Krateo (#309): with more than one replica, a node drain may take one replica at a time. Never minAvailable: on a
+       single replica that would block every drain forever, so nothing is rendered there. */}}
+{{- if and .Values.manifests.statefulset (gt (int .Values.pod.replicas.server) 1) }}
+{{- $envAll := . }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: memcached
+spec:
+  maxUnavailable: {{ .Values.pod.lifecycle.disruption_budget.memcached.max_unavailable }}
+  selector:
+    matchLabels:
+{{ tuple $envAll "memcached" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
+{{- end }}
