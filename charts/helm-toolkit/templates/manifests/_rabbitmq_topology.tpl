@@ -1,0 +1,153 @@
+{{/*
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{/*
+Krateo (#309 H2b): a component's RabbitMQ user, vhost, permissions and policies as messaging-topology-operator custom
+resources (rabbitmq.com/v1beta1), for a RabbitmqCluster run by the cluster-operator. It replaces the rabbit-init Job
+when endpoints.oslo_messaging.operator.cluster names the cluster. One source of truth, as #228 wants:
+  - the password is the user's generated root, endpoints.oslo_messaging.auth.<serviceName>.passwordFrom, projected
+    with the username into <serviceUser>-rabbitmq-user, which the User imports. The topology operator watches that
+    Secret and re-syncs the password when it changes (its User doc and controller), so a rotated root reaches RabbitMQ
+    when the projection refreshes (refreshInterval 1h), with no Job;
+  - the vhost is the one rabbit-init declared: endpoints.oslo_messaging.path without its leading slash;
+  - the user gets configure, write and read ".*" on it, as rabbit-init granted, and so does the RabbitMQ
+    administrator (endpoints.oslo_messaging.auth.admin.username): ceilometer's notification agent consumes other
+    components' vhosts as the administrator (#281), which the cluster-operator does not grant by itself;
+  - conf.rabbitmq.policies become Policy resources on that vhost, without the ha-* keys RabbitMQ 4.x refuses.
+Names are <serviceUser>-rabbitmq-{user,vhost,permission,admin-permission,policy-<name>}, the names
+helm-toolkit.utils.dependency_jobs_filter waits on in place of <serviceUser>-rabbit-init. The vhost is retained when
+its resource is deleted (deletionPolicy retain: a pruned resource would otherwise delete the vhost and every queue in
+it). hack/validate-messaging-topology.py renders all of it.
+*/}}
+{{- define "helm-toolkit.manifests.rabbitmq_topology" -}}
+{{- $envAll := index . "envAll" -}}
+{{- $serviceName := index . "serviceName" -}}
+{{- $su := (index . "serviceUser" | default $serviceName) | replace "_" "-" -}}
+{{- $om := $envAll.Values.endpoints.oslo_messaging -}}
+{{- $cluster := $om.operator.cluster -}}
+{{- $auth := index ($om.auth | default dict) $serviceName | default dict -}}
+{{- $from := $auth.passwordFrom | default dict -}}
+{{- range $field := list "store" "secret" "key" }}
+{{- if not (index $from $field) }}
+{{- fail (printf "endpoints.oslo_messaging.auth.%s.passwordFrom.%s is required with the RabbitMQ cluster-operator: the user's password comes from its generated root (#228), never from a value" $serviceName $field) }}
+{{- end }}
+{{- end }}
+{{- $vhost := trimPrefix "/" ($om.path | default "" | toString) -}}
+{{- if not $vhost }}
+{{- fail (printf "endpoints.oslo_messaging.path is empty for %s: with the RabbitMQ cluster-operator each component has its own vhost, never /" $serviceName) }}
+{{- end }}
+{{- $aux := $envAll.Values.conf.rabbitmq | default dict -}}
+{{- range $k := keys $aux | sortAlpha }}
+{{- if ne $k "policies" }}
+{{- fail (printf "conf.rabbitmq.%s is set for %s: with the RabbitMQ cluster-operator only policies are carried over (as Policy resources); declare the rest as messaging-topology-operator resources" $k $serviceName) }}
+{{- end }}
+{{- end }}
+{{- $ref := dict "name" $cluster -}}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ printf "%s-rabbitmq-user" $su }}
+  annotations:
+    # Deleted by helm WITH the release, after its pre-delete hooks (#254).
+    krateo.io/teardown: with-release
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: {{ $from.store | quote }}
+  target:
+    name: {{ printf "%s-rabbitmq-user" $su }}
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      engineVersion: v2
+      data:
+        username: {{ $auth.username | quote }}
+        password: {{ "{{ .password }}" | quote }}
+  data:
+    - secretKey: password
+      remoteRef:
+        key: {{ $from.secret | quote }}
+        property: {{ $from.key | quote }}
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: User
+metadata:
+  name: {{ printf "%s-rabbitmq-user" $su }}
+spec:
+  rabbitmqClusterReference:
+    name: {{ $cluster | quote }}
+  importCredentialsSecret:
+    name: {{ printf "%s-rabbitmq-user" $su }}
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Vhost
+metadata:
+  name: {{ printf "%s-rabbitmq-vhost" $su }}
+spec:
+  name: {{ $vhost | quote }}
+  defaultQueueType: quorum
+  deletionPolicy: retain
+  rabbitmqClusterReference:
+    name: {{ $cluster | quote }}
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Permission
+metadata:
+  name: {{ printf "%s-rabbitmq-permission" $su }}
+spec:
+  vhost: {{ $vhost | quote }}
+  userReference:
+    name: {{ printf "%s-rabbitmq-user" $su }}
+  permissions:
+    configure: ".*"
+    write: ".*"
+    read: ".*"
+  rabbitmqClusterReference:
+    name: {{ $cluster | quote }}
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Permission
+metadata:
+  name: {{ printf "%s-rabbitmq-admin-permission" $su }}
+spec:
+  vhost: {{ $vhost | quote }}
+  user: {{ (index ($om.auth | default dict) "admin" | default dict).username | quote }}
+  permissions:
+    configure: ".*"
+    write: ".*"
+    read: ".*"
+  rabbitmqClusterReference:
+    name: {{ $cluster | quote }}
+{{- range $p := ($aux.policies | default list) }}
+{{- $def := dict }}
+{{- range $k, $v := ($p.definition | default dict) }}{{- if not (hasPrefix "ha-" $k) }}{{- $_ := set $def $k $v }}{{- end }}{{- end }}
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Policy
+metadata:
+  name: {{ printf "%s-rabbitmq-policy-%s" $su ($p.name | lower | replace "_" "-") }}
+spec:
+  name: {{ $p.name | quote }}
+  vhost: {{ $p.vhost | default $vhost | quote }}
+  pattern: {{ $p.pattern | quote }}
+  applyTo: {{ (index $p "apply-to") | default "all" | quote }}
+  priority: {{ $p.priority | default 0 }}
+  definition:
+{{ toYaml $def | indent 4 }}
+  rabbitmqClusterReference:
+    name: {{ $cluster | quote }}
+{{- end }}
+{{- end -}}
