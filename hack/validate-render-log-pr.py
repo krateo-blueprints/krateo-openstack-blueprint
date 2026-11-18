@@ -17,7 +17,9 @@ script:
   3. a bot pull request already open: that branch gets the fresh render as a fast-forward, no second pull request is
      opened, and that number is merged;
   4. once the render has landed on main: nothing again (idempotent);
-  5. a token from an App with another slug: refused before anything is committed.
+  5. a token from an App with another slug: refused before anything is committed;
+  6. a merge queue on main (a merge_queue rule): auto-merge is enabled, so the pull request joins the queue, and the
+     bot merges nothing itself.
 
 Fails when git is missing or a case cannot be set up.
 """
@@ -45,6 +47,7 @@ STUB = r'''#!/bin/sh
 echo "$*" >> "$GH_LOG"
 case "$1 $2" in
   "api users/"*) echo "$GH_BOT_ID" ;;
+  "api repos/"*"/rules/branches/"*) echo "${GH_QUEUE:-0}" ;;
   "pr list") printf '%s\n' "$GH_OPEN" ;;
   "pr create") echo "https://github.com/o/r/pull/42" ;;
   "pr merge") exit 0 ;;
@@ -92,15 +95,15 @@ def setup(tmp):
     return remote, work, bindir
 
 
-def script(work, bindir, tmp, open_pr="", slug=None):
+def script(work, bindir, tmp, open_pr="", slug=None, queue="0"):
     log = os.path.join(tmp, "gh.log")
     open(log, "w").close()
     env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"], GH_LOG=log, GH_OPEN=open_pr,
-               GH_BOT_ID=BOT_ID, APP_SLUG=SLUG if slug is None else slug)
+               GH_BOT_ID=BOT_ID, APP_SLUG=SLUG if slug is None else slug, GH_QUEUE=queue)
     env.pop("BOT_USER_ID", None)
     r = run(["bash", "hack/render-log-pr.sh", "."], work, env=env, check=False)
-    # the bot account's id lookup is not a pull-request call
-    return r, [l for l in open(log).read().splitlines() if l and not l.startswith("api users/")]
+    # the bot account's id and the branch's rules are lookups, not pull-request calls
+    return r, [l for l in open(log).read().splitlines() if l and not l.startswith("api ")]
 
 
 def workflow_check():
@@ -226,6 +229,14 @@ def main():
         if r.returncode != 0 or calls or remote_branches(remote) != branches or git(remote, "rev-parse", "main") != head:
             failures.append("4 (after landing): rc %d, gh calls %s; want rc 0 and nothing done" % (r.returncode, calls))
         checked += 1
+        # 6. a merge queue on main: the bot enables auto-merge (it joins the queue) and merges nothing itself
+        add_entry(work, "2099-01-04-01-gate-entry.md")
+        r, calls = script(work, bindir, tmp, queue="1")
+        merges = [c for c in calls if c.startswith("pr merge")]
+        if r.returncode != 0 or len(merges) != 1 or "--auto" not in merges[0] or "--delete-branch" in merges[0]:
+            failures.append("6 (merge queue): rc %d, merge calls %s; want one `pr merge <n> --auto`, no direct merge"
+                            % (r.returncode, merges))
+        checked += 1
         # 5. a token from another App: refused before anything is committed or called
         add_entry(work, "2099-01-03-01-gate-entry.md")
         head = git(remote, "rev-parse", "main")
@@ -241,7 +252,8 @@ def main():
         return 1
     print("OK: render-log-pr.sh, %d cases: nothing when current; one bot branch, commit and squash-merged pull request "
           "for a new entry, by the App's bot with no skip marker; an open bot pull request updated, never a second; "
-          "idempotent once landed; another App refused; the workflow cannot re-trigger itself" % checked)
+          "idempotent once landed; another App refused; the workflow cannot re-trigger itself; under a merge queue it "
+          "enqueues instead of merging" % checked)
     return 0
 
 
