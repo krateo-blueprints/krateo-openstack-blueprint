@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Render docs/log.md from docs/log.d/, one file per change.
 
-    hack/render-log.py [repo-root]           write docs/log.md
-    hack/render-log.py [repo-root] --check   fail if docs/log.md is not what docs/log.d renders
+    hack/render-log.py [repo-root]                    write docs/log.md (the render-log workflow, on main)
+    hack/render-log.py [repo-root] --check            validate docs/log.d alone (the pull-request gate)
+    hack/render-log.py [repo-root] --check-rendered   also fail if docs/log.md is not the render
 
-Every pull request used to add its entry at the top of docs/log.md, so any two branches in flight conflicted there.
-Now a change adds one file, docs/log.d/<yyyy-mm-dd>-<nn>-<slug>.md, and this script writes docs/log.md, which stays
-checked in because people read it on GitHub. Never edit docs/log.md by hand.
+A change adds one file, docs/log.d/<yyyy-mm-dd>-<nn>-<slug>.md, and nothing else: a pull request never touches
+docs/log.md (hack/validate-log-untouched.py). Every pull request used to edit the top of docs/log.md, and from #340
+every one committed a regenerated copy, so any two branches in flight still conflicted there. Now
+.github/workflows/render-log.yaml renders docs/log.md after each merge to main and lands it through a bot pull request
+(hack/render-log-pr.sh). docs/log.md stays checked in because people read it on GitHub.
 
 An entry file is OKF front matter (the docs standard's lint-docs reads every docs/**/*.md) and then its bullet:
 
@@ -25,17 +28,21 @@ newest first, then the body of docs/log.d/_earlier.md (the history from before d
 month, entries sort newest first by file name: the date, then <nn>, so on one day the higher number is the later
 change. Entries are separated by one blank line.
 
---check fails, naming the problem, when docs/log.md differs from the render, when a file in docs/log.d is neither one
-of the two fixed parts nor named <yyyy-mm-dd>-<nn>-<slug>.md, when an entry lacks the front matter or does not start
-with "- **", and when there is no entry at all (no input is not a pass).
+--check fails, naming the problem, when a file in docs/log.d is neither one of the two fixed parts nor named
+<yyyy-mm-dd>-<nn>-<slug>.md with a real date, when two entries share a <yyyy-mm-dd>-<nn> (their order would be
+ambiguous; CI checks the pull request merged with current main, so this fires when an entry merged ahead took the
+number), when an entry lacks the front matter or does not start with "- **",
+when a relative link in an entry does not resolve from docs/log.d (and so would not after rebasing), and when there is
+no entry at all (no input is not a pass). It does not read docs/log.md, which on a pull request is main's.
 """
+import datetime
 import difflib
 import os
 import re
 import sys
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
-CHECK = "--check" in sys.argv[1:]
+FLAGS = {a for a in sys.argv[1:] if a.startswith("--")}
 ROOT = os.path.abspath(args[0] if args else ".")
 DOCS = os.path.join(ROOT, "docs")
 LOGD = os.path.join(DOCS, "log.d")
@@ -43,6 +50,7 @@ OUT = os.path.join(DOCS, "log.md")
 NAME = re.compile(r"^(\d{4})-(\d{2})-(\d{2})-(\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
 FIXED = ("_header.md", "_earlier.md")
 LINK = re.compile(r"(\]\()([^)\s]+)(\))")
+EXTERNAL = re.compile(r"^[a-z]+://|^mailto:|^#")
 
 
 def split_front_matter(text):
@@ -63,7 +71,7 @@ def rebase(text):
     """Links written from docs/log.d/, rewritten from docs/."""
     def one(m):
         target = m.group(2)
-        if re.match(r"^[a-z]+://|^mailto:|^#", target):
+        if EXTERNAL.match(target):
             return m.group(0)
         path, sep, anchor = target.partition("#")
         new = os.path.relpath(os.path.normpath(os.path.join(LOGD, path)), DOCS)
@@ -76,6 +84,11 @@ def body_of(f, problems):
     if fm is None or fm.get("type") != "Log" or not fm.get("title") or not fm.get("description"):
         problems.append("docs/log.d/%s needs front matter with type: Log, a title and a description" % f)
         return None
+    for m in LINK.finditer(body):
+        target = m.group(2)
+        if not EXTERNAL.match(target) and not os.path.exists(os.path.join(LOGD, target.partition("#")[0])):
+            problems.append("docs/log.d/%s: link %r does not resolve from docs/log.d (write it relative to the entry, "
+                            "e.g. ../supply-chain.md)" % (f, target))
     return rebase(body.strip("\n"))
 
 
@@ -91,8 +104,14 @@ def render():
     for f in files:
         if f in FIXED:
             continue
-        if not NAME.match(f):
+        m = NAME.match(f)
+        if not m:
             problems.append("docs/log.d/%s is not named <yyyy-mm-dd>-<nn>-<slug>.md (lowercase slug)" % f)
+            continue
+        try:
+            datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            problems.append("docs/log.d/%s: %s-%s-%s is not a date" % (f, m.group(1), m.group(2), m.group(3)))
             continue
         body = body_of(f, problems)
         if body is None:
@@ -103,6 +122,13 @@ def render():
         entries.append((f, body))
     if not entries:
         problems.append("docs/log.d holds no entry")
+    by_key = {}
+    for f, _ in entries:
+        by_key.setdefault(f[:13], []).append(f)
+    for key, names in sorted(by_key.items()):
+        if len(names) > 1:
+            problems.append("docs/log.d: %s share %s, so their order is ambiguous; give the later change the next free "
+                            "number for that date" % (" and ".join(names), key))
     earlier = body_of("_earlier.md", problems) if "_earlier.md" in files else None
     if problems:
         return None, problems
@@ -126,20 +152,22 @@ def main():
         for p in problems:
             print("FAIL: " + p)
         return 1
-    if not CHECK:
-        open(OUT, "w").write(out)
-        print("wrote docs/log.md from docs/log.d")
-        return 0
-    have = open(OUT).read() if os.path.exists(OUT) else ""
-    if have != out:
-        print("FAIL: docs/log.md is not what docs/log.d renders. Add or edit a file in docs/log.d, then run "
-              "`python3 hack/render-log.py .`; never edit docs/log.md by hand.")
-        for line in list(difflib.unified_diff(have.splitlines(), out.splitlines(), "docs/log.md (committed)",
-                                              "docs/log.md (rendered)", lineterm=""))[:40]:
-            print("  " + line)
-        return 1
     n = len([f for f in os.listdir(LOGD) if f not in FIXED])
-    print("OK: docs/log.md is the render of %d docs/log.d entries" % n)
+    if "--check" in FLAGS:
+        print("OK: %d docs/log.d entries are well formed and render (docs/log.md is rendered on main, not here)" % n)
+        return 0
+    if "--check-rendered" in FLAGS:
+        have = open(OUT).read() if os.path.exists(OUT) else ""
+        if have != out:
+            print("FAIL: docs/log.md is not what docs/log.d renders")
+            for line in list(difflib.unified_diff(have.splitlines(), out.splitlines(), "docs/log.md (committed)",
+                                                  "docs/log.md (rendered)", lineterm=""))[:40]:
+                print("  " + line)
+            return 1
+        print("OK: docs/log.md is the render of %d docs/log.d entries" % n)
+        return 0
+    open(OUT, "w").write(out)
+    print("wrote docs/log.md from %d docs/log.d entries" % n)
     return 0
 
 

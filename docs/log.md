@@ -13,24 +13,55 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
-- **Uninstall deletes a component's hook Jobs (#206).** Since 0.3.41 every Job is a `post-install,post-upgrade` hook
-  (#179), and Helm never deletes hook resources at uninstall: cinder's removal left six completed Jobs and their pods,
-  and a full teardown 156 pods (#204). `hook-succeeded` can't be used, because kubernetes-entrypoint waits on dependency
-  Jobs by name while the component is installed. Each of the 32 charts that render hook Jobs now includes
-  helm-toolkit's `job_hook_cleanup`. It is a `pre-delete` hook, weight 100, so it runs after db-drop and the clean
-  Jobs. It selects `release_group=<release>`, leaves out itself, and deletes the Jobs whose `helm.sh/hook` names
-  post-install or post-upgrade, with background propagation so their pods go too. Its ServiceAccount, Role (list and
-  delete on Jobs, nothing else) and RoleBinding are plain release objects, so they exist while it runs. It uses the
-  chart's own ks-user (or db-init, or rabbit-init) image, which has python, and always exits 0, so a failed cleanup
-  leaves Jobs behind rather than blocking the uninstall. That pre-delete hooks run under the controller was measured in
-  #204 (glance-clean ran at teardown); this hook itself hasn't been run on a cluster yet. New gate
-  `hack/validate-hook-cleanup.py` renders each chart at defaults and with every Job on. For every render with a hook
-  Job, it requires exactly one cleanup, last among pre-delete hooks, with that RBAC and a selector matching every hook
-  Job but not itself. It also runs the script against a stand-in API, with another release's Job and a non-hook Job
-  next to the render's, and against a failing API. Its first CI run found four hook Jobs with no labels at all
-  (cloudkitty-storage-init, ironic-manage-cleaning-network, magnum-domain-ks-user, masakari-db-sync), which no
-  selector can reach. They now carry helm-toolkit's labels; their pod templates are unchanged. libvirt, memcached, openvswitch and redis render no hook Job unless
-  `images.local_registry.active` turns on image-repo-sync, and have no python image, so they get no cleanup.
+- **docs/log.md is rendered on main, by a bot pull request.** After #340, every branch still committed a regenerated
+  `docs/log.md`, so merges kept conflicting on it (#322, #320).
+  - **Pull requests:** a pull request now adds its `docs/log.d` entry and nothing else.
+    `hack/validate-log-untouched.py` fails one whose diff touches `docs/log.md`. It makes one exception, for the
+    bot's own pull request, and only when the branch is `bot/render-log-*` and the author is `github-actions[bot]`.
+    The rule is checked case by case first (prefix with a human author, bot author on another branch, a look-alike
+    prefix, another bot). `hack/render-log.py --check` now validates only the entries: names with real dates, front
+    matter, the bullet, links that resolve from `docs/log.d`, and no two entries with the same date and number.
+    CI checks the pull request merged with current main, so a number an entry merged ahead already took fails, and
+    the author takes the next free one.
+  - **Main:** after each merge, `.github/workflows/render-log.yaml` re-renders `docs/log.md`. If it changed,
+    `hack/render-log-pr.sh` commits it as `github-actions[bot]` on `bot/render-log-<sha7>` with `[skip ci]`, opens a
+    pull request and squash-merges it. If a bot pull request is already open, it updates that one with a
+    fast-forward instead. It runs one at a time and commits nothing when the render is unchanged. It's a pull request
+    rather than a push because main's org ruleset requires one and has no bypass actor (Diego, 2026-11-18). It needs
+    "Allow GitHub Actions to create and approve pull requests", which is off for the org and the repo (checked
+    2026-11-18).
+  - **Gate:** `hack/validate-render-log-pr.py` runs the script against a local remote and a stand-in `gh`, in four
+    cases: current, a new entry, a bot pull request already open, and after landing.
+
+- **neutron's tunnel interface is detected, not assumed.** `network.interface.tunnel` defaulted to `ens4`, a GCE NIC
+  name. On a node without `ens4` the OVS agent's init set no tunnel IP ("Var LOCAL_IP is empty"). The default is now
+  empty, so the init uses the interface of the default route. That logic was already in the script; the `ens4` default
+  had been skipping it.
+  - **Existing installs keep `ens4`.** The old schema default was written into each stored neutron object (#179). It is
+    harmless on GCE, where `ens4` is the right NIC. Elsewhere, clear `componentValues.neutron.network.interface.tunnel`
+    or set it to the node's NIC.
+  - **New gate:** `hack/validate-neutron-tunnel-interface.py` checks the empty default and the schema, and runs the
+    rendered fallback.
+
+- **Images pinned; remediation issues (#316, #328 to #334).**
+  - **Dated tags:** Diego decided on 2026-11-17 to pin dated tags and verify their digests in CI. The 31 airshipit
+    release-series images now use `2026.1-ubuntu_noble-20261117`, and `docker.io/rabbitmq:3.13-management` became
+    `3.13.7-management`. Each new tag serves the digest that was recorded and scanned, so no bytes change. It is also
+    the newest dated build, so no baseline CVE is fixed and the allowlist keeps all 167 entries, re-keyed.
+  - **libvirt:** appVersion was re-measured on its dated image: libvirt 10.0.0, from Trivy's package list.
+  - **Gates:**
+    - `hack/gen-image-inventory.py` fails on a release-series tag unless `hack/image-pin-waivers.yaml` waives it, and
+      on a stale or expired waiver.
+    - With `--resolve` (image-scan), it fails when a pinned tag serves a digest other than the recorded one, and
+      `--write` keeps the recorded digest.
+    - `validate-app-version.py` and `validate-keystone-oidc-image-series.py` accept the dated suffix and compare the
+      series.
+  - **Mirror:** `hack/image-mirror.yaml` and `.github/workflows/image-mirror.yaml` copy the 4 Kolla gnocchi images by
+    digest to dated tags in `ghcr.io/krateo-blueprints/images/`. The copy runs on main or by hand. It never moves a
+    tag, and it fails until the package pulls anonymously. The 4 images are waived until 2027-01-31 (#334).
+  - **Remediation issues:** #328 (PyJWT, from `stable/2026.1` upper-constraints), #329 (nginx 1.13.3 in ironic),
+    #330 (drop the rally test pods), #331 (docker 27.5.0 and image_repo_sync), #332 (PowerDNS), #333 (memcached) and
+    #334 (Kolla gnocchi). Candidate replacements were scanned, so each issue states the CRITICAL count the fix leaves.
 
 - **One file per log entry and per gate.** Every pull request edited the top of `docs/log.md` and the step list
   of `.github/workflows/lint.yaml` in the same places, so branches in flight collided on both (Diego, 2026-11-17).

@@ -21,6 +21,7 @@ The pinning policy and the scan's allowlist are in [supply-chain.md](supply-chai
 - **By registry:** docker.io 8, ghcr.io 1, quay.io 49.
 - **Rendered at a chart's defaults:** 47. **Only with off-by-default manifests on:** 4. **Declared in `images.tags`, rendered by neither:** 7.
 - **Not pullable anonymously:** 0.
+- **Pinned by tag form:** dated 37, commit 3, version 13, digest 1. **Not pinned, waived:** 4.
 - **Charts that run no image:** openstack, openstack-capabilities.
 
 "Pullable anonymously" was measured without credentials, as the kubelet pulls here: the manifest is served
@@ -40,68 +41,69 @@ format is a finding here, not a surprise at install time.
 ## Images
 
 Platforms are the ones the registry lists for the reference. `d` = rendered at defaults, `m` = only with
-off-by-default manifests on, `x` = declared only.
+off-by-default manifests on, `x` = declared only. "Pinned by" is the tag's form (dated, commit, version or
+digest); the digest each tag served when recorded is in `hack/images.yaml`, and a re-push fails the weekly check.
 
-| Image | Publisher | Anonymous pull | Platforms | Charts |
-| --- | --- | --- | --- | --- |
-| `docker.io/bitnami/kubectl@sha256:bedd34c910e2a5ce9836813d16444af449d7fe07a29136d59f34e861e8e660c5` | Bitnami (Broadcom) | yes | linux/amd64, linux/arm64 | libvirt (x) |
-| `docker.io/docker:17.07.0` | Docker Official Images | yes | linux/amd64 | aodh (x), barbican (x), blazar (x), ceilometer (x), cinder (x), cloudkitty (x), freezer (x), glance (x), heat (x), horizon (x), ironic (x), keystone (x), magnum (x), manila (x), mistral (x), neutron (x), nova (x), octavia (x), placement (x), swift (x), trove (x), watcher (x), zaqar (x) |
-| `docker.io/library/redis:7.2.17` | Docker Official Images | yes | linux/386, linux/amd64, linux/arm/v7, linux/arm64/v8, linux/ppc64le | redis (d) |
-| `docker.io/nginx:1.13.3` | Docker Official Images | yes | linux/amd64 | ironic (d) |
-| `docker.io/powerdns/pdns-auth-49:4.9.18` | PowerDNS | yes | linux/amd64, linux/arm64/v8 | powerdns (d) |
-| `docker.io/prom/mysqld-exporter:v0.12.1` | Prometheus project | yes | linux/amd64 | mariadb (x) |
-| `docker.io/rabbitmq:3.13-management` | Docker Official Images | yes | linux/amd64, linux/arm/v7, linux/arm64/v8, linux/ppc64le, linux/riscv64, linux/s390x | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), glance (m), heat (d), ironic (d), keystone (m), magnum (d), manila (d), masakari (d), mistral (d), neutron (d), nova (d), octavia (d), tacker (d), trove (d), watcher (d) |
-| `docker.io/xrally/xrally-openstack:2.0.0` | OpenStack Rally project | yes | linux/amd64 | blazar (m), cinder (m), freezer (x), glance (m), heat (m), keystone (m), mistral (m), neutron (m), nova (m), octavia (x), trove (m), watcher (m), zaqar (x) |
-| `ghcr.io/vexxhost/netoffload:v1.0.1` | VEXXHOST | yes | linux/amd64 | neutron (x) |
-| `quay.io/airshipit/aodh:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d) |
-| `quay.io/airshipit/barbican:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | barbican (d) |
-| `quay.io/airshipit/blazar:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | blazar (d) |
-| `quay.io/airshipit/ceilometer:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | ceilometer (d) |
-| `quay.io/airshipit/ceph-config-helper:ubuntu_jammy_20.2.1-1-20260407` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | gnocchi (x), libvirt (x) |
-| `quay.io/airshipit/ceph-config-helper:ubuntu_jammy_20.2.4-1-20260828` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | cinder (d), glance (d), nova (d) |
-| `quay.io/airshipit/cinder:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | cinder (d) |
-| `quay.io/airshipit/cloudkitty:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | cloudkitty (d) |
-| `quay.io/airshipit/cyborg:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | cyborg (d) |
-| `quay.io/airshipit/designate:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | designate (d) |
-| `quay.io/airshipit/docker:27.5.0` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | gnocchi (x), libvirt (x), mariadb (x), memcached (x), openvswitch (x), powerdns (x), rabbitmq (x), redis (x) |
-| `quay.io/airshipit/freezer-api:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | freezer (d) |
-| `quay.io/airshipit/glance:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | glance (d) |
-| `quay.io/airshipit/heat:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | heat (d), ironic (d), swift (d), trove (d) |
-| `quay.io/airshipit/horizon:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | horizon (d) |
-| `quay.io/airshipit/ironic:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | ironic (d) |
-| `quay.io/airshipit/keystone:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | keystone (d) |
-| `quay.io/airshipit/kubernetes-entrypoint:4fbcf7ce324dc66e78480f73035e31434cfea1e8-ubuntu_focal` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | ironic (d) |
-| `quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), freezer (d), glance (d), gnocchi (d), heat (d), horizon (d), keystone (d), libvirt (d), magnum (d), manila (d), mariadb (d), masakari (d), memcached (d), mistral (d), neutron (d), nova (d), octavia (d), openvswitch (d), placement (d), powerdns (d), rabbitmq (d), redis (d), skyline (d), swift (d), tacker (d), trove (d), watcher (d), zaqar (d) |
-| `quay.io/airshipit/libvirt:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | libvirt (d) |
-| `quay.io/airshipit/magnum:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | magnum (d) |
-| `quay.io/airshipit/manila:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | manila (d) |
-| `quay.io/airshipit/mariadb:11.4.8-noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | mariadb (x) |
-| `quay.io/airshipit/mariadb:ubuntu_noble-20261030` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | mariadb (d), powerdns (d) |
-| `quay.io/airshipit/masakari-monitors:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | masakari (m) |
-| `quay.io/airshipit/masakari:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | masakari (d) |
-| `quay.io/airshipit/memcached:1.6.32` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | memcached (d) |
-| `quay.io/airshipit/mistral:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | mistral (d) |
-| `quay.io/airshipit/neutron:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | neutron (d) |
-| `quay.io/airshipit/nova:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | nova (d) |
-| `quay.io/airshipit/octavia:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | octavia (d) |
-| `quay.io/airshipit/openstack-client:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), freezer (d), glance (d), gnocchi (d), heat (d), horizon (d), keystone (d), magnum (d), manila (d), mariadb (d), masakari (d), mistral (d), neutron (d), nova (d), octavia (d), placement (d), powerdns (d), rabbitmq (d), skyline (d), tacker (d), watcher (d), zaqar (d) |
-| `quay.io/airshipit/openvswitch:ubuntu_jammy-20261018` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | octavia (d) |
-| `quay.io/airshipit/openvswitch:ubuntu_noble-20261030` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | openvswitch (d) |
-| `quay.io/airshipit/osh-selenium:ubuntu_noble-20261030` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | horizon (m) |
-| `quay.io/airshipit/placement:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | placement (d) |
-| `quay.io/airshipit/porthole-mysqlclient-utility:d51f180252a26421dbb2904e1533a38866fd0d74-ubuntu_jammy` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | mariadb (m) |
-| `quay.io/airshipit/rabbitmq:3.10.18` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | rabbitmq (d) |
-| `quay.io/airshipit/rabbitmq:3.10.18-management` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | rabbitmq (d) |
-| `quay.io/airshipit/skyline:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | skyline (d) |
-| `quay.io/airshipit/swift:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | swift (d) |
-| `quay.io/airshipit/tacker:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | tacker (d) |
-| `quay.io/airshipit/trove:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | trove (d) |
-| `quay.io/airshipit/watcher:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | watcher (d) |
-| `quay.io/airshipit/zaqar:2026.1-ubuntu_noble` | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | zaqar (d) |
-| `quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble` | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
-| `quay.io/openstack.kolla/gnocchi-base:2026.1-ubuntu-noble` | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
-| `quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble` | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
-| `quay.io/openstack.kolla/gnocchi-statsd:2026.1-ubuntu-noble` | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
+| Image | Pinned by | Publisher | Anonymous pull | Platforms | Charts |
+| --- | --- | --- | --- | --- | --- |
+| `docker.io/bitnami/kubectl@sha256:bedd34c910e2a5ce9836813d16444af449d7fe07a29136d59f34e861e8e660c5` | digest | Bitnami (Broadcom) | yes | linux/amd64, linux/arm64 | libvirt (x) |
+| `docker.io/docker:17.07.0` | version | Docker Official Images | yes | linux/amd64 | aodh (x), barbican (x), blazar (x), ceilometer (x), cinder (x), cloudkitty (x), freezer (x), glance (x), heat (x), horizon (x), ironic (x), keystone (x), magnum (x), manila (x), mistral (x), neutron (x), nova (x), octavia (x), placement (x), swift (x), trove (x), watcher (x), zaqar (x) |
+| `docker.io/library/redis:7.2.17` | version | Docker Official Images | yes | linux/386, linux/amd64, linux/arm/v7, linux/arm64/v8, linux/ppc64le | redis (d) |
+| `docker.io/nginx:1.13.3` | version | Docker Official Images | yes | linux/amd64 | ironic (d) |
+| `docker.io/powerdns/pdns-auth-49:4.9.18` | version | PowerDNS | yes | linux/amd64, linux/arm64/v8 | powerdns (d) |
+| `docker.io/prom/mysqld-exporter:v0.12.1` | version | Prometheus project | yes | linux/amd64 | mariadb (x) |
+| `docker.io/rabbitmq:3.13.7-management` | version | Docker Official Images | yes | linux/amd64, linux/arm/v7, linux/arm64/v8, linux/ppc64le, linux/riscv64, linux/s390x | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), glance (m), heat (d), ironic (d), keystone (m), magnum (d), manila (d), masakari (d), mistral (d), neutron (d), nova (d), octavia (d), tacker (d), trove (d), watcher (d) |
+| `docker.io/xrally/xrally-openstack:2.0.0` | version | OpenStack Rally project | yes | linux/amd64 | blazar (m), cinder (m), freezer (x), glance (m), heat (m), keystone (m), mistral (m), neutron (m), nova (m), octavia (x), trove (m), watcher (m), zaqar (x) |
+| `ghcr.io/vexxhost/netoffload:v1.0.1` | version | VEXXHOST | yes | linux/amd64 | neutron (x) |
+| `quay.io/airshipit/aodh:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d) |
+| `quay.io/airshipit/barbican:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | barbican (d) |
+| `quay.io/airshipit/blazar:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | blazar (d) |
+| `quay.io/airshipit/ceilometer:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | ceilometer (d) |
+| `quay.io/airshipit/ceph-config-helper:ubuntu_jammy_20.2.1-1-20260407` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | gnocchi (x), libvirt (x) |
+| `quay.io/airshipit/ceph-config-helper:ubuntu_jammy_20.2.4-1-20260828` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | cinder (d), glance (d), nova (d) |
+| `quay.io/airshipit/cinder:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | cinder (d) |
+| `quay.io/airshipit/cloudkitty:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | cloudkitty (d) |
+| `quay.io/airshipit/cyborg:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | cyborg (d) |
+| `quay.io/airshipit/designate:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | designate (d) |
+| `quay.io/airshipit/docker:27.5.0` | version | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | gnocchi (x), libvirt (x), mariadb (x), memcached (x), openvswitch (x), powerdns (x), rabbitmq (x), redis (x) |
+| `quay.io/airshipit/freezer-api:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | freezer (d) |
+| `quay.io/airshipit/glance:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | glance (d) |
+| `quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | heat (d), ironic (d), swift (d), trove (d) |
+| `quay.io/airshipit/horizon:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | horizon (d) |
+| `quay.io/airshipit/ironic:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | ironic (d) |
+| `quay.io/airshipit/keystone:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | keystone (d) |
+| `quay.io/airshipit/kubernetes-entrypoint:4fbcf7ce324dc66e78480f73035e31434cfea1e8-ubuntu_focal` | commit | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | ironic (d) |
+| `quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble` | commit | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), freezer (d), glance (d), gnocchi (d), heat (d), horizon (d), keystone (d), libvirt (d), magnum (d), manila (d), mariadb (d), masakari (d), memcached (d), mistral (d), neutron (d), nova (d), octavia (d), openvswitch (d), placement (d), powerdns (d), rabbitmq (d), redis (d), skyline (d), swift (d), tacker (d), trove (d), watcher (d), zaqar (d) |
+| `quay.io/airshipit/libvirt:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | libvirt (d) |
+| `quay.io/airshipit/magnum:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | magnum (d) |
+| `quay.io/airshipit/manila:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | manila (d) |
+| `quay.io/airshipit/mariadb:11.4.8-noble` | version | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | mariadb (x) |
+| `quay.io/airshipit/mariadb:ubuntu_noble-20261030` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | mariadb (d), powerdns (d) |
+| `quay.io/airshipit/masakari-monitors:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | masakari (m) |
+| `quay.io/airshipit/masakari:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | masakari (d) |
+| `quay.io/airshipit/memcached:1.6.32` | version | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | memcached (d) |
+| `quay.io/airshipit/mistral:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | mistral (d) |
+| `quay.io/airshipit/neutron:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | neutron (d) |
+| `quay.io/airshipit/nova:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | nova (d) |
+| `quay.io/airshipit/octavia:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | octavia (d) |
+| `quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), freezer (d), glance (d), gnocchi (d), heat (d), horizon (d), keystone (d), magnum (d), manila (d), mariadb (d), masakari (d), mistral (d), neutron (d), nova (d), octavia (d), placement (d), powerdns (d), rabbitmq (d), skyline (d), tacker (d), watcher (d), zaqar (d) |
+| `quay.io/airshipit/openvswitch:ubuntu_jammy-20261018` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | octavia (d) |
+| `quay.io/airshipit/openvswitch:ubuntu_noble-20261030` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | openvswitch (d) |
+| `quay.io/airshipit/osh-selenium:ubuntu_noble-20261030` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | horizon (m) |
+| `quay.io/airshipit/placement:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | placement (d) |
+| `quay.io/airshipit/porthole-mysqlclient-utility:d51f180252a26421dbb2904e1533a38866fd0d74-ubuntu_jammy` | commit | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | mariadb (m) |
+| `quay.io/airshipit/rabbitmq:3.10.18` | version | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | rabbitmq (d) |
+| `quay.io/airshipit/rabbitmq:3.10.18-management` | version | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | rabbitmq (d) |
+| `quay.io/airshipit/skyline:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | skyline (d) |
+| `quay.io/airshipit/swift:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | swift (d) |
+| `quay.io/airshipit/tacker:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | tacker (d) |
+| `quay.io/airshipit/trove:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | trove (d) |
+| `quay.io/airshipit/watcher:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | watcher (d) |
+| `quay.io/airshipit/zaqar:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | zaqar (d) |
+| `quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble` | **not pinned**: waived until 2027-01-31 (#334) | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
+| `quay.io/openstack.kolla/gnocchi-base:2026.1-ubuntu-noble` | **not pinned**: waived until 2027-01-31 (#334) | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
+| `quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble` | **not pinned**: waived until 2027-01-31 (#334) | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
+| `quay.io/openstack.kolla/gnocchi-statsd:2026.1-ubuntu-noble` | **not pinned**: waived until 2027-01-31 (#334) | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
 
 ## Publishers
 

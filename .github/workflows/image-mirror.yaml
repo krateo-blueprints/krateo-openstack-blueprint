@@ -1,0 +1,65 @@
+# Copies the images hack/image-mirror.yaml lists into ghcr.io/krateo-blueprints, by digest, under immutable tags
+# (#316, #334). Only images that cannot be pinned where they are published are mirrored; see docs/supply-chain.md.
+#
+# On main and by hand only: it writes packages in the org's registry, which a branch under review must not do.
+# hack/image-mirror.py refuses to move an existing mirror tag, verifies the digest after the copy, and fails until the
+# package is pullable anonymously (a package GHCR creates is private until an org owner makes it public once).
+#
+# GHCR is where the copies live, not a requirement: every image is still overridable per component through
+# componentValues (images.tags), for clusters that pull from their own registry.
+name: image-mirror
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - hack/image-mirror.yaml
+      - hack/image-mirror.py
+      - .github/workflows/image-mirror.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  # crane, from google/go-containerregistry, checked against a digest written here (the same rule as Trivy in
+  # image-scan.yaml). Bump both lines together.
+  CRANE_VERSION: 0.22.1
+  CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install PyYAML
+
+      - name: Install crane, checked against the digest pinned in this workflow
+        run: |
+          set -euo pipefail
+          t="$RUNNER_TEMP/go-containerregistry.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors -o "$t" \
+            "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "$CRANE_SHA256  $t" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$t" -C "$RUNNER_TEMP/bin" crane
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Log in to GHCR
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$TOKEN" | crane auth login ghcr.io -u "$ACTOR" --password-stdin
+
+      - name: Copy each image by digest, then verify it pulls anonymously
+        run: python3 hack/image-mirror.py . --apply
