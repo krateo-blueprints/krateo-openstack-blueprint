@@ -35,15 +35,15 @@ on:
 
 jobs:
   # krateo-blueprints/charts PUBLISHING.md rule 9: every reusable workflow this repository calls is pinned by
-  # commit SHA with a version comment (or `# main YYYY-MM-DD` for krateo-platformops/.github, which has no tags
-  # yet). The shared check refuses any that is not.
+  # commit SHA with the tag it carries in a comment, `# X.Y.Z` (krateo-platformops/.github is tagged from 1.0.0;
+  # resolve a tag with `^{}` when pinning and when reviewing). The shared check refuses any that is not.
   pinned-uses:
     permissions:
       contents: read
-    uses: krateo-blueprints/charts/.github/workflows/pinned-uses.yaml@ae27682c30cf6a005e03e77bc18a3f9a194db6ed # 1.4.0
+    uses: krateo-blueprints/charts/.github/workflows/pinned-uses.yaml@aea92de356085f50ea45477a4e6ae2b026cd6b14 # 1.4.2
 
   lint-docs:
-    uses: krateo-platformops/.github/.github/workflows/lint-docs.yaml@f25d6b526bde39f37bca6a4eb8c493bf4c2bbec1 # main 2026-11-17
+    uses: krateo-platformops/.github/.github/workflows/lint-docs.yaml@e1d3e99215e80ae56eca4a67e9e061b2c73168b8 # 1.0.0
 
   values-schema:
     # Gating. A chart whose own defaults violate its own schema cannot be installed at all:
