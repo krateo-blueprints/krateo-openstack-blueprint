@@ -9,8 +9,12 @@ source:
 files:
   - path: blueprints/rabbitmq-cluster-operator/chart/files/upstream/cluster-operator.yml
     sha256: 58b74bd515767123c3ba3bcdd01016e808565c93fda501eb4f05679bf4dc773f
+    # Byte-identical to the upstream release asset (same sha256, checked 2026-11-18):
+    upstream: https://github.com/rabbitmq/cluster-operator/releases/download/v2.23.2/cluster-operator.yml
   - path: blueprints/rabbitmq-topology-operator/chart/files/upstream/messaging-topology-operator-with-certmanager.yaml
     sha256: 01c8487002d027415f54bdf5d3ca030f3e78a7d2d38e596057e9a625a0009029
+    # Byte-identical to the upstream release asset (same sha256, checked 2026-11-18):
+    upstream: https://github.com/rabbitmq/messaging-topology-operator/releases/download/v1.20.5/messaging-topology-operator-with-certmanager.yaml
 require:
   - rabbitmqclusters.rabbitmq.com
   - users.rabbitmq.com

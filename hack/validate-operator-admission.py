@@ -22,8 +22,16 @@ What it does:
      RabbitmqCluster without its override `containers` (this defect), every other kind without the first field its
      CRD lists under spec.required.
 
-Out of scope: the operators' admission webhooks (the topology operator's need cert-manager and the operator running)
-and anything the operators do after admission. The H2 live test covers those.
+What the API server enforces here is the CRD's whole structural schema as on a real cluster: required, type, enum,
+pattern, format, min/max bounds, x-kubernetes-validations (CEL), x-kubernetes-int-or-string,
+x-kubernetes-preserve-unknown-fields, and (with --validate=strict) unknown and duplicate fields.
+
+What it does not enforce:
+  - the operators' validating webhooks (the topology operator's need cert-manager and the operator running), which
+    check, for example, that rabbitmqClusterReference names a cluster and that immutable fields do not change;
+  - update rules (transition CEL rules, immutability): every object is admitted as a create;
+  - anything an operator does after admission (the H2 live test covers those);
+  - objects rendered outside the two gates' operator-spec renders (mutations, other values).
 
 Exits 2 when a tool is missing or there is nothing to check, 1 on any refusal or failed control.
 """
@@ -103,7 +111,9 @@ def dry_run(kc, obj, tmp):
     p = os.path.join(tmp, "obj.yaml")
     with open(p, "w") as f:
         yaml.safe_dump(obj, f, default_flow_style=False, sort_keys=False)
-    r = run(["kubectl", "--kubeconfig", kc, "apply", "--dry-run=server", "-n", NS, "-f", p])
+    # --validate=strict: server-side field validation refuses unknown and duplicate fields, which the API server would
+    # otherwise prune silently (a misspelled key would vanish, not fail).
+    r = run(["kubectl", "--kubeconfig", kc, "apply", "--dry-run=server", "--validate=strict", "-n", NS, "-f", p])
     return r.returncode == 0, (r.stderr or r.stdout).strip()
 
 

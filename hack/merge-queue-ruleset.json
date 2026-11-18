@@ -55,6 +55,10 @@
             "integration_id": 15368
           },
           {
+            "context": "operator-admission",
+            "integration_id": 15368
+          },
+          {
             "context": "capability-roles",
             "integration_id": 15368
           },
