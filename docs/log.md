@@ -13,6 +13,106 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **The docs-rendering screen's fixture contract with nova-kog.** The nova peer couldn't copy this repository's
+  `hack/check-doc-rendering.py`, so it implemented the tier ordering itself (its #187). The two repositories now agree
+  on five named cases instead of on identical bytes. All five passed against main's file (f260b87) before they were
+  added, and both repositories now run them as self-test arms 7a–7e:
+  - **7a:** uniqueness beats length.
+  - **7b:** a concatenation C = A + B leaves A and B at tier 2 and C shared, at tier 3.
+  - **7c:** a document quoting only some of another's tokens isn't a superset of it, which the arm asserts first. The
+    quoted document takes the token the quote lacks, at tier 1.
+  - **7d:** a superset means containment, and an empty token set has no supersets.
+  - **7e:** a document with no tokens falls to tier 4.
+
+- **The operator-mode RabbitmqCluster was refused by its CRD (#309 H2).** H2's live test on GKE installed
+  0.3.74-main.g92cd983 with `messaging.backend: operator`. The rabbitmq Composition then stayed Ready=False with
+  `RabbitmqCluster.rabbitmq.com "openstack-mq" is invalid: spec.override.statefulSet.spec.template.spec.containers:
+  Required value`, so no broker was ever created, and every component that waits on messaging waited behind it.
+  - **The cause:** the template's override PodSpec held only a `nodeSelector`. The cluster-operator's CRD types that
+    field as a whole PodSpec, where `containers` is required.
+  - **The fix:** the override lists one container, `rabbitmq`, by name only. The operator merges the override into
+    its own PodSpec strategically, containers by name (v2.23.2 `internal/resource/statefulset.go`, `patchPodSpec`),
+    so the entry changes nothing else. Without any entry the override would marshal `containers: null`, which the
+    merge would read as deleting them; the CRD refuses that case before it can happen.
+  - **Why every gate was green:** `validate-messaging-operator.py` and `validate-messaging-topology.py` render the
+    objects and check this repository's own predicates. Nothing asked the CRD.
+- **The guard: `hack/validate-operator-admission.py`, in a new lint job `operator-admission`.**
+  - **The CRDs:** read from rabbitmq-operator-blueprint at the commit of the operator build H2 runs (e22d03a), with a
+    sha256 per upstream manifest (`hack/operator-crds.yaml`). There is no copy here to drift.
+  - **The objects:** the two messaging gates write every rabbitmq.com object they render from the umbrella's operator
+    spec to `OPERATOR_OBJECTS_DIR`, never one from a mutation. Both gates must pass, and each required kind
+    (RabbitmqCluster, User, Vhost, Permission, Policy) must have at least one object.
+  - **The validator:** a kind cluster serving those CRDs dry-runs every object server-side. The API server validates,
+    not a schema library, which would be a second implementation that disagrees at the edges.
+  - **The controls:** per kind, one admitted object is broken and must be refused: the RabbitmqCluster without its
+    override `containers` (this defect), each other kind without the first field its CRD requires.
+  - **Also:** `validate-messaging-operator.py` asserts the override lists exactly `rabbitmq`, and the rabbitmq
+    divergence entry asserts the three lines.
+  - **Out of scope:** the operators' admission webhooks and what the operators do after admission. The H2 live test
+    covers those.
+
+- **No shell line pipes a producer into `grep -q`.** Under `set -o pipefail`, `producer | grep -q pattern` fails
+  when grep exits on its match while the producer still has output to write: the producer takes SIGPIPE (rc 141)
+  and pipefail makes that the pipeline's status, so a line that was found reads as missing.
+  - **Where it came from:** nova-kog's 0.1.9 release refused its own chart this way (#183, 2026-11-18): the file it
+    looked for was the third of 24 archive entries, so tar still had most of its listing to write.
+  - **Here:** one instance, `hack/smoke-migrate-to-pvc.sh`'s second `migrate prepare`. It now captures the output,
+    then matches with `<<<`, and a failing prepare fails as such rather than as "did not recognise".
+  - **Same class, other readers:** `| head` (the GHCR push script's `tar -tzf | head -n1` died 20 of 20 times on a
+    20,001-entry archive) and `| grep -m N`. The guard refuses all three, and refuses a small `printf | grep -q`
+    deliberately: it is safe only while the output fits one pipe write, which a scan cannot know.
+  - **The guard:** `hack/validate-no-pipe-into-grep-q.py` (job-hooks) scans every workflow and shell file. It fails
+    on scanning nothing, and its self-test must catch four planted forms and pass four safe ones.
+
+- **The docs-rendering screen identifies each document past its own concatenations (#388).** `docs/log.md` is rendered
+  from every `docs/log.d` entry, so it repeats all of their tokens. Counted against everything, it left 40 of 71
+  documents identified only by a shared token. That proves the response wasn't truncated, but not that it was for that
+  document.
+  - **Tiers:** each document takes the first tier that yields a token (agreed with the nova peer):
+    1. the longest token unique across all documents;
+    2. else the longest token unique once the documents containing this one's whole token set (its concatenations)
+       are left out;
+    3. else the longest shared token, reported as shared;
+    4. else any block element.
+
+    Every document is still checked.
+  - **Why per document:** the rule's first form (18056b1) left every superset out of one global census. Four
+    documents that merely quote small entries count as supersets that way: `README.md`, `docs/configuration.md`,
+    `docs/release.md` and `docs/supply-chain.md`. Leaving them out for everyone handed 17 documents a "unique" token
+    that one of those quoting documents' renders also held.
+  - **Measured on 72 documents:** tier 1: 32, tier 2: 34, tier 3: 6, tier 4: 0.
+    - Unique tokens that another, non-concatenation document also holds: 17 before, 0 after.
+    - Still shared, as before: `docs/log.md` and the 2026-11-16-01 entry.
+    - Now shared, honestly: four whose "unique" token was quoted elsewhere (the 2026-11-18-02 and -31 entries,
+      `_earlier.md`, `examples/identity-profile/README.md`).
+  - **What no token can fix:** an entry whose every token a quoting document holds (8 here, for example 2026-11-17-03
+    in `README.md`). That document's render passes the entry's check whatever token is chosen.
+  - **Counter:** this adopts nova-kog #181, which counts `<p class="markdown-alert-title"` (prose can't produce a
+    literal `<`).
+  - **Tests:** three self-test arms.
+    - A, B and C = A + B: A and B at tier 2, C shared and still checked.
+    - A small document sharing a long token with a quoting document picks its own tier-1 token.
+    - A document under a concatenation keeps the token it shares with a quoting document shared.
+
+    Mutants caught: skipping tier 1, excluding every superset at tier 2, and dropping supersets from the check.
+
+- **Render-log bot updates a queued pull request (#387).** Run 44291452478 found bot pull request #384 already in the
+  merge queue, queued by the run before it. GitHub refused the push to its branch (GH006), and the run failed. The
+  entry that run rendered then waited for the next docs/log.d merge, because the bot's own merge starts no run: the
+  paths filter is the loop guard, and it is unchanged.
+  - **The fix:** before pushing to an open bot pull request, `hack/render-log-pr.sh` asks GraphQL whether it is in the
+    queue (`isInMergeQueue`). If it is, the script:
+    - takes it out with `dequeuePullRequest`;
+    - pushes;
+    - waits for the required checks on the new commit;
+    - enqueues it again.
+  - **Queued during the run:** a push refused because the pull request entered the queue after the script looked
+    re-reads the state and takes the same path once. A refused push to a pull request that isn't queued fails, and so
+    does a queue state that can't be read.
+  - **Tests:** `hack/validate-render-log-pr.py` adds three cases: already queued, queued mid-run, and refused while
+    not queued. Its local remote refuses pushes to a queued branch the way GitHub does. Six mutants now run inside the
+    gate, among them no dequeue and enqueue before the checks pass.
+
 - **Render-log bot waits for its checks and merges from a full history (#379 follow-up).** Two failures on the bot's
   merge-queue path:
   - **Read "no checks yet" as a failure.** Run 44280066151 opened #384 at 09:53:05Z and gave up a second later with
@@ -43,8 +143,8 @@ Curated history; release notes live in GitHub Releases.
   item rendered as a plain quote, and a `[!NOTE]` swallowed by an open fence rendered as shell. No static check saw
   either.
   - **What it does:** `hack/check-doc-rendering.py` POSTs every markdown file outside `charts/` (63 here) to GitHub's
-    `/markdown` (gfm). Each file's count of rendered alert titles must equal all of its admonition markers, fenced or
-    not.
+    `/markdown` (gfm). Each file's count of `markdown-alert-title` must equal all of its admonition markers, fenced
+    or not.
   - **Controls:** a known-good fixture must render 1 alert and a known-bad fenced one 0. Otherwise the run is VOID
     (exit 2).
   - **Per-document check:** each response must contain the document's own identifying token. That is its longest
@@ -58,10 +158,45 @@ Curated history; release notes live in GitHub Releases.
     `docs/log.d` plus `docs/log.md`, because `docs/log.md` is their concatenation, and
     `examples/identity-profile/README.md`. That still proves the response wasn't truncated. It doesn't prove the
     response was for this document.
-  - **Upstream defect, worked around here:** the screen counts the alert title's class name as a substring anywhere in
-    the rendered HTML, so a document that names the class in prose counts as one alert. This entry did, and failed;
-    it now describes the class instead of naming it. The defect is to be reported to the nova repository, where the
-    screen lives.
+  - **Upstream defect, fixed upstream:** the screen counted `markdown-alert-title` as a substring anywhere in the
+    rendered HTML, so a document naming the class in prose counted as one alert. This entry did, and failed. nova-kog
+    #181 now counts `<p class="markdown-alert-title"` (prose can't produce a literal `<`), and this entry names the
+    class plainly again, as the live test of that counter (#388).
+
+- **Monitoring (#312, phase 1).** New component `openstack-monitoring`, switched by the umbrella's `monitoring` value.
+  It is explicit opt-in: only `true` turns it on, and the umbrella refuses `true` where alert-provider's CRDs are not
+  served. Unset or false, the render is byte-identical.
+  - **What it scrapes.** An OpenTelemetry collector forwards OTLP to the Krateo observability stack. The endpoint is an
+    input, and nothing in the defaults is cloud-specific. It scrapes:
+    - openstack-exporter 2.0.0-alpha, through its own generated Keystone user;
+    - a standalone mysqld-exporter v0.21.0, whose least-privilege MariaDB user the mariadb chart creates without
+      restarting the database;
+    - RabbitMQ's `/metrics/detailed`.
+  - **Why a plain collector Deployment.** It is a Deployment rather than an `OpenTelemetryCollector` CR because the
+    Krateo stack runs no OpenTelemetry Operator. Its collectors come from the upstream opentelemetry-collector Helm
+    chart.
+  - **Alerts.** They are alert-provider CRs in the release namespace, rendered from one source file. Each has a runbook (see
+    [the runbooks](runbooks/openstack-api-down.md)) and a scrape-down companion. Each metric name is cited at the
+    pinned image's tag.
+  - **The gate.** `hack/validate-openstack-monitoring.py` checks the alerts, the credential readers and the switch, and
+    plants a defect for each check.
+  - **Not yet run on a cluster.**
+
+- **cinder's default refuses; the gates render it as the umbrella delivers it (#308 step 4, #196).**
+  - **The flip:** cinder's chart default for `krateo.storageBackend` is now `none`, which refuses to render, instead
+    of `unmanaged` (upstream's `rbd1` wiring). Through the umbrella nothing changes, since it always passes
+    `storage.backend`. A standalone Cinder Composition must choose: its refusal names the key and the two escapes,
+    `unmanaged` and `ceph-external` (README, "Upgrading: a standalone Cinder Composition must choose its storage
+    backend"). Diego chose this, keeping `unmanaged` as an explicit opt-in.
+  - **Why:** #196 stayed open for a standalone Cinder Composition, which rendered upstream's wiring silently and waited
+    in `Init` forever without hand-provided Ceph objects, including `client.admin`.
+  - **Gates:** the new `hack/gate_values.py` hands a chart that requires block-storage exactly what
+    `storage.backend: ceph-external` adds to its delivered spec, computed from the umbrella's own lines through
+    `hack/umbrella_spec.py`; every other chart gets nothing, so its render is unchanged. The 25 gates that render every
+    chart (measured: all 25 rendered cinder at its default and failed when the default was flipped without it), the HA
+    gate and the image inventory pass it; the inventory is unchanged. A renderer that misses it renders cinder's refusal
+    and fails. `validate-storage-backend` check 3 and the cinder
+    divergence entry assert the new default.
 
 - **A disruption budget for the RabbitmqCluster (#309, H2).** The RabbitMQ cluster-operator renders no
   PodDisruptionBudget, so a node drain could evict two of three brokers and take the quorum queues' majority. In
