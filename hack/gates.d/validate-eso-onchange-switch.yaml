@@ -1,0 +1,8 @@
+# #309 C: every projection of a generated root moved to refreshPolicy OnChange. An installed base upgrades through that
+# switch, so it is measured on a real External Secrets Operator (the pinned 2.14.0) in kind: the switch keeps the
+# Secret byte-identical, OnChange ignores a root change a 10s Periodic twin follows, and refreshes on its own change.
+name: "Switching a projection to OnChange changes no credential, measured on ESO"
+job: operator-admission
+order: 20
+run: |
+  python3 hack/validate-eso-onchange-switch.py .

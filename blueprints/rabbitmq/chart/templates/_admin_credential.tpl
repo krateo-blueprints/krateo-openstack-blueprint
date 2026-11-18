@@ -67,7 +67,9 @@ metadata:
     # Deleted by helm WITH the release, after its pre-delete hooks (#254).
     krateo.io/teardown: with-release
 spec:
-  refreshInterval: 1h
+  # OnChange (#309 C): refreshed only when this ExternalSecret itself changes, never on a timer, so a
+  # root edited by hand (which ESO regenerates) reaches no live credential until a rotation.
+  refreshPolicy: OnChange
   secretStoreRef:
     kind: SecretStore
     name: {{ $auth.user.passwordFrom.store | quote }}

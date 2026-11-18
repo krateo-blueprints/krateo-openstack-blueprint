@@ -1332,6 +1332,121 @@
           ]
         }
       }
+    },
+    "rotate": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "Rotate a RabbitMQ service user (messaging.backend operator)",
+      "description": "A token per rotating credential (an unknown id is rejected). Setting rotate.oslo-messaging-<service> to a new token rotates that service's RabbitMQ user: a new root, a second user, the service switched to it, the old one deleted once every reader rolled. Once set, keep it set to its last token: removing it is refused. Refused with messaging.backend chart. README: \"Rotating a RabbitMQ service user\" (#309).",
+      "additionalProperties": false,
+      "properties": {
+        "oslo-messaging-aodh": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-barbican": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-blazar": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-ceilometer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-cinder": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-cloudkitty": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-cyborg": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-designate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-heat": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-ironic": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-magnum": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-manila": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-masakari": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-mistral": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-neutron": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-nova": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-octavia": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-tacker": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-trove": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-watcher": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "credentialDrift": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "Acknowledge a reported credential drift",
+      "description": "acknowledge.<root Secret>: the sha256 shown in ConfigMap openstack-credential-drift-<root Secret>. Accepted only when it equals the root's current data. README: \"Editing or deleting a root Secret\" (#309).",
+      "additionalProperties": false,
+      "properties": {
+        "acknowledge": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "propertyNames": {
+            "pattern": "^openstack-credential-[a-z0-9-]+$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
     }
   },
   "definitions": {

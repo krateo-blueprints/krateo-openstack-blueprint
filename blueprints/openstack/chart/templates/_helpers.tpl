@@ -461,14 +461,16 @@ true
 krateo.io/composition-version
 {{- end -}}
 
-{{/* The live state of <kind>/<name>, read at <ver>, as JSON {"spec": ..., "version": ...}: its spec,
-     and the version its osh.compositionVersionLabel says it was last written through ("" when the
-     label is absent). "" when no such object exists.
+{{/* The live state of <kind>/<name>, read at <ver>, as JSON {"spec": ..., "version": ..., "managed": ...}:
+     its spec, the version its osh.compositionVersionLabel says it was last written through ("" when
+     the label is absent), and its status.managed. "" when no such object exists.
 
-     One named GET of the one object, made ONLY while osh.holdValues holds: compositions.yaml calls
-     it inside that branch, so a steady-state render pays nothing for it, and an upgrade pays one GET
-     per held component for the passes until its definition is Ready on the new version. Both
-     answers come from this one GET; the label is not read anywhere else. It is a third GET of an
+     One named GET of the one object, made ONLY while osh.holdValues holds or the component has a
+     rotate.<id> token (#309 C): compositions.yaml calls it once, under that condition, and hands the
+     result to both, so a steady-state render pays nothing for it, an upgrade pays one GET per held
+     component for the passes until its definition is Ready on the new version, and a rotated
+     component one GET per render (never two, holding or not). Every answer comes from this one GET;
+     the label is not read anywhere else. It is a third GET of an
      object osh.exists and osh.originVersion already read, for the reason osh.originVersion gives
      for being the second: hoisting one shared read into compositions.yaml would make this
      component's existence test different code from every dependency's.
@@ -487,7 +489,7 @@ krateo.io/composition-version
 {{- $o := lookup (include "osh.apiVersionAt" (list $ver)) $kind $top.Release.Namespace $name -}}
 {{- if $o -}}
 {{- $labels := (($o.metadata).labels) | default dict -}}
-{{- dict "spec" (($o.spec) | default dict) "version" ((index $labels (include "osh.compositionVersionLabel" $top)) | default "") | toJson -}}
+{{- dict "spec" (($o.spec) | default dict) "version" ((index $labels (include "osh.compositionVersionLabel" $top)) | default "") "managed" ((($o.status) | default dict).managed | default list) | toJson -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -1469,6 +1471,134 @@ krateo-openstack-node-reader
 {{- define "osh.lookupSecret" -}}
 {{- $top := index . 0 -}}
 {{- lookup "v1" "Secret" $top.Release.Namespace (index . 1) | default dict | toJson -}}
+{{- end -}}
+
+{{- /* osh.messagingRotation (list $ $c $liveSpec): the rotation state of component $c's RabbitMQ user (#309 C, Diego's
+       (d): immutable roots per generation, dual users), derived from what exists, never from remembered state, as JSON
+       {base, target, active, previous, phase, refuse, token}. "{}" when $c has no umbrella projection (osh.messagingProjection).
+         base     its root, credentials.items oslo-messaging-<component>: generation 0, never modified;
+         target   base when rotate.<id> is unset, else <base>-g<first 8 hex of sha256(token)>, a NEW root ESO mints once;
+         active   the root the LIVE component Composition references now ($liveSpec's
+                  endpoints.oslo_messaging.auth.<component>.passwordFrom.secret), base for a component not created yet;
+         previous for a target other than base, the active root when the target was first rendered, stamped on the target
+                  root's ExternalSecret (krateo.io/previous-root) and read back by lookup: the ConfigMap
+                  openstack-credential-generations is not needed, so losing it loses nothing;
+         phase    steady (target == active) or minting (target != active: mint the target root);
+         refuse   a message when the token cannot be honoured: the target root already exists with a previous-root other
+                  than the active one (the token names an old or retired generation), or the token was removed after a
+                  rotation (target base, active a generation root). Never silently re-activates an old root. */ -}}
+{{- define "osh.messagingRotation" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}{{- $live := index . 2 | default dict -}}
+{{- $p := include "osh.messagingProjection" (list $top $c) | fromJson -}}
+{{- $out := dict -}}
+{{- if $p.secret -}}
+{{- $id := printf "oslo-messaging-%s" $c.name -}}
+{{- $base := $p.root -}}
+{{- $tok := toString (index ($top.Values.rotate | default dict) $id | default "") -}}
+{{- $target := $base -}}
+{{- if $tok -}}{{- $target = printf "%s-g%s" $base (trunc 8 (sha256sum $tok)) -}}{{- end -}}
+{{- $active := (((((($live.endpoints | default dict).oslo_messaging | default dict).auth | default dict) | dig $c.name "passwordFrom" "secret" "") | toString) | default $base) -}}
+{{- $_ := set $out "base" $base -}}{{- $_ := set $out "target" $target -}}{{- $_ := set $out "active" $active -}}
+{{- $_ := set $out "token" $tok -}}{{- $_ := set $out "id" $id -}}
+{{- $es := include "osh.lookupExternalSecret" (list $top $target) | fromJson -}}
+{{- $stamp := toString ((($es.metadata | default dict).annotations | default dict) | dig "krateo.io/previous-root" "") -}}
+{{- if eq $target $active -}}
+{{- $_ := set $out "phase" "steady" -}}
+{{- if ne $target $base -}}{{- $_ := set $out "previous" $stamp -}}{{- end -}}
+{{- else if eq $target $base -}}
+{{- $_ := set $out "refuse" (printf "rotate.%s was removed while %s uses the generation root %s: removing a rotation token would re-activate the old root %s. Keep the token, or set a new one to rotate again." $id $c.name $active $base) -}}
+{{- else if and $es.metadata (ne $stamp $active) -}}
+{{- $_ := set $out "refuse" (printf "rotate.%s token %q maps to generation root %s, which already exists (previous root %s) while %s uses %s: the token names an old generation. Set a new token." $id $tok $target ($stamp | default "none") $c.name $active) -}}
+{{- else -}}
+{{- $_ := set $out "phase" "minting" -}}
+{{- $_ := set $out "previous" ($stamp | default $active) -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{- /* osh.generationRoot (list $ $rot): the ROOT of a rotation's target generation (#309 C), in the form of every generated
+       root (templates/credentials.yaml): an ExternalSecret writing <target> from the Password generator once
+       (refreshPolicy CreatedOnce), kept by helm and torn down with the release. Stamped with the active root at the time
+       it was first rendered (krateo.io/previous-root, read back by osh.messagingRotation, so the stamp never moves) and
+       the token that named it. Never modified afterwards: a new rotation is a new token, so a new root. */ -}}
+{{- define "osh.generationRoot" -}}
+{{- $top := index . 0 -}}{{- $rot := index . 1 -}}
+{{- $creds := $top.Values.credentials | default dict -}}
+{{- $key := "password" -}}
+{{- range $i := ($creds.items | default list) -}}{{- if eq $i.id $rot.id -}}{{- $key = $i.key -}}{{- end -}}{{- end }}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ $rot.target }}
+  namespace: {{ $top.Release.Namespace }}
+  labels:
+    krateo.io/credential: {{ $rot.id }}
+    krateo.io/credential-generation: {{ trimPrefix (printf "%s-" $rot.base) $rot.target | quote }}
+  annotations:
+    # Never deleted by an upgrade that stops rendering it, as every root (templates/credentials.yaml).
+    helm.sh/resource-policy: keep
+    krateo.io/teardown: with-release
+    krateo.io/previous-root: {{ $rot.previous | quote }}
+    krateo.io/rotation-token: {{ $rot.token | quote }}
+spec:
+  refreshPolicy: CreatedOnce
+  target:
+    name: {{ $rot.target }}
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      engineVersion: v2
+      data:
+        {{ $key }}: {{ "{{ .password }}" | quote }}
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: {{ $creds.generator }}
+{{- end -}}
+
+{{- /* osh.lookupConfigMap (list $ name): the ConfigMap <name> in the release namespace, as JSON ("{}" when absent). One
+       named GET, stood in by hack/validate-credential-drift.py. */ -}}
+{{- define "osh.lookupConfigMap" -}}
+{{- $top := index . 0 -}}
+{{- lookup "v1" "ConfigMap" $top.Release.Namespace (index . 1) | default dict | toJson -}}
+{{- end -}}
+
+{{- /* osh.credentialDrift (list $): the drift latch (#309 C), as JSON {state: {id: "<sha256>"}, drift: [{id, secret, sha}]}.
+       For each GENERATED credential item whose root Secret exists, its data's sha256 (sprig; ESO's own data-hash is
+       SHA3-224 of Go's %+v rendering, which a template cannot compute) is compared with the baseline latched in the
+       previous render's ConfigMap openstack-credential-generations, read back by lookup:
+         no baseline yet: the current sha becomes it;
+         equal: nothing to report;
+         different: the root was edited or regenerated by hand (ESO v2.14.0 regenerates a generated root the moment its
+           data-hash stops matching, externalsecret_controller.go:370). Reported, the baseline kept, unless
+           credentialDrift.acknowledge.<Secret> is exactly the current sha: then the current sha becomes the baseline.
+       A rotation never needs acknowledging: it mints a NEW root (osh.generationRoot), which is latched on its own. */ -}}
+{{- define "osh.credentialDrift" -}}
+{{- $top := index . 0 -}}
+{{- $prevCM := include "osh.lookupConfigMap" (list $top "openstack-credential-generations") | fromJson -}}
+{{- $prev := $prevCM.data | default dict -}}
+{{- $ack := (($top.Values.credentialDrift | default dict).acknowledge | default dict) -}}
+{{- $state := dict -}}{{- $drift := list -}}
+{{- range $i := (($top.Values.credentials | default dict).items | default list) -}}
+{{- if ne ($i.source | default "") "provided" -}}
+{{- $s := include "osh.lookupSecret" (list $top $i.secret) | fromJson -}}
+{{- if $s.data -}}
+{{- $sha := toJson $s.data | sha256sum -}}
+{{- $base := toString (index $prev $i.id | default "") -}}
+{{- if or (not $base) (eq $base $sha) (eq (toString (index $ack $i.secret | default "")) $sha) -}}
+{{- $_ := set $state $i.id $sha -}}
+{{- else -}}
+{{- $_ := set $state $i.id $base -}}
+{{- $drift = append $drift (dict "id" $i.id "secret" $i.secret "sha" $sha) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- dict "state" $state "drift" $drift | toJson -}}
 {{- end -}}
 
 {{- /* osh.messagingProjectionReady (list $ $c): "true" when component $c may be CREATED as far as its RabbitMQ user is
