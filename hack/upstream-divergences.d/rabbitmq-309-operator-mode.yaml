@@ -9,6 +9,12 @@ assertions:
     why: >-
       The broker in operator mode. hack/validate-messaging-operator.py renders it, its refusals (no CRD, an existing
       chart-mode StatefulSet) and the absence of every chart-mode object.
+  - file: templates/rabbitmqcluster.yaml
+    present: "            containers:\n              - name: rabbitmq\n            nodeSelector:"
+    why: >-
+      The override PodSpec's one container entry. The CRD types the override as a whole PodSpec, where `containers` is
+      required; without it the API server refused the RabbitmqCluster on GKE (H2, 2026-11-18). The operator merges by
+      container name, so the name alone changes nothing. hack/validate-operator-admission.py has an API server admit it.
   - file: templates/statefulset.yaml
     present: include "rabbitmq.chart_mode" .
     why: >-

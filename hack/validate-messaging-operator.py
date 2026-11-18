@@ -58,6 +58,23 @@ UMBRELLA = os.path.join(BP, "openstack", "chart")
 TOOLKIT = os.path.join(ROOT, "charts", "helm-toolkit")
 NS = "openstack"
 SUFFIX = "%s.svc.cluster.local" % NS
+
+
+# OPERATOR_OBJECTS_DIR: hack/validate-operator-admission.py sets it to collect every rabbitmq.com object this gate
+# renders from the umbrella's operator spec (never from a mutation), for a real API server to admit. Unset, nothing is
+# written and the gate is unchanged.
+EMIT = os.environ.get("OPERATOR_OBJECTS_DIR")
+
+
+def emit(tag, docs):
+    if not EMIT:
+        return
+    objs = [d for d in docs if d and str(d.get("apiVersion", "")).startswith("rabbitmq.com/")]
+    if objs:
+        with open(os.path.join(EMIT, "%s.yaml" % tag), "w") as f:
+            yaml.safe_dump_all(objs, f, default_flow_style=False, sort_keys=False)
+
+
 if shutil.which("helm") is None:
     print("FAILED MEASUREMENT: helm not on PATH, so nothing was rendered")
     sys.exit(2)
@@ -279,6 +296,7 @@ def part3(uv, spec, tmp):
         fail("3: rabbitmq does not render with the operator spec: %s" % err.strip()[:300])
         return
     docs = [d for d in yaml.safe_load_all(out) if d]
+    emit("rabbitmq-replicas3", docs)
     clusters = [d for d in docs if d.get("kind") == "RabbitmqCluster"]
     if len(clusters) != 1 or clusters[0]["metadata"]["name"] != name:
         fail("3: want exactly one RabbitmqCluster %s, got %s" % (name, [d["metadata"]["name"] for d in clusters]))
@@ -302,6 +320,11 @@ def part3(uv, spec, tmp):
                      % (refs, root.get("secret"), root.get("key")))
             if "default_user.conf" not in es[0]["spec"]["target"]["template"]["data"]:
                 fail("3: the default-user Secret has no default_user.conf, which the cluster-operator reads")
+        ops = ((((s.get("override") or {}).get("statefulSet") or {}).get("spec") or {}).get("template") or {}).get("spec")
+        if isinstance(ops, dict) and [c.get("name") for c in ops.get("containers") or []] != ["rabbitmq"]:
+            fail("3: the RabbitmqCluster's override PodSpec must list exactly the container `rabbitmq` (the CRD requires "
+                 "containers, so GKE refused it without (H2); the operator merges by name, so the name alone changes "
+                 "nothing); got %s" % [c.get("name") for c in ops.get("containers") or []])
         if "requiredDuringSchedulingIgnoredDuringExecution" not in ((s.get("affinity") or {}).get("podAntiAffinity") or {}):
             fail("3: three quorum members without required hostname anti-affinity: one node's loss can take a majority")
         pdbs = [d for d in docs if d.get("kind") == "PodDisruptionBudget"]
@@ -312,6 +335,8 @@ def part3(uv, spec, tmp):
         one = json.loads(json.dumps(spec))
         one.setdefault("pod", {}).setdefault("replicas", {})["server"] = 1
         rc1, out1, err1 = helm_template(r, "rabbitmq", one)
+        if rc1 == 0:
+            emit("rabbitmq-replicas1", list(yaml.safe_load_all(out1)))
         if rc1 != 0 or any(d and d.get("kind") == "PodDisruptionBudget" for d in yaml.safe_load_all(out1)):
             fail("3: a single broker renders a PodDisruptionBudget (or does not render): any budget there only blocks drains")
     leftovers = sorted("%s/%s" % (d["kind"], d["metadata"]["name"]) for d in docs
