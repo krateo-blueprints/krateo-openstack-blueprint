@@ -34,7 +34,7 @@ None, as measured.
 
 **#115, gnocchi:** upstream OpenStack-Helm points gnocchi at `quay.io/attcomdev/ubuntu-source-gnocchi-*:3.0.3`,
 which are Docker Registry v1 manifests: the tags resolve and no current docker can pull them. This repo
-repointed gnocchi at the OpenStack Kolla images (#117, kept by `hack/upstream-divergences.yaml`); their rows
+repointed gnocchi at the OpenStack Kolla images (#117, kept by `hack/upstream-divergences.d`); their rows
 below are measured like every other. The registry check above fails on a v1 manifest, so a return of that
 format is a finding here, not a surprise at install time.
 
