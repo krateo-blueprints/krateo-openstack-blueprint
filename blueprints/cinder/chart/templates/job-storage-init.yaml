@@ -16,9 +16,15 @@ limitations under the License.
 {{- $envAll := . }}
 
 {{- $internal_ceph_backend := .Values.ceph_client.internal_ceph_backend }}
+{{- /* Krateo (#308): ceph-managed, this Job creates nothing. The pool and client.<rbd_user> are made on Ceph's side
+       (a Rook CephBlockPool and CephClient, or the Ceph admin); the Job checks, with that user's own key and no
+       client.admin, that the pool exists and the user can use it, so a missing pool or cap fails here, named, rather than
+       in cinder-volume. No Role on Secrets: it writes none. */ -}}
+{{- $managed := eq (include "helm-toolkit.utils.ceph_managed" $envAll) "true" }}
 
 {{- $serviceAccountName := "cinder-storage-init" }}
 {{ tuple $envAll "storage_init" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
+{{- if not $managed }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -47,6 +53,7 @@ subjects:
   - kind: ServiceAccount
     name: {{ $serviceAccountName }}
     namespace: {{ $envAll.Release.Namespace }}
+{{- end }}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -73,7 +80,30 @@ spec:
         {{ .Values.labels.job.node_selector_key }}: {{ .Values.labels.job.node_selector_value }}
       initContainers:
 {{ tuple $envAll "storage_init" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
-        {{- if eq "true" (include "cinder.utils.has_ceph_backend" $envAll) }}
+        {{- if and $managed (eq "true" (include "cinder.utils.has_ceph_backend" $envAll)) }}
+        - name: ceph-keyring-placement
+{{ tuple $envAll "cinder_storage_init" | include "helm-toolkit.snippets.image" | indent 10 }}
+          securityContext:
+            runAsUser: 0
+          command:
+            - /tmp/ceph-keyring.sh
+          env:
+            - name: RBD_USER
+              value: {{ (index .Values.conf.backends $internal_ceph_backend).rbd_user | quote }}
+          volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
+            - name: etcceph
+              mountPath: /etc/ceph
+            - name: cinder-bin
+              mountPath: /tmp/ceph-keyring.sh
+              subPath: ceph-keyring.sh
+              readOnly: true
+            - name: ceph-keyring
+              mountPath: /tmp/client-keyring
+              subPath: key
+              readOnly: true
+        {{- else if eq "true" (include "cinder.utils.has_ceph_backend" $envAll) }}
         - name: ceph-keyring-placement
 {{ tuple $envAll "cinder_storage_init" | include "helm-toolkit.snippets.image" | indent 10 }}
           securityContext:
@@ -112,6 +142,10 @@ spec:
               value: {{ $backend.volume_driver | quote }}
             - name: RBD_POOL_NAME
               value: {{ $backend.rbd_pool | quote }}
+            {{- if $managed }}
+            - name: RBD_POOL_USER
+              value: {{ $backend.rbd_user | quote }}
+            {{- else }}
             - name: RBD_POOL_APP_NAME
               value: {{ (index $envAll.Values.conf.ceph.pools $backend.rbd_pool).app_name | quote }}
             - name: RBD_POOL_USER
@@ -124,6 +158,7 @@ spec:
               value: {{ (index $envAll.Values.conf.ceph.pools $backend.rbd_pool).chunk_size | quote }}
             - name: RBD_POOL_SECRET
               value: {{ $envAll.Values.secrets.rbd.volume | quote }}
+            {{- end }}
           command:
             - /tmp/storage-init.sh
           volumeMounts:
@@ -139,7 +174,7 @@ spec:
               mountPath: /etc/ceph/ceph.conf
               subPath: ceph.conf
               readOnly: true
-            {{- if empty $envAll.Values.conf.ceph.admin_keyring }}
+            {{- if and (not $managed) (empty $envAll.Values.conf.ceph.admin_keyring) }}
             - name: ceph-keyring
               mountPath: /tmp/client-keyring
               subPath: key
@@ -158,6 +193,15 @@ spec:
         {{- if eq "true" (include "cinder.utils.has_ceph_backend" $envAll) }}
         - name: etcceph
           emptyDir: {}
+        {{- if $managed }}
+        - name: ceph-etc
+          secret:
+            secretName: cinder-ceph-etc
+            defaultMode: 0444
+        - name: ceph-keyring
+          secret:
+            secretName: {{ .Values.secrets.rbd.volume | quote }}
+        {{- else }}
         - name: ceph-etc
           configMap:
             name: {{ .Values.ceph_client.configmap }}
@@ -166,6 +210,7 @@ spec:
         - name: ceph-keyring
           secret:
             secretName: {{ .Values.ceph_client.user_secret_name }}
+        {{- end }}
         {{- end }}
         {{- end }}
 {{- end }}

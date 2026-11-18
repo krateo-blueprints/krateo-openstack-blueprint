@@ -13,6 +13,95 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Uninstall deletes a component's hook Jobs (#206).** Since 0.3.41 every Job is a `post-install,post-upgrade` hook
+  (#179), and Helm never deletes hook resources at uninstall: cinder's removal left six completed Jobs and their pods,
+  and a full teardown 156 pods (#204). `hook-succeeded` can't be used, because kubernetes-entrypoint waits on dependency
+  Jobs by name while the component is installed. Each of the 32 charts that render hook Jobs now includes
+  helm-toolkit's `job_hook_cleanup`. It is a `pre-delete` hook, weight 100, so it runs after db-drop and the clean
+  Jobs. It selects `release_group=<release>`, leaves out itself, and deletes the Jobs whose `helm.sh/hook` names
+  post-install or post-upgrade, with background propagation so their pods go too. Its ServiceAccount, Role (list and
+  delete on Jobs, nothing else) and RoleBinding are plain release objects, so they exist while it runs. It uses the
+  chart's own ks-user (or db-init, or rabbit-init) image, which has python, and always exits 0, so a failed cleanup
+  leaves Jobs behind rather than blocking the uninstall. That pre-delete hooks run under the controller was measured in
+  #204 (glance-clean ran at teardown); this hook itself hasn't been run on a cluster yet. New gate
+  `hack/validate-hook-cleanup.py` renders each chart at defaults and with every Job on. For every render with a hook
+  Job, it requires exactly one cleanup, last among pre-delete hooks, with that RBAC and a selector matching every hook
+  Job but not itself. It also runs the script against a stand-in API, with another release's Job and a non-hook Job
+  next to the render's, and against a failing API. Its first CI run found four hook Jobs with no labels at all
+  (cloudkitty-storage-init, ironic-manage-cleaning-network, magnum-domain-ks-user, masakari-db-sync), which no
+  selector can reach. They now carry helm-toolkit's labels; their pod templates are unchanged. libvirt, memcached, openvswitch and redis render no hook Job unless
+  `images.local_registry.active` turns on image-repo-sync, and have no python image, so they get no cleanup.
+
+- **Public endpoints over HTTPS through the Gateway API (#311, phase 1).**
+  - **Umbrella `publicEndpoints`:** off by default, and off renders byte-identical. When on, the umbrella renders:
+    - one Gateway (`gatewayClassName`, default `agentgateway`, which Krateo's `features.ingress` installs);
+    - an HTTPRoute per public endpoint of every selected component;
+    - an HTTP-to-HTTPS redirect;
+    - a cert-manager Certificate from `tls.issuerRef`;
+    - an ingress NetworkPolicy set: deny by default, allow the namespace, `nodeCIDRs`, the Gateway proxy, and
+      `allowNamespaces`. The policies select every pod without the label `krateo.io/networkpolicy-exempt`, in block
+      style; the label is an explicit opt-out.
+  - **The components:**
+    - Each public catalog URL becomes `https://<service>.<baseDomain>`, with proxy-header parsing set.
+    - The charts' inert Ingress switches go off (upstream removed those templates in 6ec1132485).
+    - Horizon becomes ClusterIP with Secure cookies.
+    - Routes set HSTS, and overwrite X-Forwarded-Proto with `https`.
+    - Never routed: metadata, RabbitMQ, MariaDB, memcached.
+  - **Refused on a live cluster** without the Gateway API or cert-manager CRDs, and on a missing input.
+  - **The new gate:** `hack/validate-public-endpoints.py` checks:
+    - off equals before;
+    - the routes against what each chart registers;
+    - the deny list, HSTS and redirect, and the policy's exact peers;
+    - the refusals;
+    - every routed chart rendered with the values the umbrella gives it (backend Service, catalog URL, no Ingress,
+      proxy headers, Horizon);
+    - the tables against the charts.
+
+    It also runs thirteen mutations, each of which must be reported as the defect it plants.
+  - **Not yet verified on a cluster.** The live checks are in the README. Follow-ups: #325, #326, #327.
+
+- **Consume a Ceph cluster without client.admin (#308 phase P1, steps 1-3; rendered and gated, not yet run live).**
+  - **Copied keys:** a third credential kind, `source: provided`. With `storage.backend` ceph-rook or ceph-external, the
+    umbrella copies each Ceph user's key and `mon_host` from where Ceph keeps them (Rook's `rook-ceph-client-<name>`
+    and `rook-ceph-config`, or the operator-named `storage.ceph.keys`) through a SecretStore limited to exactly those
+    Secrets. Copies refresh every 5 minutes and are not kept past the release.
+  - **Charts:** cinder, libvirt and (with `storage.ceph.glanceStore: rbd`) glance project the copies. No client.admin
+    keyring is rendered, no `ceph auth` runs and no pool is created: storage-init checks the pool with the user's own
+    key. Each reader carries a live checksum of its key, so it restarts when Ceph's side rotates it. Without a Ceph
+    backend every chart renders as before.
+  - **One source:** pools, users and the libvirt secret UUID reach cinder, glance, libvirt and nova from
+    `storage.ceph` only; `componentValues` may not set them, nor wire Ceph by hand.
+  - **Held, refused, never stuck:** a Ceph consumer is created only once the copies of its keys report Ready; the
+    Openstack Composition refuses while ESO reports the copy store unable to read the source Secrets, naming the grant;
+    glance refuses to move its store to `rbd` off a live `glance-images` claim until `storage.ceph.glanceImagesMigrated`.
+  - **Gates:** the new `hack/validate-ceph-consumer.py` (27 copied roots, P projections, 22c reader closure against
+    the measured `hack/ceph-readers.yaml`, 18c readers restart, 18d the checksum can read its Secret, 28 no
+    client.admin, 29 delivery and consistency through `hack/umbrella_spec.py`, 30 the hold and the read-grant refusal);
+    `hack/validate-glance-store.py` adds the migration refusal on the same single claim lookup. `validate-pod-references` renders the storage-dependent charts as the umbrella
+    delivers them.
+
+- **cinder refuses to render without a block-storage backend (#196, phase P0 of #308).**
+  - **What was wrong:** cinder's only backend is Ceph RBD. With no Ceph, `cinder-volume` and `cinder-storage-init`
+    waited in `Init` forever on `ceph-etc` and keyring Secrets nothing creates. That was the state on every default
+    install (#179, #204).
+  - **Now:** the Openstack Composition has `storage.backend`, `none` by default, typed by the generated schema. The
+    umbrella passes it to every component that requires block-storage (cinder) as `krateo.storageBackend`, and refuses a
+    `componentValues` override. With `none`, cinder fails its render and names the value. The Ceph backends
+    (`ceph-rook`, `ceph-external`) are accepted by the schema and refused by cinder until #308 implements them.
+  - **Selection:** `requiresProvisioning` became `components[].requires`, a capability list (`block-storage`,
+    `pxe-interface`, `lb-mgmt-net`, `rwx-storage-class`). `full-strict` selects a component only when the install
+    provides everything it requires; only `block-storage` can be provided, by `storage.backend`. `full` is unchanged.
+  - **Gates:**
+    - `hack/validate-provisioning-preconditions.py` also renders `full-strict` with every non-`none` backend. That is
+      the positive control: it must add cinder and nothing else.
+    - The new `hack/validate-storage-backend.py` checks that the value reaches cinder alone, that the umbrella is the
+      one place that sets it, and that cinder refuses without a backend.
+    - `hack/validate-pod-references.py` renders cinder once per backend the umbrella can deliver. Its #196 allowlist
+      entries are gone.
+  - **Also:** nova-compute's `LIBVIRT_CEPH_SECRET_UUID` read the undefined `conf.ceph.secret_uuid` (an upstream defect),
+    so it rendered with no value. It now reads `conf.ceph.cinder.secret_uuid`, and the new gate renders it with a
+    sentinel.
+
 - **docs/log.md is rendered on main, by a bot pull request.** After #340, every branch still committed a regenerated
   `docs/log.md`, so merges kept conflicting on it (#322, #320).
   - **Pull requests:** a pull request now adds its `docs/log.d` entry and nothing else.

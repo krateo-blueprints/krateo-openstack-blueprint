@@ -53,6 +53,9 @@ spec:
 {{ tuple $envAll "cinder" "volume" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
       annotations:
 {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+{{- with include "helm-toolkit.snippets.ceph_key_checksum" (tuple $envAll .Values.secrets.rbd.volume) }}
+{{ . | indent 8 }}
+{{- end }}
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
         secret-ks-etc-hash: {{ tuple "secret-ks-etc.yaml" . | include "helm-toolkit.utils.hash" }}
@@ -355,8 +358,13 @@ spec:
         - name: etcceph
           emptyDir: {}
         - name: ceph-etc
+          {{- if eq (include "helm-toolkit.utils.ceph_managed" $envAll) "true" }}
+          secret:
+            secretName: cinder-ceph-etc
+          {{- else }}
           configMap:
             name: {{ .Values.ceph_client.configmap }}
+          {{- end }}
             defaultMode: 0444
         {{- if and .Values.ceph_client.enable_external_ceph_backend .Values.ceph_client.external_ceph.configmap }}
         - name: external-ceph-etc

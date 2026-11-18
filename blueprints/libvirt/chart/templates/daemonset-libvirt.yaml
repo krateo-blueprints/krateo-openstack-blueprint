@@ -55,6 +55,9 @@ spec:
       annotations:
 {{- dict "envAll" $envAll "podName" "libvirt-libvirt-default" "containerNames" (list "libvirt") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 8 }}
 {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+{{- with include "helm-toolkit.snippets.ceph_key_checksum" (tuple $envAll "libvirt-ceph-cinder-keyring") }}
+{{ . | indent 8 }}
+{{- end }}
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
     spec:
@@ -169,7 +172,9 @@ spec:
               readOnly: true
 {{- end }}
 {{- if .Values.conf.ceph.enabled }}
-        {{- if empty .Values.conf.ceph.cinder.keyring }}
+        {{- /* Krateo (#308): ceph-managed, the key of client.<conf.ceph.cinder.user> is a projection of the umbrella's copy
+               of the key Ceph minted, so no client.admin keyring is placed on the hypervisor and no user is created here. */}}
+        {{- if and (empty .Values.conf.ceph.cinder.keyring) (ne (include "helm-toolkit.utils.ceph_managed" $envAll) "true") }}
         - name: ceph-admin-keyring-placement
 {{ tuple $envAll "ceph_config_helper" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ dict "envAll" $envAll "application" "libvirt" "container" "ceph_admin_keyring_placement" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
@@ -218,6 +223,12 @@ spec:
               mountPath: /etc/ceph/ceph.conf.template
               subPath: ceph.conf
               readOnly: true
+            {{- if eq (include "helm-toolkit.utils.ceph_managed" $envAll) "true" }}
+            - name: ceph-keyring
+              mountPath: /tmp/client-keyring
+              subPath: key
+              readOnly: true
+            {{- end }}
 {{- end }}
       containers:
         - name: libvirt
@@ -342,6 +353,15 @@ spec:
         - name: etcceph
           hostPath:
             path: /var/lib/openstack-helm/compute/libvirt
+        {{- if eq (include "helm-toolkit.utils.ceph_managed" $envAll) "true" }}
+        - name: ceph-etc
+          secret:
+            secretName: libvirt-ceph-etc
+            defaultMode: 0444
+        - name: ceph-keyring
+          secret:
+            secretName: libvirt-ceph-cinder-keyring
+        {{- else }}
         - name: ceph-etc
           configMap:
             name: {{ .Values.ceph_client.configmap }}
@@ -351,6 +371,7 @@ spec:
           secret:
             secretName: {{ .Values.ceph_client.user_secret_name }}
         {{ end }}
+        {{- end }}
         {{ end }}
         {{- if .Values.conf.ceph.cinder.external_ceph.enabled }}
         - name: external-ceph-keyring

@@ -106,7 +106,9 @@ typed by `blueprints/openstack/chart/values.schema.json`:
 
 | Field | Type | Default | Purpose |
 | --- | --- | --- | --- |
-| `profile` | string (`identity`\|`full`) | `identity` | Component preset. |
+| `profile` | string (`identity`\|`full`\|`full-strict`) | `identity` | Component preset. |
+| `storage.backend` | string (`none`\|`ceph-rook`\|`ceph-external`) | `none` | Block-storage backend, passed to cinder (#196, #308). With a ceph backend, cinder, libvirt and (with `storage.ceph.glanceStore: rbd`) glance consume Ceph through copies of the keys Ceph mints, never client.admin. |
+| `storage.ceph` | object | see values.yaml | How the install consumes Ceph (#308): `sourceNamespace`, `clients`, `rook` (Rook's Secret conventions), `keys` (ceph-external), `pools`, `libvirtSecretUUID`, `glanceStore`. |
 | `enabled` | array\|null | `[]` | Explicit component set (overrides `profile`), expanded to the transitive dependency closure. |
 | `installDefinitions` | boolean | `true` | Register each component `CompositionDefinition` first. |
 | `ociRepo` | string | `oci://ghcr.io/krateo-blueprints/charts` | Registry for the component charts. They are pulled at the orchestrator's own chart version; there is no `chartVersion` value (#179). |
