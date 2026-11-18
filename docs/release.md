@@ -46,6 +46,10 @@ the commit that will be tagged (Diego, 2026-11-17: "batch on main, GKE-verify, t
    For the same commit, the charts that tag publishes are the bytes the pair installed. The one
    difference is the version string: in `Chart.yaml`, in each stamped `CHART_VERSION`, and in the
    composition apiVersion derived from it.
+
+   The release refuses a tag whose commit has no `X.Y.Z-main.g<sha7>` pre-release in GHCR (see
+   **The release preflight** below). That stops a tag on a commit that skipped steps 2–4 or is not
+   on `main`. Whether the GKE pair passed is still your call: no machine record of it exists.
 6. **Pin the README:** set `BP_VERSION=X.Y.Z` in its install block, and record what the pair
    installed.
 
@@ -185,6 +189,46 @@ $ gh secret set PRERELEASE_PRUNE_TOKEN -R krateo-blueprints/krateo-openstack-blu
 Paste the token at the prompt rather than piping it, so it gets no trailing newline. Without the
 secret, the workflow refuses at its first step instead of skipping.
 
+## The release preflight
+
+`release-tag.yaml`'s first job, `preflight`, calls krateo-blueprints/charts
+`release-preflight.yaml` (PUBLISHING.md rule 12). It is pinned to the same commit as the
+publisher. `package-and-push` declares `needs: preflight`, and `publish-index` needs
+`package-and-push`, so a refusal stamps, pushes, indexes and releases nothing.
+
+The reusable workflow runs this repository's `hack/release-preflight X.Y.Z` at the tag's commit,
+with no secrets. The hook asks GHCR, anonymously, whether `openstack:X.Y.Z-main.g<sha7 of the
+commit>` exists, and refuses when it is missing or when GHCR cannot be asked:
+
+- `prerelease.yaml` publishes a `-main.` version only for a commit on `origin/main` that passed
+  lint. A hit therefore proves the tag is on `main`, on a commit that went through the pre-release
+  channel at this version.
+- It does **not** prove that the GKE pair passed.
+
+The other release-time preconditions are already enforced elsewhere, so the hook does not repeat
+them:
+
+- the tag shape: the first step, plus `hack/release-version.sh`;
+- lint, including the examples-apiVersion and first-release gates: `hack/require-lint-passed.sh`;
+- the stamped CDs: `hack/publish-charts.sh`, `hack/stage-release-assets.sh` and the publisher.
+
+The README pin is not a precondition, because it is set after the tag.
+
+`prune-prereleases.yaml` keeps the newest 5 pre-releases. If the commit's pre-release was pruned
+before you tagged, run `prerelease.yaml` on that commit again; it republishes the same version.
+Then re-run the release.
+
+`hack/validate-prerelease-channel.py` gates the wiring and the pins:
+
+- `preflight` and `publish-index` must use full 40-hex SHAs, the same commit, each with a
+  `# X.Y.Z` comment;
+- the preflight gets `${{ github.ref_name }}`;
+- the `needs:` chain must be in place.
+
+It also runs the hook against a stubbed GHCR (200, 404, 500, unreachable, a failed token request,
+a pre-release-shaped or empty version). Each wiring and hook check has a mutation that must be
+caught.
+
 ## What a tag ships
 
 `.github/workflows/release-tag.yaml` triggers on a semver tag (`[0-9]+.[0-9]+.[0-9]+`; GitHub
@@ -205,7 +249,8 @@ a repository move does not need a code change. For this repo that resolves to
 
 The stamped CompositionDefinitions, the two RBAC grants and the stamped examples are uploaded to
 the GitHub release of the tag. The `publish-index` job then hands the blueprint tarballs to
-krateo-blueprints/charts `publish-chart.yaml`, and that is how they reach the Marketplace. The
+krateo-blueprints/charts `publish-chart.yaml` (1.1.0), and that is how they reach the Marketplace.
+Since 1.1.0 the publisher refuses any version that is not plain `X.Y.Z` (its rule 13). The
 committed CompositionDefinitions keep the `CHART_VERSION` placeholder: nothing on `main` is bumped
 after a release.
 
