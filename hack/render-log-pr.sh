@@ -79,23 +79,38 @@ else
   number=${url##*/}
 fi
 
-# With a merge queue on main (docs/release.md, "How a pull request merges"), the bot does not merge: it enables
-# auto-merge, so the pull request joins the queue once its checks pass and lands only after its merge group's lint
-# run, like any other. That needs the App token: a merge group enqueued with GITHUB_TOKEN would start no merge_group
-# workflow (GitHub's documented GITHUB_TOKEN rule lists no merge_group exception), and the queue would wait out its
-# timeout. Without a queue it squash-merges at once, as before.
+# With a merge queue on main (docs/release.md, "How a pull request merges"), the bot does not merge: it adds its pull
+# request to the queue, which lands it only after its merge group's lint run, like any other. It enqueues with the
+# GraphQL mutation enqueuePullRequest: `gh pr merge --auto` (and `gh pr merge` alone, which falls back to it) calls
+# enablePullRequestAutoMerge, and auto-merge is disabled on this repository, so it fails with "Auto merge is not
+# allowed for this repository" (gh 2.86, 2026-11-18). The queue takes a pull request whose required checks passed, so
+# it first waits for them (gh pr checks --required --watch). All of this needs the App token: a merge group enqueued
+# with GITHUB_TOKEN would start no merge_group workflow (GitHub's documented GITHUB_TOKEN rule lists no merge_group
+# exception). Without a queue it squash-merges at once, as before.
 queued=$(gh api "repos/{owner}/{repo}/rules/branches/$BASE_BRANCH" --jq '[.[] | select(.type == "merge_queue")] | length')
-for attempt in 1 2 3 4 5; do
-  if [ "$queued" != "0" ]; then
-    if gh pr merge "$number" --auto --squash; then
-      echo "bot pull request #$number joins the merge queue once its checks pass"
+if [ "$queued" != "0" ]; then
+  if ! gh pr checks "$number" --required --watch --fail-fast; then
+    echo "bot pull request #$number failed a required check; it is not enqueued (the next run updates it)" >&2
+    exit 1
+  fi
+  node=$(gh pr view "$number" --json id --jq .id)
+  for attempt in 1 2 3 4 5; do
+    if gh api graphql -f query='mutation($id: ID!) { enqueuePullRequest(input: {pullRequestId: $id}) { mergeQueueEntry { position } } }' \
+      -f id="$node"; then
+      echo "bot pull request #$number is in the merge queue"
       exit 0
     fi
-  elif gh pr merge "$number" --squash --delete-branch --subject "$MSG" --body ""; then
+    sleep $((attempt * 5))
+  done
+  echo "could not enqueue bot pull request #$number; the next run updates it" >&2
+  exit 1
+fi
+for attempt in 1 2 3 4 5; do
+  if gh pr merge "$number" --squash --delete-branch --subject "$MSG" --body ""; then
     echo "merged bot pull request #$number"
     exit 0
   fi
   sleep $((attempt * 5))
 done
-echo "could not merge or enqueue bot pull request #$number; the next run updates it" >&2
+echo "could not merge bot pull request #$number; the next run updates it" >&2
 exit 1

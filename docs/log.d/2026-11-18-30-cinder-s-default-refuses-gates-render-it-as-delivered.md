@@ -13,7 +13,8 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
     in `Init` forever without hand-provided Ceph objects, including `client.admin`.
   - **Gates:** the new `hack/gate_values.py` hands a chart that requires block-storage exactly what
     `storage.backend: ceph-external` adds to its delivered spec, computed from the umbrella's own lines through
-    `hack/umbrella_spec.py`; every other chart gets nothing, so its render is unchanged. 25 gates that render every chart
-    pass it (measured: all 25 rendered cinder at its default and failed when the default was flipped without it). A
-    renderer that misses it renders cinder's refusal and fails. `validate-storage-backend` check 3 and the cinder
+    `hack/umbrella_spec.py`; every other chart gets nothing, so its render is unchanged. The 25 gates that render every
+    chart (measured: all 25 rendered cinder at its default and failed when the default was flipped without it), the HA
+    gate and the image inventory pass it; the inventory is unchanged. A renderer that misses it renders cinder's refusal
+    and fails. `validate-storage-backend` check 3 and the cinder
     divergence entry assert the new default.

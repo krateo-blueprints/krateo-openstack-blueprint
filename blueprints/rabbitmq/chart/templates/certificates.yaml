@@ -12,6 +12,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- if .Values.manifests.certificates -}}
+{{- if and (.Values.manifests.certificates) (include "rabbitmq.chart_mode" .) -}}
 {{ dict "envAll" . "service" "oslo_messaging" "type" "internal" | include "helm-toolkit.manifests.certificates" }}
 {{- end -}}

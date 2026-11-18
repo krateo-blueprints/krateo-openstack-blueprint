@@ -342,6 +342,24 @@ volume:
     enabled: false
     host_path: /var/lib/rabbitmq
 
+# Krateo (#309 H2b): the broker as a RabbitmqCluster run by the RabbitMQ cluster-operator
+# (krateo-blueprints/rabbitmq-operator-blueprint), instead of this chart's StatefulSet. The umbrella turns it on with
+# messaging.backend: operator, for fresh installs only (moving a chart-mode broker is H2c). On, this chart renders only
+# the RabbitmqCluster and the ExternalSecret that gives it the administrator from the generated root
+# (endpoints.oslo_messaging.auth.user.passwordFrom); every chart-mode object is off. Off, the chart renders as before.
+operator:
+  enabled: false
+  # The RabbitmqCluster's name. Its pods are <name>-server-N behind the headless Service <name>-nodes, which is what
+  # every transport URL lists (the umbrella passes both). Not "rabbitmq", so it can run beside a chart-mode broker
+  # while one is migrated (H2c).
+  name: openstack-mq
+  # Pinned, never the operator's default: RabbitMQ 4.3 refuses the transient non-exclusive queues oslo.messaging
+  # declares unless they are quorum queues, so the clients' queue settings follow this version (the umbrella sets them).
+  image: rabbitmq:4.3.4-management
+  # Each node's PersistentVolumeClaim: the cluster's default StorageClass unless volume.class_name names one. Quorum
+  # queues keep a write-ahead log of up to 512 MiB plus segments, hence more than the chart-mode 768Mi.
+  storage: 10Gi
+
 # Krateo blueprint addition (#297): controls that belong to the blueprint, not to OpenStack-Helm.
 krateo:
   # rerunHooksToken: rendered nowhere. The umbrella sets it from rerunHooks.<component>. Changing it changes this

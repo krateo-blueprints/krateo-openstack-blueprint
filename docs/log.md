@@ -13,6 +13,34 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **RabbitMQ cluster-operator mode for fresh installs (#309, H2b).** `messaging.backend: operator`, opt-in, with
+  `chart` the default.
+  - **The broker:** a RabbitmqCluster `openstack-mq`, run by the cluster-operator from
+    krateo-blueprints/rabbitmq-operator-blueprint. The image is pinned to `rabbitmq:4.3.4-management`, the replicas come
+    from the one existing source, and persistence uses the default StorageClass unless set.
+  - **Credentials:** the administrator comes from the generated root, through `secretBackend.externalSecret`. The
+    rabbitmq chart renders nothing of chart mode.
+  - **Refusals:** the chart refuses a cluster that doesn't serve `rabbitmqclusters.rabbitmq.com`, and an install
+    already running the chart-mode broker; migrating one is H2c.
+  - **Clients:** every component that lists RabbitMQ hosts lists the cluster's pods
+    (`openstack-mq-server-N.openstack-mq-nodes`); watcher lists the headless Service.
+  - **Quorum queues:** every component that builds a transport URL gets them (`rabbit_quorum_queue`,
+    `rabbit_transient_quorum_queue`, `use_queue_manager`, `rabbit_stream_fanout`, prefetch 1, `rabbit_ha_queues`
+    false), because RabbitMQ 4.x refuses the classic transient queues. Their rabbit-init policies lose the `ha-*`
+    keys 4.x refuses and keep `message-ttl`.
+  - **Overrides refused:** a per-component `rabbit_ha_queues: true` or statefulset override.
+  - **Chart mode:** every render is unchanged.
+  - **New gate:** `hack/validate-messaging-operator.py`.
+
+- **Custom-resource waits may read their resource (#309).** helm-toolkit's `kubernetes_pod_rbac_serviceaccount` now
+  renders, for a component whose dependencies list `custom_resources`, a Role granting `get` on exactly each named
+  object (its group, its `resource` plural, `resourceNames`) and a RoleBinding to the pod's ServiceAccount.
+  kubernetes-entrypoint (pinned `c606628c`) already waits on custom resources by `status.conditions`, but the dependency
+  Role covered only core, batch, apps and discovery resources, so every such wait would have been Forbidden. An entry
+  without `resource`, or with a core apiVersion, is refused at render time. No chart declares `custom_resources` yet:
+  every render is unchanged. It unblocks the operator CRs that replace db-init and rabbit-init (#309, H2b/H3b). New gate:
+  `hack/validate-custom-resource-wait-rbac.py`.
+
 - **Upstream divergences, one file per entry.** Every change that diverged from upstream appended to
   `hack/upstream-divergences.yaml`, so each merge re-conflicted the branches in flight (#352, #353, #355, #344 and
   #357 on 2026-11-18). Each divergence is now `hack/upstream-divergences.d/<component>-<slug>.yaml`, holding one
@@ -40,6 +68,21 @@ Curated history; release notes live in GitHub Releases.
   - **What it cannot prove:** that the GKE pair passed.
   - **Gate:** `hack/validate-prerelease-channel.py` checks the pins, the `needs:` chain and the hook's behaviour
     against a stubbed GHCR. All 45 mutations are caught. See [release.md](release.md).
+
+- **render-log.py refuses arguments it does not know.**
+  - **What happened:** `hack/render-log.py` ignored every `--` argument it did not recognise and fell through to write
+    mode. So `render-log.py --help`, or a typo such as `--chek`, rewrote `docs/log.md` in the working tree, a file a
+    pull request must never carry (`hack/validate-log-untouched.py`). `-h` was taken as the repository root.
+  - **The fix:** arguments are now parsed with argparse before anything is read or written. Only the root and
+    `--check` or `--check-rendered` (one of them) are accepted. Unknown flags, two roots and both modes at once are
+    refused, and so is a root that is not an existing directory holding `docs/log.d`. `--help` prints the usage.
+  - **The new gate:** `hack/validate-render-log-args.py` runs the renderer in a throwaway copy and checks:
+    - each refusal exits non-zero with its reason and leaves `docs/log.md` byte-identical;
+    - `--help` and `-h` only print the usage;
+    - as positive controls, write mode, both `--check` orders and `--check-rendered` still work.
+
+    Against the previous renderer it fails on the unknown-flag, two-roots, both-modes and `--help` cases, which
+    rewrote `docs/log.md`, and on `-h`.
 
 - **Merge queue on main, drafted.** Diego approved GitHub's merge queue (2026-11-18), so every commit that lands is
   tested as it will exist on main. Until now each pull request was brought up to date with main and waited for, one

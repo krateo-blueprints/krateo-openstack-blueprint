@@ -1716,6 +1716,26 @@ Service, whose DNS answers every ready node, so it needs nothing passed.
 RabbitMQ and MariaDB move to their operators in later phases (#309). `hack/validate-ha-propagation.py` checks all of
 the above against the rendered charts.
 
+**RabbitMQ on its operator (`messaging.backend: operator`, #309 H2b), for fresh installs:**
+
+```yaml
+messaging:
+  backend: operator
+```
+
+- **The broker:** a RabbitmqCluster `openstack-mq`, run by the RabbitMQ cluster-operator, which
+  [krateo-blueprints/rabbitmq-operator-blueprint](https://github.com/krateo-blueprints/rabbitmq-operator-blueprint)
+  installs. That blueprint needs cert-manager.
+- **No release yet:** neither that blueprint nor this mode has a release until the H2 live tests have run.
+- **Image:** pinned to `rabbitmq:4.3.4-management`, never the operator's default.
+- **Administrator:** comes from the install's generated root.
+- **Clients:** every component lists the cluster's pods and runs quorum queues, which RabbitMQ 4.x needs. Their
+  rabbit-init policies drop the `ha-*` keys 4.x refuses.
+- **Refusals, on the Composition's status:** the rabbitmq component refuses a cluster without the operator's CRD,
+  and an install that already runs the chart-mode broker; moving one over is a separate migration (H2c).
+- **Off (`chart`, the default):** nothing changes.
+- **Gate:** `hack/validate-messaging-operator.py` checks all of the above.
+
 **nova-compute's liveness checks the process only (#146).** Upstream's liveness and startup probes ping nova-compute
 over RPC, so a RabbitMQ outage restarted every hypervisor's agent at once and repaired nothing. Readiness keeps the RPC
 check, so the outage still shows as NotReady. `hack/validate-nova-compute-liveness.py` runs the rendered probe.

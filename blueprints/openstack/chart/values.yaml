@@ -211,6 +211,18 @@ kogCredentials:
 ha:
   enabled: false
 
+# messaging.backend (#309 H2b): chart (this repo's rabbitmq chart, a StatefulSet; the default) or operator (a
+# RabbitmqCluster named haTopology.messagingOperator.name, run by the RabbitMQ cluster-operator from
+# krateo-blueprints/rabbitmq-operator-blueprint). operator is for fresh installs: the rabbitmq chart refuses it while
+# its chart-mode StatefulSet exists (the migration is H2c), and refuses it on a cluster that does not serve
+# rabbitmqclusters.rabbitmq.com. With operator, every component that lists RabbitMQ hosts lists the cluster's pods
+# (<name>-server-N.<name>-nodes), and every component that builds a transport URL gets quorum queues
+# (haTopology.messagingQuorumConf): RabbitMQ 4.x refuses the transient non-exclusive queues oslo.messaging otherwise
+# declares, and the policies its rabbit-init imports lose their ha-* keys, which 4.x refuses. Merged UNDER
+# componentValues, except where a refusal says otherwise.
+messaging:
+  backend: chart
+
 # componentValues: per-component spec passed through to that component's Composition, keyed by
 # component name. Each value is exactly that component's own spec (its curated schema),
 # so you can configure any component through the umbrella instead of dropping to a
@@ -1508,6 +1520,49 @@ haTopology:
     key: openstack-control-plane
     value: enabled
   messagingStatefulset: rabbitmq-rabbitmq
+  # messagingOperator.name: the RabbitmqCluster with messaging.backend operator. Its pods are <name>-server-N behind the
+  # headless Service <name>-nodes; the rabbitmq chart's operator.name defaults to the same and the umbrella passes it.
+  messagingOperator:
+    name: openstack-mq
+  # messagingQuorum: the components whose charts build a transport URL (from endpoints.oslo_messaging.statefulset or
+  # from the Service name); with messaging.backend operator each gets endpoints.oslo_messaging.quorum_queues (its
+  # rabbit-init drops ha-* policy keys) and conf.<component>.oslo_messaging_rabbit = messagingQuorumConf. Measured from
+  # the charts by hack/validate-messaging-operator.py.
+  messagingQuorum:
+    - aodh
+    - barbican
+    - blazar
+    - ceilometer
+    - cinder
+    - cloudkitty
+    - cyborg
+    - designate
+    - glance
+    - heat
+    - ironic
+    - keystone
+    - magnum
+    - manila
+    - masakari
+    - mistral
+    - neutron
+    - nova
+    - octavia
+    - tacker
+    - trove
+    - watcher
+  # messagingQuorumConf: oslo.messaging's quorum settings (oslo.messaging 17.3.2, the 2026.1 upper constraint, has
+  # them all). rabbit_ha_queues false: oslo.messaging raises RuntimeError when it is true together with
+  # rabbit_quorum_queue. use_queue_manager and rabbit_stream_fanout keep the quorum-queue count bounded: stable reply
+  # queue names, and one stream per fanout instead of a queue per consumer (which needs a prefetch count).
+  messagingQuorumConf:
+    rabbit_ha_queues: false
+    amqp_durable_queues: true
+    rabbit_quorum_queue: true
+    rabbit_transient_quorum_queue: true
+    use_queue_manager: true
+    rabbit_qos_prefetch_count: 1
+    rabbit_stream_fanout: true
   messaging:
     - aodh
     - barbican

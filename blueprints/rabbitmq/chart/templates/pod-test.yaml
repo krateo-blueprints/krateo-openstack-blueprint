@@ -18,7 +18,7 @@ limitations under the License.
 {{- $_ := set . "deployment_name" .Release.Name }}
 {{- end }}
 
-{{- if .Values.manifests.pod_test }}
+{{- if and (.Values.manifests.pod_test) (include "rabbitmq.chart_mode" .) }}
 {{- $envAll := . }}
 
 {{ if kindIs "string" $envAll.Values.dependencies.static.tests.jobs }}
