@@ -62,32 +62,41 @@ ALLOWED = {
 # the chart; until then the issue says why the object is still dangling.
 KNOWN_DEFECTS = {}
 
-# Objects the operator provides, for components the umbrella flags `requiresProvisioning: true`
-# and declares in hack/provisioning-preconditions.yaml. `profile: full-strict` leaves those
-# components out, so these references are a documented precondition, not a defect. Each entry
-# holds only while its component is still flagged: if the flag comes off, the component installs
-# by default again and these become dangling references, so the gate fails (#196, #204).
-PROVISIONED_BY_OPERATOR = {
-    ("cinder", "ConfigMap", "ceph-etc"): "#196",
-    ("cinder", "Secret", "cinder-volume-rbd-keyring"): "#196",
-    ("cinder", "Secret", "pvc-ceph-client-key"): "#196",
+# Components that require block-storage (umbrella components[].requires) are not rendered at their chart default
+# (krateo.storageBackend: unmanaged, upstream's rbd1 wiring, which names the ConfigMap ceph-etc and the Secrets
+# pvc-ceph-client-key and cinder-volume-rbd-keyring that only a standalone install's operator provides). They are
+# rendered the way the umbrella delivers them, once per storage.backend its schema accepts. A backend the chart
+# refuses must refuse with the chart's own message for it -- with none, "storage.backend is none (#196)"; a backend
+# not implemented yet, "is not implemented in this release (#308)" -- and any backend it renders is checked like every
+# other chart. Until #196 there was an allowlist here for those three objects; the refusal is what replaced it.
+REFUSALS = {
+    "none": "storage.backend is none (#196)",
 }
+NOT_IMPLEMENTED = "is not implemented in this release (#308)"
 
 
-def flagged_components(root: Path):
-    """Components the umbrella marks requiresProvisioning: true."""
-    values = yaml.safe_load((root / "blueprints" / "openstack" / "chart" / "values.yaml").read_text()) or {}
-    return {c["name"] for c in values.get("components") or [] if c.get("requiresProvisioning") is True}
+def umbrella(root: Path):
+    return yaml.safe_load((root / "blueprints" / "openstack" / "chart" / "values.yaml").read_text()) or {}
+
+
+def block_storage_components(root: Path):
+    """Components the umbrella lists as requiring block-storage."""
+    return {c["name"] for c in umbrella(root).get("components") or [] if "block-storage" in (c.get("requires") or [])}
+
+
+def storage_backends(root: Path):
+    import json
+    schema = json.loads((root / "blueprints" / "openstack" / "chart" / "values.schema.json").read_text())
+    return (((schema.get("properties") or {}).get("storage") or {}).get("properties") or {}).get("backend", {}).get("enum") or []
 
 KINDS = ("Secret", "ConfigMap", "PersistentVolumeClaim", "ServiceAccount")
 
 
-FLAGGED = set()
 
-
-def stage_and_render(chart: Path, component: str, workdir: Path) -> str:
+def stage_and_render(chart: Path, component: str, workdir: Path, sets=()) -> str:
     staged = workdir / component
-    shutil.copytree(chart, staged)
+    if not staged.exists():
+        shutil.copytree(chart, staged)
     cm = staged / "Chart.yaml"
     cm.write_text(cm.read_text().replace("CHART_VERSION", "0.0.0-gate"))
     toolkit = chart.parent.parent.parent / "charts" / "helm-toolkit"
@@ -97,7 +106,7 @@ def stage_and_render(chart: Path, component: str, workdir: Path) -> str:
             shutil.copytree(toolkit, staged / "charts" / "helm-toolkit")
     release = f"{component}-{RELEASE_SUFFIX}"
     r = subprocess.run(
-        ["helm", "template", release, str(staged), "--namespace", "openstack"],
+        ["helm", "template", release, str(staged), "--namespace", "openstack"] + [a for kv in sets for a in ("--set", kv)],
         capture_output=True, text=True,
     )
     if r.returncode != 0:
@@ -201,10 +210,6 @@ def check(component, rendered):
                 if (component, kind, name) in KNOWN_DEFECTS:
                     known.append(("KNOWN", owner, kind, name, where, KNOWN_DEFECTS[(component, kind, name)]))
                     continue
-                if (component, kind, name) in PROVISIONED_BY_OPERATOR and component in FLAGGED:
-                    known.append(("PROVISIONED", owner, kind, name, where,
-                                  "requires provisioning, " + PROVISIONED_BY_OPERATOR[(component, kind, name)]))
-                    continue
                 dangling.append((owner, kind, name, where))
     return pods, dangling, known
 
@@ -218,29 +223,44 @@ def main() -> int:
         charts = [c for c in charts if c.parent.name in only]
     if not charts:
         sys.exit("FAIL: no component charts found -- nothing was measured")
-    global FLAGGED
-    FLAGGED = flagged_components(root)
+    block = block_storage_components(root)
+    backends = storage_backends(root)
+    if block and "none" not in backends:
+        sys.exit(f"FAIL: the umbrella schema's storage.backend enum is {backends}, without none, so "
+                 f"{sorted(block)} cannot be rendered the way the umbrella delivers them")
 
-    total_pods, failures, unrendered = 0, [], []
+    total_pods, failures, unrendered, not_refused = 0, [], [], []
     with tempfile.TemporaryDirectory() as td:
         for chart in charts:
             component = chart.parent.name
-            try:
-                rendered = stage_and_render(chart, component, Path(td))
-            except RuntimeError as e:
-                unrendered.append((component, str(e)))
-                continue
-            pods, dangling, known = check(component, rendered)
-            total_pods += pods
-            status = "OK  " if not dangling else "FAIL"
-            print(f"{status} {component}: {pods} pod templates, {len(dangling)} dangling")
-            for label, owner, kind, name, where, issue in known:
-                print(f"{label} {component}: {owner} {where} names {kind} {name!r} ({issue})")
-            for owner, kind, name, where in dangling:
-                failures.append((component, owner, kind, name, where))
+            modes = [(f"storage.backend {b}", b, [f"krateo.storageBackend={b}"]) for b in backends] \
+                if component in block else [("", None, [])]
+            for label, backend, sets in modes:
+                tag = f"{component} ({label})" if label else component
+                try:
+                    rendered = stage_and_render(chart, component, Path(td), sets)
+                except RuntimeError as e:
+                    want = REFUSALS.get(backend, NOT_IMPLEMENTED) if backend else None
+                    if want and want in str(e):
+                        print(f"REFUSED {tag}: renders nothing, as designed: {want!r}")
+                        continue
+                    unrendered.append((tag, str(e)))
+                    continue
+                if backend in REFUSALS:
+                    not_refused.append((tag, REFUSALS[backend]))
+                pods, dangling, known = check(component, rendered)
+                total_pods += pods
+                status = "OK  " if not dangling else "FAIL"
+                print(f"{status} {tag}: {pods} pod templates, {len(dangling)} dangling")
+                for lbl, owner, kind, name, where, issue in known:
+                    print(f"{lbl} {tag}: {owner} {where} names {kind} {name!r} ({issue})")
+                for owner, kind, name, where in dangling:
+                    failures.append((tag, owner, kind, name, where))
 
     for component, err in unrendered:
         print(f"FAIL {component}: did not render, so nothing was measured: {err}")
+    for tag, want in not_refused:
+        print(f"FAIL {tag}: renders, and must refuse with {want!r}: with no backend its pods wait in Init forever")
     if total_pods == 0:
         print("FAIL: no pod templates rendered in any chart -- nothing was measured")
         return 1
@@ -251,7 +271,7 @@ def main() -> int:
         print("\nA pod naming an object nobody creates waits forever (FailedMount, or a container")
         print("that never starts) and nothing reports it. Render it from the chart, or, if another")
         print("component creates it, add it to ALLOWED in this script with the reason.")
-    if failures or unrendered:
+    if failures or unrendered or not_refused:
         return 1
     print(f"\nOK: {len(charts)} charts, {total_pods} pod templates, every reference rendered")
     return 0
