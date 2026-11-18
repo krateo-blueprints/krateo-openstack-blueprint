@@ -1,0 +1,39 @@
+# Images the charts run that are NOT pinned yet, each with why and until when (#316).
+#
+# hack/gen-image-inventory.py fails on any image whose tag is a release series (rebuilt upstream, so the chart version
+# stops naming what it installs) unless it is waived here. A waiver needs:
+#   image     the reference exactly as hack/images.yaml writes it
+#   reason    why it cannot be pinned today, and what pins it
+#   issue     the issue that removes the waiver
+#   expires   YYYY-MM-DD, at most 120 days after the day the gate runs; an expired waiver fails
+# A waiver for an image the charts no longer run, or one that is already pinned, fails too.
+# A waived image's digest may move (reported by --resolve); every other image's may not.
+waivers:
+  - image: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
+    reason: >-
+      Kolla publishes only release-series tags for gnocchi, rebuilt in place, and quay keeps no history for them.
+      hack/image-mirror.yaml copies the recorded, scanned digest to an immutable tag in ghcr.io/krateo-blueprints;
+      the chart moves to the mirror once it has run on main and the package is public.
+    issue: 334
+    expires: "2027-01-31"
+  - image: quay.io/openstack.kolla/gnocchi-base:2026.1-ubuntu-noble
+    reason: >-
+      Kolla publishes only release-series tags for gnocchi, rebuilt in place, and quay keeps no history for them.
+      hack/image-mirror.yaml copies the recorded, scanned digest to an immutable tag in ghcr.io/krateo-blueprints;
+      the chart moves to the mirror once it has run on main and the package is public.
+    issue: 334
+    expires: "2027-01-31"
+  - image: quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble
+    reason: >-
+      Kolla publishes only release-series tags for gnocchi, rebuilt in place, and quay keeps no history for them.
+      hack/image-mirror.yaml copies the recorded, scanned digest to an immutable tag in ghcr.io/krateo-blueprints;
+      the chart moves to the mirror once it has run on main and the package is public.
+    issue: 334
+    expires: "2027-01-31"
+  - image: quay.io/openstack.kolla/gnocchi-statsd:2026.1-ubuntu-noble
+    reason: >-
+      Kolla publishes only release-series tags for gnocchi, rebuilt in place, and quay keeps no history for them.
+      hack/image-mirror.yaml copies the recorded, scanned digest to an immutable tag in ghcr.io/krateo-blueprints;
+      the chart moves to the mirror once it has run on main and the package is public.
+    issue: 334
+    expires: "2027-01-31"

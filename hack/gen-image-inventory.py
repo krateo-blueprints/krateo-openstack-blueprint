@@ -29,9 +29,21 @@ TWO KINDS OF FACT, KEPT APART ON PURPOSE.
   * What a registry says about an image (does it answer anonymously, in a manifest format docker can pull, for
     linux/amd64; its digest) is not in this tree. It is recorded under `registry`, with the date it was observed, and
     re-measured only with --resolve: on the weekly image-scan run, and when --write meets an image it has no record of.
-    A pull request is never failed by a registry being slow. --resolve fails when pullability differs from the record,
-    and REPORTS a moved digest without failing: the series tags these charts use today (2026.1-ubuntu_noble) are
-    rebuilt upstream, so a moved digest is the expected state until the pinning decision in docs/supply-chain.md.
+    A pull request is never failed by a registry being slow. --resolve fails when pullability differs from the record.
+
+PINNING (#316, decided 2026-11-17; docs/supply-chain.md). Each image is pinned by two facts, one per kind:
+
+  * OFFLINE, its tag has an immutable form (tag_form below): a dated build (...-YYYYMMDD), a commit SHA, an exact
+    x.y.z version, or a digest. A release-series tag (2026.1-ubuntu_noble, 3.13-management) is rebuilt upstream, so the
+    chart version would stop naming what it installs; it fails unless hack/image-pin-waivers.yaml waives that image,
+    with a reason and an expiry at most WAIVER_MAX_DAYS ahead. A waiver for an image the charts no longer run, or that
+    is already immutable, fails too. Kind side-loads images (tools/kind-load-images.sh), where a digest reference
+    cannot work (#72), so a tag is the reference and the digest is the record.
+  * MEASURED, its digest is the one recorded under registry_facts. --resolve fails when the registry now serves
+    another digest under the same reference: a "dated" or "version" tag was re-pushed, which the form alone cannot
+    prevent (ceph-config-helper:ubuntu_jammy_20.2.4-1-20260828 was pushed twice in one day). --write never replaces a
+    recorded digest that moved; the remedy is a new reference, or a mirror of the recorded digest
+    (hack/image-mirror.yaml). Only a waived image's digest may move, and that is reported.
 
 "Pullable anonymously" means: with no credentials, as the kubelet pulls here, the registry serves the manifest in a
 type a current containerd accepts (not Docker Registry v1, #115), an index has a linux/amd64 entry, that entry's
@@ -47,6 +59,7 @@ Fails when helm or PyYAML is missing, when no chart renders, and when no image i
 """
 import datetime
 import difflib
+import re
 import hashlib
 import importlib.util
 import json
@@ -242,6 +255,50 @@ def split_ref(ref):
     return host, repo, tag, digest
 
 
+WAIVERS = os.path.join(ROOT, "hack", "image-pin-waivers.yaml")
+WAIVER_MAX_DAYS = 120
+
+
+def tag_form(image):
+    """How a reference pins its image, read from its text: digest, commit, dated, version, or series (mutable)."""
+    _, _, tag, digest = split_ref(image)
+    if digest:
+        return "digest"
+    tag = tag or ""
+    if re.search(r"(^|[-_])[0-9a-f]{40}([-_]|$)", tag):
+        return "commit"
+    if re.search(r"[-_]20[0-9]{6}$", tag):
+        return "dated"
+    if re.fullmatch(r"v?[0-9]+\.[0-9]+\.[0-9]+(-[a-z][a-z0-9.]*)?", tag):
+        return "version"
+    return "series"
+
+
+def load_waivers(today):
+    """({image: entry}, failures). An entry needs image, reason, issue and an expiry within WAIVER_MAX_DAYS."""
+    if not os.path.exists(WAIVERS):
+        return {}, []
+    out, bad = {}, []
+    for i, e in enumerate((yaml.safe_load(open(WAIVERS)) or {}).get("waivers") or []):
+        where = "hack/image-pin-waivers.yaml entry %d (%s)" % (i + 1, (e or {}).get("image"))
+        missing = [k for k in ("image", "reason", "issue", "expires") if not str((e or {}).get(k) or "").strip()]
+        if missing:
+            bad.append("%s: missing %s" % (where, ", ".join(missing)))
+            continue
+        try:
+            exp = e["expires"] if isinstance(e["expires"], datetime.date) else datetime.date.fromisoformat(str(e["expires"]))
+        except ValueError:
+            bad.append("%s: expires %r is not a YYYY-MM-DD date" % (where, e["expires"]))
+            continue
+        if exp < today:
+            bad.append("%s: expired on %s; pin the image or renew the waiver with a reason" % (where, exp))
+        elif exp > today + datetime.timedelta(days=WAIVER_MAX_DAYS):
+            bad.append("%s: expires %s, more than %d days after %s" % (where, exp, WAIVER_MAX_DAYS, today))
+        else:
+            out[e["image"]] = e
+    return out, bad
+
+
 def load_sources():
     data = yaml.safe_load(open(SOURCES)) or {}
     return data.get("sources") or []
@@ -267,6 +324,7 @@ def offline_entries(usage):
             e["tag"] = tag
         if digest:
             e["pinned_digest"] = digest
+        e["tag_form"] = tag_form(image)
         e["used_by"] = []
         for chart in sorted(usage[image]):
             u = usage[image][chart]
@@ -431,6 +489,10 @@ def markdown(inv, sources):
         "**Declared in `images.tags`, rendered by neither:** %d." % (
             count["defaults"], count["every-manifest-on"], count["declared-only"]),
         "- **Not pullable anonymously:** %d." % len(bad),
+        "- **Pinned by tag form:** %s. **Not pinned, waived:** %d." % (
+            ", ".join("%s %d" % (f, sum(1 for e in images if e["tag_form"] == f))
+                      for f in ("dated", "commit", "version", "digest")),
+            sum(1 for e in images if e.get("pin_waiver"))),
         "- **Charts that run no image:** %s." % (", ".join(inv["charts_without_images"]) or "none"),
         "",
         "\"Pullable anonymously\" was measured without credentials, as the kubelet pulls here: the manifest is served",
@@ -458,10 +520,11 @@ def markdown(inv, sources):
         "## Images",
         "",
         "Platforms are the ones the registry lists for the reference. `d` = rendered at defaults, `m` = only with",
-        "off-by-default manifests on, `x` = declared only.",
+        "off-by-default manifests on, `x` = declared only. \"Pinned by\" is the tag's form (dated, commit, version or",
+        "digest); the digest each tag served when recorded is in `hack/images.yaml`, and a re-push fails the weekly check.",
         "",
-        "| Image | Publisher | Anonymous pull | Platforms | Charts |",
-        "| --- | --- | --- | --- | --- |",
+        "| Image | Pinned by | Publisher | Anonymous pull | Platforms | Charts |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     short = {"defaults": "d", "every-manifest-on": "m", "declared-only": "x"}
     for e in images:
@@ -469,8 +532,11 @@ def markdown(inv, sources):
         s = source_of(e["image"], sources)
         pull = "yes" if r.get("anonymous_pull") is True else "**no**"
         charts = ", ".join("%s (%s)" % (u["chart"], short[u["rendered"]]) for u in e["used_by"])
-        out.append("| `%s` | %s | %s | %s | %s |" % (e["image"], s["publisher"] if s else "?", pull,
-                                                   ", ".join(r.get("platforms") or []) or "-", charts))
+        pin = e["tag_form"]
+        if e.get("pin_waiver"):
+            pin = "**not pinned**: waived until %s (#%s)" % (e["pin_waiver"]["expires"], e["pin_waiver"]["issue"])
+        out.append("| `%s` | %s | %s | %s | %s | %s |" % (e["image"], pin, s["publisher"] if s else "?", pull,
+                                                        ", ".join(r.get("platforms") or []) or "-", charts))
     out += ["", "## Publishers", "", "| Prefix | Publisher | Built from |", "| --- | --- | --- |"]
     for s in sorted(sources, key=lambda s: s["prefix"]):
         out.append("| `%s` | %s | %s |" % (s["prefix"], s["publisher"], s["source"]))
@@ -502,6 +568,27 @@ def main():
         if not any(source_of(e["image"], sources) is s for e in entries):
             failures.append("hack/image-sources.yaml: %s matches no image any chart runs; remove it" % s["prefix"])
 
+    # Pinning, offline half: an immutable tag form, or a waiver that is in date.
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    waivers, bad = load_waivers(today)
+    failures += bad
+    images = {e["image"]: e for e in entries}
+    for e in entries:
+        w = waivers.get(e["image"])
+        if e["tag_form"] == "series":
+            if w is None:
+                failures.append("%s: tag form is a release series, which upstream rebuilds; pin a dated, commit or "
+                                "exact-version tag (docs/supply-chain.md), or waive it in hack/image-pin-waivers.yaml"
+                                % e["image"])
+            else:
+                e["pin_waiver"] = {"issue": w["issue"], "expires": str(w["expires"])}
+    for img in sorted(waivers):
+        if img not in images:
+            failures.append("hack/image-pin-waivers.yaml: %s is not an image any chart runs; remove the waiver" % img)
+        elif images[img]["tag_form"] != "series":
+            failures.append("hack/image-pin-waivers.yaml: %s is already pinned (%s); remove the waiver"
+                            % (img, images[img]["tag_form"]))
+
     old = {}
     if os.path.exists(INVENTORY):
         prev = yaml.safe_load(open(INVENTORY)) or {}
@@ -518,15 +605,17 @@ def main():
                 print("FAILED MEASUREMENT: %s could not be asked: %s" % (e["image"], err))
                 sys.exit(2)
             measured += 1
+            pinned_moved = False
             if rec is not None:
                 if rec.get("digest") and facts.get("digest") and rec["digest"] != facts["digest"]:
                     moved.append((e["image"], rec["digest"], facts["digest"]))
+                    pinned_moved = e["image"] not in waivers
                 diff = [k for k in PULL_FACTS if rec.get(k) != facts.get(k)]
                 if diff:
                     changed.append((e["image"], {k: rec.get(k) for k in diff}, {k: facts.get(k) for k in diff}))
             # A check compares the files against what was recorded; the fresh answer is compared to the record
-            # above. Only --write replaces the record.
-            e["registry_facts"] = facts if WRITE or rec is None else rec
+            # above. Only --write replaces the record, and never a pinned digest that moved: that record is the pin.
+            e["registry_facts"] = facts if (WRITE and not pinned_moved) or rec is None else rec
         elif rec is not None:
             e["registry_facts"] = rec
         else:
@@ -552,8 +641,14 @@ def main():
                 failures.append("%s is not what the charts generate (%d diff lines); run "
                                 "hack/gen-image-inventory.py . --write\n%s" % (rel, len(d), "\n".join(d[:80])))
 
+    # Pinning, measured half: a pinned reference that now serves another digest was re-pushed upstream.
     for img, a, b in moved:
-        print("DIGEST MOVED (reported, not failed; see docs/supply-chain.md): %s %s -> %s" % (img, a, b))
+        if img in waivers:
+            print("DIGEST MOVED under a waived series tag (reported): %s %s -> %s" % (img, a, b))
+        else:
+            failures.append("%s: the registry now serves %s, not the recorded %s; the tag was re-pushed. Point the "
+                            "chart at a new reference, or mirror the recorded digest (hack/image-mirror.yaml)"
+                            % (img, b, a))
     # --write records a changed answer (that is what it is for); a check fails on it.
     for img, a, b in changed:
         (print if WRITE else failures.append)("%s: the registry's answer changed: recorded %s, now %s" % (img, a, b))
