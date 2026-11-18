@@ -1,0 +1,55 @@
+{{- /*
+#309 H2 (run 4, option 4): with messaging.backend operator, the RabbitMQ user projection of each selected component whose
+rabbit-init runs, written by the UMBRELLA rather than the component's chart (osh.messagingProjection says why). The
+component's Composition is created only once this Secret exists, labelled (osh.messagingProjectionReady), and its chart
+imports the name it is passed (endpoints.oslo_messaging.operator.userSecret) and renders no projection of its own, so one
+writer owns it (hack/validate-messaging-topology.py). Same shape as the chart's: username and password from the
+component's root, labelled for the topology operator, which caches and admits only labelled Secrets (#404).
+A component installed standalone, without the umbrella, is passed no name and keeps its chart-rendered projection,
+retried by CDC until ESO has written it (README).
+*/ -}}
+{{- if eq (include "osh.messagingBackend" $) "operator" }}
+{{- $sel := splitList " " (include "osh.selected" (list $)) }}
+{{- range $c := .Values.components }}
+{{- if has $c.name $sel }}
+{{- $p := include "osh.messagingProjection" (list $ $c) | fromJson }}
+{{- if $p.secret }}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ $p.secret }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    krateo.io/messaging-projection: {{ $c.name }}
+  annotations:
+    # Deleted by helm WITH the release, after its pre-delete hooks (#254).
+    krateo.io/teardown: with-release
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: {{ $p.store | quote }}
+  target:
+    name: {{ $p.secret }}
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      engineVersion: v2
+      metadata:
+        labels:
+          # The topology operator reads only Secrets with this label (v1.20.5 cmd/main.go:281-283), and its User webhook
+          # refuses an import Secret without it (internal/webhook/v1beta1/label_validation.go). #404.
+          rabbitmq.com/topology-operator: "true"
+      data:
+        username: {{ $p.username | quote }}
+        password: {{ "{{ .password }}" | quote }}
+  data:
+    - secretKey: password
+      remoteRef:
+        key: {{ $p.root | quote }}
+        property: {{ $p.key | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

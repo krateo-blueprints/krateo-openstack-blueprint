@@ -703,10 +703,15 @@ def check30(tmp, uv):
     if '{{- $cephReady := include "osh.cephRootsReady" (list $ $c) }}' not in comp:
         fail("30: compositions.yaml does not compute $cephReady from osh.cephRootsReady for each component")
     gate = [l for l in comp.splitlines() if l.startswith('{{- if and (eq $crd "true")')]
-    want = ('(or (and (eq $strictReady "true") (eq $relaxedExist "true") (eq $cephReady "true")) (eq $exists "true"))')
-    if len(gate) != 1 or want not in gate[0]:
+    # The structure, not the exact text: other creation gates sit in the same `and` (osh.messagingProjectionReady,
+    # #309), so the check is that $cephReady is one of the conjuncts beside the dependency gates, inside the `and` that
+    # an existing component bypasses (`or ... (eq $exists "true")`).
+    m = re.search(r'\(or \(and ((?:\(eq \$[A-Za-z]+ "true"\) ?)+)\) \(eq \$exists "true"\)\)', gate[0]) if len(gate) == 1 else None
+    conj = set(re.findall(r'\$([A-Za-z]+)', m.group(1))) if m else set()
+    if not {"strictReady", "relaxedExist", "cephReady"} <= conj:
         fail("30: the creation gate must hold a component on $cephReady beside its dependencies, and never an existing "
-             "one: want `%s` in `%s`" % (want, gate))
+             "one: want $strictReady, $relaxedExist and $cephReady in the `and` that `(eq $exists \"true\")` bypasses, "
+             "in `%s`" % gate)
     if 'include "osh.requireCephReadGrant" (list $)' not in comp:
         fail("30: compositions.yaml does not call osh.requireCephReadGrant")
 

@@ -160,7 +160,10 @@
 {{- $relaxedExist := include "osh.depsExist" (list $ $relaxed $.Values.components $crds) }}
 {{- /* #308: a Ceph consumer is created only once the copies of the keys it reads report Ready (osh.cephRootsReady). */ -}}
 {{- $cephReady := include "osh.cephRootsReady" (list $ $c) }}
-{{- if and (eq $crd "true") (or (and (eq $strictReady "true") (eq $relaxedExist "true") (eq $cephReady "true")) (eq $exists "true")) }}
+{{- /* #309 H2: with messaging.backend operator, a component whose rabbit-init runs is created only once the umbrella's
+       projection of its RabbitMQ user exists, labelled (osh.messagingProjectionReady), so its User is admitted at once. */ -}}
+{{- $mqReady := include "osh.messagingProjectionReady" (list $ $c) }}
+{{- if and (eq $crd "true") (or (and (eq $strictReady "true") (eq $relaxedExist "true") (eq $cephReady "true") (eq $mqReady "true")) (eq $exists "true")) }}
 {{- $ov := (index ($.Values.componentValues | default dict) $c.name) | default dict }}
 {{- /* Credential references (#228): merged UNDER the component's own values, so an explicit
        componentValues entry wins. osh.credentialRefs says what is passed and why. */ -}}

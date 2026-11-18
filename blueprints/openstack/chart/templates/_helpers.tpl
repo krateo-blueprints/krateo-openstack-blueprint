@@ -1413,6 +1413,81 @@ krateo-openstack-node-reader
 {{- toYaml $out -}}
 {{- end -}}
 
+{{- /* osh.runsRabbitInit (list $ $c): "true" when component $c's rabbit-init runs -- in chart mode its Job, with
+       messaging.backend operator its topology resources: the Job is on (its componentValues manifests.job_rabbit_init when
+       set, else its chart default, components[].rabbitmqInit, true unless false) and so is the Secret it reads
+       (manifests.secret_rabbitmq, else rabbitmqSecret: keystone ships it off). The one rule osh.notificationVhostSources
+       and osh.messagingProjection both read. */ -}}
+{{- define "osh.runsRabbitInit" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- $cv := index ($top.Values.componentValues | default dict) $c.name | default dict -}}
+{{- $man := $cv.manifests | default dict -}}
+{{- $init := ne (toString $c.rabbitmqInit) "false" -}}
+{{- if hasKey $man "job_rabbit_init" -}}{{- $init = eq (toString (index $man "job_rabbit_init")) "true" -}}{{- end -}}
+{{- $secret := ne (toString $c.rabbitmqSecret) "false" -}}
+{{- if hasKey $man "secret_rabbitmq" -}}{{- $secret = eq (toString (index $man "secret_rabbitmq")) "true" -}}{{- end -}}
+{{- if and $init $secret -}}true{{- end -}}
+{{- end -}}
+
+{{- /* osh.messagingProjection (list $ $c): with messaging.backend operator, the RabbitMQ user projection the UMBRELLA
+       writes for component $c (#309 H2 run 4, option 4), as JSON {secret, username, store, root, key}; "{}" when $c has
+       none (another backend, not in haTopology.messagingQuorum, or its rabbit-init does not run).
+       Why the umbrella: the topology operator's User webhook refuses a User whose import Secret does not exist yet
+       (v1.20.5 label_validation.go), and a component's chart submits its ExternalSecret and its User in one helm
+       transaction while ESO writes the Secret afterwards (3-85 s measured). Run 4 measured every messaging component
+       refused 1-2 times and converging on CDC's retry after up to 198 s. Rendered here, the projection exists before the
+       component is created (osh.messagingProjectionReady gates creation on it), so its User is admitted at once.
+       The username is the chart's auth.<component>.username: componentValues' when set, else the component name, which
+       every messaging chart's default equals (hack/validate-messaging-topology.py checks both). The root is the
+       component's oslo-messaging-<component> credential item, read through credentials.store as every reference is. */ -}}
+{{- define "osh.messagingProjection" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- $out := dict -}}
+{{- $topo := $top.Values.haTopology | default dict -}}
+{{- if and (eq (include "osh.messagingBackend" $top) "operator") (has $c.name ($topo.messagingQuorum | default list)) (eq (include "osh.runsRabbitInit" (list $top $c)) "true") -}}
+{{- $creds := $top.Values.credentials | default dict -}}
+{{- $id := printf "oslo-messaging-%s" $c.name -}}
+{{- $item := dict -}}
+{{- range $i := ($creds.items | default list) -}}{{- if eq $i.id $id -}}{{- $item = $i -}}{{- end -}}{{- end -}}
+{{- if not $item.secret -}}
+{{- fail (printf "\n\n%s runs rabbit-init with messaging.backend operator, but credentials.items has no %s: its RabbitMQ user projection would have no root (#228, #309).\n" $c.name $id) -}}
+{{- end -}}
+{{- $cv := index ($top.Values.componentValues | default dict) $c.name | default dict -}}
+{{- $user := ((((($cv.endpoints | default dict).oslo_messaging | default dict).auth | default dict) | dig $c.name "username" "") | toString) | default $c.name -}}
+{{- $_ := set $out "secret" (printf "%s-rabbitmq-topology-user" ($c.name | replace "_" "-")) -}}
+{{- $_ := set $out "username" $user -}}
+{{- $_ := set $out "store" $creds.store -}}
+{{- $_ := set $out "root" $item.secret -}}
+{{- $_ := set $out "key" $item.key -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{- /* osh.lookupSecret (list $ name): the Secret <name> in the release namespace, as JSON ("{}" when absent). One named
+       GET, so a gate can stand it in: helm template's lookup returns nothing, and an offline render therefore emits no
+       component that waits on one (hack/validate-messaging-operator.py part 5 renders this gate with a stand-in). */ -}}
+{{- define "osh.lookupSecret" -}}
+{{- $top := index . 0 -}}
+{{- lookup "v1" "Secret" $top.Release.Namespace (index . 1) | default dict | toJson -}}
+{{- end -}}
+
+{{- /* osh.messagingProjectionReady (list $ $c): "true" when component $c may be CREATED as far as its RabbitMQ user is
+       concerned: it has no umbrella projection, or that projection's Secret exists AND carries
+       rabbitmq.com/topology-operator=true (the label the User webhook requires, #404). Until then $c is held like a
+       dependency that is not Ready: listed in openstack-install-pending, never created against a Secret ESO has not
+       written, so its User is never refused. Only creation: compositions.yaml keeps an existing component (`or
+       $exists`), as for osh.cephRootsReady. */ -}}
+{{- define "osh.messagingProjectionReady" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- $p := include "osh.messagingProjection" (list $top $c) | fromJson -}}
+{{- $ready := true -}}
+{{- if $p.secret -}}
+{{- $s := include "osh.lookupSecret" (list $top $p.secret) | fromJson -}}
+{{- if ne (toString (((($s.metadata | default dict).labels) | default dict) | dig "rabbitmq.com/topology-operator" "")) "true" -}}{{- $ready = false -}}{{- end -}}
+{{- end -}}
+{{- $ready -}}
+{{- end -}}
+
 {{- /* osh.notificationVhostSources (list $ $sel): .Values.notificationVhosts.vhosts, in order, mapped to what the
        selected closure $sel actually creates, as JSON [{vhost, component, job}]. Each entry names a component's default vhost (components[].rabbitmqVhost). It is kept
        when that component is selected and its rabbit-init runs: the Job is on (its componentValues
@@ -1429,15 +1504,10 @@ krateo-openstack-node-reader
 {{- range $c := $top.Values.components -}}
 {{- if and $c.rabbitmqVhost (has $c.name $sel) -}}
 {{- $cv := index $cvs $c.name | default dict -}}
-{{- $man := $cv.manifests | default dict -}}
-{{- $init := ne (toString $c.rabbitmqInit) "false" -}}
-{{- if hasKey $man "job_rabbit_init" -}}{{- $init = eq (toString (index $man "job_rabbit_init")) "true" -}}{{- end -}}
-{{- $secret := ne (toString $c.rabbitmqSecret) "false" -}}
-{{- if hasKey $man "secret_rabbitmq" -}}{{- $secret = eq (toString (index $man "secret_rabbitmq")) "true" -}}{{- end -}}
 {{- $vhost := $c.rabbitmqVhost -}}
 {{- $path := ((($cv.endpoints | default dict).oslo_messaging | default dict).path) | default "" | toString -}}
 {{- if $path -}}{{- $vhost = trimPrefix "/" $path | default "/" -}}{{- end -}}
-{{- if and $init $secret -}}{{- $_ := set $created $c.rabbitmqVhost (dict "vhost" $vhost "component" $c.name "job" (printf "%s-rabbit-init" $c.name)) -}}{{- end -}}
+{{- if eq (include "osh.runsRabbitInit" (list $top $c)) "true" -}}{{- $_ := set $created $c.rabbitmqVhost (dict "vhost" $vhost "component" $c.name "job" (printf "%s-rabbit-init" $c.name)) -}}{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- $out := list -}}
@@ -1614,6 +1684,8 @@ krateo-openstack-node-reader
 {{- /* Its rabbit-init becomes messaging-topology-operator resources on this cluster
        (helm-toolkit.manifests.rabbitmq_topology), and its pods wait on them. */ -}}
 {{- $_ := set $om "operator" (dict "cluster" $name) -}}
+{{- /* Its user projection is the umbrella's (osh.messagingProjection): the chart imports this name and renders none. */ -}}
+{{- with (include "osh.messagingProjection" (list $top $c) | fromJson).secret -}}{{- $_ := set $om.operator "userSecret" . -}}{{- end -}}
 {{- $_ := set $out "conf" (dict $c.name (dict "oslo_messaging_rabbit" (deepCopy $topo.messagingQuorumConf))) -}}
 {{- end -}}
 {{- if $om -}}{{- $_ := set $out "endpoints" (dict "oslo_messaging" $om) -}}{{- end -}}
