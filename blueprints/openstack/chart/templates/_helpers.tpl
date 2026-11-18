@@ -794,10 +794,46 @@ true
 {{- $out | uniq | join " " -}}
 {{- end -}}
 
+{{/* The infrastructure capabilities this install provides, space-joined, for components[].requires.
+     block-storage is provided by storage.backend when it is not none (#196, #308). Nothing in the
+     umbrella provides the others components list (pxe-interface, lb-mgmt-net, rwx-storage-class):
+     they exist only as preconditions an operator meets by hand (#163), so profile full-strict never
+     selects their components and `enabled:` is how to take one. hack/validate-provisioning-preconditions.py
+     asserts every capability a component requires is declared in hack/provisioning-preconditions.yaml. */}}
+{{- define "osh.providedCapabilities" -}}
+{{- $top := index . 0 -}}
+{{- $out := list -}}
+{{- if ne (include "osh.storageBackend" (list $top)) "none" -}}{{- $out = append $out "block-storage" -}}{{- end -}}
+{{- $out | join " " -}}
+{{- end -}}
+
+{{/* storage.backend, `none` when unset. */}}
+{{- define "osh.storageBackend" -}}
+{{- $top := index . 0 -}}
+{{- (($top.Values.storage | default dict).backend | default "none") -}}
+{{- end -}}
+
+{{/* The umbrella's storage.backend is the one statement of which block-storage backend the install has: it is what
+     full-strict selects cinder by, and what cinder renders by. A componentValues.<component>.krateo.storageBackend would
+     let the two disagree (full-strict leaving cinder out while cinder renders a backend, or the reverse), so it is
+     refused, for every component that requires block-storage. hack/validate-storage-backend.py renders the refusal. */}}
+{{- define "osh.requireStorageNotOverridden" -}}
+{{- $top := index . 0 -}}
+{{- range $c := $top.Values.components -}}
+  {{- if has "block-storage" ($c.requires | default list) -}}
+    {{- $cv := (index ($top.Values.componentValues | default dict) $c.name) | default dict -}}
+    {{- if hasKey ($cv.krateo | default dict) "storageBackend" -}}
+      {{- fail (printf "\n\ncomponentValues.%s.krateo.storageBackend is set. Set storage.backend instead: it is the one value that says which block-storage backend this install has, and both profile full-strict and %s read it (#196). The umbrella passes it to %s as krateo.storageBackend.\n" $c.name $c.name $c.name) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{/* The set of component names to deploy, space-joined. If `enabled` is non-empty it
      is an explicit selection expanded to its transitive dependency closure (so
      `enabled: [heat]` pulls in keystone, rabbitmq, mariadb, memcached). Otherwise it
-     falls back to the `profile`: identity tier always, plus compute when profile=full. */}}
+     falls back to the `profile`: identity tier always, plus compute when profile=full,
+     plus compute minus unmet components[].requires when profile=full-strict. */}}
 {{- define "osh.selected" -}}
 {{- $top := index . 0 -}}
 {{- $comps := $top.Values.components -}}
@@ -816,12 +852,14 @@ true
 {{- else -}}
   {{/* A PROFILE PROMISES ONLY WHAT CAN WORK ON THE CLUSTER YOU HAVE.
 
-       `requiresProvisioning` components are excluded from every profile, including `full`.
-       They are not unsupported and nothing about them is removed -- they are selectable, and
-       fully gated, through `enabled:`. What they are not is DEFAULT, because each of them waits
-       on infrastructure that no Kubernetes cluster provides and that this blueprint does not
-       create: an interface named ironic-pxe, a Neutron port per host on octavia's management
-       network, a ReadWriteMany StorageClass for swift.
+       A component whose `requires` names a capability this install does not provide
+       (osh.providedCapabilities) is excluded from `full-strict`. It is not unsupported and nothing
+       about it is removed -- it is selectable, and fully gated, through `enabled:`, and `full`
+       still selects it. What it is not is DEFAULT, because it waits on infrastructure that no
+       Kubernetes cluster provides and that this blueprint does not create: an interface named
+       ironic-pxe, a Neutron port per host on octavia's management network, a ReadWriteMany
+       StorageClass for swift. cinder's block-storage is the one capability the umbrella can be
+       told it has, by storage.backend (#196); then full-strict selects cinder.
 
        Measured on a 4-node GKE install of profile=full: six pods at 14 restarts in Init plus
        four Pending, none of which could EVER become Ready, and `Init:` is the state a pod
@@ -829,13 +867,21 @@ true
        nothing. A profile that installs components which cannot start is a promise that cannot
        be kept, and the cost of keeping it is paid by whoever next reads that census.
 
-       hack/validate-provisioning-preconditions.py asserts the flag and the declared
-       precondition agree in BOTH directions, so a flagged component must say what it needs and
-       a declared precondition must belong to a flagged component. Issue #163. */}}
+       hack/validate-provisioning-preconditions.py asserts `requires` and the declared
+       precondition agree in BOTH directions, so a component that requires something must say
+       what it needs and a declared precondition must belong to a component that requires it, and
+       it renders this selection with storage.backend none AND with a backend, so the capability
+       is shown to be read and not merely declared. Issues #163, #196. */}}
+  {{- $provided := splitList " " (include "osh.providedCapabilities" (list $top)) | compact -}}
   {{- range $c := $comps -}}
-    {{/* `full` is unchanged and still selects every component, including the three that need
-         infrastructure an operator must provide. `full-strict` selects everything EXCEPT those,
-         so it is the profile that promises only what can start on a cluster as it comes.
+    {{- $unmet := false -}}
+    {{- range $r := ($c.requires | default list) -}}
+      {{- if not (has $r $provided) -}}{{- $unmet = true -}}{{- end -}}
+    {{- end -}}
+    {{/* `full` is unchanged and still selects every component, including the four that need
+         infrastructure an operator must provide. `full-strict` selects everything EXCEPT those
+         whose requirement the install does not provide, so it is the profile that promises only
+         what can start on the cluster as described.
 
          Opt-in rather than a change to `full`, deliberately: a profile silently selecting three
          fewer components than it did yesterday is a surprise delivered through a patch release,
@@ -843,7 +889,7 @@ true
          what it means, and leaves anyone who HAS provisioned a PXE interface, an lb-mgmt-net or
          an RWX StorageClass exactly where they were. */}}
     {{- if or (eq $top.Values.profile "full")
-              (and (eq $top.Values.profile "full-strict") (not $c.requiresProvisioning))
+              (and (eq $top.Values.profile "full-strict") (not $unmet))
               (eq $c.tier "identity") -}}
       {{- $_ := set $sel $c.name true -}}
     {{- end -}}

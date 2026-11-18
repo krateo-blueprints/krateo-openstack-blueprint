@@ -8,13 +8,28 @@ ociRepo: oci://ghcr.io/krateo-blueprints/charts
 # carries `chartVersion` in its spec; it is accepted and ignored.
 # installDefinitions: also register the component CompositionDefinitions.
 installDefinitions: true
-# profile: "identity" (mariadb,memcached,keystone,glance,horizon) or "full" (adds compute).
+# profile: "identity" (mariadb,memcached,keystone,glance,horizon), "full" (adds compute, every component) or
+# "full-strict" (full minus each component whose components[].requires the install does not provide).
 profile: identity
 
 # enabled: explicit component selection (overrides profile). Each name is expanded to
 # its transitive dependency closure, so selecting just `heat` also pulls in keystone,
 # rabbitmq, mariadb and memcached. Leave empty (null) to use `profile`.
 enabled:
+
+# storage (#196, #308): the backend that provides block storage, the `block-storage` capability a component lists
+# under components[].requires (cinder). `none`, the default, provides nothing: profile full-strict then leaves cinder
+# out, and a cinder selected anyway (profile full, or `enabled:`) refuses to render, naming this value, instead of
+# waiting in Init forever on Ceph objects nothing creates. Passed to each component that requires block-storage as its
+# krateo.storageBackend; a componentValues.<component>.krateo.storageBackend is refused, so this is the one place that
+# says which backend the install has.
+#   none           no backend (the default).
+#   ceph-rook      Ceph run by the rook-ceph blueprint, which mints the client keys (#308). Not implemented yet:
+#                  cinder refuses it, naming #308.
+#   ceph-external  an existing Ceph whose admin provides the client keys (#308). Not implemented yet, likewise.
+# Typed by values.schema.json, which hack/gen-componentvalues-schema.py generates.
+storage:
+  backend: none
 
 # tolerations: one list of Kubernetes tolerations applied to EVERY pod the blueprint renders, in every component
 # (Deployments, StatefulSets, DaemonSets, Jobs and CronJobs, helm-toolkit's Jobs included). Passed to each component
@@ -859,13 +874,15 @@ components:
       - glance
       - neutron
     tier: compute
-    ## Not selected by `profile: full`. ironic-conductor binds its PXE and TFTP services to an
-    ## interface NAMED ironic-pxe -- `ip addr | awk '/inet / && /ironic-pxe/'` -- which is the
-    ## bare-metal provisioning NIC. A cloud node has none and cannot grow one, so the init
-    ## container exits 1 with "Could not find IP for pxe to bind to" and the pod sits in Init
-    ## forever. Measured on a 4-node GKE install: 14 restarts, and the three init containers
-    ## behind it never ran. See hack/provisioning-preconditions.yaml and issue #163.
-    requiresProvisioning: true
+    ## Not selected by `profile: full-strict`: nothing in the umbrella provides pxe-interface.
+    ## ironic-conductor binds its PXE and TFTP services to an interface NAMED ironic-pxe --
+    ## `ip addr | awk '/inet / && /ironic-pxe/'` -- which is the bare-metal provisioning NIC. A cloud
+    ## node has none and cannot grow one, so the init container exits 1 with "Could not find IP for
+    ## pxe to bind to" and the pod sits in Init forever. Measured on a 4-node GKE install: 14
+    ## restarts, and the three init containers behind it never ran. See
+    ## hack/provisioning-preconditions.yaml and issue #163.
+    requires:
+      - pxe-interface
   - name: cinder
     kind: Cinder
     rabbitmqVhost: cinder
@@ -887,14 +904,16 @@ components:
       - rabbitmq
       - mariadb
     tier: compute
-    ## Not selected by `profile: full-strict` from 0.3.43. Its only shipped volume backend is
-    ## Ceph RBD (rbd1), and neither this repo nor any cluster as it comes provides a Ceph
-    ## cluster: cinder-volume and cinder-storage-init mount the ConfigMap ceph-etc and the
-    ## keyring Secrets, which nothing creates. Measured on #179 and on a cold 0.3.42 install
-    ## (#204): cinder never became Ready on any default install, and since every Job became a
-    ## Helm hook, storage-init held cinder's release in pending-install. Issue #196, and
-    ## hack/provisioning-preconditions.yaml.
-    requiresProvisioning: true
+    ## Selected by `profile: full-strict` only when `storage.backend` is not none, the one thing
+    ## that provides block-storage. Its only shipped volume backend is Ceph RBD (rbd1), and with no
+    ## backend cinder-volume and cinder-storage-init mounted the ConfigMap ceph-etc and the keyring
+    ## Secrets, which nothing creates. Measured on #179 and on a cold 0.3.42 install (#204): cinder
+    ## never became Ready on any default install, and since every Job became a Helm hook,
+    ## storage-init held cinder's release in pending-install. Now the umbrella passes
+    ## storage.backend as krateo.storageBackend, and with none the chart refuses to render, naming
+    ## it. Issue #196, and hack/provisioning-preconditions.yaml.
+    requires:
+      - block-storage
   - name: heat
     kind: Heat
     rabbitmqVhost: heat
@@ -973,13 +992,15 @@ components:
       - rabbitmq
       - mariadb
       - neutron
-    tier: compute    ## Not selected by `profile: full`. Each octavia worker and health-manager waits for a
-    ## Neutron port named after its own node on the load-balancer management network --
-    ## `openstack port show octavia-worker-port-<hostname>` -- and nothing in this blueprint
-    ## creates lb-mgmt-net or those per-host ports. Measured on a 4-node GKE install: four pods
-    ## at 14 restarts in Init, logging "No Port found for octavia-worker-port-...".
-    ## See hack/provisioning-preconditions.yaml and issue #163.
-    requiresProvisioning: true
+    tier: compute
+    ## Not selected by `profile: full-strict`: nothing in the umbrella provides lb-mgmt-net. Each
+    ## octavia worker and health-manager waits for a Neutron port named after its own node on the
+    ## load-balancer management network -- `openstack port show octavia-worker-port-<hostname>` --
+    ## and nothing in this blueprint creates lb-mgmt-net or those per-host ports. Measured on a
+    ## 4-node GKE install: four pods at 14 restarts in Init, logging "No Port found for
+    ## octavia-worker-port-...". See hack/provisioning-preconditions.yaml and issue #163.
+    requires:
+      - lb-mgmt-net
 
   - name: magnum
     kind: Magnum
@@ -1288,12 +1309,14 @@ components:
     deps:
       - keystone
     tier: compute
-    ## Not selected by `profile: full`. swift-shared-storage asks for ReadWriteMany, which GKE
-    ## does not provide; upstream satisfies it with an nfs-provisioner default this repo does
-    ## not ship. Measured: swift-ring-builder and three swift-storage pods Pending, swift-proxy
-    ## in Init, on six nodes and then on two -- unchanged by node count because it is the
-    ## StorageClass that is missing. Issue #141, and hack/provisioning-preconditions.yaml.
-    requiresProvisioning: true
+    ## Not selected by `profile: full-strict`: nothing in the umbrella provides rwx-storage-class.
+    ## swift-shared-storage asks for ReadWriteMany, which GKE does not provide; upstream satisfies
+    ## it with an nfs-provisioner default this repo does not ship. Measured: swift-ring-builder and
+    ## three swift-storage pods Pending, swift-proxy in Init, on six nodes and then on two --
+    ## unchanged by node count because it is the StorageClass that is missing. Issue #141, and
+    ## hack/provisioning-preconditions.yaml.
+    requires:
+      - rwx-storage-class
 
 # haTopology (#309): who reads the stateful services' host lists, so one value reaches every reader, and what ha needs
 # of the cluster. Not part of the Openstack schema: properties of these charts, measured from them by
