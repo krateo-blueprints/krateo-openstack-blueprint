@@ -57,5 +57,10 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
 - **One live read per component** (`validate-two-phase-values`): the read is reached only when holding, when a token
   is set, or when a generation root of the component is latched in `openstack-credential-generations`. That marker
   keeps a removed token refused without a GET on every render; it costs one ConfigMap read per render in
-  `compositions.yaml`. Counted: 0 plain, 1 rotating, 1 with the token removed after a rotation, 0 for another
-  credential's latched root, 36 holding, 36 holding and rotating.
+  `compositions.yaml`.
+  - **With that ConfigMap absent** (lost, or an install from before it existed), the state is unknown, so that render
+    reads every existing rotating component live. A removed token is still refused, and the render re-creates the
+    ConfigMap, so the next render reads nothing again.
+  - **Counted:** 0 plain, 1 rotating, 1 with the token removed after a rotation, 20 with the ConfigMap absent (one per
+    rotating component), 36 holding, 36 holding and rotating.
+  - **The 0.3.74 upgrade** meets an absent ConfigMap once, so its first render makes those 20 reads.

@@ -61,8 +61,10 @@ What this asserts, in five parts:
  6. THE LIVE READS, COUNTED. osh.liveState stubbed to record each call, the real compositions.yaml
     in operator mode with every component existing: 0 reads plain, exactly the rotated component's
     one with a rotate token, and with its token removed while a generation root of it is latched
-    (so the removal is refused), none for a latched root of another credential, one per held
-    component, and still one for a component both held and rotated.
+    (so the removal is refused), none for a latched root of another credential, one per rotating
+    component when openstack-credential-generations is absent (its state unknown; that render
+    re-creates it, and the next is the plain case), one per held component, and still one for a
+    component both held and rotated.
 
  5. THE OFFLINE RENDER IS UNCHANGED, PROVED DIFFERENTIALLY. Offline nothing exists, so nothing
     is held. Built against a counterfactual chart whose $hold is the constant "", in the four
@@ -960,6 +962,7 @@ READS_VALUES = {"profile": "full", "messaging": {"backend": "operator"},
 
 
 def live_reads(crds, cd, rotate, latched=None):
+    """latched: the data of openstack-credential-generations, or None for the ConfigMap ABSENT."""
     d = stage(CHART, "reads-%d" % len(list(Path(_tmp).glob("reads-*"))))
     cp = d / "templates/compositions.yaml"
     # Counted inside compositions.yaml itself: helm gives each template its own copy of the values, so a count kept
@@ -973,8 +976,9 @@ def live_reads(crds, cd, rotate, latched=None):
     for name, body in (("osh.exists", "true"), ("osh.definition", gotmpl_raw(json.dumps(cd)).join(("{{- ", " -}}"))),
                        ("osh.originVersion", ""), ("osh.liveState", counter),
                        ("osh.depsReady", "true"), ("osh.depsExist", "true"),
-                       ("osh.lookupConfigMap", gotmpl_raw(json.dumps({"data": latched} if latched else {})).join(
-                           ("{{- ", " -}}")))):
+                       ("osh.lookupConfigMap", gotmpl_raw(json.dumps(
+                           {} if latched is None else {"metadata": {"name": "openstack-credential-generations"},
+                                                       "data": latched})).join(("{{- ", " -}}")))):
         h = stub_define(h, name, body)
     hp.write_text(h)
     vf = Path(_tmp) / ("reads-values-%s.yaml" % d.name)
@@ -992,28 +996,35 @@ def live_reads(crds, cd, rotate, latched=None):
 
 
 _heat_root = next(i["secret"] for i in umbrella["credentials"]["items"] if i["id"] == "oslo-messaging-" + READS_COMPONENT)
+# The components the umbrella writes a RabbitMQ projection for: the ids rotate.<id> rotates (values.schema.json).
+_rotating = sorted(k[len("oslo-messaging-"):] for k in json.loads((CHART / "values.schema.json").read_text())
+                   ["properties"]["rotate"]["properties"])
+if not _rotating:
+    measurement_failed("values.schema.json lets rotate nothing, so the latch-absent case has nothing to expect")
+_other = {"oslo-db-keystone": "0" * 64}   # a latched root of another credential: the ConfigMap present, no marker
 READS_CASES = (
-    ("plain", BOTH, CD["available"], False, lambda rd: rd == []),
-    ("rotating", BOTH, CD["available"], True, lambda rd: rd == [READS_COMPONENT]),
+    ("plain", BOTH, CD["available"], False, lambda rd: rd == [], _other),
+    ("rotating", BOTH, CD["available"], True, lambda rd: rd == [READS_COMPONENT], _other),
     # a generation root of heat latched, its token removed: the read still happens, so the removal is refused
     ("rotated, token removed", BOTH, CD["available"], False, lambda rd: rd == [READS_COMPONENT],
-     {_heat_root + "-gdeadbeef": "0" * 64}),
-    # a latched root of ANOTHER credential is not heat's marker
-    ("latched, not messaging", BOTH, CD["available"], False, lambda rd: rd == [],
-     {"oslo-db-keystone": "0" * 64}),
+     dict(_other, **{_heat_root + "-gdeadbeef": "0" * 64})),
+    # the latch ABSENT (lost, or from before it existed): the state is unknown, so every rotating component is read
+    # once; the render re-creates the ConfigMap, and the next render is "plain" again
+    ("latch absent", BOTH, CD["available"], False, lambda rd: sorted(rd) == _rotating, None),
     ("holding", BUMP, CD["ready_on_old"], False,
-     lambda rd: len(rd) > 1 and len(rd) == len(set(rd)) and READS_COMPONENT in rd),
+     lambda rd: len(rd) > 1 and len(rd) == len(set(rd)) and READS_COMPONENT in rd, _other),
     ("holding+rotating", BUMP, CD["ready_on_old"], True,
-     lambda rd: len(rd) > 1 and len(rd) == len(set(rd)) and rd.count(READS_COMPONENT) == 1),
+     lambda rd: len(rd) > 1 and len(rd) == len(set(rd)) and rd.count(READS_COMPONENT) == 1, _other),
 )
 reads_seen = {}
-for rid, crds, cd, rot, ok, *latched in READS_CASES:
-    rd = live_reads(crds, cd, rot, latched[0] if latched else None)
+for rid, crds, cd, rot, ok, latched in READS_CASES:
+    rd = live_reads(crds, cd, rot, latched)
     reads_seen[rid] = rd
     if not ok(rd):
         problems.append(f"live reads, {rid}: osh.liveState was reached for {rd}; the rule is one read per component, "
                         "only when it is held, has a rotate.<id> token, or was rotated (a generation root latched) (0 plain, 1 rotating, "
-                        "1 rotated with its token removed, 1 holding, 1 both).")
+                        "1 rotated with its token removed, 1 per rotating component with the latch absent, 1 holding, "
+                        "1 both).")
 if not reads_seen.get("holding"):
     measurement_failed("the holding case made no live read, so the counter is not counting")
 
@@ -1021,8 +1032,9 @@ if not reads_seen.get("holding"):
 print(f"two-phase values: {len(HOLD_CASES)} decisions, {len(HOLD_VERSION_CASES)} hold versions, "
       f"{len(CD)} synthetic definitions, "
       f"{len(APPROVAL_CASES)} approvals, {len(E2E_CASES)} end-to-end cluster states, "
-      f"{len(SELECTIONS)} selections x 2 modes rendered twice; live reads plain/rotating/holding/both: "
-      f"{len(reads_seen.get('plain', []))}/{len(reads_seen.get('rotating', []))}/{len(reads_seen.get('holding', []))}"
+      f"{len(SELECTIONS)} selections x 2 modes rendered twice; live reads plain/rotating/removed/latch-absent/holding/both: "
+      f"{len(reads_seen.get('plain', []))}/{len(reads_seen.get('rotating', []))}/"
+      f"{len(reads_seen.get('rotated, token removed', []))}/{len(reads_seen.get('latch absent', []))}/{len(reads_seen.get('holding', []))}"
       f"/{len(reads_seen.get('holding+rotating', []))} (components {len(set(reads_seen.get('holding', [])))})")
 if problems:
     print()
