@@ -27,7 +27,7 @@ jobs:
   # GHCR, which happens when the commit skipped the pre-release channel or is not on main
   # (docs/release.md). Pinned like the publisher, to the same release (rule 9).
   preflight:
-    uses: krateo-blueprints/charts/.github/workflows/release-preflight.yaml@788f1a6c106707ada89792f499afdcf3bc0b5d13 # 1.1.0
+    uses: krateo-blueprints/charts/.github/workflows/release-preflight.yaml@aea92de356085f50ea45477a4e6ae2b026cd6b14 # 1.4.2
     with:
       version: ${{ github.ref_name }}
 
@@ -156,7 +156,7 @@ jobs:
     # write token (krateo-blueprints/charts PUBLISHING.md rule 9); Dependabot proposes upgrades. It also
     # reads the served index and installs every chart anonymously before it succeeds.
     # 1.1.0 adds rule 13: the publisher itself refuses a version that is not plain X.Y.Z.
-    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@788f1a6c106707ada89792f499afdcf3bc0b5d13 # 1.1.0
+    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@aea92de356085f50ea45477a4e6ae2b026cd6b14 # 1.4.2
     with:
       source_repo: ${{ github.repository }}
       git_tag: ${{ github.ref_name }}
