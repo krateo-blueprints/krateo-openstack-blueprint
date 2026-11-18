@@ -13,6 +13,38 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **The docs-rendering screen identifies each document past its own concatenations (#388).** `docs/log.md` is rendered
+  from every `docs/log.d` entry, so it repeats all of their tokens. Counted against everything, it left 40 of 71
+  documents identified only by a shared token. That proves the response wasn't truncated, but not that it was for that
+  document.
+  - **Tiers:** each document takes the first tier that yields a token (agreed with the nova peer):
+    1. the longest token unique across all documents;
+    2. else the longest token unique once the documents containing this one's whole token set (its concatenations)
+       are left out;
+    3. else the longest shared token, reported as shared;
+    4. else any block element.
+
+    Every document is still checked.
+  - **Why per document:** the rule's first form (18056b1) left every superset out of one global census. Four
+    documents that merely quote small entries count as supersets that way: `README.md`, `docs/configuration.md`,
+    `docs/release.md` and `docs/supply-chain.md`. Leaving them out for everyone handed 17 documents a "unique" token
+    that one of those quoting documents' renders also held.
+  - **Measured on 72 documents:** tier 1: 32, tier 2: 34, tier 3: 6, tier 4: 0.
+    - Unique tokens that another, non-concatenation document also holds: 17 before, 0 after.
+    - Still shared, as before: `docs/log.md` and the 2026-11-16-01 entry.
+    - Now shared, honestly: four whose "unique" token was quoted elsewhere (the 2026-11-18-02 and -31 entries,
+      `_earlier.md`, `examples/identity-profile/README.md`).
+  - **What no token can fix:** an entry whose every token a quoting document holds (8 here, for example 2026-11-17-03
+    in `README.md`). That document's render passes the entry's check whatever token is chosen.
+  - **Counter:** this adopts nova-kog #181, which counts `<p class="markdown-alert-title"` (prose can't produce a
+    literal `<`).
+  - **Tests:** three self-test arms.
+    - A, B and C = A + B: A and B at tier 2, C shared and still checked.
+    - A small document sharing a long token with a quoting document picks its own tier-1 token.
+    - A document under a concatenation keeps the token it shares with a quoting document shared.
+
+    Mutants caught: skipping tier 1, excluding every superset at tier 2, and dropping supersets from the check.
+
 - **Render-log bot updates a queued pull request (#387).** Run 44291452478 found bot pull request #384 already in the
   merge queue, queued by the run before it. GitHub refused the push to its branch (GH006), and the run failed. The
   entry that run rendered then waited for the next docs/log.d merge, because the bot's own merge starts no run: the
@@ -60,8 +92,8 @@ Curated history; release notes live in GitHub Releases.
   item rendered as a plain quote, and a `[!NOTE]` swallowed by an open fence rendered as shell. No static check saw
   either.
   - **What it does:** `hack/check-doc-rendering.py` POSTs every markdown file outside `charts/` (63 here) to GitHub's
-    `/markdown` (gfm). Each file's count of rendered alert titles must equal all of its admonition markers, fenced or
-    not.
+    `/markdown` (gfm). Each file's count of `markdown-alert-title` must equal all of its admonition markers, fenced
+    or not.
   - **Controls:** a known-good fixture must render 1 alert and a known-bad fenced one 0. Otherwise the run is VOID
     (exit 2).
   - **Per-document check:** each response must contain the document's own identifying token. That is its longest
@@ -75,10 +107,10 @@ Curated history; release notes live in GitHub Releases.
     `docs/log.d` plus `docs/log.md`, because `docs/log.md` is their concatenation, and
     `examples/identity-profile/README.md`. That still proves the response wasn't truncated. It doesn't prove the
     response was for this document.
-  - **Upstream defect, worked around here:** the screen counts the alert title's class name as a substring anywhere in
-    the rendered HTML, so a document that names the class in prose counts as one alert. This entry did, and failed;
-    it now describes the class instead of naming it. The defect is to be reported to the nova repository, where the
-    screen lives.
+  - **Upstream defect, fixed upstream:** the screen counted `markdown-alert-title` as a substring anywhere in the
+    rendered HTML, so a document naming the class in prose counted as one alert. This entry did, and failed. nova-kog
+    #181 now counts `<p class="markdown-alert-title"` (prose can't produce a literal `<`), and this entry names the
+    class plainly again, as the live test of that counter (#388).
 
 - **Monitoring (#312, phase 1).** New component `openstack-monitoring`, switched by the umbrella's `monitoring` value.
   It is explicit opt-in: only `true` turns it on, and the umbrella refuses `true` where alert-provider's CRDs are not

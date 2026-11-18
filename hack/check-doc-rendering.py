@@ -103,7 +103,28 @@ sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "scripts"))
 from mdfence import ADMONITION, fence_scan  # noqa: E402
 
-ALERT = "markdown-alert-title"
+# THE OPENING TAG, BECAUSE PROSE CANNOT PRODUCE A LITERAL `<`.
+#
+# A document that MENTIONS the alert markup -- documentation about this very
+# screen, for instance -- renders its backticked examples as code spans, and a
+# substring counter reads them as alert boxes. Measured on one document
+# declaring ONE real alert and naming three forms in prose:
+#
+#     markdown-alert-title             -> 4   SPOOFED (3 mentions counted)
+#     class="markdown-alert-title"     -> 3   SPOOFED (2 mentions counted)
+#     <p class="markdown-alert-title"  -> 1   correct
+#     <div class="markdown-alert       -> 1   correct
+#
+# GitHub does NOT escape `"` inside a code span, so the attribute form is
+# spoofable; it DOES escape `<` to `&lt;`, so including the opening tag makes
+# the counter unspoofable by text. The first fix here used the attribute form --
+# the openstack-as-a-service session's suggestion after it bit them -- and this
+# repo's own mutation arm caught that it was still spoofable within a minute.
+#
+# This repo had ZERO documents mentioning any form, so its 18-of-18 was LUCKY
+# rather than correct -- worth writing down, because "all green" is exactly how
+# a latent counter bug stays latent.
+ALERT = '<p class="markdown-alert-title"'
 HEADING = re.compile(r"<h[1-6][\s>]")
 SRC_HEADING = re.compile(r"#{1,6} \S")
 # Any block-level element, used only when a document has no distinctive token.
@@ -218,6 +239,57 @@ def pick_token(tokens, counts):
     return None, False
 
 
+def supersets_of(f, corpus):
+    """The other documents that contain f's whole token set -- concatenations of f."""
+    toks = corpus[f]
+    return [g for g in corpus if g != f and toks and toks <= corpus[g]]
+
+
+def identify(f, corpus, full):
+    """(token, unique, tier) for one document, the first tier that yields a token.
+
+      1  the longest token unique across ALL documents (no exclusion);
+      2  else the longest token unique once the documents that contain this one's
+         whole token set are excluded -- its concatenations, such as
+         openstack-as-a-service's docs/log.md over each docs/log.d entry, which
+         repeat every token a source has and would leave it only shared ones;
+      3  else the longest shared token, reported as shared;
+      4  else none: the caller falls back to any block-level element.
+
+    Tier 2 excludes the supersets OF THIS DOCUMENT, not every document that is a
+    superset of some other one. Excluding those globally (the rule's first form)
+    let a document that merely QUOTES a small one -- a README containing every
+    token of a four-line changelog entry -- drop out of the census for everyone,
+    so any third document sharing a token with that README could claim it as
+    unique while the README's render contains it too.
+    """
+    token, unique = pick_token(corpus[f], full)
+    if token is not None and unique:
+        return token, True, 1
+    sups = supersets_of(f, corpus)
+    if sups:
+        local = dict(full)
+        for g in sups:
+            for tok in corpus[g]:
+                local[tok] -= 1
+        token, unique = pick_token(corpus[f], local)
+        if token is not None and unique:
+            return token, True, 2
+    token, unique = pick_token(corpus[f], full)
+    if token is not None:
+        return token, False, 3
+    return None, False, 4
+
+
+def plan(corpus):
+    """[(document, token, unique, tier)] for EVERY document, in order -- the check list."""
+    full = {}
+    for ts in corpus.values():
+        for tok in ts:
+            full[tok] = full.get(tok, 0) + 1
+    return [(f,) + identify(f, corpus, full) for f in sorted(corpus)]
+
+
 def instrument_controls():
     """Returns a list of reasons the instrument cannot be trusted right now."""
     bad = []
@@ -265,6 +337,24 @@ def self_test():
     assert real_two.count(ALERT) == 2, real_two.count(ALERT)
     assert real_two.count("markdown-alert") == 6, \
         "the 3-per-alert inflation is the reason ALERT is the title class"
+
+    # Recorded verbatim from a real response: prose naming three forms of the
+    # markup in backticks, plus one real alert. The fixture asserts BOTH that
+    # the rejected counters are spoofable and that the chosen one is not --
+    # without the first half the arm would pass just as well if ALERT matched
+    # nothing at all.
+    spoof = ('<p>Forms a doc might name: <code class="notranslate">'
+             'markdown-alert-title</code>, <code class="notranslate">'
+             'class="markdown-alert-title"</code>, and <code class="notranslate">'
+             '&lt;p class="markdown-alert-title"&gt;</code>.</p>\n'
+             '<div class="markdown-alert markdown-alert-note">'
+             '<p class="markdown-alert-title"><svg></svg>Note</p>'
+             '<p>one real alert</p>\n</div>')
+    assert spoof.count("markdown-alert-title") == 4, "the bare form is spoofable"
+    assert spoof.count('class="markdown-alert-title"') == 3, \
+        "the attribute form is spoofable too -- `\"` is not escaped in a code span"
+    assert spoof.count(ALERT) == 1, \
+        "the opening-tag form must count the one real alert and no mention"
     assert HEADING.search(real_two)
 
     # 4. The mutation that would make this script useless, asserted as wrong
@@ -333,7 +423,57 @@ def self_test():
     render_of_b = "<h1>B</h1><p>it discusses theUniqueTokenOfB at length</p>"
     assert pa not in render_of_b, "doc A's token must be absent from doc B's render"
 
-    print("check-doc-rendering.py: self-test passed (9 arms)")
+    # 9. The superset rule. C is A plus B, as a concatenation is. Counted
+    #    against everything, A's and B's every token is shared with C. With
+    #    each document's OWN supersets excluded (tier 2), A and B are
+    #    identified by unique tokens again -- and C is still CHECKED, by a
+    #    shared token (tier 3). Excluding C from the check instead would lose
+    #    the one document that copies the others; that is asserted.
+    corp = {"a.md": {"alphaOnlyInA", "commonToAllThree"},
+            "b.md": {"bravoOnlyInB", "commonToAllThree"},
+            "c.md": {"alphaOnlyInA", "bravoOnlyInB", "commonToAllThree"}}
+    got = {f: (tok, uniq, tier) for f, tok, uniq, tier in plan(corp)}
+    assert set(got) == set(corp), "every document must be checked, the superset included: %s" % sorted(got)
+    assert got["a.md"] == ("alphaOnlyInA", True, 2), got["a.md"]
+    assert got["b.md"] == ("bravoOnlyInB", True, 2), got["b.md"]
+    assert got["c.md"][1:] == (False, 3) and got["c.md"][0] is not None, got["c.md"]
+
+    # 10. A quoting document is not a concatenation of everyone. Q contains all
+    #     of the small entry E (so Q is a superset, of E alone) and shares one
+    #     long token with S. S also has a token no other document has, and must
+    #     pick it at tier 1. Under the rule's first form -- every superset left
+    #     out of one global census -- S picked the long token it shares with Q,
+    #     reported as unique, and a render of Q would have passed S's check.
+    corp = {"e.md": {"entryTokenOfE"},
+            "q.md": {"entryTokenOfE", "aVeryLongTokenSharedByQandS", "quoteOwnToken"},
+            "s.md": {"aVeryLongTokenSharedByQandS", "sOwnToken12"}}
+    got = {f: (tok, uniq, tier) for f, tok, uniq, tier in plan(corp)}
+    assert got["s.md"] == ("sOwnToken12", True, 1), got["s.md"]
+    assert got["e.md"] == ("entryTokenOfE", True, 2), got["e.md"]
+    assert got["q.md"][2] == 1, got["q.md"]
+    global_census = {}
+    for f, ts in corp.items():
+        if not any(g != f and corp[g] and corp[g] <= ts for g in corp):
+            for tok in ts:
+                global_census[tok] = global_census.get(tok, 0) + 1
+    assert pick_token(corp["s.md"], global_census) == ("aVeryLongTokenSharedByQandS", True), \
+        "the fixture must express the defect: a global census hands S the token Q's render also holds"
+
+    # 11. Tier 2 excludes THIS document's supersets only. X has no globally unique
+    #     token (L, a concatenation, holds all of it). Without L, X's own token is
+    #     unique -- but the longer token X shares with the quoting document Q
+    #     must stay shared, because Q is not a concatenation of X. Excluding
+    #     every superset at once (Q too, as a superset of E) would hand X that
+    #     longer token as "unique", and a render of Q would pass X's check.
+    corp = {"e.md": {"entryTokenOfE"},
+            "q.md": {"entryTokenOfE", "aVeryLongTokenSharedByQandX", "quoteOwnToken"},
+            "x.md": {"aVeryLongTokenSharedByQandX", "xOwnToken12"},
+            "l.md": {"aVeryLongTokenSharedByQandX", "xOwnToken12", "logOwnToken1"}}
+    got = {f: (tok, uniq, tier) for f, tok, uniq, tier in plan(corp)}
+    assert got["x.md"] == ("xOwnToken12", True, 2), got["x.md"]
+    assert got["l.md"][2] == 1, got["l.md"]
+
+    print("check-doc-rendering.py: self-test passed (13 arms)")
     return OK
 
 
@@ -352,25 +492,25 @@ def main():
             print("  - " + b)
         return VOID
 
-    # Corpus pass first: a token is only an identifier if no other file has it.
-    corpus, counts = {}, {}
+    # Corpus pass first: a token is only an identifier if no other file has it
+    # (identify() says when a concatenation of this file is left out).
+    corpus = {}
     for f in docs():
         lines = open(f, encoding="utf-8", errors="replace").read().split("\n")
         inside, _, _, _ = fence_scan(lines)
         corpus[f] = tokens_of(lines, inside)
-        for t in corpus[f]:
-            counts[t] = counts.get(t, 0) + 1
-    shared = 0
+    supersets = sorted({g for f in corpus for g in supersets_of(f, corpus)})
+    shared, tiers = 0, {1: 0, 2: 0, 3: 0, 4: 0}
 
     void, mismatched, clean = [], [], 0
-    for f in docs():
+    for f, token, unique, tier in plan(corpus):
+        tiers[tier] += 1
         lines = open(f, encoding="utf-8", errors="replace").read().split("\n")
         declared = markers(lines)
         html, why = render("\n".join(lines))
         if html is None:
             void.append("%s: %s" % (f, why))
             continue
-        token, unique = pick_token(corpus[f], counts)
         if token is not None:
             if not unique:
                 shared += 1
@@ -408,6 +548,12 @@ def main():
         print("%d document(s) had no corpus-unique token and were identified by "
               "a shared one -- still proof against a truncated response, not "
               "against a response for a different document." % shared)
+    print("identified at tier 1 (unique everywhere): %d, tier 2 (unique without this document's "
+          "concatenations): %d, tier 3 (shared): %d, tier 4 (block element): %d"
+          % (tiers[1], tiers[2], tiers[3], tiers[4]))
+    if supersets:
+        print("%d document(s) contain another document's whole token set (still checked): %s"
+              % (len(supersets), ", ".join(supersets)))
     if void:
         return VOID
     return MISMATCH if mismatched else OK
