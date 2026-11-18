@@ -76,6 +76,29 @@ gate_values = _gv_util.module_from_spec(_gv_spec)
 _gv_spec.loader.exec_module(gate_values)
 
 
+# tooz 8.1.0 (openstack/requirements stable/2026.1 upper-constraints), pyproject.toml [project.entry-points."tooz.backends"]:
+# the schemes a tooz coordination URL may name. H2 run 4: gnocchi rendered memcached-discovery://h0,h1,h2, which this gate
+# counted as a valid memcache list (it compared only the hosts), and tooz refused it ("No 'tooz.backends' driver found").
+TOOZ_DRIVERS = {"etcd", "etcd3+http", "etcd3+https", "kazoo", "memcached", "ipc", "redis", "postgresql", "mysql", "file",
+                "zookeeper", "consul", "kubernetes"}
+TOOZ_RX = re.compile(r"^\s*(coordination_url|backend_url)\s*=\s*(\S+)\s*$")
+REDIS_URL_RX = re.compile(r"^\s*redis_url\s*=\s*(\S+)\s*$")
+
+
+def tooz_problem(url):
+    """None when url is a tooz URL a lock can live on: a registered driver and, unless it is a path, one host."""
+    scheme, sep, rest = url.partition("://")
+    if not sep:
+        return "has no scheme"
+    if scheme not in TOOZ_DRIVERS:
+        return "names driver %r, which tooz 8.1.0 does not register (%s)" % (scheme, ", ".join(sorted(TOOZ_DRIVERS)))
+    if scheme not in ("file", "ipc", "kubernetes"):
+        netloc = rest.split("/", 1)[0].split("?", 1)[0].rsplit("@", 1)[-1]
+        if "," in netloc or not netloc:
+            return "names %s host(s) %r: a lock must live on exactly one backend" % ("no" if not netloc else "several", netloc)
+    return None
+
+
 def fail(m):
     failures.append(m)
 
@@ -380,11 +403,21 @@ def part3(uv, ha_specs, tmp):
             fail("3: %s does not render with the spec the umbrella builds: %s" % (chart, err.strip()[:200]))
             continue
         nmq = nmc = 0
+        tooz_seen, redis_urls = [], []
         for d in yaml.safe_load_all(out):
             if not d:
                 continue
             for text in doc_texts(d):
                 for line in text.splitlines():
+                    m = TOOZ_RX.match(line)
+                    if m and m.group(2):
+                        tooz_seen.append(m.group(2))
+                        why = tooz_problem(m.group(2))
+                        if why:
+                            fail("3: %s renders %s = %s, which %s" % (chart, m.group(1), m.group(2)[:160], why))
+                    m = REDIS_URL_RX.match(line)
+                    if m:
+                        redis_urls.append(m.group(1))
                     if chart in counts["builds"] and "rabbit://" in line and re.search(r"@[A-Za-z0-9.-]+:5672\b", line):
                         # Port 5672: a transport URL. rabbit-init's management connection (port 15672) is one host by
                         # design and is not a client's broker list.
@@ -399,6 +432,18 @@ def part3(uv, ha_specs, tmp):
                         if hosts != want_mc:
                             fail("3: %s renders a memcache list naming %s, want %s: %s"
                                  % (chart, hosts, want_mc, line.strip()[:160]))
+        # gnocchi coordinates on its redis metric store when coordination_url is unset (gnocchi/service.py
+        # prepare_service): then that redis URL is the lock backend and must satisfy the same rule.
+        if chart == "gnocchi":
+            if not tooz_seen and not redis_urls:
+                fail("3: gnocchi renders no coordination_url and no redis_url with the ha spec: no lock backend at all")
+            for u in ([] if tooz_seen else redis_urls):
+                why = tooz_problem(u)
+                if why:
+                    fail("3: gnocchi coordinates on its redis_url %s, which %s" % (u[:160], why))
+            counts["tooz"] = counts.get("tooz", 0) + len(tooz_seen or redis_urls)
+        else:
+            counts["tooz"] = counts.get("tooz", 0) + len(tooz_seen)
         if chart in counts.get("builds", set()) and not nmq:
             fail("3: %s builds a transport URL from endpoints.oslo_messaging.statefulset but renders none" % chart)
         if chart in topo["cache"] and not nmc:
@@ -460,7 +505,7 @@ def main():
         if ha_specs is not None:
             part3(uv, ha_specs, tmp)
             part4(u)
-    for k in ("1", "2", "3", "4"):
+    for k in ("1", "2", "3", "4", "tooz"):
         if not counts.get(k):
             fail("part %s checked nothing" % k)
     if failures:
@@ -470,8 +515,9 @@ def main():
     mq, mc = counts["1"]
     print("OK: haTopology matches the charts (%d hold the RabbitMQ host list, %d build a memcache list); %d component specs: ha off "
           "and one RabbitMQ replica pass nothing, RabbitMQ at 3 and ha move only their readers, the refusals hold; "
-          "%d charts rendered with the ha spec list every RabbitMQ and memcached pod; the node refusal holds in %d cases"
-          % (mq, mc, counts["2"], len(counts["3"]), counts["4"]))
+          "%d charts rendered with the ha spec list every RabbitMQ and memcached pod; %d tooz coordination URL(s) name a "
+          "registered driver and one backend; the node refusal holds in %d cases"
+          % (mq, mc, counts["2"], len(counts["3"]), counts["tooz"], counts["4"]))
 
 
 main()

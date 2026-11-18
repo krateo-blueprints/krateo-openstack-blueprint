@@ -48,10 +48,25 @@ limitations under the License.
 {{- $_ := set .Values.conf.gnocchi.keystone_authtoken "password" .Values.endpoints.identity.auth.gnocchi.password -}}
 {{- end -}}
 
-{{- if empty .Values.conf.gnocchi.DEFAULT.coordination_url -}}
+{{/*
+Krateo (#309 H2 run 4): the tooz coordination backend. metricd's sack locks must live on ONE backend: locks spread over
+memcached shards would let two metricd hold one sack. Upstream derived the URL from the memcache endpoint and took the
+tooz DRIVER from endpoints.oslo_cache.hosts.default -- right only while that host is literally `memcached`. With
+ha.enabled the umbrella sets it to the headless Service memcached-discovery and a host list, which rendered
+`memcached-discovery://h0,h1,h2` ("No 'tooz.backends' driver found") and gnocchi never became Ready.
+  - storage.driver redis (this blueprint's default): coordination_url is left unset, so gnocchi coordinates on the
+    metric store's redis (gnocchi/service.py prepare_service fills an unset coordination_url from the redis URL; the
+    readiness probe models the same fallback). One backend, in every mode.
+  - any other storage driver: the memcached driver, named literally, on exactly one memcached host; a memcache host
+    list (ha.enabled) is refused, because it cannot be a lock backend. hack/validate-ha-propagation.py checks every
+    tooz URL the charts render with the ha spec.
+*/}}
+{{- if and (empty .Values.conf.gnocchi.DEFAULT.coordination_url) (ne (.Values.conf.gnocchi.storage.driver | toString) "redis") -}}
+{{- if (.Values.endpoints.oslo_cache.statefulset | default dict).name -}}
+{{- fail "\n\ngnocchi coordination: with a memcached host list (ha.enabled) memcached cannot be gnocchi's tooz lock backend (locks spread over shards). Use storage.driver redis, which gnocchi coordinates on, or set conf.gnocchi.DEFAULT.coordination_url to a single-backend tooz URL.\n" -}}
+{{- end -}}
 {{- $endpointUrl := tuple "oslo_cache" "internal" "memcache" . | include "helm-toolkit.endpoints.host_and_port_endpoint_uri_lookup" }}
-{{- $driver := .Values.endpoints.oslo_cache.hosts.default -}}
-{{- $_ := printf "%s://%s" $driver $endpointUrl | set .Values.conf.gnocchi.DEFAULT "coordination_url" -}}
+{{- $_ := printf "memcached://%s" $endpointUrl | set .Values.conf.gnocchi.DEFAULT "coordination_url" -}}
 {{- end -}}
 
 {{- dict "envAll" . "entries" (include "gnocchi.db_dropin_entries" . | fromJsonArray) "confKey" "gnocchi" | include "helm-toolkit.utils.db_dropin_refuse" }}
