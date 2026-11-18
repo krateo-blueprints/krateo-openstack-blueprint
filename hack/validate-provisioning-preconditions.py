@@ -1,34 +1,44 @@
 #!/usr/bin/env python3
-"""`profile: full-strict` must omit exactly the components that need provisioning, and `full`
-must still include them.
+"""`profile: full-strict` must omit exactly the components whose requirements the install does not
+provide, and `full` must still include them.
 
 Four of the 36 components cannot start on a Kubernetes cluster as it comes: cinder wants a
-Ceph cluster for its only shipped volume backend (from 0.3.43, #196), ironic wants an
-interface named `ironic-pxe`, octavia wants a Neutron port per host on its management network,
-swift wants a ReadWriteMany StorageClass. Measured on a 4-node GKE install of profile=full: six
-pods at 14 restarts in Init plus four Pending, none of which could ever become Ready there.
+volume backend (its only shipped one is Ceph, #196), ironic wants an interface named
+`ironic-pxe`, octavia wants a Neutron port per host on its management network, swift wants a
+ReadWriteMany StorageClass. Measured on a 4-node GKE install of profile=full: six pods at 14
+restarts in Init plus four Pending, none of which could ever become Ready there.
 
-They are flagged `requiresProvisioning: true`. `profile: full-strict` skips the flagged ones;
-`profile: full` is unchanged and still selects all 36, because taking components away from an
-operator who HAS provisioned a PXE interface, an lb-mgmt-net or an RWX StorageClass would be a
-behaviour change arriving through a patch release. This gate asserts all four directions:
+Each lists what it needs under components[].requires, a capability (block-storage, pxe-interface,
+lb-mgmt-net, rwx-storage-class). `profile: full-strict` selects a component only when the install
+provides every capability it requires; `profile: full` is unchanged and still selects all 36,
+because taking components away from an operator who HAS provisioned what they need would be a
+behaviour change arriving through a patch release. One capability is provided by the umbrella
+itself: block-storage, by storage.backend when it is not none (#196). This gate asserts:
 
-  * every flagged component has an entry in hack/provisioning-preconditions.yaml, so a component
-    cannot be quietly dropped from a profile without saying what it needs;
-  * every entry names a flagged component, so a precondition cannot describe something no
-    profile distinguishes -- which would read as a warning while nothing acts on it;
-  * profile=full-strict does NOT select any flagged component, RENDERED rather than inferred
-    from the template text -- otherwise the flag is data nothing reads;
-  * profile=full DOES select all of them, so the opt-in cannot quietly become the default.
+  * every component that requires something has an entry in hack/provisioning-preconditions.yaml,
+    and the entry's `capability` is exactly what the component requires, so a component cannot be
+    quietly dropped from a profile without saying what it needs, nor require a capability (a
+    typo) that nothing declares and nothing could ever provide;
+  * every entry names a component that requires its capability, so a precondition cannot describe
+    something no profile distinguishes -- which would read as a warning while nothing acts on it;
+  * with storage.backend none, profile=full-strict does NOT select any of them, RENDERED rather
+    than inferred from the template text -- otherwise `requires` is data nothing reads;
+  * profile=full DOES select all of them, so the opt-in cannot quietly become the default;
+  * THE POSITIVE CONTROL: for every other storage.backend the schema accepts, osh.providedCapabilities
+    answers block-storage and full-strict selects exactly the none selection plus the components
+    that require block-storage alone -- and still none of the others. Without it, a selector that
+    ignored `requires` altogether and excluded the four by name would pass every check above.
 
-The one-directional version would have been the easy one to write and would have let the set rot
-in whichever direction nobody was looking at. The third and fourth are rendered because the
-first version of this gate checked for the strings `requiresProvisioning` and the component
-names in the template, and was satisfied by its own explanatory comment. Each entry must also
-carry a `symptom` and a `check`: the symptom because every one of these fails as `Init:` forever,
-which a pod census can only count, and the check because a precondition an operator cannot test
-is one they will rediscover instead.
+The selections are read through the osh.selected helper by a probe template: an offline render of
+the umbrella emits no component (no CRD is served), so the emitted manifest says nothing about what
+was selected. The third and fourth checks are rendered because the first version of this gate
+checked for the strings `requiresProvisioning` and the component names in the template, and was
+satisfied by its own explanatory comment. Each entry must also carry a `symptom` and a `check`: the
+symptom because every one of these fails as `Init:` forever (or, for cinder now, as a render error),
+which a pod census can only count, and the check because a precondition an operator cannot test is
+one they will rediscover instead.
 """
+import json
 import os
 import re
 import shutil
@@ -49,8 +59,9 @@ HELPERS = os.path.join(ROOT, "blueprints", "openstack", "chart", "templates", "_
 
 
 
-def selection_for_profile(profile):
-    """What osh.selected actually returns for a profile -- rendered, not inferred from text."""
+def render_probe(values):
+    """(selected, provided) as osh.selected and osh.providedCapabilities return them for `values`,
+    rendered, not inferred from text. None when the umbrella does not render."""
     tmp = tempfile.mkdtemp()
     try:
         dst = os.path.join(tmp, "chart")
@@ -65,17 +76,39 @@ def selection_for_profile(profile):
             shutil.copytree(tk, os.path.join(dst, "charts", "helm-toolkit"))
         probe = os.path.join(dst, "templates", "zz-selection-probe.yaml")
         open(probe, "w").write(
-            "#SELECTED {{ include \"osh.selected\" (list $) }}\n")
-        p = subprocess.run(["helm", "template", "gate", dst, "--set", f"profile={profile}"],
-                           capture_output=True, text=True)
+            "#SELECTED {{ include \"osh.selected\" (list $) }}\n"
+            "#PROVIDED {{ include \"osh.providedCapabilities\" (list $) }}\n")
+        vf = os.path.join(tmp, "values.yaml")
+        open(vf, "w").write(yaml.safe_dump(values))
+        p = subprocess.run(["helm", "template", "gate", dst, "-f", vf], capture_output=True, text=True)
         if p.returncode:
+            print(f"  (render with {values} failed: {p.stderr.strip()[:300]})")
             return None
+        sel = prov = None
         for line in p.stdout.splitlines():
-            if line.startswith("#SELECTED "):
-                return set(line.split()[1:])
-        return None
+            if line.startswith("#SELECTED"):
+                sel = set(line.split()[1:])
+            if line.startswith("#PROVIDED"):
+                prov = set(line.split()[1:])
+        if sel is None or prov is None:
+            return None
+        return sel, prov
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def storage_values(backend):
+    """storage values that render with `backend`: ceph-external names its source Secrets or is refused (#308), so the
+    selection probe gives it placeholders; they select nothing."""
+    v = {"backend": backend}
+    if backend == "ceph-external":
+        v["ceph"] = {"keys": {k: {"secret": "gate-" + k, "key": "key"} for k in ("cinder", "glance", "monHost")}}
+    return v
+
+
+def selection_for_profile(profile, backend="none"):
+    r = render_probe({"profile": profile, "storage": storage_values(backend)})
+    return None if r is None else r[0]
 
 
 def main():
@@ -86,7 +119,11 @@ def main():
     comps = (yaml.safe_load(open(UMBRELLA)) or {}).get("components") or []
     if not comps:
         sys.exit("FAIL: the umbrella declares no components -- nothing was measured")
-    flagged = {c["name"] for c in comps if c.get("requiresProvisioning")}
+    requires = {c["name"]: set(c.get("requires") or []) for c in comps if c.get("requires")}
+    flagged = set(requires)
+    if any("requiresProvisioning" in c for c in comps):
+        sys.exit("FAIL: a component still carries requiresProvisioning, which nothing reads since #196: "
+                 "list what it needs under `requires` instead")
 
     decl = (yaml.safe_load(open(DECL)) or {}).get("preconditions") or []
     if not decl:
@@ -95,7 +132,7 @@ def main():
                  "has been emptied")
     declared = {}
     for e in decl:
-        for k in ("component", "requires", "symptom", "check", "issue"):
+        for k in ("component", "capability", "requires", "symptom", "check", "issue"):
             if not e.get(k):
                 sys.exit(f"FAIL: a precondition entry is missing {k!r}: "
                          f"{e.get('component', '<unnamed>')}")
@@ -104,16 +141,23 @@ def main():
     problems = []
     for name in sorted(flagged - set(declared)):
         problems.append(
-            f"{name} is flagged requiresProvisioning and has no entry in "
-            f"hack/provisioning-preconditions.yaml. It has been removed from every profile "
+            f"{name} requires {sorted(requires[name])} and has no entry in "
+            f"hack/provisioning-preconditions.yaml. It has been removed from full-strict "
             f"without saying what an operator must provide to use it."
         )
     for name in sorted(set(declared) - flagged):
         problems.append(
-            f"{name} has a declared provisioning precondition but is NOT flagged "
-            f"requiresProvisioning, so the profiles still install it. The declaration reads as "
-            f"a warning while the component still ships by default."
+            f"{name} has a declared provisioning precondition but requires nothing, so the "
+            f"profiles still install it. The declaration reads as a warning while the component "
+            f"still ships by default."
         )
+    for name in sorted(flagged & set(declared)):
+        if requires[name] != {declared[name]["capability"]}:
+            problems.append(
+                f"{name} requires {sorted(requires[name])} but its precondition declares the "
+                f"capability {declared[name]['capability']!r}: a capability no entry declares is "
+                f"one nothing can ever provide, so the component could never be selected"
+            )
     known = {c["name"] for c in comps}
     for name in sorted(set(declared) - known):
         problems.append(f"{name} has a precondition but is not a component of this umbrella")
@@ -130,6 +174,48 @@ def main():
     # release this was deliberately designed to avoid.
     full = selection_for_profile("full")
     strict = selection_for_profile("full-strict")
+    none_probe = render_probe({"profile": "full-strict", "storage": {"backend": "none"}})
+    if none_probe is not None and none_probe[1]:
+        problems.append(f"with storage.backend none, osh.providedCapabilities answers {sorted(none_probe[1])}; "
+                        "none provides nothing")
+    # THE POSITIVE CONTROL. Every backend the schema accepts other than none provides block-storage, and with it
+    # full-strict selects exactly what it selected with none plus the components that require block-storage alone.
+    schema = json.load(open(os.path.join(ROOT, "blueprints", "openstack", "chart", "values.schema.json")))
+    backends = ((((schema.get("properties") or {}).get("storage") or {}).get("properties") or {})
+                .get("backend") or {}).get("enum") or []
+    others = [b for b in backends if b != "none"]
+    block = {n for n, r in requires.items() if r == {"block-storage"}}
+    if "none" not in backends or not others:
+        problems.append(f"the umbrella schema's storage.backend enum is {backends}: it must hold none and at least "
+                        "one backend, or the positive control below has nothing to render")
+    if not block:
+        problems.append("no component requires block-storage alone, so storage.backend selects nothing and the "
+                        "positive control proves nothing")
+    controls = 0
+    for b in others:
+        r = render_probe({"profile": "full-strict", "storage": storage_values(b)})
+        if r is None or strict is None:
+            problems.append(f"could not render full-strict with storage.backend {b}, so the positive control "
+                            "did not run")
+            continue
+        sel_b, prov_b = r
+        if prov_b != {"block-storage"}:
+            problems.append(f"with storage.backend {b}, osh.providedCapabilities answers {sorted(prov_b)}, "
+                            "want exactly block-storage")
+        if sel_b != strict | block:
+            problems.append(
+                f"with storage.backend {b}, full-strict selects {len(sel_b)}: missing "
+                f"{sorted((strict | block) - sel_b)}, extra {sorted(sel_b - (strict | block))}. It must be the none "
+                f"selection plus {sorted(block)}: a backend provides block-storage and nothing else")
+        full_b = selection_for_profile("full", b)
+        if full is not None and full_b != full:
+            problems.append(f"profile=full selects differently with storage.backend {b}: full selects every "
+                            "component whatever the install provides")
+        ident_b = selection_for_profile("identity", b)
+        if ident_b is None or ident_b & flagged:
+            problems.append(f"profile=identity with storage.backend {b} selects {sorted((ident_b or set()) & flagged)}"
+                            " or does not render: a backend must not widen the identity profile")
+        controls += 1
     if full is None or strict is None:
         problems.append("could not render the umbrella for both profiles, so neither half of "
                         "the contract was verified -- a flag nothing reads selects everything")
@@ -148,7 +234,7 @@ def main():
         if still_in_strict:
             problems.append(
                 "profile=full-strict still selects " + ", ".join(still_in_strict) + " despite "
-                "the requiresProvisioning flag, so the flag is data that nothing reads"
+                "what they require with storage.backend none, so `requires` is data that nothing reads"
             )
         if strict >= full:
             problems.append(
@@ -180,9 +266,10 @@ def main():
         for p in sorted(set(problems)):
             print("  " + p)
         return 1
-    print(f"OK: profile=full selects all {len(full)}; profile=full-strict selects "
-          f"{len(strict)}, excluding {', '.join(sorted(flagged))}, and each of those "
-          f"declares what it needs, its symptom and a check")
+    print(f"OK: profile=full selects all {len(full)}; profile=full-strict selects {len(strict)} with "
+          f"storage.backend none, excluding {', '.join(sorted(flagged))}, and {len(strict | block)} with each of "
+          f"{controls} other backend(s), adding {', '.join(sorted(block))}; each declares what it needs, its "
+          f"symptom and a check")
     return 0
 
 

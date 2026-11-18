@@ -1,0 +1,53 @@
+component: gnocchi
+issue: 115
+reason: >-
+  Upstream points gnocchi at quay.io/attcomdev/ubuntu-source-gnocchi-* images that are Docker
+  Registry v1 manifests, unpullable by any current docker, and publishes no alternative. The
+  only maintained family is the official OpenStack Kolla set, which carries no apache, so the
+  API cannot be served the way upstream's chart serves it.
+assertions:
+  - file: templates/bin/_gnocchi-api.sh.tpl
+    absent: exec apache2
+    why: >-
+      Kolla images have no apache2 binary and no /etc/apache2. Restoring upstream's
+      `exec apache2 -DFOREGROUND` makes the API container exec a binary that is not in the
+      image, so it fails instantly while the values still name the Kolla images.
+  - file: templates/bin/_gnocchi-api.sh.tpl
+    present: exec uwsgi
+    why: >-
+      Kolla ships uwsgi at /var/lib/kolla/venv/bin/uwsgi with gnocchi's standard WSGI module,
+      which is how the API is served here.
+  - file: templates/deployment-api.yaml
+    absent: /etc/apache2/conf-enabled
+    why: >-
+      The wsgi-gnocchi.conf mount has nowhere to land in an image with no apache, and its
+      presence signals the apache serving model has been restored.
+  - file: values.yaml
+    absent: attcomdev
+    why: >-
+      The unpullable v1-manifest images. preflight-refs' media-type check would also catch
+      these, but only on its weekly network run; this catches them on every push.
+  - file: values.yaml
+    present: openstack.kolla/gnocchi-api
+    why: The maintained replacement.
+  - file: values.yaml
+    absent: "composite:gnocchi+auth"
+    why: >-
+      Upstream's conf.paste names its composites gnocchi+auth / gnocchi+noauth, which no
+      version of gnocchi has ever asked for: gnocchi/rest/app.py load_app() looks up
+      "gnocchi+" + conf.api.auth_mode, which is gnocchi+keystone here. Measured in
+      quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble: with upstream's names,
+      `uwsgi --need-app` ends in `LookupError: No section 'gnocchi+keystone'` and
+      `*** no app loaded. GAME OVER ***`, so the API serves nothing.
+  - file: values.yaml
+    present: "composite:gnocchi+keystone"
+    why: >-
+      The composite gnocchi actually asks for. hack/validate-gnocchi-readiness.py also
+      asserts it in the RENDERED api-paste.ini, which is the form the container reads.
+  - file: values.yaml
+    absent: gnocchi.rest.VersionsController
+    why: >-
+      Upstream points the paste apps at gnocchi.rest.VersionsController and
+      gnocchi.rest.V1Controller. gnocchi/rest/__init__.py is empty in gnocchi 4.7; the
+      controllers are in gnocchi.rest.api, and paste resolves the root at app load, so
+      restoring upstream's names breaks the API even with the composites fixed.

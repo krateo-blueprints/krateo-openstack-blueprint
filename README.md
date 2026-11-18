@@ -237,7 +237,12 @@ kubectl create namespace openstack-system
 #     plane resizing), core-provider up to 2.13.107 can leave it deployed with its install hooks never
 #     run and its pods waiting forever. Recovery: delete that component's Composition, and the umbrella
 #     re-creates it (core-provider#563; 2.13.108 marks it Ready=False/HooksMayNotHaveRun, #297).
-# cinder is not in full-strict because its only backend needs Ceph (#196). NOT verified at this
+#   - cinder needs a block-storage backend: a Ceph cluster, through storage.backend ceph-rook or
+#     ceph-external ("Storage: consuming a Ceph cluster" below; the Ceph path is not yet verified on a
+#     live cluster, #308). With the default none, full-strict leaves it out, and selected anyway
+#     (profile: full, or enabled:) its Composition reports "cinder needs a volume backend, and
+#     storage.backend is none (#196)" instead of waiting in Init (see the full-strict section).
+# NOT verified at this
 # version: the 36-component profile: full, kind, a VNC console in a browser, and the
 # per-component path further down.
 
@@ -304,19 +309,37 @@ kubectl apply -f "$OS"
 `profile: identity` brings up MariaDB+Memcached+Keystone+Glance+Horizon; `profile: full`
 brings up **all 36 components** (needs a large amd64 cluster — see `quickstart-gke.md`).
 
-#### `profile: full-strict` — full, minus the four that need provisioning you must do yourself
+#### `profile: full-strict` — full, minus what needs provisioning you must do yourself
+
+> **cinder now refuses to render without a block-storage backend (#196).** The Openstack
+> Composition has a `storage.backend` (default `none`), and the umbrella passes it to cinder.
+> With `none`, `full-strict` leaves cinder out, and a cinder selected anyway — `profile: full`, or
+> `enabled:` — does not install: its Composition reports *cinder needs a volume backend, and
+> storage.backend is none (#196)* instead of `cinder-volume` sitting in `Init` on `ceph-etc`.
+> `full` itself is unchanged and still selects cinder, so a `full` install shows that one
+> component failed rather than stuck. With a Ceph backend, `ceph-rook` or `ceph-external`, cinder
+> installs (see "Storage: consuming a Ceph cluster"). Installs that provisioned Ceph by hand for the
+> old `rbd1` precondition lose that path on purpose: it handed OpenStack the Ceph `client.admin`
+> key, which #308 rules out. `componentValues.cinder.krateo.storageBackend` is refused:
+> `storage.backend` is the one place that says which backend the install has. A standalone
+> `Cinder` Composition keeps upstream's wiring at its own default (`krateo.storageBackend:
+> unmanaged`), with the old precondition.
 
 > **Upgrading an existing `full-strict` install to 0.3.43 or later uninstalls its `cinder`
 > Composition.** From 0.3.43 `cinder` is one of the components `full-strict` leaves out, because
 > its only shipped volume backend is Ceph and nothing provides a Ceph cluster (#196). On a
 > default install that cinder never worked: `cinder-volume` never started, and from 0.3.41 its
 > `storage-init` hook held the release in `pending-install`. Measured on #179 and on a cold
-> install (#204). If you have provisioned Ceph and use cinder, switch to `profile: full`, or
-> keep `full-strict` and add `cinder` to `enabled:`, **before** you upgrade.
+> install (#204). Up to the #196 fix, an install that had provisioned Ceph could keep cinder with
+> `profile: full` or `enabled:`; that path is now closed (see the notice above).
 
-Four components — `cinder`, `ironic`, `octavia` and `swift` — each wait on infrastructure that no
-Kubernetes cluster provides and that this blueprint does not create. They are in `profile: full`,
-and they stay there. `profile: full-strict` is the same set **minus those four**:
+Four components — `cinder`, `ironic`, `octavia` and `swift` — each require infrastructure that no
+Kubernetes cluster provides and that this blueprint does not create, listed as a capability under
+`components[].requires` in the umbrella (`block-storage`, `pxe-interface`, `lb-mgmt-net`,
+`rwx-storage-class`). They are in `profile: full`, and they stay there. `profile: full-strict` is
+the same set **minus each one whose capability the install does not provide**. Only
+`block-storage` can be provided today, by `storage.backend`; with the default `none` that is all
+four:
 
 ```yaml
 spec:
@@ -328,7 +351,7 @@ of `openstack-network-node` (see the labelling block above).
 
 | component | needs | symptom when it is absent |
 |---|---|---|
-| `cinder` | a Ceph cluster, plus the ConfigMap `ceph-etc` and the keyring Secrets `pvc-ceph-client-key` and `cinder-volume-rbd-keyring` in `openstack`, for the default `rbd1` backend | `cinder-storage-init` and `cinder-volume` stay in `Init` on `FailedMount` for `ceph-etc`; `cinder-api` and `cinder-scheduler` wait on `cinder-volume` |
+| `cinder` | `block-storage`: a `storage.backend` other than `none` — a Ceph cluster, consumed as "Storage: consuming a Ceph cluster" describes | its Composition reports the render error *cinder needs a volume backend, and storage.backend is none (#196)*. Before the fix: `cinder-storage-init` and `cinder-volume` stayed in `Init` on `FailedMount` for `ceph-etc` |
 | `ironic` | an interface named `ironic-pxe` on each conductor node — the bare-metal provisioning NIC | `ironic-conductor-init` exits 1 with `Could not find IP for pxe to bind to`; the pod sits in `Init:CrashLoopBackOff` |
 | `octavia` | `lb-mgmt-net` plus a Neutron port per node, named `octavia-{worker,health-manager}-port-<hostname>` | the `get-port` init containers log `No Port found for octavia-worker-port-…` and never finish |
 | `swift` | a StorageClass offering `ReadWriteMany` (upstream uses an `nfs-provisioner` default this repo does not ship) | `swift-ring-builder` and `swift-storage` stay `Pending`, `swift-proxy` stays in `Init` |
@@ -354,10 +377,13 @@ injected and `designate-manage pool update` died on `` Field `host' cannot be No
 was to deploy the thing it needs rather than to document the need, and `full-strict` went up by
 two — designate back in, and powerdns itself.
 
-`hack/provisioning-preconditions.yaml` carries each one with a command you can run to check it,
-and `hack/validate-provisioning-preconditions.py` asserts **both** halves by rendering the chart:
-every flagged component is still selected by `full`, none is selected by `full-strict`, and each
-declares what it needs, its symptom and that check. Neither profile can drift from the other
+`hack/provisioning-preconditions.yaml` carries each one with its capability and a command you can
+run to check it, and `hack/validate-provisioning-preconditions.py` asserts **both** halves by
+rendering the chart: every such component is still selected by `full`, none is selected by
+`full-strict` with `storage.backend: none`, and each declares what it needs, its symptom and that
+check. As a positive control it renders `full-strict` with every other backend too, which must add
+cinder and nothing else. `hack/validate-storage-backend.py` asserts the value reaches cinder alone
+and that cinder refuses without a backend. Neither profile can drift from the other
 silently, and a precondition cannot describe a component that no profile distinguishes.
 
 To take just one of them on top of `full-strict` — say you have the RWX StorageClass but no PXE
@@ -416,6 +442,107 @@ kubectl apply -f "$EX"
 ```
 
 Full install paths and how to access OpenStack/Horizon: [docs/usage.md](docs/usage.md).
+
+## Storage: consuming a Ceph cluster
+
+cinder's volumes — and, if you choose, glance's images — live in Ceph (#308). The blueprint consumes **any** Ceph
+the same way and never holds the Ceph `client.admin` key: the cluster's side creates the users, their caps and the
+pools, and mints the keys; the umbrella **copies** each key and the monitor addresses into its namespace with
+External Secrets Operator, and the charts project the copies. Nothing here depends on a cloud provider.
+
+```yaml
+spec:
+  profile: full-strict          # now includes cinder
+  storage:
+    backend: ceph-rook          # or ceph-external
+    ceph:
+      sourceNamespace: rook-ceph
+      glanceStore: rbd          # optional: images in Ceph too (default pvc)
+```
+
+**What must exist on Ceph's side** (with Rook: a `CephBlockPool` per pool and a `CephClient` per user; otherwise the
+Ceph admin), with the names in `storage.ceph` (defaults shown):
+
+- pools `cinder.volumes` (and `glance.images` for `glanceStore: rbd`);
+- `client.cinder` with `mon 'profile rbd'`, `osd 'profile rbd pool=cinder.volumes, profile rbd-read-only pool=glance.images'`;
+- `client.glance` with `mon 'profile rbd'`, `osd 'profile rbd pool=glance.images'` (only for `glanceStore: rbd`).
+
+These are the caps the Ceph documentation gives for OpenStack (docs.ceph.com, "Block Devices and OpenStack"). The
+blueprint checks, with each user's own key, that its pool exists and the user can use it: `cinder-storage-init`
+fails with `client.cinder cannot list pool cinder.volumes` when either is missing.
+
+**Where the keys come from:**
+
+- `ceph-rook`: Rook keeps a CephClient's key in Secret `rook-ceph-client-<name>` (key `userKey`) and the monitors in
+  `rook-ceph-config` (key `mon_host`), in the CephCluster's namespace (`storage.ceph.rook` if yours differ).
+- `ceph-external`: the Ceph admin places each user's key and `mon_host` in Secrets and names them under
+  `storage.ceph.keys.{cinder,glance,monHost}` (each `secret` and `key`); the umbrella refuses an empty one.
+
+**The read grant.** The copies are read by the ServiceAccount `openstack-credentials-ceph-reader` in the Openstack
+namespace. If the source Secrets are in that namespace, the umbrella grants it itself. If they are in another (Rook's),
+that namespace's owner grants exactly those Secrets — for example:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openstack-ceph-reader
+  namespace: rook-ceph
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    resourceNames:
+      - rook-ceph-client-cinder
+      - rook-ceph-client-glance
+      - rook-ceph-config
+    verbs:
+      - get
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - selfsubjectrulesreviews
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openstack-ceph-reader
+  namespace: rook-ceph
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: openstack-ceph-reader
+subjects:
+  - kind: ServiceAccount
+    name: openstack-credentials-ceph-reader
+    namespace: openstack
+```
+
+Without it, External Secrets Operator reports the copy store `openstack-credentials-ceph` not Ready, and the Openstack
+Composition **refuses to render**, naming the namespace, the ServiceAccount and the exact Secrets to grant. A Ceph
+consumer (cinder, libvirt, glance with `rbd`) is **created only once the copies of the keys it reads report Ready**:
+until then it is listed in `openstack-install-pending`, like a dependency that is not Ready yet, and never starts on
+a key nothing has copied. Check with
+`kubectl get secretstore openstack-credentials-ceph` and
+`kubectl get externalsecret openstack-credential-ceph-client-cinder openstack-credential-ceph-mon-host`.
+
+**Rotation.** A key Ceph's side rotates (Rook's cephx rotation, or the Ceph admin) reaches the copies within 5 minutes,
+then the projections. Each reader — `cinder-volume`, `glance-api`, `libvirt` — carries a checksum of the key it
+mounts, so the next reconcile restarts it. A cephx user holds one key at a time, so a rotation interrupts that user
+until its readers restart; libvirt defines its secret at start. What a running VM's open connection to an attached
+volume does across a rotation is not measured yet (#308, live test L4): rotate in a maintenance window.
+
+**Not covered yet:** nova's ephemeral disks stay on the hypervisor (Ceph-backed ephemeral disks are a later phase of
+#308); and this path has been rendered and gated, not yet run on a live cluster.
+
+**Moving an existing glance to `rbd`.** glance stops mounting its `glance-images` claim, so every image stored there
+would become unreadable. While the claim exists, glance refuses to render until you set
+`storage.ceph.glanceImagesMigrated: true`: first copy each image into the rbd store (with both stores enabled,
+`glance image-import <id> --import-method copy-image --stores rbd`), or confirm there is nothing to keep. The claim
+itself is kept (`keep_pvc`) until you delete it.
 
 ## swift needs a ReadWriteMany StorageClass
 
@@ -648,6 +775,99 @@ so it re-renders them unchanged apart from adding `keep`, and step 1 then takes 
 The ownership decision is in `templates/_capabilities.tpl`. `hack/validate-capability-roles.py`
 checks it against owned, foreign, absent and partly taken-over objects, and checks that the
 umbrella renders none of them on its own.
+
+## Public endpoints: the APIs and Horizon over HTTPS (#311)
+
+Off by default. Without it, OpenStack is reachable from inside the cluster, plus Horizon on NodePort 31000 over plain
+HTTP; the public catalog URLs point at Services nothing serves. With `publicEndpoints.enabled`, the orchestrator renders
+one Gateway API `Gateway` and an `HTTPRoute` per public endpoint of every selected component, and moves each public
+catalog URL to `https://<service>.<baseDomain>`:
+
+```yaml
+spec:
+  publicEndpoints:
+    enabled: true
+    baseDomain: cloud.example.com          # keystone.cloud.example.com, nova.cloud.example.com, ...
+    tls:
+      issuerRef:
+        name: krateo-selfsigned-ca         # any cert-manager ClusterIssuer (or kind: Issuer)
+    networkPolicy:
+      nodeCIDRs:
+        - 192.168.10.0/24                  # your nodes' address range (example)
+      allowNamespaces:
+        - krateo-system                    # e.g. where the OpenStack KOG operators run
+```
+
+**Prerequisites:** a Gateway API implementation (the CRDs plus a controller for `gatewayClassName`, default
+`agentgateway`) and cert-manager. Krateo's installer brings both with `features.ingress`. On a live cluster the
+orchestrator refuses to render, with the reason on its status, while the Gateway API or cert-manager CRDs are absent.
+Then point DNS for the hostnames, or a wildcard `*.<baseDomain>`, at the Gateway's address
+(`kubectl -n openstack get gateway openstack-gateway`). Krateo's `features.externalDns` does that from the HTTPRoutes.
+Set `gateway.addresses` to a reserved IP so a rebuild keeps the records valid.
+
+Nothing here is specific to a cloud. The class, the issuer, the domain and the node CIDRs are all inputs, and the
+chart renders no load-balancer annotations and assumes no DNS provider. How the Gateway gets an external address
+(a cloud load balancer, MetalLB, or something else) is up to the Gateway API implementation.
+
+**What it renders and changes:**
+
+- **The Gateway** `openstack-gateway`: an HTTPS listener on 443 with the Certificate `openstack-gateway-tls`, and an
+  HTTP listener on 80 that only redirects to HTTPS.
+- **The Certificate:** issued by `tls.issuerRef` for every routed hostname. A private CA (such as Krateo's
+  `krateo-selfsigned-ca`) needs clients to trust it: `export OS_CACERT=ca.crt`, or `openstack --os-cacert ca.crt`. An
+  ACME issuer must be able to validate every hostname. DNS-01 works; an HTTP-01 solver attached to a different Gateway
+  cannot.
+- **One HTTPRoute per public endpoint:** every catalog service a selected chart registers, plus Horizon and the noVNC
+  console proxy. Each route sends to that component's ClusterIP Service. Every response carries
+  `Strict-Transport-Security: max-age=31536000`. Every request gets `X-Forwarded-Proto: https`, overwriting what the
+  client sent, so the services' proxy-header parsing cannot be lied to.
+- **Never routed:** nova-metadata, RabbitMQ (and its management UI), MariaDB, memcached.
+- **Each component's public endpoint** (`endpoints.<type>.host_fqdn_override.public`, scheme `https`, port 443) moves to
+  its hostname. Its `[oslo_middleware] enable_proxy_headers_parsing` is set, so version-discovery links say `https`.
+  Its own Ingress objects are switched off: they were inert, because no controller serves their class. nova's noVNC
+  base URL and glance's CORS origin follow too.
+- **Horizon:** its Service becomes `ClusterIP`, so **NodePort 31000 goes away**. Its cookies become `Secure`, it
+  trusts `X-Forwarded-Proto`, and it accepts CSRF only from `https://horizon.<baseDomain>`.
+- **An ingress NetworkPolicy for the install namespace.** It denies everything by default, then allows:
+  - this namespace;
+  - `nodeCIDRs`. These are required: neutron's agents, nova-compute, libvirt and openvswitch run on the host network,
+    so their traffic arrives from node addresses;
+  - the Gateway's proxy pods, to the routed backends' ports;
+  - the internet, to the proxy pods only;
+  - `allowNamespaces`.
+
+  Nothing else crosses into the namespace. That includes the OpenStack KOG operators, unless you list their
+  namespace. Set `networkPolicy.enabled: false` to leave policy to yourself.
+
+  The policies select every pod that lacks the label `krateo.io/networkpolicy-exempt`. A pod given that label is
+  selected by none of them and is left unrestricted: an explicit, visible opt-out.
+
+**Turning it on for an existing install** changes the values of every component it touches once, so each runs a helm
+upgrade. The ks-endpoints hooks then re-register the public catalog URLs. Anyone using `:31000` must move to
+`https://horizon.<baseDomain>`.
+
+**Not verified on a cluster yet.** `hack/validate-public-endpoints.py` checks the rendered objects and every
+component chart rendered with the values the orchestrator gives it. A release run still has to show:
+
+1. From a machine outside the cluster, `openstack --os-cacert ca.crt --os-auth-url https://keystone.<baseDomain>/v3
+   --os-interface public token issue` succeeds, and `catalog list` shows only `https://...<baseDomain>` public URLs.
+2. One call per routed service also succeeds through its public URL.
+3. `curl -sI https://horizon.<baseDomain>/` shows `Strict-Transport-Security`, `http://` answers 301, and a browser
+   login works with `Secure` cookies.
+4. The NetworkPolicy is enforced. A pod in another namespace connecting to `memcached:11211`, `mariadb:3306`,
+   `rabbitmq:5672` or `keystone-api:5000` **must be refused**. If it connects, the cluster's network plugin is not
+   enforcing NetworkPolicy, and the run fails rather than passes.
+5. A server still boots and gets its address, which shows the node allowance kept the host-network agents working.
+6. The Gateway answers a hostname it does not route, and an internal name such as `keystone-api.openstack.svc`,
+   with 404.
+
+Two consequences to know:
+
+- **In-cluster clients that use the public interface now reach the external hostname, so they need cluster DNS to
+  resolve it and must trust the CA.** heat's own heat client (`clients_heat`, publicURL, as upstream) and castellan's
+  `barbican_endpoint_type` (upstream default `public`, used by nova and cinder for encrypted volumes) are two such
+  clients. Before this they reached a Service with no pods.
+- **Not routed in this release:** Skyline, and nova's spice and serial consoles.
 
 ## Upgrading an existing install
 
@@ -1166,6 +1386,17 @@ Two costs, both measured:
 On a cluster still on 0.3.40 or earlier, a hook Job of the same name replaces the plain Job on
 the first upgrade. Nothing has to be deleted by hand.
 
+Helm never deletes hook resources when it uninstalls a release, and a completed hook Job can't
+delete itself (`hook-succeeded`), because kubernetes-entrypoint waits on dependency Jobs by name
+for as long as the component is installed. So each chart also renders `<component>-hook-cleanup`,
+a `pre-delete` hook that runs last at uninstall and deletes that release's install/upgrade hook
+Jobs and their pods (#206). It runs in an image the chart's own Jobs already use, with a Role
+limited to listing and deleting Jobs in the namespace. It always exits 0, so a failed cleanup
+leaves the Jobs behind rather than blocking the uninstall. Jobs left by uninstalls before this
+version stay: `kubectl -n <ns> delete jobs -l release_group=<release>` removes them.
+`hack/validate-hook-cleanup.py` checks every chart that renders a hook Job, and runs the cleanup
+against a stand-in API.
+
 ### Horizon sessions move to the database: every Horizon user is logged out once
 
 Horizon now keeps sessions in its MariaDB (`session_engine: django.contrib.sessions.backends.db`)
@@ -1437,6 +1668,38 @@ How the token and the endpoints are written:
 **Install oasgen-provider 0.80.0 from OCI**, with its chart and CRDs in step, once per cluster, before the KOGs. Some KOG
 READMEs show an unpinned install from `charts.krateo.io`, which serves 0.10.0; don't use it. nova-kog's owner measured
 all 6 nova Kinds reconciling on 0.80.0.
+
+### High availability
+
+High availability for the stateful core is opt-in and arrives phase by phase (#309). Today:
+
+```yaml
+ha:
+  enabled: true
+```
+
+- **memcached:** 3 replicas behind a headless Service, as the StatefulSet `memcached-ha`. Every component that builds
+  a memcache server list names each replica, so every client hashes a key to the same replica. Without `ha`, memcached
+  is one ClusterIP with ClientIP affinity: each client sticks to one replica, so several replicas would hold
+  disagreeing caches (keystone's token-validation and revocation caches among them). That is why more than one
+  memcached replica without `ha` is refused. Switching `ha` on starts the cache empty; nothing else is lost.
+- **The node refusal:** with `ha`, the render is refused while fewer than 3 nodes carry
+  `openstack-control-plane=enabled`. The replicas use required anti-affinity, one per node, so on fewer nodes the rest
+  would stay Pending. The check needs the node-read grant (`node-reader-rbac.yaml`); without it, the ConfigMap
+  `<release>-node-label-preconditions` says the nodes were not measured.
+- **Off changes nothing:** every chart renders as it always has.
+
+**RabbitMQ's host count has one source,** with or without `ha`: `componentValues.rabbitmq.pod.replicas.server`. Above
+1, every component that lists RabbitMQ hosts gets the count, so its transport URL (and ceilometer's notification URLs)
+lists every node. A component whose `componentValues` set a different count is refused. watcher names the headless
+Service, whose DNS answers every ready node, so it needs nothing passed.
+
+RabbitMQ and MariaDB move to their operators in later phases (#309). `hack/validate-ha-propagation.py` checks all of
+the above against the rendered charts.
+
+**nova-compute's liveness checks the process only (#146).** Upstream's liveness and startup probes ping nova-compute
+over RPC, so a RabbitMQ outage restarted every hypervisor's agent at once and repaired nothing. Readiness keeps the RPC
+check, so the outage still shows as NotReady. `hack/validate-nova-compute-liveness.py` runs the rendered probe.
 
 ### A component reads Ready=False/HooksMayNotHaveRun
 

@@ -11,6 +11,12 @@
 # exclusion by RENDERING the chart rather than by looking for the flag's name in the
 # template -- the first version grepped _helpers.tpl, which its own explanatory comment
 # satisfied.
+#
+# From #196 the flag is components[].requires, a capability, and the umbrella can provide one:
+# block-storage, by storage.backend when it is not none. The gate renders the selection with
+# none AND with every other backend the schema accepts (the positive control: full-strict must
+# then add cinder and nothing else), through the osh.selected helper, since an offline render
+# emits no component.
 name: "full-strict omits what needs provisioning; full still includes it"
 job: capability-roles
 order: 350
