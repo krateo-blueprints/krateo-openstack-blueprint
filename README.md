@@ -1581,8 +1581,9 @@ GHCR on a semver tag (`git tag 0.1.0 && git push origin 0.1.0` →
 `hack/gates.d` (each states the defect it was written for), the umbrella `componentValues` schema-in-sync check
 (`hack/gen-componentvalues-schema.py`), the service-contract SSO deep-link resolution, the
 removed-values refusal, and the shared `lint-docs` documentation-standard job. A change adds a
-`docs/log.d` file and, for a new gate, a `hack/gates.d` file; `docs/log.md` and the check steps
-of `lint.yaml` are never edited by hand. See [docs/release.md](docs/release.md).
+`docs/log.d` file and, for a new gate, a `hack/gates.d` file. A pull request never touches
+`docs/log.md`, which a bot renders on main after each merge, and never adds a check step to
+`lint.yaml` by hand. See [docs/release.md](docs/release.md).
 
 ## License
 
