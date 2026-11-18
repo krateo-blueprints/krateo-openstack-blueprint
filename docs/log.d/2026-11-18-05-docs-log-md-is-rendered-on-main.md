@@ -10,7 +10,9 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
     bot's own pull request, and only when the branch is `bot/render-log-*` and the author is `github-actions[bot]`.
     The rule is checked case by case first (prefix with a human author, bot author on another branch, a look-alike
     prefix, another bot). `hack/render-log.py --check` now validates only the entries: names with real dates, front
-    matter, the bullet, and links that resolve from `docs/log.d`.
+    matter, the bullet, links that resolve from `docs/log.d`, and no two entries with the same date and number.
+    CI checks the pull request merged with current main, so a number an entry merged ahead already took fails, and
+    the author takes the next free one.
   - **Main:** after each merge, `.github/workflows/render-log.yaml` re-renders `docs/log.md`. If it changed,
     `hack/render-log-pr.sh` commits it as `github-actions[bot]` on `bot/render-log-<sha7>` with `[skip ci]`, opens a
     pull request and squash-merges it. If a bot pull request is already open, it updates that one with a

@@ -78,7 +78,9 @@ the top of `docs/log.md` and the step list in `lint.yaml`. Both are now one file
 - **Log entry:** add `docs/log.d/<yyyy-mm-dd>-<nn>-<slug>.md`, and nothing else: with front
   matter (`type: Log`, `title`, `description`) and then the entry's bullet
   (`- **Title (#issue).** ...`). Write relative links from `docs/log.d/` (`../supply-chain.md`).
-  On one day the higher `<nn>` is the later change. **Don't run the renderer or commit
+  On one day the higher `<nn>` is the later change, and two entries sharing a date and number
+  fail (CI checks the pull request merged with current main, so take the next free number when
+  an entry merged ahead took yours). **Don't run the renderer or commit
   `docs/log.md`:** a pull request whose diff touches it fails (`hack/validate-log-untouched.py`),
   and CI checks only the entry (`hack/render-log.py . --check`). To preview, run
   `python3 hack/render-log.py .` and discard the result (`git checkout -- docs/log.md`).

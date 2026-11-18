@@ -29,7 +29,9 @@ month, entries sort newest first by file name: the date, then <nn>, so on one da
 change. Entries are separated by one blank line.
 
 --check fails, naming the problem, when a file in docs/log.d is neither one of the two fixed parts nor named
-<yyyy-mm-dd>-<nn>-<slug>.md with a real date, when an entry lacks the front matter or does not start with "- **",
+<yyyy-mm-dd>-<nn>-<slug>.md with a real date, when two entries share a <yyyy-mm-dd>-<nn> (their order would be
+ambiguous; CI checks the pull request merged with current main, so this fires when an entry merged ahead took the
+number), when an entry lacks the front matter or does not start with "- **",
 when a relative link in an entry does not resolve from docs/log.d (and so would not after rebasing), and when there is
 no entry at all (no input is not a pass). It does not read docs/log.md, which on a pull request is main's.
 """
@@ -120,6 +122,13 @@ def render():
         entries.append((f, body))
     if not entries:
         problems.append("docs/log.d holds no entry")
+    by_key = {}
+    for f, _ in entries:
+        by_key.setdefault(f[:13], []).append(f)
+    for key, names in sorted(by_key.items()):
+        if len(names) > 1:
+            problems.append("docs/log.d: %s share %s, so their order is ambiguous; give the later change the next free "
+                            "number for that date" % (" and ".join(names), key))
     earlier = body_of("_earlier.md", problems) if "_earlier.md" in files else None
     if problems:
         return None, problems
