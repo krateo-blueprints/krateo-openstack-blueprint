@@ -57,11 +57,17 @@ it). hack/validate-messaging-topology.py renders all of it.
 {{- end }}
 {{- end }}
 {{- $ref := dict "name" $cluster -}}
-{{- $proj := printf "%s-rabbitmq-topology-user" $su -}}
+{{- /* The umbrella writes the projection and passes its name (endpoints.oslo_messaging.operator.userSecret, #309 H2 run 4,
+       option 4): then this chart imports it and renders none, so one writer owns it, and the umbrella creates this
+       component only once it exists, so the User below is admitted at once. Standalone (no name passed) the chart
+       renders it itself, and CDC retries the User until ESO has written it. */ -}}
+{{- $passed := ($om.operator.userSecret | default "") | toString -}}
+{{- $proj := $passed | default (printf "%s-rabbitmq-topology-user" $su) -}}
 {{- $chartSecret := index ((($envAll.Values.secrets | default dict).oslo_messaging) | default dict) $serviceName | default "" -}}
 {{- if eq (toString $chartSecret) $proj }}
 {{- fail (printf "secrets.oslo_messaging.%s is %s, the name of the user projection the RabbitMQ topology resources import: one release cannot hold both (helm refuses a duplicate resource), so rename the chart's Secret" $serviceName $proj) }}
 {{- end }}
+{{- if not $passed }}
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -96,6 +102,7 @@ spec:
       remoteRef:
         key: {{ $from.secret | quote }}
         property: {{ $from.key | quote }}
+{{- end }}
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: User

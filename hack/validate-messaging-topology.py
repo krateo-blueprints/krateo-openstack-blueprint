@@ -94,6 +94,7 @@ def emit(tag, docs):
 
 
 counts = {}
+UMBRELLA_PROJ = {}   # name -> the umbrella-rendered projection ExternalSecret (op_specs)
 
 # What the umbrella delivers for a chart's storage (#308): cinder's default refuses, so a chart render carries
 # hack/gate_values.py's arguments (nothing for every other chart).
@@ -158,6 +159,19 @@ def op_specs(tmp):
         if m:
             specs[m.group(1)] = json.loads(m.group(2))
     counts["1"] = len(specs)
+    # The user projections the UMBRELLA writes (templates/messaging-projections.yaml, #309 H2 run 4 option 4). The same
+    # offline render carries them: they are not gated on a lookup (the component Compositions are, and an offline
+    # render emits none of those; see part 5 of validate-messaging-operator.py for that gate, with a stand-in).
+    for d in yaml.safe_load_all(out):
+        if d and d.get("kind") == "ExternalSecret" and ((d.get("metadata") or {}).get("labels") or {}).get(
+                "krateo.io/messaging-projection"):
+            name = d["metadata"]["name"]
+            if name in UMBRELLA_PROJ:
+                fail("1: the umbrella renders the projection %s twice" % name)
+            UMBRELLA_PROJ[name] = d
+    emit("umbrella-projections", list(UMBRELLA_PROJ.values()))
+    if not UMBRELLA_PROJ:
+        fail("1: the umbrella renders no user projection in operator mode (templates/messaging-projections.yaml)")
     return specs
 
 
@@ -276,13 +290,27 @@ def main():
                         ).get("passwordFrom") or {}
                 if u:
                     es_name = (u["spec"].get("importCredentialsSecret") or {}).get("name")
-                    es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == es_name]
+                    passed = ((((spec.get("endpoints") or {}).get("oslo_messaging") or {}).get("operator") or {})
+                              .get("userSecret"))
+                    in_chart = [d for d in docs if d.get("kind") == "ExternalSecret" and d["metadata"]["name"] == es_name]
                     owners = [d["metadata"]["name"] for d in docs if d.get("kind") == "ExternalSecret"
                               and ((d.get("spec") or {}).get("target") or {}).get("name") == es_name] + \
                              [d["metadata"]["name"] for d in docs if d.get("kind") == "Secret" and d["metadata"]["name"] == es_name]
+                    # One writer: the umbrella when it passes the name (option 4), else the chart (standalone).
+                    if passed:
+                        es = [UMBRELLA_PROJ[es_name]] if es_name in UMBRELLA_PROJ else []
+                        if es_name != passed:
+                            fail("2: %s's User imports %r, not the name the umbrella passes (%r)" % (chart, es_name, passed))
+                        if in_chart or owners:
+                            fail("2: %s renders %s itself although the umbrella passes and writes it: two writers"
+                                 % (chart, in_chart and es_name or owners))
+                        counts["umbrella-owned"] = counts.get("umbrella-owned", 0) + 1
+                    else:
+                        es = in_chart
                     if not es:
-                        fail("2: %s's User imports %r, which the chart does not render" % (chart, es_name))
-                    elif len(es) != 1 or owners != [es_name]:
+                        fail("2: %s's User imports %r, which %s does not render" % (chart, es_name,
+                                                                                  "the umbrella" if passed else "the chart"))
+                    elif len(es) != 1 or (not passed and owners != [es_name]):
                         fail("2: %s's User imports %r, which %d ExternalSecret(s) render and %s write: one projection, "
                              "one owner of its Secret" % (chart, es_name, len(es), owners))
                     else:
@@ -402,7 +430,7 @@ def main():
 
 
 def report():
-    for k in ("1", "2", "2c", "3", "4"):
+    for k in ("1", "2", "2c", "3", "4", "umbrella-owned"):
         if not counts.get(k):
             fail("part %s checked nothing" % k)
     for f in LEDGER.report():

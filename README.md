@@ -1739,6 +1739,16 @@ messaging:
   are messaging-topology-operator resources, fed by the same generated root. The vhosts are retained on deletion, and
   the policies drop the `ha-*` keys 4.x refuses. Every pod that waited on the Job waits on those resources being
   Ready.
+- **Each user's password Secret is the umbrella's, and comes first.** The topology operator refuses a User whose Secret
+  does not exist yet, and ESO writes a Secret seconds to a minute after its ExternalSecret (measured 3-85 s on GKE,
+  H2 run 4). So the umbrella writes `<component>-rabbitmq-topology-user` (username and password from the component's
+  root, labelled `rabbitmq.com/topology-operator: "true"`), and creates the component only once that Secret exists,
+  labelled; until then the component is listed in `openstack-install-pending`. Its chart imports the name and renders no
+  projection of its own. Run 4, before this, measured every messaging component's first install refused 1-2 times and
+  retried for up to 198 s.
+- **A component installed on its own, without the umbrella,** is passed no name: its chart writes the projection
+  itself in the same release, and its first User create is refused until ESO has written the Secret, then admitted on
+  core-provider's next retry.
 - **Refusals, on the Composition's status:** the rabbitmq component refuses a cluster without the operator's CRD,
   and an install that already runs the chart-mode broker; moving one over is a separate migration (H2c).
 - **Off (`chart`, the default):** nothing changes.

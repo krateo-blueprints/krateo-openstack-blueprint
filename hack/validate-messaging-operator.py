@@ -273,6 +273,11 @@ def part2(uv, tmp):
             if n in topo["messagingQuorum"]:
                 om["quorum_queues"] = True
                 om["operator"] = {"cluster": name}
+                # The umbrella writes this component's user projection when its rabbit-init runs (components[]
+                # rabbitmqInit and rabbitmqSecret not false; option 4), and passes the name the chart imports.
+                cc = next((c for c in uv["components"] if c["name"] == n), {})
+                if str(cc.get("rabbitmqInit")).lower() != "false" and str(cc.get("rabbitmqSecret")).lower() != "false":
+                    om["operator"]["userSecret"] = "%s-rabbitmq-topology-user" % n.replace("_", "-")
                 add["conf"] = {n: {"oslo_messaging_rabbit": topo["messagingQuorumConf"]}}
             if om:
                 add["endpoints"] = {"oslo_messaging": om}
@@ -476,6 +481,59 @@ def part4(uv, specs_op, builds, tmp):
     counts["4"] = seen
 
 
+# --- 5. the umbrella holds a component until its user projection exists (#309 H2 run 4, option 4) -----------------
+def part5(tmp):
+    """osh.messagingProjectionReady, rendered with a STAND-IN for osh.lookupSecret. helm template's lookup returns
+    nothing, so an offline render emits no component that waits on a lookup at all: rendering the umbrella as is would
+    show every component absent and prove nothing. The stand-in reads the Secrets from a gate-only value, gateSecrets,
+    and a probe prints the gate's verdict per component, as hack/validate-ceph-consumer.py check 30 does for Ceph."""
+    comp = open(os.path.join(UMBRELLA, "templates", "compositions.yaml")).read()
+    if '{{- $mqReady := include "osh.messagingProjectionReady" (list $ $c) }}' not in comp or \
+            not re.search(r'\{\{- if and \(eq \$crd "true"\) \(or \(and [^\n]*\(eq \$mqReady "true"\)\)[^\n]*\(eq \$exists "true"\)\)', comp):
+        fail("5: compositions.yaml does not gate CREATION (beside the dependency gate, never an existing component) on "
+             "$mqReady from osh.messagingProjectionReady")
+    u = stage(UMBRELLA, tmp, "umbrella-p5")
+    hp = os.path.join(u, "templates", "_helpers.tpl")
+    h = open(hp).read()
+    rx = re.compile(r'(\{\{- define "osh\.lookupSecret" -\}\}).*?(\{\{- end -\}\})', re.S)
+    if not rx.search(h):
+        fail("5: _helpers.tpl defines no osh.lookupSecret, so the gate cannot be stood in for")
+        return
+    open(hp, "w").write(rx.sub(lambda m: m.group(1) + "\n{{- index ((index . 0).Values.gateSecrets | default dict) (index . 1) "
+                               "| default dict | toJson -}}\n" + m.group(2), h, count=1))
+    open(os.path.join(u, "templates", "zz-gate-mq-ready-probe.yaml"), "w").write(
+        '{{- range $c := .Values.components }}\n'
+        '{{ printf "\\n# MQREADY %s %s\\n" $c.name (include "osh.messagingProjectionReady" (list $ $c)) }}\n{{- end }}\n')
+    base = {"profile": "full", "messaging": {"backend": "operator"},
+            "componentValues": {"rabbitmq": {"pod": {"replicas": {"server": 3}}}}}
+    lab = {"metadata": {"labels": {"rabbitmq.com/topology-operator": "true"}}}
+
+    def verdicts(vals):
+        rc, out, err = helm_template(u, "openstack-gate", vals)
+        if rc != 0:
+            fail("5: the umbrella does not render with the stand-in: %s" % err.strip()[:300])
+            return {}
+        return dict(re.findall(r"^# MQREADY (\S+) (\S+)$", out, re.M))
+    cases = [
+        ("operator mode, no Secret", base, {"heat": "false", "keystone": "true", "rabbitmq": "true"}),
+        ("operator mode, the Secret without the operator label",
+         merged(base, {"gateSecrets": {"heat-rabbitmq-topology-user": {"metadata": {"labels": {"x": "y"}}}}}),
+         {"heat": "false"}),
+        ("operator mode, the Secret labelled", merged(base, {"gateSecrets": {"heat-rabbitmq-topology-user": lab}}),
+         {"heat": "true", "nova": "false"}),
+        ("chart mode: no projection, nothing held", {"profile": "full"}, {"heat": "true", "nova": "true"}),
+    ]
+    n = 0
+    for label, vals, want in cases:
+        got = verdicts(vals)
+        for comp_name, v in want.items():
+            if got.get(comp_name) != v:
+                fail("5: %s: osh.messagingProjectionReady for %s is %r, want %r" % (label, comp_name, got.get(comp_name), v))
+            else:
+                n += 1
+    counts["5"] = n
+
+
 def main():
     uv = yaml.safe_load(open(os.path.join(UMBRELLA, "values.yaml")))
     if not uv.get("components") or not (uv.get("haTopology") or {}).get("messagingQuorum"):
@@ -487,7 +545,8 @@ def main():
         if specs is not None:
             part3(uv, specs.get("rabbitmq") or {}, tmp)
             part4(uv, specs, builds, tmp)
-    for k in ("1", "2", "3", "4"):
+        part5(tmp)
+    for k in ("1", "2", "3", "4", "5"):
         if not counts.get(k):
             fail("part %s checked nothing" % k)
     for f in LEDGER.report():
@@ -498,8 +557,9 @@ def main():
         sys.exit(1)
     print("OK: messaging.backend operator: %d transport-URL charts listed; %d component specs (chart mode passes nothing, "
           "operator mode moves only the broker and its clients); the RabbitmqCluster and its refusals; %d client chart(s) "
-          "list the cluster's pods and run quorum queues, their policies without ha-*; identity: %s" % (
-              counts["1"], counts["2"], len(counts["4"]), LEDGER.summary()))
+          "list the cluster's pods and run quorum queues, their policies without ha-*; the umbrella holds a component until "
+          "its user projection exists, labelled (%d verdicts, lookup stood in); identity: %s" % (
+              counts["1"], counts["2"], len(counts["4"]), counts["5"], LEDGER.summary()))
 
 
 main()
