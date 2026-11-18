@@ -26,8 +26,9 @@ What is judged, against a base that is always EXPLICIT -- never inferred from th
     commit on top of the group's base. A missing or all-zero BASE fails: there is nothing to measure from.
   - EVENT_NAME workflow_dispatch: a dispatched run has no pull request, so it is judged as one against main, the
     declared base (origin/main), as GITHUB_ACTOR on GITHUB_REF_NAME.
-  - Locally (no EVENT_NAME): `--base <ref>` is required, e.g. `--base origin/main`; the branch and author are
-    the checked-out branch and `git config user.name`. Without --base the gate FAILS -- it does not guess a base.
+  - Locally (no EVENT_NAME): `--base <ref>` is required, e.g. `--base origin/main`, or LOG_BASE=<ref> for a run
+    through hack/run-gates.py; the branch and author are the checked-out branch and `git config user.name`. With
+    neither the gate FAILS -- it does not guess a base.
 The rule itself is checked first, case by case (--self-test runs only that), so a change to it that widens the
 exemption fails here before it can pass a real run. Fails when no range can be determined.
 """
@@ -183,6 +184,41 @@ def range_cases():
     return out
 
 
+def base_cases():
+    """How the base is chosen with no EVENT_NAME: [(description, ok)]."""
+    out = []
+    saved = os.environ.pop("LOG_BASE", None)
+    try:
+        try:
+            pr_range.base_ref("", [])
+            out.append(("by hand with neither --base nor LOG_BASE: refused", False))
+        except pr_range.NoBase:
+            out.append(("by hand with neither --base nor LOG_BASE: refused", True))
+        os.environ["LOG_BASE"] = "origin/gate-env-base"
+        out.append(("LOG_BASE alone is the base", pr_range.base_ref("", []) == ("origin/gate-env-base", "LOG_BASE")))
+        out.append(("--base wins over LOG_BASE",
+                    pr_range.base_ref("", ["--base", "origin/gate-arg-base"]) == ("origin/gate-arg-base", "--base")))
+        out.append(("LOG_BASE never applies to a pull_request run",
+                    _pr_ref_ignores_log_base()))
+    finally:
+        os.environ.pop("LOG_BASE", None)
+        if saved is not None:
+            os.environ["LOG_BASE"] = saved
+    return out
+
+
+def _pr_ref_ignores_log_base():
+    saved = os.environ.get("GITHUB_BASE_REF")
+    os.environ["GITHUB_BASE_REF"] = "main"
+    try:
+        return pr_range.base_ref("pull_request", []) == ("origin/main", "GITHUB_BASE_REF")
+    finally:
+        if saved is None:
+            os.environ.pop("GITHUB_BASE_REF", None)
+        else:
+            os.environ["GITHUB_BASE_REF"] = saved
+
+
 def main():
     args = pr_range.positional(sys.argv[1:])
     root = os.path.abspath(args[0] if args else ".")
@@ -204,6 +240,14 @@ def main():
         return 1
     print("OK: the ranges hold in all %d cases (merge ref, the pull request's head, a branch head that merged main, "
           "a merge group; each with docs/log.md left and edited)" % len(ranges))
+    bases = base_cases()
+    wrong = [d for d, ok in bases if not ok]
+    for d in wrong:
+        print("FAIL (base): " + d)
+    if wrong:
+        return 1
+    print("OK: the base is explicit in all %d cases (neither given: refused; LOG_BASE; --base over LOG_BASE; "
+          "a pull request ignores LOG_BASE)" % len(bases))
     if "--self-test" in sys.argv:
         return 0
     event = os.environ.get("EVENT_NAME", "")

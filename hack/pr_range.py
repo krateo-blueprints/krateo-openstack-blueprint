@@ -8,7 +8,8 @@ A change is measured from the merge base of HEAD and the branch it targets. That
 the merge ref GitHub checks out on pull_request (its first parent is the target's tip, so the merge base is that tip),
 the pull request's own head, and a head that is itself a merge of the target into the branch. The target is never
 inferred: on pull_request it is origin/$GITHUB_BASE_REF, which GitHub sets on every pull_request run; a dispatched run
-declares origin/main; run by hand, `--base <ref>` is required.
+declares origin/main; run by hand, `--base <ref>` is required, or LOG_BASE=<ref> in the environment for a run through
+hack/run-gates.py (which passes a gate no arguments). With neither, NoBase: the gate fails, it never guesses.
 
 It used to be inferred from HEAD's shape: a two-parent HEAD was taken for the merge ref and measured from its first
 parent. A branch head that had merged main is also two-parent, with the BRANCH as first parent, so the change was
@@ -40,8 +41,11 @@ def base_ref(event, argv):
             return argv[i + 1], "--base"
         if a.startswith("--base="):
             return a.split("=", 1)[1], "--base"
-    raise NoBase("run by hand, the gate needs --base <ref> (e.g. --base origin/main): it does not guess what your "
-                 "branch is measured against")
+    # LOG_BASE: the same explicit base for a run through hack/run-gates.py, which passes no arguments to a gate.
+    if os.environ.get("LOG_BASE"):
+        return os.environ["LOG_BASE"], "LOG_BASE"
+    raise NoBase("run by hand, the gate needs --base <ref> or LOG_BASE=<ref> (e.g. origin/main): it does not guess "
+                 "what your branch is measured against")
 
 
 def change_base(root, ref):
