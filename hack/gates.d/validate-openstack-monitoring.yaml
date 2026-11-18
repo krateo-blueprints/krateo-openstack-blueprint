@@ -1,0 +1,10 @@
+# openstack-monitoring (#312): every alert has a runbook, a scrape-down companion and a metric name cited at its
+# image's tag; the exporter credentials reach only their readers; the umbrella's `monitoring` value is the one switch
+# and renders byte-identical off; and each check catches a planted defect (13 mutations). Guards against an alert that
+# can never fire (a dead scrape reads 0 in HyperDX, upstream's stale metric names), a credential copy no pod should
+# hold, and an install without monitoring that changes anyway.
+name: "openstack-monitoring alerts, readers and switch"
+job: capability-roles
+order: 148
+run: |
+  python3 hack/validate-openstack-monitoring.py .

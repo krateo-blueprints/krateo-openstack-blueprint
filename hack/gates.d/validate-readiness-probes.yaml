@@ -1,0 +1,13 @@
+# Gating. A container with no readinessProbe is Ready the moment it starts. On a 0.3.47
+# cold install watcher-decision-engine exited 1 seven seconds after every start, had no
+# probe, and counted as Ready in each window: its composition and the umbrella went
+# Ready=True while the decision engine had never worked once. 32 of 76 long-running
+# containers had no readiness probe (#231, #151). This renders every chart at its defaults
+# and with every workload on, and fails a container of any long-running kind without one,
+# unless hack/readiness-probe-exceptions.yaml gives the reason; an entry nothing needs
+# fails too, as does a probe of `true` or one whose /tmp script is not mounted.
+name: "Every long-running container has a readiness probe"
+job: capability-roles
+order: 452
+run: |
+  python3 hack/validate-readiness-probes.py .

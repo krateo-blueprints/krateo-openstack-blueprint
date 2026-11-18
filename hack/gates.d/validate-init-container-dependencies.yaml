@@ -1,0 +1,8 @@
+# 20 workloads passed an init-container dependency key their chart did not define, so they
+# waited on nothing: watcher's decision engine crashed on missing tables before its db-sync
+# ran (#236). Also: entries must use keys the snippet reads, and services the chart defines.
+name: "Every init container waits on a declared, resolvable dependency"
+job: job-hooks
+order: 40
+run: |
+  python3 hack/validate-init-container-dependencies.py .

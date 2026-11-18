@@ -1,5 +1,8 @@
 {{- /* The collector: scrapes the sources in configmap-collector.yaml and forwards OTLP. It holds no credential: the
-       exporters authenticate, the collector only reads their /metrics, and RabbitMQ's prometheus port needs none. */ -}}
+       exporters authenticate, the collector only reads their /metrics, and RabbitMQ's prometheus port needs none.
+       A Deployment and not an OpenTelemetryCollector CR because the Krateo observability stack runs no OpenTelemetry
+       Operator (krateo-platformops/installer, 2026-11-18): its collectors come from the upstream opentelemetry-collector
+       chart. Prefer the CR once the installer ships the operator. */ -}}
 {{- if .Values.manifests.deployment_collector }}
 {{- $envAll := . }}
 {{- $serviceAccountName := "openstack-monitoring-collector" }}

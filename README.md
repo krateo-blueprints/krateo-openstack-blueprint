@@ -1317,6 +1317,25 @@ kubectl -n openstack get compositiondefinitions \
   -o custom-columns='NAME:.metadata.name,API:.status.apiVersion,READY:.status.conditions[?(@.type=="Ready")].status'
 ```
 
+### neutron finds its tunnel interface by itself
+
+neutron's `network.interface.tunnel`, the host NIC that carries VXLAN tunnel traffic, defaults to empty. The OVS
+agent's init then uses the interface of the default route, which works on any node. Set it only when tunnel traffic
+must leave through another NIC.
+
+**Existing installs keep `ens4`.** The field used to default to `ens4`, a GCE NIC name. That old schema default was
+written into each stored neutron object (#179), and upgrading doesn't remove it.
+- On GCE, `ens4` is the right NIC, so nothing changes.
+- On any other node, the OVS agent's init stops with `Var LOCAL_IP is empty`. Clear the field, or set the node's NIC:
+
+  ```yaml
+  componentValues:
+    neutron:
+      network:
+        interface:
+          tunnel: ""        # or the NIC, e.g. eth0
+  ```
+
 ### Running guests on KVM
 
 By default (`compute.virtType: qemu`) nova runs guests in QEMU software emulation. That works on any node, slowly.
@@ -1541,6 +1560,12 @@ spec:
     - Turning it on adds a Job to mariadb and does not change its StatefulSet.
   - **RabbitMQ's `/metrics/detailed`** gives per-queue depth and consumers on every server pod. The `rabbitmq_prometheus` plugin
     serving it is already enabled. It is scraped only when rabbitmq is selected.
+- **Why a plain Deployment.** The collector is a Deployment, not an `OpenTelemetryCollector` CR: the Krateo
+  observability stack runs no OpenTelemetry Operator (checked in krateo-platformops/installer on 2026-11-18). Its own
+  collectors are deployed from the upstream opentelemetry-collector Helm chart. If the installer adds the operator, the
+  collector should become a CR.
+- **Cloud-agnostic.** Nothing in the defaults is cloud-specific. The endpoint is an input, and the credentials come from
+  the install's generated roots through ESO.
 - **The alerts.** These are alert-provider `Alert` CRs in `alertsNamespace`. They are defined in one file,
   `blueprints/openstack-monitoring/chart/files/alerts.yaml`:
   - an API down for Keystone, Glance, Nova, Neutron, Cinder or Placement;
@@ -1610,10 +1635,12 @@ The dashboard (Horizon) logs in as `admin` with the install's generated password
 GHCR on a semver tag (`git tag 0.1.0 && git push origin 0.1.0` →
 `oci://ghcr.io/krateo-blueprints/charts/<component>:0.1.0`).
 
-`.github/workflows/lint.yaml` runs on every PR: the `hack/validate-*.py` gates (each states the
-defect it was written for), the umbrella `componentValues` schema-in-sync check
+`.github/workflows/lint.yaml` runs on every PR: the `hack/validate-*.py` gates, one file each in
+`hack/gates.d` (each states the defect it was written for), the umbrella `componentValues` schema-in-sync check
 (`hack/gen-componentvalues-schema.py`), the service-contract SSO deep-link resolution, the
-removed-values refusal, and the shared `lint-docs` documentation-standard job. See [docs/release.md](docs/release.md).
+removed-values refusal, and the shared `lint-docs` documentation-standard job. A change adds a
+`docs/log.d` file and, for a new gate, a `hack/gates.d` file; `docs/log.md` and the check steps
+of `lint.yaml` are never edited by hand. See [docs/release.md](docs/release.md).
 
 ## License
 

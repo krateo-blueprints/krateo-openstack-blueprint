@@ -1,0 +1,5 @@
+name: "A version bump must not prune a component that already exists"
+job: capability-roles
+order: 390
+run: |
+  python3 hack/validate-upgrade-does-not-prune.py .

@@ -22,7 +22,7 @@ images:
       - dep_check
   tags:
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
-    ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+    ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
     # The last 1.7.x release (2024-02-20). The 1.8.0 and 2.0.0 tags are alphas. Metric names used by the alerts are
     # cited against this tag's source in files/alerts.yaml.
     openstack_exporter: ghcr.io/openstack-exporter/openstack-exporter:1.7.0

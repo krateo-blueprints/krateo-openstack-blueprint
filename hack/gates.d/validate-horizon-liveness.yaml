@@ -1,0 +1,14 @@
+# Not the same shape: the one place upstream gets a probe actively wrong rather than
+# merely shallow. Upstream points horizon's liveness at /, and horizon's own
+# SimultaneousSessionsMiddleware touches the default cache on EVERY request, so with
+# memcached away every Django path answers 500 -- measured in the real image, where
+# /static/dashboard/img/favicon.ico still answered 200. Upstream's probe therefore
+# restarts every replica for the duration of a memcached outage, repairs nothing, and
+# pays for a collectstatic of ~4000 files per restart. Liveness stays on the static
+# handler; the keystone readiness check that shipped beside it was an improvement with
+# no upstream defect behind it and has been reverted. See issue #110.
+name: "No probe that restarts horizon may enter Django"
+job: capability-roles
+order: 50
+run: |
+  python3 hack/validate-horizon-liveness.py .

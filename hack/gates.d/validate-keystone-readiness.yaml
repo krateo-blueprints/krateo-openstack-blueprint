@@ -1,0 +1,9 @@
+# Renders the chart and inspects the probes the kubelet would receive. A readiness probe
+# that does not depend on the fernet keys lets an identity plane which cannot issue a
+# single token report Ready at every layer, including the umbrella's own condition --
+# and a revert of the fix is as invisible as the bug was. See issue #99.
+name: "Keystone readiness must require the fernet keys"
+job: capability-roles
+order: 30
+run: |
+  python3 hack/validate-keystone-readiness.py .

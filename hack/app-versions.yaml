@@ -46,9 +46,9 @@ charts:
   blueprints/libvirt/chart:
     source: measured
     image: libvirt
-    tag: 2026.1-ubuntu_noble
+    tag: 2026.1-ubuntu_noble-20261117
     version: "10.0.0"
-    how: "exec in the running pod of that exact image (GKE, blueprint 0.3.64 cold install, 2026-11-15): libvirtd --version -> libvirtd (libvirt) 10.0.0"
+    how: "Trivy package list of that exact image, linux/amd64 (CI run 44192027861, 2026-11-17): libvirt-daemon, libvirt0 and libvirt-clients 10.0.0. Earlier, on the 2026-11-15 build of the series tag: libvirtd --version -> libvirtd (libvirt) 10.0.0 (GKE, 0.3.64)"
   blueprints/magnum/chart:
     source: series
   blueprints/manila/chart:

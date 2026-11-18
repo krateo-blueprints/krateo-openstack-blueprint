@@ -1,0 +1,17 @@
+name: "helm template + lint every chart (informational)"
+job: lint
+order: 10
+run: |
+  set -uo pipefail
+  # Informational only: charts across repos legitimately require values or private
+  # dependencies to render, so render/lint issues are surfaced as warnings, never failing
+  # the build. The lint-docs job above is the authoritative gate.
+  while IFS= read -r -d '' cf; do
+    dir=$(dirname "$cf")
+    echo "::group::${dir}"
+    helm dependency update "$dir" --skip-refresh
+    helm template release "$dir" >/dev/null \
+      || echo "::warning::helm template failed for ${dir} (may require values or private deps)"
+    helm lint "$dir" || true
+    echo "::endgroup::"
+  done < <(find . -type f -name Chart.yaml -not -path '*/charts/*' -not -path './.git/*' -print0)

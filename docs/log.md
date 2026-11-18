@@ -13,6 +13,69 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Monitoring (#312, phase 1).** New component `openstack-monitoring`, switched by the umbrella's `monitoring` value.
+  Unset, it is on wherever the cluster serves alert-provider's CRDs. Off, the render is byte-identical.
+  - **What it scrapes.** An OpenTelemetry collector forwards OTLP to the Krateo observability stack. The endpoint is an
+    input, and nothing in the defaults is cloud-specific. It scrapes:
+    - openstack-exporter 1.7.0, through its own generated Keystone user;
+    - a standalone mysqld-exporter v0.21.0, whose least-privilege MariaDB user the mariadb chart creates without
+      restarting the database;
+    - RabbitMQ's `/metrics/detailed`.
+  - **Why a plain collector Deployment.** It is a Deployment rather than an `OpenTelemetryCollector` CR because the
+    Krateo stack runs no OpenTelemetry Operator. Its collectors come from the upstream opentelemetry-collector Helm
+    chart.
+  - **Alerts.** They are alert-provider CRs in `krateo-system`, rendered from one source file. Each has a runbook (see
+    [the runbooks](runbooks/openstack-api-down.md)) and a scrape-down companion. Each metric name is cited at the
+    pinned image's tag.
+  - **The gate.** `hack/validate-openstack-monitoring.py` checks the alerts, the credential readers and the switch, and
+    plants a defect for each check.
+  - **Not yet run on a cluster.**
+
+- **neutron's tunnel interface is detected, not assumed.** `network.interface.tunnel` defaulted to `ens4`, a GCE NIC
+  name. On a node without `ens4` the OVS agent's init set no tunnel IP ("Var LOCAL_IP is empty"). The default is now
+  empty, so the init uses the interface of the default route. That logic was already in the script; the `ens4` default
+  had been skipping it.
+  - **Existing installs keep `ens4`.** The old schema default was written into each stored neutron object (#179). It is
+    harmless on GCE, where `ens4` is the right NIC. Elsewhere, clear `componentValues.neutron.network.interface.tunnel`
+    or set it to the node's NIC.
+  - **New gate:** `hack/validate-neutron-tunnel-interface.py` checks the empty default and the schema, and runs the
+    rendered fallback.
+
+- **Images pinned; remediation issues (#316, #328 to #334).**
+  - **Dated tags:** Diego decided on 2026-11-17 to pin dated tags and verify their digests in CI. The 31 airshipit
+    release-series images now use `2026.1-ubuntu_noble-20261117`, and `docker.io/rabbitmq:3.13-management` became
+    `3.13.7-management`. Each new tag serves the digest that was recorded and scanned, so no bytes change. It is also
+    the newest dated build, so no baseline CVE is fixed and the allowlist keeps all 167 entries, re-keyed.
+  - **libvirt:** appVersion was re-measured on its dated image: libvirt 10.0.0, from Trivy's package list.
+  - **Gates:**
+    - `hack/gen-image-inventory.py` fails on a release-series tag unless `hack/image-pin-waivers.yaml` waives it, and
+      on a stale or expired waiver.
+    - With `--resolve` (image-scan), it fails when a pinned tag serves a digest other than the recorded one, and
+      `--write` keeps the recorded digest.
+    - `validate-app-version.py` and `validate-keystone-oidc-image-series.py` accept the dated suffix and compare the
+      series.
+  - **Mirror:** `hack/image-mirror.yaml` and `.github/workflows/image-mirror.yaml` copy the 4 Kolla gnocchi images by
+    digest to dated tags in `ghcr.io/krateo-blueprints/images/`. The copy runs on main or by hand. It never moves a
+    tag, and it fails until the package pulls anonymously. The 4 images are waived until 2027-01-31 (#334).
+  - **Remediation issues:** #328 (PyJWT, from `stable/2026.1` upper-constraints), #329 (nginx 1.13.3 in ironic),
+    #330 (drop the rally test pods), #331 (docker 27.5.0 and image_repo_sync), #332 (PowerDNS), #333 (memcached) and
+    #334 (Kolla gnocchi). Candidate replacements were scanned, so each issue states the CRITICAL count the fix leaves.
+
+- **One file per log entry and per gate.** Every pull request edited the top of `docs/log.md` and the step list
+  of `.github/workflows/lint.yaml` in the same places, so branches in flight collided on both (Diego, 2026-11-17).
+  - **Log:** each entry is now `docs/log.d/<yyyy-mm-dd>-<nn>-<slug>.md` with OKF front matter, and
+    `hack/render-log.py` writes `docs/log.md`, which stays checked in. The 14 existing entries were split out in their
+    order, dated from the commit that added each. The rendered file differs from the old one only by two blank lines
+    between entries. `hack/render-log.py --check` fails when `docs/log.md` is stale.
+  - **Gates:** the 76 check steps became `hack/gates.d/<gate>.yaml`, one file each, with name, job, order, the exact
+    command and its comment. Each of the 11 jobs keeps its tools and runs its gates through one step,
+    `hack/run-gates.py --job <job>`. The two GitHub expressions (the job-hooks base commit, the migrate-to-pvc
+    matrix) come in through the runner step's `env`. The commands CI runs, listed per job before and after, are the
+    same and in the same order. The only additions are the two new gates. `hack/validate-gates-registered.py` fails
+    when a `hack/validate-*` script is in no gate file, or a gate file names a script that is missing.
+  - [release.md](release.md) says how to add both. `docs/log.md` and the check steps of `lint.yaml` are never
+    edited by hand.
+
 - **Provider-agnostic KVM guidance.** libvirt's `/dev/kvm` refusal no longer names a cloud provider. It says what to
   enable on any node: VT-x/AMD-V with the kvm module on bare metal, nested virtualization on cloud VMs, or
   `compute.virtType: qemu`. `hack/validate-virt-type.py` now asserts those terms, and that no provider is named. The
@@ -40,6 +103,7 @@ Curated history; release notes live in GitHub Releases.
   - **Pinning, open for Diego** ([supply-chain.md](supply-chain.md)): 35 images use release-series tags, and each
     airshipit one was pushed 27 to 32 times in 30 days. Proposed: dated tags with the digest recorded and verified
     in CI. Mirror the four Kolla gnocchi images, which have no immutable tag. Not `@sha256:` in the charts (#72).
+
 - **KVM guests and KOG credentials (0.3.73, #303).** These are the blueprint's half of the data-plane release stage.
   - **`compute.virtType: kvm`:** sets nova `virt_type=kvm` and `cpu_mode=host-model` and libvirt's `virt_type`. libvirt
     then refuses, in an init container, to start on a node without `/dev/kvm`; the message names GKE's
@@ -184,26 +248,12 @@ Curated history; release notes live in GitHub Releases.
   is refused (`hack/validate-removed-values.sh`). The deep-link resolution step, lost from CI
   on 2026-08-11 while the docs still claimed it, runs again.
 
-## 2026-11
-
-- **Monitoring (#312, phase 1).** New component `openstack-monitoring`, switched by the umbrella's `monitoring` value.
-  When unset, it is on wherever the cluster serves alert-provider's CRDs. Off, the render is byte-identical.
-  - An OpenTelemetry collector scrapes three sources and forwards OTLP to the Krateo observability stack:
-    - openstack-exporter 1.7.0, through its own generated Keystone user;
-    - a standalone mysqld-exporter v0.21.0, whose least-privilege MariaDB user the mariadb chart creates without
-      restarting the database;
-    - RabbitMQ's `/metrics/detailed`.
-  - Alerts are alert-provider CRs in `krateo-system`, rendered from one source file. Each has a runbook
-    (`docs/runbooks/`) and a scrape-down companion, and its metric name is cited at the pinned image's tag.
-  - `hack/validate-openstack-monitoring.py` gates the alerts, the credential readers and the switch, and plants a
-    defect for each check.
-  - Not yet run on a cluster.
-
 ## 2026-08
 
 - **Docs standard adopted.** Added the OKF documentation bundle (this `docs/` set +
   `docs/llms.txt` + `examples/identity-profile/README.md`), rewrote `README.md` to the
   six-section shape, and wired the shared `lint-docs` job into `.github/workflows/lint.yaml`.
+
 - **Dead-org sweep.** Eliminated the legacy dead-org references in favour of
   `krateo-blueprints` (part of the krateo-platformops/installer standardization).
 
