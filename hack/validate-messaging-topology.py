@@ -68,6 +68,19 @@ failures = []
 EMIT = os.environ.get("OPERATOR_OBJECTS_DIR")
 
 
+def _load(name):
+    import importlib.util as _u
+    _s = _u.spec_from_file_location(name, os.path.join(ROOT, "hack", name + ".py"))
+    _m = _u.module_from_spec(_s)
+    _s.loader.exec_module(_m)
+    return _m
+
+
+# render_identity (H2 run 2): every render this gate makes from the umbrella's operator spec must hold no two resources
+# of one identity, which helm template accepts and helm install refuses.
+LEDGER = _load("render_identity").Ledger(os.path.basename(__file__))
+
+
 def emit(tag, docs):
     if not EMIT:
         return
@@ -230,16 +243,8 @@ def main():
             # helm install refuses a release holding two resources of one identity ("rendered manifest contains
             # duplicate resource"); helm template does not, so this gate must (H2 run 2: the topology projection and
             # the chart's own connection Secret were both ExternalSecret <svc>-rabbitmq-user).
-            seen_ids, dups = set(), []
-            for d in docs:
-                ident = (str(d.get("apiVersion", "")).split("/")[0] if "/" in str(d.get("apiVersion", "")) else "",
-                         d.get("kind"), (d.get("metadata") or {}).get("namespace") or NS, (d.get("metadata") or {}).get("name"))
-                if ident in seen_ids:
-                    dups.append("%s/%s" % (ident[1], ident[3]))
-                seen_ids.add(ident)
-            if dups:
-                fail("2: %s renders duplicate resources in operator mode, which helm install refuses: %s" % (chart, dups))
-            counts["dup"] = counts.get("dup", 0) + 1
+            LEDGER.control(docs)
+            LEDGER.check("%s (operator mode)" % chart, docs)
             om = cv["endpoints"]["oslo_messaging"]
             su = chart.replace("_", "-")
             if not runs:
@@ -388,16 +393,18 @@ def main():
 
 
 def report():
-    for k in ("1", "2", "2c", "3", "4", "dup"):
+    for k in ("1", "2", "2c", "3", "4"):
         if not counts.get(k):
             fail("part %s checked nothing" % k)
+    for f in LEDGER.report():
+        fail("identity: " + f)
     if failures:
         for f in failures:
             print("FAIL: " + f)
         sys.exit(1)
     print("OK: operator mode: %d component(s) render their user, vhost, permissions and policies as topology resources "
           "from their roots; %d custom-resource wait(s) replace rabbit-init, each Ready-conditioned, granted and "
-          "rendered; chart mode unchanged" % (counts["2"], counts["3"]))
+          "rendered; chart mode unchanged; identity: %s" % (counts["2"], counts["3"], LEDGER.summary()))
     sys.exit(0)
 
 

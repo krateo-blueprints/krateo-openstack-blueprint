@@ -85,6 +85,14 @@ def block_storage_components(root: Path):
     return {c["name"] for c in umbrella(root).get("components") or [] if "block-storage" in (c.get("requires") or [])}
 
 
+def load_render_identity(root: Path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("render_identity", root / "hack" / "render_identity.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def load_umbrella_spec(root: Path):
     import importlib.util
     spec = importlib.util.spec_from_file_location("umbrella_spec", root / "hack" / "umbrella_spec.py")
@@ -272,12 +280,20 @@ def main() -> int:
     if block - vary:
         sys.exit(f"FAIL: {sorted(block - vary)} require block-storage and their spec does not depend on storage.backend")
 
+    # render_identity (H2 run 2, #309): every render here also must not hold two resources of one identity, which
+    # helm template accepts and helm install refuses. Besides the modes this gate checks references in, each chart is
+    # rendered once more as the umbrella delivers it (its spec from compositions.yaml), checked for identity only.
+    ri = load_render_identity(root)
+    ledger = ri.Ledger("validate-pod-references")
     total_pods, failures, unrendered, not_refused = 0, [], [], []
     with tempfile.TemporaryDirectory() as td:
         for chart in charts:
             component = chart.parent.name
             modes = [(f"storage.backend {b}", b, delivered[b].get(component) or {}) for b in backends] \
                 if component in vary else [("", None, None)]
+            if component not in vary:
+                base = delivered["none" if "none" in delivered else backends[0]]
+                modes.append(("as the umbrella delivers it", "umbrella", base.get(component) or {}))
             for label, backend, values in modes:
                 tag = f"{component} ({label})" if label else component
                 try:
@@ -288,6 +304,10 @@ def main() -> int:
                         print(f"REFUSED {tag}: renders nothing, as designed: {want!r}")
                         continue
                     unrendered.append((tag, str(e)))
+                    continue
+                ledger.control(rendered)
+                ledger.check(tag, rendered)
+                if backend == "umbrella":
                     continue
                 if component in block and backend in REFUSALS:
                     not_refused.append((tag, REFUSALS[backend]))
@@ -314,9 +334,12 @@ def main() -> int:
         print("\nA pod naming an object nobody creates waits forever (FailedMount, or a container")
         print("that never starts) and nothing reports it. Render it from the chart, or, if another")
         print("component creates it, add it to ALLOWED in this script with the reason.")
-    if failures or unrendered or not_refused:
+    identity = ledger.report()
+    for f in identity:
+        print(f"FAIL {f}")
+    if failures or unrendered or not_refused or identity:
         return 1
-    print(f"\nOK: {len(charts)} charts, {total_pods} pod templates, every reference rendered")
+    print(f"\nOK: {len(charts)} charts, {total_pods} pod templates, every reference rendered; identity: {ledger.summary()}")
     return 0
 
 

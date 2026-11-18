@@ -66,6 +66,19 @@ SUFFIX = "%s.svc.cluster.local" % NS
 EMIT = os.environ.get("OPERATOR_OBJECTS_DIR")
 
 
+def _load(name):
+    import importlib.util as _u
+    _s = _u.spec_from_file_location(name, os.path.join(ROOT, "hack", name + ".py"))
+    _m = _u.module_from_spec(_s)
+    _s.loader.exec_module(_m)
+    return _m
+
+
+# render_identity (H2 run 2): every render this gate makes from the umbrella's operator spec must hold no two resources
+# of one identity, which helm template accepts and helm install refuses.
+LEDGER = _load("render_identity").Ledger(os.path.basename(__file__))
+
+
 def emit(tag, docs):
     if not EMIT:
         return
@@ -297,6 +310,8 @@ def part3(uv, spec, tmp):
         return
     docs = [d for d in yaml.safe_load_all(out) if d]
     emit("rabbitmq-replicas3", docs)
+    LEDGER.control(docs)
+    LEDGER.check("rabbitmq (operator mode, 3 replicas)", docs)
     clusters = [d for d in docs if d.get("kind") == "RabbitmqCluster"]
     if len(clusters) != 1 or clusters[0]["metadata"]["name"] != name:
         fail("3: want exactly one RabbitmqCluster %s, got %s" % (name, [d["metadata"]["name"] for d in clusters]))
@@ -337,6 +352,7 @@ def part3(uv, spec, tmp):
         rc1, out1, err1 = helm_template(r, "rabbitmq", one)
         if rc1 == 0:
             emit("rabbitmq-replicas1", list(yaml.safe_load_all(out1)))
+            LEDGER.check("rabbitmq (operator mode, 1 replica)", out1)
         if rc1 != 0 or any(d and d.get("kind") == "PodDisruptionBudget" for d in yaml.safe_load_all(out1)):
             fail("3: a single broker renders a PodDisruptionBudget (or does not render): any budget there only blocks drains")
     leftovers = sorted("%s/%s" % (d["kind"], d["metadata"]["name"]) for d in docs
@@ -406,6 +422,7 @@ def part4(uv, specs_op, builds, tmp):
             fail("4: %s does not render with the operator spec: %s" % (chart, err.strip()[:200]))
             continue
         docs = [d for d in yaml.safe_load_all(out) if d]
+        LEDGER.check("%s (operator mode)" % chart, docs)
         want = want_svc if chart in (topo.get("messagingByService") or []) else want_pods
         nurl = nsec = 0
         complete = False
@@ -471,14 +488,16 @@ def main():
     for k in ("1", "2", "3", "4"):
         if not counts.get(k):
             fail("part %s checked nothing" % k)
+    for f in LEDGER.report():
+        fail("identity: " + f)
     if failures:
         for f in failures:
             print("FAIL: " + f)
         sys.exit(1)
     print("OK: messaging.backend operator: %d transport-URL charts listed; %d component specs (chart mode passes nothing, "
           "operator mode moves only the broker and its clients); the RabbitmqCluster and its refusals; %d client chart(s) "
-          "list the cluster's pods and run quorum queues, their policies without ha-*" % (counts["1"], counts["2"],
-                                                                                         len(counts["4"])))
+          "list the cluster's pods and run quorum queues, their policies without ha-*; identity: %s" % (
+              counts["1"], counts["2"], len(counts["4"]), LEDGER.summary()))
 
 
 main()

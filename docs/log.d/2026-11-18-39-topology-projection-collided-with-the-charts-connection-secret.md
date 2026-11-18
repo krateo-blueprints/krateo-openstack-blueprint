@@ -19,10 +19,15 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
 - **The fix:** the projection is `<serviceUser>-rabbitmq-topology-user`: the ExternalSecret, its target Secret, and the
   User's `importCredentialsSecret`. The User keeps `<serviceUser>-rabbitmq-user`, the name every wait references. The
   template refuses to render when `secrets.oslo_messaging.<service>` equals the projection's name.
-- **The guards, in `validate-messaging-topology.py`:**
-  - **Duplicates:** no two resources of a chart's operator-mode render may share group, kind, namespace and name.
-  - **One owner:** the imported Secret has exactly one ExternalSecret of its name and no other writer.
+- **The guards:**
+  - **`hack/render_identity.py`:** no two resources of one render may share group, kind, namespace and name. The gates
+    that already render every chart pass their output through it, rather than render the charts again:
+    - `validate-pod-references.py`: every component chart at its defaults, under each storage.backend it depends on,
+      and, new, once more as the umbrella delivers it (its spec from compositions.yaml).
+    - `validate-messaging-topology.py`: every messaging client in operator mode.
+    - `validate-messaging-operator.py`: the rabbitmq chart (3 replicas and 1) and every client in operator mode.
+  - **The ledger:** each gate reports the renders and resources checked, and fails when either is 0. Once per gate, a
+    planted duplicate of the first resource rendered must be found.
+  - **One owner:** `validate-messaging-topology.py` also requires exactly one ExternalSecret of the imported name and
+    no other writer of its Secret.
   - **2c:** heat with `secrets.oslo_messaging.heat` set to its projection's name must refuse, with that message.
-  - A part that checks nothing fails, as before.
-- **Not covered here:** duplicates in renders outside operator mode. No gate in this repository checks release-wide
-  identity uniqueness for every chart yet.
