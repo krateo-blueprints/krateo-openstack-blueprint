@@ -60,7 +60,7 @@ spec:
 {{ tuple $envAll "masakari_engine" $mounts_masakari_engine_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: masakari-engine
-{{ dict "envAll" $envAll "component" "engine" "container" "default" "args" (list "--process" "masakari-engine" "--exchange" "masakari" "--rpc-topic" "ha_engine") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "engine" "container" "default" "args" (list "--process" "masakari-engine" "--exchange" "masakari" "--rpc-topic" "ha_engine") "config" (include "masakari.config_args.engine" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "masakari_engine" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.masakari_engine | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "masakari" "container" "masakari_engine" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}

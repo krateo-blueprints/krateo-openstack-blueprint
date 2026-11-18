@@ -61,7 +61,7 @@ spec:
 {{ tuple $envAll "central" $mounts_designate_central_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: designate-central
-{{ dict "envAll" $envAll "component" "central" "container" "default" "args" (list "--process" "designate-central" "--exchange" "designate" "--rpc-topic" "central") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "central" "container" "default" "args" (list "--process" "designate-central" "--exchange" "designate" "--rpc-topic" "central") "config" (include "designate.config_args.central" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "designate_central" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.central | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "designate" "container" "designate_central" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}

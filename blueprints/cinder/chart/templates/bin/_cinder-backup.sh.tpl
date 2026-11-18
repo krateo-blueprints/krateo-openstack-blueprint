@@ -16,5 +16,4 @@ limitations under the License.
 
 set -ex
 exec cinder-backup \
-     --config-file /etc/cinder/cinder.conf \
-     --config-dir /etc/cinder/cinder.conf.d
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "cinder.config_args.backup" . | fromYamlArray) "format" "shell" "indent" 5) }}
