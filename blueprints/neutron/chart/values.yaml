@@ -2021,7 +2021,10 @@ network:
   backend:
   - openvswitch
   interface:
-    tunnel: ens4
+    # The host NIC that carries VXLAN tunnel traffic. Empty: the OVS agent's init uses the interface of the route to
+    # tunnel_network_cidr (0/0: the default route), which works on any node. Set it only when the tunnel traffic must
+    # leave through another NIC. It defaulted to ens4, a GCE NIC name, until the blueprint went provider-agnostic.
+    tunnel: ""
     tunnel_network_cidr: 0/0
   server:
     external_policy_local: false
