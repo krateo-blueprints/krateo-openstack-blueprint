@@ -256,6 +256,9 @@ class TitledProcesses(unittest.TestCase):
         self.assertTrue(workers, "the threading launcher started no worker")
         self.assertTrue(all(len(cmdline(w)) == 1 and cmdline(w)[0].startswith(NAME + ": ") for w in workers),
                         [cmdline(w) for w in workers])
+        # Evidence in the CI log that the titled shape was really measured here.
+        sys.stderr.write("\nPRECONDITION MET on %s: cmdline is rewritten. master %d %r; workers %s\n" % (
+            os.uname().machine, f.child.pid, cmdline(f.child.pid), [(w, cmdline(w)) for w in workers]))
 
     def test_precondition_check_reports_an_untitled_process(self):
         # The precondition mutated: setproctitle made unimportable, so cotyledon sets no title.
@@ -316,6 +319,7 @@ class TitledProcesses(unittest.TestCase):
             self.assertIn("no process other than this probe", err)
         f = self.fixture("plain")
         self.assertEqual(probe(self.mutants["M1"], f)[0], 0, "M1 must still pass the plain shape (a fair mutant)")
+        sys.stderr.write("\nM1 (argv name matching) KILLED on %s\n" % ", ".join(TITLED))
 
     def test_m2_config_from_argv_is_killed(self):
         for shape in TITLED:
@@ -325,6 +329,7 @@ class TitledProcesses(unittest.TestCase):
             self.assertIn("--config-file", err)
         f = self.fixture("plain")
         self.assertEqual(probe(self.mutants["M2"], f)[0], 0, "M2 must still pass the plain shape (a fair mutant)")
+        sys.stderr.write("\nM2 (config from argv) KILLED on %s\n" % ", ".join(TITLED))
 
     def test_m3_mount_namespace_filter(self):
         f = self.fixture("threading")
@@ -339,6 +344,7 @@ class TitledProcesses(unittest.TestCase):
             self.assertEqual(rc, 1, "a process outside the probe's mount namespace counted")
             rc, err = probe(self.mutants["M3"], f, prefix=prefix)
             self.assertEqual(rc, 0, "M3 (filter dropped) was not detected: %s" % err)
+            sys.stderr.write("\nM3 (mount-namespace filter dropped) KILLED with a REAL mount namespace (sudo unshare -m)\n")
             return
         sys.stderr.write("\nNOTE test_m3_mount_namespace_filter used a STUB: `sudo -n unshare -m` is not available here, "
                          "so the fixture's pid is given another mount namespace in-process.\n")
@@ -351,6 +357,7 @@ class TitledProcesses(unittest.TestCase):
             self.assertEqual(f.child.pid in mod.container_processes(), want_found,
                              "%s: the fixture in another mount namespace %s" % (
                                  os.path.basename(path), "was not counted" if want_found else "was counted"))
+        sys.stderr.write("\nM3 (mount-namespace filter dropped) KILLED with the in-process STUB\n")
 
 
 if __name__ == "__main__":

@@ -14,7 +14,9 @@ the construction; this gate guards it against a later hand edit of either consum
   identity, full and full-strict with a Ceph storage backend (hack/umbrella_spec.py; the components each profile
   selects): the probe's --config-file/--config-dir/--config-dir-if-present
   list must equal the config arguments of the program's invocation in the start script the container runs, evaluated
-  by bash with each `[ -d D ]` directory present and again absent, in order.
+  by bash with each `[ -d D ]` directory present and again absent, in order. The invocation may expand no shell
+  variable (ironic-conductor's `${OPTIONS}` once added --config-file entries no list saw), so evaluating it alone is
+  evaluating what the program receives.
 
 Positive controls, run first on the rendered objects: a probe given one more --config-file, and a script whose
 invocation lost its --config-dir, must each be reported. Fails when helm or PyYAML is missing, when a chart does not
@@ -143,6 +145,14 @@ def check(site):
     stmt = invocation(text, proc)
     if stmt is None:
         return ["%s: the start script never invokes %s" % (where, proc)]
+    # The comparison evaluates the invocation alone, which is exact only if it expands no variable: a `${OPTIONS}`
+    # set earlier in the script is how ironic-conductor's extra --config-file entries used to bypass any list.
+    # Everything the program receives must be in the invocation itself, so a variable there is refused.
+    bare = re.sub(r"\$\(\[ -d \S+ \] && echo --config-dir \S+\)", "", stmt)
+    var = re.search(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?", bare)
+    if var:
+        return ["%s: %s's invocation expands %s; its arguments must come from its config list and literals, so the "
+                "probe can be compared with what the program receives" % (where, proc, var.group(0))]
     problems = []
     for present in (True, False):
         want = script_config(stmt, proc, present)
