@@ -429,7 +429,7 @@ images:
     mariadb_controller: quay.io/airshipit/mariadb:ubuntu_noble-20261030
     prometheus_create_mysql_user: quay.io/airshipit/mariadb:11.4.8-noble
     prometheus_mysql_exporter: docker.io/prom/mysqld-exporter:v0.12.1
-    prometheus_mysql_exporter_helm_tests: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+    prometheus_mysql_exporter_helm_tests: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
     scripted_test: quay.io/airshipit/mariadb:ubuntu_noble-20261030
 jobs:
   cluster_wait:

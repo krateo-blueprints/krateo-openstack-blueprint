@@ -1,0 +1,48 @@
+# Renders docs/log.md from docs/log.d after each merge to main and lands it through a bot pull request.
+#
+# Pull requests never touch docs/log.md (hack/validate-log-untouched.py fails one that does); they add a docs/log.d
+# entry, so branches in flight stop conflicting on it. main's org ruleset requires a pull request and has no bypass
+# actor, so this cannot push to main: hack/render-log-pr.sh commits the render on bot/render-log-<sha7> as
+# github-actions[bot], opens a pull request and squash-merges it, or updates the one already open (Diego,
+# 2026-11-18). It commits nothing when the render is unchanged.
+#
+# It cannot loop: events made with GITHUB_TOKEN start no workflow, the commit says [skip ci], and this runs only when
+# docs/log.d or the renderer changes, which the bot's commit (docs/log.md alone) never does.
+name: render-log
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/log.d/**
+      - hack/render-log.py
+      - hack/render-log-pr.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run at a time, the newest waiting rather than cancelling: two merges close together must not both open a pull
+# request, and the second run renders main as it is after the first.
+concurrency:
+  group: render-log
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    # Write access here only: the branch push, and opening and merging the bot pull request.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Render docs/log.md and land it through a bot pull request if it changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash hack/render-log-pr.sh .

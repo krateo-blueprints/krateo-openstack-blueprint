@@ -9,7 +9,8 @@ it. Nothing could fail when the two disagreed.
 hack/app-versions.yaml says where each chart's version comes from (series / series-of / tag / measured /
 library / excluded). This gate:
   - fails on any Chart.yaml in the repo that the map does not list, and on any map entry with no Chart.yaml;
-  - series:    every <series>-ubuntu_<distro> tag in the chart's values.yaml is one series, and appVersion is it;
+  - series:    every <series>-ubuntu_<distro>[-YYYYMMDD] tag in the chart's values.yaml is one series, and appVersion
+               is it;
   - series-of: appVersion is the series of the named chart;
   - tag:       appVersion is the version in images.tags.<image> (leading "v" and any "-suffix" dropped);
   - measured:  appVersion is the recorded version AND images.tags.<image> still has the recorded tag (a new image
@@ -23,7 +24,8 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
-SERIES_TAG = re.compile(r":(\d{4}\.\d)-ubuntu_[a-z]+$")
+# A series tag, or the dated build of one (2026.1-ubuntu_noble-20261117): images are pinned to dated tags (#316).
+SERIES_TAG = re.compile(r":(\d{4}\.\d)-ubuntu_[a-z]+(?:-20\d{6})?$")
 failures = []
 
 
