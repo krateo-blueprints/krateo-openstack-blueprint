@@ -294,6 +294,46 @@ $ helm show chart oci://ghcr.io/krateo-blueprints/charts/keystone  --version X.Y
 5. **`lint-docs`** — the shared Krateo documentation-standard linter (this bundle), added
    under `jobs:` in `lint.yaml`.
 
+## How a pull request merges
+
+main is meant to take changes only through GitHub's merge queue (Diego, 2026-11-18). The queue
+needs the repo ruleset in `hack/merge-queue-ruleset.json` applied; until then, pull requests merge
+as before.
+
+1. A pull request runs lint on `pull_request`. Its checks must pass before it can join the queue.
+2. **Merge when ready** (or `gh pr merge --auto --squash`) adds it to the queue. The queue builds
+   a merge group: main plus every pull request queued ahead, plus this one, each squashed. It runs
+   lint on that group (`merge_group`), the commit exactly as it will exist on main.
+3. When the group's required checks pass, main moves to that commit. Then lint runs again on the
+   push to main, under the same SHA. When a group fails, the queue removes the pull request that
+   broke it (ALLGREEN grouping) and rebuilds the rest without it. The author doesn't update the
+   branch by hand.
+
+The ruleset requires the 12 checks lint.yaml reports on a merge group, and no other.
+`hack/validate-merge-queue-ruleset.py` fails when a lint job is renamed or added without the
+ruleset following it. The informational `lint` job isn't required. image-scan doesn't gate:
+it scans every image, not the changed ones, and gating merges on a newly published CVE would turn
+unrelated changes red. The security workflow doesn't gate either. Making it required means adding
+`merge_group` to `security.yml` first.
+
+A release (release-tag.yaml, and prerelease.yaml) needs a successful lint run on the exact
+commit it publishes, from that commit's merge group, its push to main, or a dispatch
+(`hack/require-lint-passed.sh`). A pull request's run is for another commit and doesn't count.
+
+The render-log bot enables auto-merge under a queue instead of merging. That needs the App token
+from "The render-log GitHub App" below: GitHub's `GITHUB_TOKEN` rule starts no workflow for an
+event the token caused, and lists no `merge_group` exception. So a queue entry made with it would
+wait out the timeout with no lint run. The App comes first, then the ruleset.
+
+To apply the ruleset, once the App is in place (an admin, with Diego's OK):
+
+```console
+$ gh api -X POST repos/krateo-blueprints/krateo-openstack-blueprint/rulesets \
+    --input hack/merge-queue-ruleset.json
+```
+
+The org's `require-pull-request` ruleset stays as it is.
+
 ## Adding a change: a log.d file and a gates.d file
 
 Branches in flight used to collide on two files every pull request edited in the same place:

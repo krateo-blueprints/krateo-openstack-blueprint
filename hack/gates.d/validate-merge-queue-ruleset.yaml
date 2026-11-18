@@ -1,0 +1,8 @@
+# hack/merge-queue-ruleset.json is main's merge queue and its required checks. A required check no job reports on a
+# merge group stalls every group until the queue's timeout, so the ruleset must name exactly lint.yaml's jobs, and
+# lint.yaml must run on merge_group.
+name: "The merge-queue ruleset requires exactly the checks lint.yaml reports on a merge group"
+job: capability-roles
+order: 485
+run: |
+  python3 hack/validate-merge-queue-ruleset.py .

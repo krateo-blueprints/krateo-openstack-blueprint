@@ -13,7 +13,9 @@ loop guard is render-log.yaml's paths filter), so nothing is exempt.
 
 What is read, from the environment lint.yaml's job-hooks runner step sets:
   - EVENT_NAME pull_request: PR_TITLE, PR_BODY, and every commit message between BASE and HEAD;
-  - EVENT_NAME push: every commit message between BASE (the previous head) and HEAD;
+  - EVENT_NAME push or merge_group: every commit message between BASE (the previous head, or the merge group's
+    base) and HEAD. In a merge group each queued pull request is its squash commit, whose message is the final one,
+    so this is where a marker in the message that would land is seen;
   - anything else (workflow_dispatch on a branch): every commit message since the branch left origin/main.
 Markers are matched as GitHub matches them, ignoring case and the space inside the brackets. To name one in prose, say
 "the skip marker" instead. The matcher is checked case by case first (--self-test runs only that).
@@ -74,7 +76,7 @@ def main():
                 return 2
             texts += [("the pull request's title", os.environ.get("PR_TITLE", "")),
                       ("the pull request's body", os.environ.get("PR_BODY", ""))]
-        elif event != "push" or not base or base == ZERO:
+        elif event not in ("push", "merge_group") or not base or base == ZERO:
             base = git(root, "merge-base", "origin/main", "HEAD").strip()
         for c in git(root, "rev-list", "%s..HEAD" % base).split():
             texts.append(("commit %s" % c[:7], git(root, "show", "-s", "--format=%B", c)))
