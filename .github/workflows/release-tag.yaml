@@ -21,7 +21,21 @@ permissions:
   packages: write
 
 jobs:
+  # This repository's own last word before anything is published (krateo-blueprints/charts
+  # PUBLISHING.md rule 12). It runs hack/release-preflight with the tag as $1, at the tag's commit,
+  # with no secrets. The hook refuses a tag whose commit has no pre-release X.Y.Z-main.g<sha7> in
+  # GHCR, which happens when the commit skipped the pre-release channel or is not on main
+  # (docs/release.md). Pinned like the publisher, to the same release (rule 9).
+  preflight:
+    uses: krateo-blueprints/charts/.github/workflows/release-preflight.yaml@788f1a6c106707ada89792f499afdcf3bc0b5d13 # 1.1.0
+    with:
+      version: ${{ github.ref_name }}
+
   package-and-push:
+    # Every later step depends on this: publish-index needs package-and-push, which needs preflight.
+    # A refusal therefore stamps, pushes, indexes and releases nothing.
+    needs:
+      - preflight
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -127,7 +141,8 @@ jobs:
     # The organisation's one publisher, pinned by full commit SHA because it receives an org-wide
     # write token (krateo-blueprints/charts PUBLISHING.md rule 9); Dependabot proposes upgrades. It also
     # reads the served index and installs every chart anonymously before it succeeds.
-    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@1e6210ab2a8b66ff1a8d6da86287e671154f44a2 # 1.0.4
+    # 1.1.0 adds rule 13: the publisher itself refuses a version that is not plain X.Y.Z.
+    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@788f1a6c106707ada89792f499afdcf3bc0b5d13 # 1.1.0
     with:
       source_repo: ${{ github.repository }}
       git_tag: ${{ github.ref_name }}

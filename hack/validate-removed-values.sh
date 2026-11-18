@@ -11,6 +11,8 @@
 #   enabled: true, schema skipped              refused by templates/removed-values.yaml
 #   any other contractEmitter key              refused by values.schema.json
 # The chart is copied and its CHART_VERSION placeholder stamped, so the checkout is untouched.
+# trove's manifests.cron_job_db_purge (removed, #289) is checked the same way: absent and false render with no
+# CronJob, true is refused by the schema and, with the schema skipped, by templates/removed-values.yaml.
 # A case that cannot render for another reason is a failure, not a pass.
 # usage: validate-removed-values.sh <repo>
 set -uo pipefail
@@ -40,6 +42,29 @@ check "enabled: false"                  ok     --set contractEmitter.enabled=fal
 check "enabled: true"                   schema --set contractEmitter.enabled=true
 check "enabled: true, schema skipped"   guard  --set contractEmitter.enabled=true --skip-schema-validation
 check "another key (clickhouse.url)"    schema --set contractEmitter.clickhouse.url=http://x
+
+# trove's manifests.cron_job_db_purge (#289): the CronJob ran `trove-manage db_purge`, which 2026.1 does not have.
+TROVE="$ROOT/blueprints/trove/chart"
+[ -f "$TROVE/Chart.yaml" ] || { echo "FAILED MEASUREMENT: no trove chart at $TROVE"; exit 2; }
+cp -R "$TROVE" "$work/trove"
+sed 's/CHART_VERSION/0.0.0-ci/g' "$work/trove/Chart.yaml" > "$work/Chart.yaml" && mv "$work/Chart.yaml" "$work/trove/Chart.yaml"
+mkdir -p "$work/trove/charts" && cp -R "$ROOT/charts/helm-toolkit" "$work/trove/charts/helm-toolkit"
+check_trove() { # name, expect (ok|schema|guard), helm args...
+  local name=$1 expect=$2; shift 2; n=$((n + 1))
+  local out rc got cron
+  out=$(helm template trove-gate1234 "$work/trove" "$@" 2>&1); rc=$?
+  cron=$(grep -c '^kind: CronJob' <<<"$out")
+  if [ $rc -eq 0 ]; then got=ok
+  elif grep -q "values don't meet the specifications of the schema" <<<"$out" && grep -q cron_job_db_purge <<<"$out"; then got=schema
+  elif grep -q "manifests.cron_job_db_purge was removed (#289)" <<<"$out"; then got=guard
+  else got="other: $(grep -m1 'Error' <<<"$out" | cut -c1-160)"; fi
+  if [ "$got" = "$expect" ] && [ "$cron" = 0 ]; then echo "ok    trove $name -> $got"
+  else echo "FAIL  trove $name: expected $expect with no CronJob, got $got with $cron CronJob(s)"; fails=$((fails + 1)); fi
+}
+check_trove "cron_job_db_purge absent"                 ok
+check_trove "cron_job_db_purge: false"                 ok     --set manifests.cron_job_db_purge=false
+check_trove "cron_job_db_purge: true"                  schema --set manifests.cron_job_db_purge=true
+check_trove "cron_job_db_purge: true, schema skipped"  guard  --set manifests.cron_job_db_purge=true --skip-schema-validation
 
 # mariadb's Swift remote-backup path and ks-user Job (#302): absent or false render with no ks-user Job and no RGW
 # Secret; anything else is refused by the schema and, with the schema skipped, by templates/removed-values.yaml.
@@ -78,4 +103,5 @@ check_mariadb "another remote_backup key, no schema"     guard  --set conf.backu
 [ $n -gt 0 ] || { echo "FAILED MEASUREMENT: no case ran"; exit 2; }
 [ $fails -eq 0 ] || { echo "FAIL: $fails of $n removed-value case(s) wrong"; exit 1; }
 echo "OK: $n removed-value cases: absent and enabled:false render, every other contractEmitter value is refused;" \
+  "trove's cron_job_db_purge renders only absent or false;" \
   "mariadb renders local backups only, and its remote-backup values are refused"

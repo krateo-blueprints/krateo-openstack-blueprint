@@ -1,0 +1,7 @@
+# ceilometer publishes only where something consumes (#294): its notifier:// publishers filled metering.sample and
+# event.sample, which nothing reads. Every rendered publisher needs a consumer in ceilometer's deps closure.
+name: "Every ceilometer publisher has a consumer"
+job: capability-roles
+order: 155
+run: |
+  python3 hack/validate-ceilometer-publishers.py .
