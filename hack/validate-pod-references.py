@@ -25,6 +25,7 @@ It fails when it measured nothing: a chart that does not render, or a run that f
 templates at all, is a failed measurement, not a pass.
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -119,6 +120,12 @@ def storage_backends(root: Path):
     return (((schema.get("properties") or {}).get("storage") or {}).get("properties") or {}).get("backend", {}).get("enum") or []
 
 KINDS = ("Secret", "ConfigMap", "PersistentVolumeClaim", "ServiceAccount")
+
+# The planted case of the completeness check (hack/gates.d/validate-pod-references.yaml runs it): with
+# GATE_PLANT_DROP_DELIVERED=<component> the delivered renders of that component are skipped, as a future change to the
+# modes could skip them, and the gate must fail naming it. A mutant, not a bypass: while it is set the gate exits non-zero
+# whatever it found (see the end of main), so setting it by mistake fails CI instead of measuring less.
+PLANT_DROP = os.environ.get("GATE_PLANT_DROP_DELIVERED", "")
 
 
 
@@ -302,12 +309,13 @@ def main() -> int:
     ri = load_render_identity(root)
     ledger = ri.Ledger("validate-pod-references")
     total_pods, failures, unrendered, not_refused = 0, [], [], []
+    delivered_ok = set()
     with tempfile.TemporaryDirectory() as td:
         for chart in charts:
             component = chart.parent.name
             modes = [(f"storage.backend {b}", b, delivered[b].get(component) or {}) for b in backends] \
                 if component in vary else [("", None, None)]
-            if component not in vary:
+            if component not in vary and component != PLANT_DROP:
                 for (c, js), profs in sorted(as_delivered.items()):
                     if c == component:
                         modes.append(("as the umbrella delivers it, profile %s" % "/".join(profs), "umbrella",
@@ -324,8 +332,11 @@ def main() -> int:
                     unrendered.append((tag, str(e)))
                     continue
                 ledger.control(rendered)
+                before = len(ledger.failures)
                 ledger.check(tag, rendered)
                 if backend == "umbrella":
+                    delivered_ok.add(component)
+                    print(f"{'OK  ' if len(ledger.failures) == before else 'FAIL'} {tag}: identity only")
                     continue
                 if component in block and backend in REFUSALS:
                     not_refused.append((tag, REFUSALS[backend]))
@@ -353,6 +364,26 @@ def main() -> int:
         print("that never starts) and nothing reports it. Render it from the chart, or, if another")
         print("component creates it, add it to ALLOWED in this script with the reason.")
     identity = ledger.report()
+    # Every component some profile selects must have been rendered as the umbrella delivers it at least once (cinder
+    # and any other storage-dependent chart is rendered per storage.backend instead): none may drop out unseen.
+    want = {c for (c, _js) in as_delivered} - vary
+    if only:
+        want &= only
+
+    def undelivered(rendered_ok):
+        return sorted(want - rendered_ok)
+
+    missing = undelivered(delivered_ok)
+    if missing:
+        identity.append("no successful render as the umbrella delivers it for %s" % missing)
+    if not want:
+        identity.append("completeness: no profile selects any component, so nothing was checked")
+    if PLANT_DROP:
+        # A mutant, never a bypass: with the plant set this run measured less than the gate requires, so it cannot pass
+        # whatever it found. The planted run in hack/gates.d/validate-pod-references.yaml requires the failure above
+        # naming the dropped component, not merely a failure.
+        identity.append("PLANTED MODE (GATE_PLANT_DROP_DELIVERED=%s): this run skipped that component's delivered "
+                        "renders and can never pass; unset the variable for a real run" % PLANT_DROP)
     for f in identity:
         print(f"FAIL {f}")
     if failures or unrendered or not_refused or identity:
