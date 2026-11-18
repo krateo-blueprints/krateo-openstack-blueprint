@@ -25,4 +25,5 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
     response was for this document.
   - **Upstream defect, worked around here:** the screen counts the alert title's class name as a substring anywhere in
     the rendered HTML, so a document that names the class in prose counts as one alert. This entry did, and failed;
-    it now describes the class instead of naming it. Reported to the nova repository.
+    it now describes the class instead of naming it. The defect is to be reported to the nova repository, where the
+    screen lives.
