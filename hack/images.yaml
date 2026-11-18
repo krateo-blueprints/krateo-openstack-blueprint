@@ -1371,7 +1371,7 @@ images:
     - ks_service
     - ks_user
   - chart: mariadb
-    rendered: every-manifest-on
+    rendered: defaults
     keys:
     - ks_user
     - prometheus_mysql_exporter_helm_tests
