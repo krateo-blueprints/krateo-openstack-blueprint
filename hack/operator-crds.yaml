@@ -21,3 +21,9 @@ require:
   - vhosts.rabbitmq.com
   - permissions.rabbitmq.com
   - policies.rabbitmq.com
+# The operators' admission webhooks (#405) are served with certificates cert-manager issues: phase 2 of the gate installs
+# it, then both manifests above whole (their Deployments, webhook configurations, Issuers and Certificates). The same
+# version create.sh installs on GKE.
+certManager:
+  url: https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml
+  sha256: c04a51295adda2b1a775146751f973e787190778c7f35180861d9678876e5c74

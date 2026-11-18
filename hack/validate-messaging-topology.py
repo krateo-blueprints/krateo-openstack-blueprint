@@ -85,7 +85,9 @@ LEDGER = _load("render_identity").Ledger(os.path.basename(__file__))
 def emit(tag, docs):
     if not EMIT:
         return
-    objs = [d for d in docs if d and str(d.get("apiVersion", "")).startswith("rabbitmq.com/")]
+    # rabbitmq.com objects, and the ExternalSecrets whose Secrets the operators' webhooks read (eso_model, #405).
+    objs = [d for d in docs if d and (str(d.get("apiVersion", "")).startswith("rabbitmq.com/")
+                                      or d.get("kind") == "ExternalSecret")]
     if objs:
         with open(os.path.join(EMIT, "%s.yaml" % tag), "w") as f:
             yaml.safe_dump_all(objs, f, default_flow_style=False, sort_keys=False)
@@ -240,7 +242,7 @@ def main():
             topo_docs = [d for d in docs if d.get("apiVersion", "").startswith("rabbitmq.com/") and d.get("kind") in KINDS]
             for d in topo_docs:
                 rendered_crs.add((d["kind"], d["metadata"]["name"]))
-            emit(chart, topo_docs)
+            emit(chart, docs)   # emit() keeps the rabbitmq.com objects and the ExternalSecrets (the projections)
             # helm install refuses a release holding two resources of one identity ("rendered manifest contains
             # duplicate resource"); helm template does not, so this gate must (H2 run 2: the topology projection and
             # the chart's own connection Secret were both ExternalSecret <svc>-rabbitmq-user).
