@@ -261,8 +261,9 @@ Notable per-component fields:
     invalid token gets 400 and changes nothing. Each value is documented in the horizon
     chart's `values.yaml`. Keystone's mapping must take `user.id` from the OIDC `sub`, because
     Horizon records the user's federated `unique_id` at login and compares it with `sub`.
-- **neutron** — `network.interface.tunnel` — host NIC used as the VXLAN tunnel endpoint
-  (e.g. `ens4` on GKE/GCE; default `ens4`).
+- **neutron** — `network.interface.tunnel` — host NIC used as the VXLAN tunnel endpoint. Default empty: the
+  OVS agent uses the interface of the route to `network.interface.tunnel_network_cidr` (`0/0`, the default route).
+  Set it only when tunnel traffic must leave through another NIC.
 - **ironic** (bare metal)
   - `pod.replicas.{api,conductor}`.
   - `labels.conductor.{node_selector_key,node_selector_value}` — the conductor uses

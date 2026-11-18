@@ -13,47 +13,35 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
-- **Consume a Ceph cluster without client.admin (#308 phase P1, steps 1-3; rendered and gated, not yet run live).**
-  - **Copied keys:** a third credential kind, `source: provided`. With `storage.backend` ceph-rook or ceph-external, the
-    umbrella copies each Ceph user's key and `mon_host` from where Ceph keeps them (Rook's `rook-ceph-client-<name>`
-    and `rook-ceph-config`, or the operator-named `storage.ceph.keys`) through a SecretStore limited to exactly those
-    Secrets. Copies refresh every 5 minutes and are not kept past the release.
-  - **Charts:** cinder, libvirt and (with `storage.ceph.glanceStore: rbd`) glance project the copies. No client.admin
-    keyring is rendered, no `ceph auth` runs and no pool is created: storage-init checks the pool with the user's own
-    key. Each reader carries a live checksum of its key, so it restarts when Ceph's side rotates it. Without a Ceph
-    backend every chart renders as before.
-  - **One source:** pools, users and the libvirt secret UUID reach cinder, glance, libvirt and nova from
-    `storage.ceph` only; `componentValues` may not set them, nor wire Ceph by hand.
-  - **Held, refused, never stuck:** a Ceph consumer is created only once the copies of its keys report Ready; the
-    Openstack Composition refuses while ESO reports the copy store unable to read the source Secrets, naming the grant;
-    glance refuses to move its store to `rbd` off a live `glance-images` claim until `storage.ceph.glanceImagesMigrated`.
-  - **Gates:** the new `hack/validate-ceph-consumer.py` (27 copied roots, P projections, 22c reader closure against
-    the measured `hack/ceph-readers.yaml`, 18c readers restart, 18d the checksum can read its Secret, 28 no
-    client.admin, 29 delivery and consistency through `hack/umbrella_spec.py`, 30 the hold and the read-grant refusal);
-    `hack/validate-glance-store.py` adds the migration refusal on the same single claim lookup. `validate-pod-references` renders the storage-dependent charts as the umbrella
-    delivers them.
+- **docs/log.md is rendered on main, by a bot pull request.** After #340, every branch still committed a regenerated
+  `docs/log.md`, so merges kept conflicting on it (#322, #320).
+  - **Pull requests:** a pull request now adds its `docs/log.d` entry and nothing else.
+    `hack/validate-log-untouched.py` fails one whose diff touches `docs/log.md`. It makes one exception, for the
+    bot's own pull request, and only when the branch is `bot/render-log-*` and the author is `github-actions[bot]`.
+    The rule is checked case by case first (prefix with a human author, bot author on another branch, a look-alike
+    prefix, another bot). `hack/render-log.py --check` now validates only the entries: names with real dates, front
+    matter, the bullet, links that resolve from `docs/log.d`, and no two entries with the same date and number.
+    CI checks the pull request merged with current main, so a number an entry merged ahead already took fails, and
+    the author takes the next free one.
+  - **Main:** after each merge, `.github/workflows/render-log.yaml` re-renders `docs/log.md`. If it changed,
+    `hack/render-log-pr.sh` commits it as `github-actions[bot]` on `bot/render-log-<sha7>` with `[skip ci]`, opens a
+    pull request and squash-merges it. If a bot pull request is already open, it updates that one with a
+    fast-forward instead. It runs one at a time and commits nothing when the render is unchanged. It's a pull request
+    rather than a push because main's org ruleset requires one and has no bypass actor (Diego, 2026-11-18). It needs
+    "Allow GitHub Actions to create and approve pull requests", which is off for the org and the repo (checked
+    2026-11-18).
+  - **Gate:** `hack/validate-render-log-pr.py` runs the script against a local remote and a stand-in `gh`, in four
+    cases: current, a new entry, a bot pull request already open, and after landing.
 
-- **cinder refuses to render without a block-storage backend (#196, phase P0 of #308).**
-  - **What was wrong:** cinder's only backend is Ceph RBD. With no Ceph, `cinder-volume` and `cinder-storage-init`
-    waited in `Init` forever on `ceph-etc` and keyring Secrets nothing creates. That was the state on every default
-    install (#179, #204).
-  - **Now:** the Openstack Composition has `storage.backend`, `none` by default, typed by the generated schema. The
-    umbrella passes it to every component that requires block-storage (cinder) as `krateo.storageBackend`, and refuses a
-    `componentValues` override. With `none`, cinder fails its render and names the value. The Ceph backends
-    (`ceph-rook`, `ceph-external`) are accepted by the schema and refused by cinder until #308 implements them.
-  - **Selection:** `requiresProvisioning` became `components[].requires`, a capability list (`block-storage`,
-    `pxe-interface`, `lb-mgmt-net`, `rwx-storage-class`). `full-strict` selects a component only when the install
-    provides everything it requires; only `block-storage` can be provided, by `storage.backend`. `full` is unchanged.
-  - **Gates:**
-    - `hack/validate-provisioning-preconditions.py` also renders `full-strict` with every non-`none` backend. That is
-      the positive control: it must add cinder and nothing else.
-    - The new `hack/validate-storage-backend.py` checks that the value reaches cinder alone, that the umbrella is the
-      one place that sets it, and that cinder refuses without a backend.
-    - `hack/validate-pod-references.py` renders cinder once per backend the umbrella can deliver. Its #196 allowlist
-      entries are gone.
-  - **Also:** nova-compute's `LIBVIRT_CEPH_SECRET_UUID` read the undefined `conf.ceph.secret_uuid` (an upstream defect),
-    so it rendered with no value. It now reads `conf.ceph.cinder.secret_uuid`, and the new gate renders it with a
-    sentinel.
+- **neutron's tunnel interface is detected, not assumed.** `network.interface.tunnel` defaulted to `ens4`, a GCE NIC
+  name. On a node without `ens4` the OVS agent's init set no tunnel IP ("Var LOCAL_IP is empty"). The default is now
+  empty, so the init uses the interface of the default route. That logic was already in the script; the `ens4` default
+  had been skipping it.
+  - **Existing installs keep `ens4`.** The old schema default was written into each stored neutron object (#179). It is
+    harmless on GCE, where `ens4` is the right NIC. Elsewhere, clear `componentValues.neutron.network.interface.tunnel`
+    or set it to the node's NIC.
+  - **New gate:** `hack/validate-neutron-tunnel-interface.py` checks the empty default and the schema, and runs the
+    rendered fallback.
 
 - **Images pinned; remediation issues (#316, #328 to #334).**
   - **Dated tags:** Diego decided on 2026-11-17 to pin dated tags and verify their digests in CI. The 31 airshipit

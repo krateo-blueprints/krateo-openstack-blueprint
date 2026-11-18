@@ -182,6 +182,9 @@ jobs:
       - name: Gates (hack/gates.d, job job-hooks)
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: python3 hack/run-gates.py --job job-hooks .
 
   capability-roles:
