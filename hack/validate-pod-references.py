@@ -302,6 +302,7 @@ def main() -> int:
     ri = load_render_identity(root)
     ledger = ri.Ledger("validate-pod-references")
     total_pods, failures, unrendered, not_refused = 0, [], [], []
+    delivered_ok = set()
     with tempfile.TemporaryDirectory() as td:
         for chart in charts:
             component = chart.parent.name
@@ -324,8 +325,11 @@ def main() -> int:
                     unrendered.append((tag, str(e)))
                     continue
                 ledger.control(rendered)
+                before = len(ledger.failures)
                 ledger.check(tag, rendered)
                 if backend == "umbrella":
+                    delivered_ok.add(component)
+                    print(f"{'OK  ' if len(ledger.failures) == before else 'FAIL'} {tag}: identity only")
                     continue
                 if component in block and backend in REFUSALS:
                     not_refused.append((tag, REFUSALS[backend]))
@@ -353,6 +357,14 @@ def main() -> int:
         print("that never starts) and nothing reports it. Render it from the chart, or, if another")
         print("component creates it, add it to ALLOWED in this script with the reason.")
     identity = ledger.report()
+    # Every component some profile selects must have been rendered as the umbrella delivers it at least once (cinder
+    # and any other storage-dependent chart is rendered per storage.backend instead): none may drop out unseen.
+    want = {c for (c, _js) in as_delivered} - vary
+    if only:
+        want &= only
+    missing = sorted(want - delivered_ok)
+    if missing:
+        identity.append("no successful render as the umbrella delivers it for %s" % missing)
     for f in identity:
         print(f"FAIL {f}")
     if failures or unrendered or not_refused or identity:
