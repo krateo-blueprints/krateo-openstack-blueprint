@@ -20,14 +20,16 @@ Sources the predicate rests on (read, not assumed):
     == desiredNumberScheduled); StatefulSet :130-146 (OnDelete refused; readyReplicas == spec.replicas; a partition
     accepted once updatedReplicas >= replicas - partition; updateRevision == currentRevision). This predicate is stricter
     on one point: a partition counts as not rolled while any pod is below it, since those pods hold the old credential.
-  - composition-dynamic-controller internal/composition/support.go setStatus writes status.managed (from the release
-    manifest: hooks are not in it), digest, helmChartUrl/Version and a condition; unstructured-runtime v1.1.0
-    pkg/tools/unstructured/condition sets no ObservedGeneration. So the Composition says nothing about which spec was
-    applied: each workload's pod-template annotation krateo.io/messaging-generation (helm-toolkit custom_pod_annotations)
-    is the evidence that the release which switched it was applied.
-  - helm-toolkit job_hook_deadline: every hook Job has activeDeadlineSeconds (per-Job value, else
-    helm3_hook_deadline_seconds, else 1800). Hook Jobs are not in status.managed, so the previous user is kept until that
-    long after the latest ESO sync (status.refreshTime) of the component's projections of the active root.
+  - each workload's pod-template annotation krateo.io/messaging-generation (helm-toolkit custom_pod_annotations): its
+    pods are the new generation's. (Upstream krateoplatformops/composition-dynamic-controller main writes no
+    observedGeneration; the fork core-provider deploys does, see below.)
+  - the composition-dynamic-controller core-provider 2.13.111 deploys (krateo-platformops/core-provider tag 2.13.111,
+    commit 7cd0848): status.observedGeneration is written only in setStatus (internal/composition/support.go:377;
+    unstructured-runtime v1.27.1 statusprojection.go:177, = metadata.generation as read), after a successful reconcile
+    (a failed one returns first, composition.go Observe :700). That reconcile (plumbing v1.95.0 helm/v3/reconcile.go
+    steps 5-8) runs one real helm upgrade whenever anything changed, which runs and waits for the hooks. So
+    observedGeneration == generation means the switching release was applied, its hook Jobs ended; hooks are not in
+    status.managed and need no clock. krateo.io/hooks-unverified (#563) is reported.
   - ESO v2.14.0: status.syncedResourceVersion is "<metadata.generation>-<HashMeta>" (GetResourceVersion), so a projection
     synced at its current spec carries its own generation as prefix.
   - chart-inspector internal/tracer/tracer.go RoundTrip records every named request of the dry-run render, lookups and
@@ -37,15 +39,16 @@ Sources the predicate rests on (read, not assumed):
     once its projection exists, labelled.
 
   1. THE STEPS. osh.messagingRotation probed for heat with osh.lookupNamed, osh.lookupSecret, osh.lookupExternalSecret
-     and osh.nowUnix stood in, and a status.managed built from heat's own operator-mode render (its Deployments,
+     stood in, and a status.managed built from heat's own operator-mode render (its Deployments,
      StatefulSets, DaemonSets, CronJobs and non-hook Jobs):
        a. no token: nothing passed (the component's spec does not change);
        b. a token, its projection not written yet: minting, the base user only;
        c. the projection written and labelled: the new user joins, not switched (its User is not Ready);
        d. the new User Ready: switched in that render; both users; the new suffix and username;
        e. after the switch, workloads still at the old pod template: draining, each named;
-       f. every workload rolled, projections synced, inside the hook deadline: draining on the hook bound;
-       g. past the hook deadline: steady, the new user only;
+       f. every workload rolled, the Composition's observedGeneration behind (its release, hooks included, not applied
+          yet), or krateo.io/hooks-unverified set: draining, saying which;
+       g. all of it done: steady, the new user only;
        h. the previous User being deleted (deletionTimestamp) or gone: steady;
        i. a second token while the first still drains: the new generation waits (never three users);
        j. half-finished rollouts, one per kind and failure (Deployment x5, StatefulSet x4, DaemonSet x3, CronJob x2,
@@ -66,7 +69,8 @@ Sources the predicate rests on (read, not assumed):
           every workload mounting a projection of the root changes its pod template on the switch (rolls); no non-hook
           Job changes (a Job's template is immutable);
        d. the ExternalSecrets reading the root are exactly osh.messagingReaders' names, and no other chart reads it;
-       e. no hook Job's activeDeadlineSeconds exceeds osh.hookDeadline's default;
+       e. a pod restarting after generation 0 is gone (steady: the new user only): its init waits name the active
+          generation's User and Permission, and generation 0's User is not rendered;
        f. without a rotation: no messaging-generation annotation and the generation-0 names only.
   4. MUTANTS, each of which must fail the part it breaks: the waits ignoring the suffix (heat); the waits naming another
      service's User (ceilometer); the pod annotation removed; the partition rule dropped; the hook bound dropped;
@@ -119,7 +123,6 @@ STANDINS = {
                         '| default dict | toJson -}}',
     "osh.lookupExternalSecret": '{{- index ((index . 0).Values.gateObj | default dict) (printf "ExternalSecret/%s" '
                                 '(index . 1)) | default dict | toJson -}}',
-    "osh.nowUnix": '{{- (.Values.gateNow | default 0) | int64 -}}',
     "osh.lookupConfigMap": '{{- index ((index . 0).Values.gateObj | default dict) (printf "ConfigMap/%s" (index . 1)) '
                            '| default dict | toJson -}}',
 }
@@ -205,9 +208,7 @@ def sfx(c, root):
     return "" if root == base_root(c) else root[len(base_root(c)):]
 
 
-NOW = 2_000_000_000
-REFRESH = "2033-05-18T03:33:20Z"   # NOW - 0 s: inside the deadline unless NOW moves past it
-REFRESH_EPOCH = 2_000_000_000
+REFRESH = "2033-05-18T03:33:20Z"
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -322,7 +323,9 @@ def probe(w, cases):
         '{{- range $c := $.Values.components }}{{- if eq $c.name "heat" }}\n'
         '{{- $v := merge (deepCopy $case.vals) (deepCopy $.Values) }}\n'
         '{{ printf "\\n# ROT %s %s\\n" $case.name (include "osh.messagingRotation" '
-        '(list (dict "Values" $v "Release" $.Release) $c ($case.live | default dict) ($case.managed | default list))) }}\n'
+        '(list (dict "Values" $v "Release" $.Release) $c ($case.live | default dict) (dict "managed" ($case.managed | default list) '
+        '"generation" ($case.vals.gateGen | default 5) "observedGeneration" ($case.vals.gateObs | default 5) '
+        '"hooksUnverified" ($case.vals.gateHU | default false)))) }}\n'
         '{{- end }}{{- end }}\n{{- end }}\n')
     vals = merged(BASE_VALS, {"gateCases": [{"name": n, "vals": v, "live": lv, "managed": m} for n, v, lv, m in cases]})
     r = helm(w, "openstack-gate", vals, ("--show-only", "templates/zz-gate-rot-probe.yaml"), umbrella=True)
@@ -365,7 +368,6 @@ def part1(tmp, w=None, only=None):
     after = dict(world(s1), **es_world(g1))
     after.update({"ExternalSecret/" + g1: stamp(b0), "User/heat-rabbitmq-user": user_obj(),
                   "User/heat-rabbitmq-user" + s1: user_obj(), "Secret/" + proj + s1: labelled_secret()})
-    late = NOW + 1800
 
     def mut(world_, key, f):
         g = copy.deepcopy(world_)
@@ -392,20 +394,23 @@ def part1(tmp, w=None, only=None):
                                        "User/heat-rabbitmq-user" + s1: user_obj()}), {}, [],
          {"phase": "draining", "users": users("", s1), "activeSuffix": s1, "activeRoot": g1, "switched": True,
           "username": "heat" + s1}),
-        ("e", dict(tok("t1"), gateObj=dict(after, **world("")), gateNow=late), live(c, g1), managed,
+        ("e", dict(tok("t1"), gateObj=dict(after, **world(""))), live(c, g1), managed,
          {"phase": "draining", "users": users("", s1), "activeSuffix": s1, "blocker": "its pod template is at generation"}),
-        ("f", dict(tok("t1"), gateObj=after, gateNow=NOW), live(c, g1), managed,
-         {"phase": "draining", "users": users("", s1), "blocker": "hook Jobs started before"}),
-        ("g", dict(tok("t1"), gateObj=after, gateNow=late), live(c, g1), managed,
+        # the switching release not applied yet, hooks included (Composition observedGeneration behind)
+        ("f", dict(tok("t1"), gateObj=after, gateObs=4), live(c, g1), managed,
+         {"phase": "draining", "users": users("", s1), "blocker": "has not been applied yet, hooks included"}),
+        ("f2", dict(tok("t1"), gateObj=after, gateHU=True), live(c, g1), managed,
+         {"phase": "draining", "users": users("", s1), "blocker": "hooks-unverified"}),
+        ("g", dict(tok("t1"), gateObj=after), live(c, g1), managed,
          {"phase": "steady", "users": users(s1), "activeSuffix": s1, "roots": [g1], "blockers": []}),
-        ("h1", dict(tok("t1"), gateObj=dict(after, **{"User/heat-rabbitmq-user": user_obj(deleting=True)}), gateNow=NOW),
+        ("h1", dict(tok("t1"), gateObj=dict(after, **{"User/heat-rabbitmq-user": user_obj(deleting=True)})),
          live(c, g1), managed, {"phase": "steady", "users": users(s1)}),
-        ("h2", dict(tok("t1"), gateObj={k: v for k, v in after.items() if k != "User/heat-rabbitmq-user"}, gateNow=NOW),
+        ("h2", dict(tok("t1"), gateObj={k: v for k, v in after.items() if k != "User/heat-rabbitmq-user"}),
          live(c, g1), managed, {"phase": "steady", "users": users(s1)}),
-        ("i1", dict(tok("t2"), gateObj=after, gateNow=NOW), live(c, g1), managed,
+        ("i1", dict(tok("t2"), gateObj=after, gateObs=4), live(c, g1), managed,
          {"phase": "minting", "users": users("", s1), "activeSuffix": s1, "roots": [g1, g2],
           "blocker": "waits until the previous rotation has drained"}),
-        ("i2", dict(tok("t2"), gateObj=dict(after, **{"Secret/" + proj + s2: labelled_secret()}), gateNow=late),
+        ("i2", dict(tok("t2"), gateObj=dict(after, **{"Secret/" + proj + s2: labelled_secret()})),
          live(c, g1), managed, {"phase": "minting", "users": users(s1, s2), "activeSuffix": s1}),
     ]
     # j. half-finished rollouts: each from the rolled world of g, broken one way.
@@ -473,17 +478,17 @@ def part1(tmp, w=None, only=None):
          "not synced at its generation"),
     ]
     for name, key, f, needle in halves:
-        cases.append((name, dict(tok("t1"), gateObj=mut(full_after, key, f), gateNow=late), live(c, g1), full_managed,
+        cases.append((name, dict(tok("t1"), gateObj=mut(full_after, key, f)), live(c, g1), full_managed,
                       {"phase": "draining", "users": users("", s1), "blocker": needle, "names": key.split("/", 1)[1]}))
     cases.append(("jgone", dict(tok("t1"), gateObj={k: v for k, v in full_after.items()
-                                                    if k != "Deployment/heat-gate-gone-check"}, gateNow=late),
+                                                    if k != "Deployment/heat-gate-gone-check"}),
                   live(c, g1), full_managed, {"phase": "draining", "blocker": "cannot be read", "names": "heat-gate-gone-check"}))
     cases.append(("jesgone", dict(tok("t1"), gateObj={k: v for k, v in full_after.items()
-                                                      if k != "ExternalSecret/heat-transport"}, gateNow=late),
+                                                      if k != "ExternalSecret/heat-transport"}),
                   live(c, g1), full_managed, {"phase": "draining", "blocker": "cannot be read", "names": "heat-transport"}))
-    cases.append(("jempty", dict(tok("t1"), gateObj=full_after, gateNow=late), live(c, g1), [],
+    cases.append(("jempty", dict(tok("t1"), gateObj=full_after), live(c, g1), [],
                   {"phase": "draining", "blocker": "lists no status.managed"}))
-    cases.append(("jall", dict(tok("t1"), gateObj=full_after, gateNow=late), live(c, g1), full_managed,
+    cases.append(("jall", dict(tok("t1"), gateObj=full_after), live(c, g1), full_managed,
                   {"phase": "steady", "users": users(s1), "blockers": []}))
     if only:
         cases = [x for x in cases if x[0] in only]
@@ -763,13 +768,6 @@ def check_chart(tmp, c, spec_a, spec_b, readers, tag="", toolkit_mutate=None):
     if root_es_a != set(readers) or root_es_b != set(readers):
         probs.append(("3d", "the ExternalSecrets reading the root are %r (before) / %r (after), osh.messagingReaders "
                             "says %r" % (sorted(root_es_a), sorted(root_es_b), sorted(readers))))
-    # e. hook deadlines
-    for d in db:
-        if d.get("kind") == "Job" and (d["metadata"].get("annotations") or {}).get("helm.sh/hook"):
-            ads = int((d.get("spec") or {}).get("activeDeadlineSeconds") or 0)
-            if ads <= 0 or ads > 1800:
-                probs.append(("3e", "hook Job/%s activeDeadlineSeconds %r, outside osh.hookDeadline's 1800"
-                              % (d["metadata"]["name"], ads)))
     # f. nothing without a rotation
     for d, t in pods(da):
         if "krateo.io/messaging-generation" in ((t.get("metadata") or {}).get("annotations") or {}):
@@ -802,6 +800,39 @@ def part3(tmp):
         if not probs:
             n += 1
     counts["specB"] = sb
+    # e. generation 0 gone (steady after a rotation: the active user only): a restarting pod waits on the active
+    #    generation's User and Permission, and nothing renders or waits on generation 0's User.
+    steady = {}
+    for c in ROTATING:
+        g1, s1, rot = chart_rot(c)
+        rot = dict(rot, users=[u for u in rot["users"] if u["suffix"]])
+        steady[c] = rot
+    ss = span_specs(tmp, steady, "steady")
+    n_e = 0
+    for c in ROTATING if ss else []:
+        su = c.replace("_", "-")
+        s1 = chart_rot(c)[1]
+        w = stage_chart(tmp, c)
+        r = helm(w, c, for_chart(w, ss[c][0]))
+        if r.returncode:
+            fail("3e: %s does not render after generation 0 is gone: %s" % (c, r.stderr.strip()[:200]))
+            continue
+        docs = [d for d in yaml.safe_load_all(r.stdout) if d]
+        users = {d["metadata"]["name"] for d in docs if d.get("kind") == "User"
+                 and d.get("apiVersion", "").startswith("rabbitmq.com/")}
+        waits = [(d["metadata"]["name"], wt["name"]) for d, t in pods(docs) for wt in waits_of(t.get("spec") or {})
+                 if wt.get("kind") in ("User", "Permission") and not wt["name"].endswith("-admin-permission")
+                 and wt["name"].startswith(su + "-rabbitmq-")]
+        bad = [x for x in waits if x[1] not in ("%s-rabbitmq-user%s" % (su, s1), "%s-rabbitmq-permission%s" % (su, s1))]
+        if users != {"%s-rabbitmq-user%s" % (su, s1)}:
+            fail("3e: %s after generation 0 is gone renders Users %r" % (c, sorted(users)))
+        elif bad:
+            fail("3e: %s after generation 0 is gone: a restarting pod would wait on %r (deleted)" % (c, bad[:3]))
+        elif not waits and c == "heat":
+            fail("3e: heat has no wait on its own User at all, so this check measured nothing")
+        else:
+            n_e += 1
+    counts["3e"] = n_e
     return n
 
 
@@ -838,16 +869,20 @@ def part4(tmp):
     for i, (what, part, chart, f) in enumerate(toolkit_mutants):
         probs = check_chart(tmp, chart, SPECS0[chart][0], sb[chart][0], sb[chart][1], tag="-m%d" % i,
                             toolkit_mutate=f)
-        if any(k == part for k, _ in probs):
+        hit = [p for k, p in probs if k == part]
+        # the annotation-removed control must name that chart's workloads, not just fail somewhere
+        if hit and (what != "pod annotation removed" or any(("/%s-" % chart) in p for p in hit)):
             n += 1
         else:
-            fail("4: mutant '%s' passes part %s: %s" % (what, part, probs[:2]))
+            fail("4: mutant '%s' passes part %s (or does not name %s's workloads): %s" % (what, part, chart, probs[:2]))
     helper_mutants = [
         ("partition rule dropped", "js2", lambda h: h.replace(
             '{{- else if and (gt $part 0) (lt (int64 ($st.updatedReplicas | default 0)) $want) -}}',
             '{{- else if false -}}')),
-        ("hook bound dropped", "f", lambda h: h.replace(
-            '{{- if lt (include "osh.nowUnix" $top | int64) $until -}}', '{{- if false -}}')),
+        ("observedGeneration ignored", "f", lambda h: h.replace(
+            '{{- if lt (int64 ($ls.observedGeneration | default 0)) (int64 ($ls.generation | default 0)) -}}',
+            '{{- if false -}}')),
+        ("hooks-unverified ignored", "f2", lambda h: h.replace('{{- if $ls.hooksUnverified -}}', '{{- if false -}}')),
         ("switch without the User Ready", "c", lambda h: h.replace(
             '{{- if and (eq (toString $cond.type) "Ready") (eq (toString $cond.status) "True") -}}{{- $ready = true -}}{{- end -}}\n{{- end -}}',
             '{{- end -}}{{- $ready = true -}}')),
@@ -900,9 +935,10 @@ def main():
             print("FAIL: " + f)
         sys.exit(1)
     print("OK: a RabbitMQ user rotation switches only once the new user is Ready and retires the old one only once every "
-          "reader has rolled: %d step case(s) with lookups stood in (no ConfigMap consulted); %d umbrella render "
+          "reader has rolled: %d step case(s) with lookups stood in (the state from what exists, no ConfigMap); %d umbrella render "
           "check(s); %d of %d rotating charts render one user per generation, wait on the active one, roll every "
-          "reader and change no non-hook Job; %d mutant(s) killed" % (n1, n2, n3, len(ROTATING), n4))
+          "reader and change no non-hook Job; %d of them restart onto the active user with generation 0 gone; "
+          "%d mutant(s) killed" % (n1, n2, n3, len(ROTATING), counts.get("3e", 0), n4))
 
 
 main()

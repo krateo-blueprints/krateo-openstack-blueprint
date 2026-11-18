@@ -151,9 +151,9 @@
        is not steady a ConfigMap openstack-credential-rotation-<id> saying what it waits on (status.credentialRotation). */ -}}
 {{- $rot := dict }}
 {{- if $mp.secret }}
-{{- $rotLive := dict }}{{- $rotManaged := list }}
-{{- if $live }}{{- $ls := fromJson $live }}{{- $rotLive = $ls.spec | default dict }}{{- $rotManaged = $ls.managed | default list }}{{- end }}
-{{- $rot = include "osh.messagingRotation" (list $ $c $rotLive $rotManaged) | fromJson }}
+{{- $rotLive := dict }}{{- $rotStatus := dict }}
+{{- if $live }}{{- $rotStatus = fromJson $live }}{{- $rotLive = $rotStatus.spec | default dict }}{{- end }}
+{{- $rot = include "osh.messagingRotation" (list $ $c $rotLive $rotStatus) | fromJson }}
 {{- if $rot.refuse }}{{- fail (printf "\n\n%s\n" $rot.refuse) }}{{- end }}
 {{- if ne $rot.target $rot.base }}
 {{- include "osh.generationRoot" (list $ $rot) }}

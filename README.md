@@ -932,10 +932,12 @@ over the next reconciles, deriving each step from what exists in the cluster (#3
      as `kubectl rollout status` judges it (kubectl v1.36.4). A StatefulSet partition counts as not rolled while any pod
      is below it;
    - no Job or CronJob Job is still running;
-   - the service's projections of the new root (`<service>-rabbitmq-user`, `<service>-transport`) have synced, and their
-     hook deadline has passed. Hook Jobs are not listed in the release's status, but each is bounded by
-     `activeDeadlineSeconds` (1800 s unless `helm3_hook_deadline_seconds` or a per-Job value says otherwise). So the
-     previous user stays **at least that long after the switch**.
+   - the service's release for the switched spec has been applied, **hooks included**: its Composition's
+     `status.observedGeneration` has caught up. core-provider's controller writes it only after the helm upgrade,
+     which runs and waits for the hooks, has succeeded. A Composition marked `krateo.io/hooks-unverified` waits until
+     you have checked its hooks and removed the mark;
+   - the service's projections of the new root (`<service>-rabbitmq-user`, `<service>-transport`) have synced, so every
+     pod started from then on reads the new credential.
 4. **Retired.** The previous user leaves the release. Its User is deleted, and the topology operator deletes the
    RabbitMQ user.
 

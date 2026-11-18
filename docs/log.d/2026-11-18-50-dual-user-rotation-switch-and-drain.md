@@ -24,29 +24,38 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
     ironic-/magnum-conductor, mistral-engine/-event-engine, neutron-rpc-server, tacker-conductor/-server,
     watcher-api/-applier/-decision-engine, and the aodh, designate and nova (x2) cleanup and cell-setup CronJobs.
 - **"Rolled", and its sources:**
-  - **The evidence:** CDC writes no observedGeneration on a Composition (`internal/composition/support.go`
-    setStatus, and unstructured-runtime v1.1.0's conditions set none). So the evidence that the switching release
-    was applied is each Deployment, StatefulSet, DaemonSet and CronJob carrying the new generation.
-  - **Rollout:** then kubectl v1.36.4's rollout predicates (`rollout_status.go` :75-87, :107-112, :130-146), with a
-    partition counted as not rolled while any pod is below it. OnDelete, bare Pods and unreadable objects are kept
-    and reported, never forced.
+  - **The release, hooks included:** the component Composition's `status.observedGeneration` has caught up with its
+    generation, and no `krateo.io/hooks-unverified` is set.
+    - Read at the version core-provider 2.13.111 deploys (krateo-platformops/core-provider tag 2.13.111, commit
+      7cd0848). It writes observedGeneration only in setStatus (`support.go:377`; unstructured-runtime v1.27.1
+      `statusprojection.go:177`), after a successful reconcile.
+    - That reconcile runs one real helm upgrade whenever anything changed, and the upgrade runs and waits for the
+      hooks (plumbing v1.95.0 `helm/v3/reconcile.go`, steps 5-8).
+    - So hook Jobs, which aren't in `status.managed`, need no clock. Upstream composition-dynamic-controller `main`
+      writes no observedGeneration; that was the first measurement, against the wrong source.
+  - **Workloads:** each Deployment, StatefulSet, DaemonSet and CronJob carries the new generation and passes kubectl
+    v1.36.4's rollout predicates (`rollout_status.go` :75-87, :107-112, :130-146). A partition counts as not rolled
+    while any pod is below it. OnDelete, bare Pods and unreadable objects are kept and reported, never forced.
   - **Jobs:** no Job running, CronJobs included.
-  - **Hook Jobs** aren't in `status.managed`, but each is bounded by `activeDeadlineSeconds`. So the previous user
-    stays until the service's projections of the new root have synced (ESO `syncedResourceVersion` at their own
-    generation) and that deadline has passed since (1800 s by default).
+  - **Projections:** the service's projections of the new root have synced at their own generation.
 - **Entrypoint waits:**
   - **Own service:** a pod waits on its own service's **active** User and Permission. Without this, a pod restarting
     after the generation-0 user's deletion would have waited forever.
   - **Another service:** a pod waits only on that service's vhost and the administrator's permission (ceilometer's
     notification agent waited on four services' Users). The umbrella passes `operator.serviceUser` for this, and at
     0.3.74 ceilometer-notification rolls once for it.
-- **The live read:** a rotation reads the live component with its own GET (`osh.liveMessaging`), never the hold's
-  read (`validate-two-phase-values`, which failed #422's first run).
 - **Drift:** the latch also covers generation roots, by Secret name.
 - **Guard:** `validate-messaging-rotation` (capability-roles 492):
-  - 33 step cases with the lookups stood in, from heat's own `status.managed`. They cover each step, the
-    second-token wait, the deletion of the old User, and half-finished rollouts for every kind and failure.
+  - 34 step cases with the lookups stood in, from heat's own `status.managed`. They cover each step, the
+    second-token wait, the deletion of the old User, a release not yet applied, hooks-unverified, and half-finished
+    rollouts for every kind and failure.
   - 7 umbrella render checks: the generation projection, the report, the span with and without a rotation, and drift.
   - All 20 rotating charts: one user per generation, waits on the active one only, every reader rolls, no non-hook
-    Job changes, the readers are exactly `osh.messagingReaders`, and the hook deadlines are bounded.
-  - 6 mutants killed.
+    Job changes, the readers are exactly `osh.messagingReaders`. With generation 0 gone, a restarting pod waits on
+    the active user, and generation 0's User is not rendered.
+  - 7 mutants killed, the annotation-removed one naming that chart's workloads.
+- **One live read per component** (`validate-two-phase-values`): the read is reached only when holding, when a token
+  is set, or when a generation root of the component is latched in `openstack-credential-generations`. That marker
+  keeps a removed token refused without a GET on every render; it costs one ConfigMap read per render in
+  `compositions.yaml`. Counted: 0 plain, 1 rotating, 1 with the token removed after a rotation, 0 for another
+  credential's latched root, 36 holding, 36 holding and rotating.
