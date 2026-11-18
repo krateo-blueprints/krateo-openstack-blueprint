@@ -1735,7 +1735,10 @@ def mq_dropin_check(chart, cid, sentinel, docs_s, docs, label=""):
                 if not files & carrier_paths:
                     continue
                 MQ_PROBES_CHECKED.append((chart, podname, cname, probe))
-                if not any(re.search(r"--config-dir(?:=|\s+)%s/?(?=\s|$)" % re.escape(dd), text) for dd in dirs):
+                # --config-dir-if-present is the worker probe's form of the start script's `$([ -d D ] && echo
+                # --config-dir D)`: the drop-in is mounted into D, so D exists and is read.
+                if not any(re.search(r"--config-dir(?:-if-present)?(?:=|\s+)%s/?(?=\s|$)" % re.escape(dd), text)
+                           for dd in dirs):
                     fail("22m%s: %s: %s container %s's %s parses %s with --config-file but passes no --config-dir %s: "
                          "it never reads the drop-in, so it has no transport URL and checks nothing" % (
                              label, chart, podname, cname, probe, sorted(files & carrier_paths), " or ".join(sorted(dirs))))
