@@ -125,7 +125,7 @@
 {{- $mp := include "osh.messagingProjection" (list $ $c) | fromJson }}
 {{- if $mp.secret }}
 {{- $rotLive := dict }}{{- $rotManaged := list }}
-{{- if eq $exists "true" }}{{- with include "osh.liveState" (list $ $c.kind $c.name $emitVer $crds) }}{{- $ls := fromJson . }}{{- $rotLive = $ls.spec | default dict }}{{- $rotManaged = $ls.managed | default list }}{{- end }}{{- end }}
+{{- if eq $exists "true" }}{{- with include "osh.liveMessaging" (list $ $c.kind $c.name $emitVer $crds) }}{{- $ls := fromJson . }}{{- $rotLive = $ls.spec | default dict }}{{- $rotManaged = $ls.managed | default list }}{{- end }}{{- end }}
 {{- $rot = include "osh.messagingRotation" (list $ $c $rotLive $rotManaged) | fromJson }}
 {{- if $rot.refuse }}{{- fail (printf "\n\n%s\n" $rot.refuse) }}{{- end }}
 {{- if ne $rot.target $rot.base }}

@@ -487,7 +487,24 @@ krateo.io/composition-version
 {{- $o := lookup (include "osh.apiVersionAt" (list $ver)) $kind $top.Release.Namespace $name -}}
 {{- if $o -}}
 {{- $labels := (($o.metadata).labels) | default dict -}}
-{{- dict "spec" (($o.spec) | default dict) "version" ((index $labels (include "osh.compositionVersionLabel" $top)) | default "") "managed" ((($o.status) | default dict).managed | default list) | toJson -}}
+{{- dict "spec" (($o.spec) | default dict) "version" ((index $labels (include "osh.compositionVersionLabel" $top)) | default "") | toJson -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* osh.liveMessaging (list $ kind name ver crds): what a RabbitMQ user rotation reads from the LIVE component
+       Composition (#309 C), as JSON {spec, managed}: its spec (the root its passwordFrom names is the active generation)
+       and its status.managed. One named GET of the component at <ver>, guarded by osh.crdExists as osh.liveState is.
+       Not osh.liveState: that is the hold's read, called once and only inside the hold
+       (hack/validate-two-phase-values.py), so a render that holds nothing makes no GET for it. This one is made only for
+       a component with an umbrella RabbitMQ projection (osh.messagingProjection: messaging.backend operator) that
+       exists: one GET per such component per render, the cost of deriving the rotation from what exists. */ -}}
+{{- define "osh.liveMessaging" -}}
+{{- $top := index . 0 -}}{{- $kind := index . 1 -}}{{- $name := index . 2 -}}{{- $ver := index . 3 -}}{{- $crds := index . 4 -}}
+{{- if eq (include "osh.crdExists" (list $kind $ver $crds)) "true" -}}
+{{- $o := lookup (include "osh.apiVersionAt" (list $ver)) $kind $top.Release.Namespace $name -}}
+{{- if $o -}}
+{{- dict "spec" (($o.spec) | default dict) "managed" ((($o.status) | default dict).managed | default list) | toJson -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
