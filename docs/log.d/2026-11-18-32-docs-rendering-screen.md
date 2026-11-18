@@ -8,8 +8,8 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
   item rendered as a plain quote, and a `[!NOTE]` swallowed by an open fence rendered as shell. No static check saw
   either.
   - **What it does:** `hack/check-doc-rendering.py` POSTs every markdown file outside `charts/` (63 here) to GitHub's
-    `/markdown` (gfm). Each file's count of rendered alert titles must equal all of its admonition markers, fenced or
-    not.
+    `/markdown` (gfm). Each file's count of `markdown-alert-title` must equal all of its admonition markers, fenced
+    or not.
   - **Controls:** a known-good fixture must render 1 alert and a known-bad fenced one 0. Otherwise the run is VOID
     (exit 2).
   - **Per-document check:** each response must contain the document's own identifying token. That is its longest
@@ -23,7 +23,7 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
     `docs/log.d` plus `docs/log.md`, because `docs/log.md` is their concatenation, and
     `examples/identity-profile/README.md`. That still proves the response wasn't truncated. It doesn't prove the
     response was for this document.
-  - **Upstream defect, worked around here:** the screen counts the alert title's class name as a substring anywhere in
-    the rendered HTML, so a document that names the class in prose counts as one alert. This entry did, and failed;
-    it now describes the class instead of naming it. The defect is to be reported to the nova repository, where the
-    screen lives.
+  - **Upstream defect, fixed upstream:** the screen counted `markdown-alert-title` as a substring anywhere in the
+    rendered HTML, so a document naming the class in prose counted as one alert. This entry did, and failed. nova-kog
+    #181 now counts `<p class="markdown-alert-title"` (prose can't produce a literal `<`), and this entry names the
+    class plainly again, as the live test of that counter (#388).

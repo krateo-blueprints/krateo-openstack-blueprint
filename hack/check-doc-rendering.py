@@ -103,7 +103,28 @@ sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "scripts"))
 from mdfence import ADMONITION, fence_scan  # noqa: E402
 
-ALERT = "markdown-alert-title"
+# THE OPENING TAG, BECAUSE PROSE CANNOT PRODUCE A LITERAL `<`.
+#
+# A document that MENTIONS the alert markup -- documentation about this very
+# screen, for instance -- renders its backticked examples as code spans, and a
+# substring counter reads them as alert boxes. Measured on one document
+# declaring ONE real alert and naming three forms in prose:
+#
+#     markdown-alert-title             -> 4   SPOOFED (3 mentions counted)
+#     class="markdown-alert-title"     -> 3   SPOOFED (2 mentions counted)
+#     <p class="markdown-alert-title"  -> 1   correct
+#     <div class="markdown-alert       -> 1   correct
+#
+# GitHub does NOT escape `"` inside a code span, so the attribute form is
+# spoofable; it DOES escape `<` to `&lt;`, so including the opening tag makes
+# the counter unspoofable by text. The first fix here used the attribute form --
+# the openstack-as-a-service session's suggestion after it bit them -- and this
+# repo's own mutation arm caught that it was still spoofable within a minute.
+#
+# This repo had ZERO documents mentioning any form, so its 18-of-18 was LUCKY
+# rather than correct -- worth writing down, because "all green" is exactly how
+# a latent counter bug stays latent.
+ALERT = '<p class="markdown-alert-title"'
 HEADING = re.compile(r"<h[1-6][\s>]")
 SRC_HEADING = re.compile(r"#{1,6} \S")
 # Any block-level element, used only when a document has no distinctive token.
@@ -218,6 +239,49 @@ def pick_token(tokens, counts):
     return None, False
 
 
+def census(corpus):
+    """(counts, supersets) -- the token census, and the documents left out of it.
+
+    A document whose token set CONTAINS another document's whole token set is a
+    concatenation of it: docs/log.md in openstack-as-a-service is rendered from
+    every docs/log.d entry, so it repeats every token they have, and counted in
+    the census it made all 37 of its sources "shared" -- 40 of 71 documents
+    there, the strong identifier lost for exactly the files a concatenation
+    copies. A superset is therefore left out of the CENSUS only: its sources
+    regain their corpus-unique tokens. It is still CHECKED, identified against
+    the full count, where everything it holds is shared at best -- which is the
+    honest strength of an identifier for a document that is a copy.
+    """
+    supersets = {
+        f for f, ts in corpus.items()
+        if any(g != f and corpus[g] and corpus[g] <= ts for g in corpus)}
+    counts = {}
+    for f, ts in corpus.items():
+        if f in supersets:
+            continue
+        for tok in ts:
+            counts[tok] = counts.get(tok, 0) + 1
+    return counts, supersets
+
+
+def plan(corpus):
+    """[(document, token, unique)] for EVERY document, in order -- the check list.
+
+    A superset is identified against the full count (its own tokens included),
+    so it can never claim a token its sources hold as unique to itself.
+    """
+    census_counts, supersets = census(corpus)
+    full = {}
+    for ts in corpus.values():
+        for tok in ts:
+            full[tok] = full.get(tok, 0) + 1
+    out = []
+    for f in sorted(corpus):
+        token, unique = pick_token(corpus[f], full if f in supersets else census_counts)
+        out.append((f, token, unique))
+    return out
+
+
 def instrument_controls():
     """Returns a list of reasons the instrument cannot be trusted right now."""
     bad = []
@@ -265,6 +329,24 @@ def self_test():
     assert real_two.count(ALERT) == 2, real_two.count(ALERT)
     assert real_two.count("markdown-alert") == 6, \
         "the 3-per-alert inflation is the reason ALERT is the title class"
+
+    # Recorded verbatim from a real response: prose naming three forms of the
+    # markup in backticks, plus one real alert. The fixture asserts BOTH that
+    # the rejected counters are spoofable and that the chosen one is not --
+    # without the first half the arm would pass just as well if ALERT matched
+    # nothing at all.
+    spoof = ('<p>Forms a doc might name: <code class="notranslate">'
+             'markdown-alert-title</code>, <code class="notranslate">'
+             'class="markdown-alert-title"</code>, and <code class="notranslate">'
+             '&lt;p class="markdown-alert-title"&gt;</code>.</p>\n'
+             '<div class="markdown-alert markdown-alert-note">'
+             '<p class="markdown-alert-title"><svg></svg>Note</p>'
+             '<p>one real alert</p>\n</div>')
+    assert spoof.count("markdown-alert-title") == 4, "the bare form is spoofable"
+    assert spoof.count('class="markdown-alert-title"') == 3, \
+        "the attribute form is spoofable too -- `\"` is not escaped in a code span"
+    assert spoof.count(ALERT) == 1, \
+        "the opening-tag form must count the one real alert and no mention"
     assert HEADING.search(real_two)
 
     # 4. The mutation that would make this script useless, asserted as wrong
@@ -333,7 +415,30 @@ def self_test():
     render_of_b = "<h1>B</h1><p>it discusses theUniqueTokenOfB at length</p>"
     assert pa not in render_of_b, "doc A's token must be absent from doc B's render"
 
-    print("check-doc-rendering.py: self-test passed (9 arms)")
+    # 9. The superset census rule. C is A plus B, as a concatenation is: left in
+    #    the census, it makes A's and B's every token shared. Out of the census,
+    #    A and B are identified by unique tokens again -- and C is still CHECKED,
+    #    by a shared token. Excluding C from the check instead of the census
+    #    would lose the one document that copies the others; that is asserted,
+    #    not left to a comment.
+    corp = {"a.md": {"alphaOnlyInA", "commonToAllThree"},
+            "b.md": {"bravoOnlyInB", "commonToAllThree"},
+            "c.md": {"alphaOnlyInA", "bravoOnlyInB", "commonToAllThree"}}
+    cc, sup = census(corp)
+    assert sup == {"c.md"}, sup
+    got = {f: (tok, uniq) for f, tok, uniq in plan(corp)}
+    assert set(got) == set(corp), "every document must be checked, the superset included: %s" % sorted(got)
+    assert got["a.md"] == ("alphaOnlyInA", True), got["a.md"]
+    assert got["b.md"] == ("bravoOnlyInB", True), got["b.md"]
+    assert got["c.md"][1] is False and got["c.md"][0] is not None, got["c.md"]
+    legacy = {}
+    for ts in corp.values():
+        for tok in ts:
+            legacy[tok] = legacy.get(tok, 0) + 1
+    assert pick_token(corp["a.md"], legacy)[1] is False, \
+        "without the rule A is shared: the fixture must express the defect it fixes"
+
+    print("check-doc-rendering.py: self-test passed (11 arms)")
     return OK
 
 
@@ -352,25 +457,24 @@ def main():
             print("  - " + b)
         return VOID
 
-    # Corpus pass first: a token is only an identifier if no other file has it.
-    corpus, counts = {}, {}
+    # Corpus pass first: a token is only an identifier if no other file has it,
+    # counting every file except the concatenations (census()).
+    corpus = {}
     for f in docs():
         lines = open(f, encoding="utf-8", errors="replace").read().split("\n")
         inside, _, _, _ = fence_scan(lines)
         corpus[f] = tokens_of(lines, inside)
-        for t in corpus[f]:
-            counts[t] = counts.get(t, 0) + 1
+    _, supersets = census(corpus)
     shared = 0
 
     void, mismatched, clean = [], [], 0
-    for f in docs():
+    for f, token, unique in plan(corpus):
         lines = open(f, encoding="utf-8", errors="replace").read().split("\n")
         declared = markers(lines)
         html, why = render("\n".join(lines))
         if html is None:
             void.append("%s: %s" % (f, why))
             continue
-        token, unique = pick_token(corpus[f], counts)
         if token is not None:
             if not unique:
                 shared += 1
@@ -408,6 +512,9 @@ def main():
         print("%d document(s) had no corpus-unique token and were identified by "
               "a shared one -- still proof against a truncated response, not "
               "against a response for a different document." % shared)
+    if supersets:
+        print("%d document(s) contain another document's whole token set and were left out of "
+              "the census (still checked): %s" % (len(supersets), ", ".join(sorted(supersets))))
     if void:
         return VOID
     return MISMATCH if mismatched else OK
