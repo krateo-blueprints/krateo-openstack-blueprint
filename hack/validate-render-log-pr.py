@@ -30,7 +30,17 @@ script:
   7. a merge queue, and a required check fails on the bot's pull request: refused at once, nothing enqueued or merged;
   8. the required checks never reported within the appear limit: fails saying so, nothing enqueued;
   9. a required check reported but never finished within the finish limit: fails saying so, nothing enqueued;
-  10. a ruleset that requires no check: refused rather than enqueued unchecked.
+  10. a ruleset that requires no check: refused rather than enqueued unchecked;
+  11. the open bot pull request is already in the merge queue (#387, run 44291452478: GitHub refused the push, GH006):
+     it is dequeued, the push is accepted, the required checks are polled on the new commit, and it is enqueued again,
+     in that order. The local remote refuses pushes to a queued branch the way GitHub does (a pre-receive hook);
+  12. it enters the queue between the look and the push: the refused push re-reads the state, dequeues once, pushes
+     again, waits, enqueues;
+  13. a push refused while the pull request is not queued: a failure, nothing dequeued or enqueued.
+
+Then each mutant in MUTANTS (no dequeue, every pull request read as unqueued, no re-read after a refusal, enqueue
+before the checks pass, the workflow back at depth 1, "not reported" read as failed) runs this gate on a copy of its
+files, and must fail it.
 
 Fails when git is missing or a case cannot be set up.
 """
@@ -56,6 +66,7 @@ BOT_EMAIL = "%s+%s@users.noreply.github.com" % (BOT_ID, BOT)
 SKIP = re.compile(r"\[\s*(?:skip\s+ci|ci\s+skip|no\s+ci|skip\s+actions|actions\s+skip)\s*\]|^\s*skip-checks\s*:\s*true", re.I | re.M)
 STUB = r'''#!/bin/sh
 echo "$*" >> "$GH_LOG"
+echo "gh $*" >> "$GH_SEQ"
 case "$1 $2" in
   "api users/"*) echo "$GH_BOT_ID" ;;
   "api repos/"*"/check-runs"*)
@@ -69,7 +80,21 @@ case "$1 $2" in
       *required_status_checks*) [ -n "${GH_REQUIRED:-}" ] && printf '%b\n' "$GH_REQUIRED"; exit 0 ;;
       *) echo "${GH_QUEUE:-0}" ;;
     esac ;;
-  "api graphql") echo '{"data":{"enqueuePullRequest":{"mergeQueueEntry":{"position":1}}}}' ;;
+  "api graphql")
+    case "$*" in
+      *isInMergeQueue*)
+        # the queue state is the marker file the remote's pre-receive hook refuses on; GH_BECOME_QUEUED answers
+        # false once and puts the pull request in the queue right after, as if it entered between look and push
+        if [ -f "$GH_QUEUE_MARK" ]; then echo true; else
+          echo false
+          if [ "${GH_BECOME_QUEUED:-}" = 1 ] && [ ! -f "$GH_QUEUE_MARK.once" ]; then
+            touch "$GH_QUEUE_MARK" "$GH_QUEUE_MARK.once"
+          fi
+        fi ;;
+      *dequeuePullRequest*) rm -f "$GH_QUEUE_MARK"; echo '{"data":{"dequeuePullRequest":{"mergeQueueEntry":{"id":"MQE"}}}}' ;;
+      *enqueuePullRequest*) echo '{"data":{"enqueuePullRequest":{"mergeQueueEntry":{"position":1}}}}' ;;
+      *) echo "stub gh: unexpected graphql $*" >&2; exit 3 ;;
+    esac ;;
   "pr view") echo "PR_kwDOGATE42" ;;
   "pr list") printf '%s\n' "$GH_OPEN" ;;
   "pr create") echo "https://github.com/o/r/pull/42" ;;
@@ -121,28 +146,65 @@ def setup(tmp):
     os.makedirs(bindir)
     open(os.path.join(bindir, "gh"), "w").write(STUB)
     os.chmod(os.path.join(bindir, "gh"), 0o755)
+    # GitHub refuses a push to a queued pull request's branch (GH006, "protected branch hook declined"): the remote does
+    # the same while the queue marker exists, or always while the refuse marker exists, and records every push.
+    hook = os.path.join(remote, "hooks", "pre-receive")
+    open(hook, "w").write("""#!/bin/sh
+while read old new ref; do
+  case "$ref" in
+    refs/heads/bot/*)
+      if [ -f "%(mark)s" ] || [ -f "%(refuse)s" ]; then
+        echo "push $ref refused" >> "%(seq)s"
+        echo "protected branch hook declined" >&2
+        exit 1
+      fi
+      echo "push $ref" >> "%(seq)s" ;;
+  esac
+done
+""" % {"mark": QUEUE_MARK(tmp), "refuse": os.path.join(tmp, "refuse.mark"), "seq": os.path.join(tmp, "seq.log")})
+    os.chmod(hook, 0o755)
     return remote, work, bindir
+
+
+def QUEUE_MARK(tmp):
+    return os.path.join(tmp, "queue.mark")
 
 
 REQUIRED = "lint-docs / lint-docs\nvalues-schema"
 PASSING = "lint-docs / lint-docs\tcompleted\tsuccess\nvalues-schema\tcompleted\tsuccess"
 RAW = []  # every gh call of the last script() run, lookups included
+SEQ = []  # gh calls and pushes to bot branches, in the order they happened
 
 
-def script(work, bindir, tmp, open_pr="", slug=None, queue="0", runs=None, required=REQUIRED):
+def script(work, bindir, tmp, open_pr="", slug=None, queue="0", runs=None, required=REQUIRED, queued_pr="0",
+           refuse=False):
     """runs: what successive check-runs reads return, one TSV text per poll (name, status, conclusion); the last one
-    repeats. The script polls with no sleep and limits of 3 polls to appear and 5 to finish."""
+    repeats. The script polls with no sleep and limits of 3 polls to appear and 5 to finish. queued_pr: "1" the open
+    bot pull request is in the merge queue, "become" it enters the queue right after the script first looks. refuse:
+    the remote refuses every push to a bot branch, queued or not."""
     log = os.path.join(tmp, "gh.log")
     open(log, "w").close()
+    seq = os.path.join(tmp, "seq.log")
+    open(seq, "w").close()
+    mark = QUEUE_MARK(tmp)
+    for p in (mark, mark + ".once", os.path.join(tmp, "refuse.mark")):
+        if os.path.exists(p):
+            os.unlink(p)
+    if queued_pr == "1":
+        open(mark, "w").close()
+    if refuse:
+        open(os.path.join(tmp, "refuse.mark"), "w").close()
     rdir = tempfile.mkdtemp(dir=tmp)
     for i, text in enumerate(runs if runs is not None else [PASSING], 1):
         open(os.path.join(rdir, "runs.%d" % i), "w").write(text + ("\n" if text else ""))
     env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"], GH_LOG=log, GH_OPEN=open_pr,
                GH_BOT_ID=BOT_ID, APP_SLUG=SLUG if slug is None else slug, GH_QUEUE=queue, GH_RUNS_DIR=rdir,
-               GH_REQUIRED=required, CHECKS_POLL_SECONDS="0", CHECKS_APPEAR_POLLS="3", CHECKS_DONE_POLLS="5")
+               GH_REQUIRED=required, CHECKS_POLL_SECONDS="0", CHECKS_APPEAR_POLLS="3", CHECKS_DONE_POLLS="5",
+               GH_SEQ=seq, GH_QUEUE_MARK=mark, GH_BECOME_QUEUED="1" if queued_pr == "become" else "")
     env.pop("BOT_USER_ID", None)
     r = run(["bash", "hack/render-log-pr.sh", "."], work, env=env, check=False)
     RAW[:] = [l for l in open(log).read().splitlines() if l]
+    SEQ[:] = [l for l in open(seq).read().splitlines() if l]
     # the bot account's id and the branch's rules are lookups, not pull-request calls; the enqueue mutation is one
     return r, [l for l in open(log).read().splitlines()
                if l and (not l.startswith("api ") or l.startswith("api graphql"))]
@@ -281,9 +343,10 @@ def main():
             if remote_branches(remote) != sorted(["main", branch]):
                 failures.append("3 (open bot pull request): remote branches %s; want no second bot branch"
                                 % remote_branches(remote))
-            if kinds != ["pr list", "pr merge"] or " 7 " not in " %s " % calls[-1]:
-                failures.append("3 (open bot pull request): gh calls %s; want pr list then pr merge 7, no pr create"
-                                % calls)
+            if (kinds != ["pr list", "pr view", "api graphql", "pr merge"] or "isInMergeQueue" not in calls[2]
+                    or " 7 " not in " %s " % calls[-1]):
+                failures.append("3 (open bot pull request): gh calls %s; want pr list, the pull request's node id, "
+                                "whether it is queued (isInMergeQueue), then pr merge 7, no pr create" % calls)
         checked += 1
         # 3b. the same update path from a checkout of the depth render-log.yaml uses. main moves on after the bot
         #     branch forked; from a depth-1 clone main's one commit has no parents, so git refuses to merge it into the
@@ -389,6 +452,59 @@ def main():
             failures.append("10 (merge queue, nothing required): rc %d, stderr %r; want a refusal and no enqueue"
                             % (r.returncode, r.stderr[-300:]))
         checked += 1
+        # 11-13. a merge queue, and the open bot pull request is in it (#387, run 44291452478: the push to queued
+        #     bot/render-log-5d41b6d was refused with GH006). First give it an open bot branch to update.
+        add_entry(work, "2099-01-09-01-gate-entry.md")
+        sha7 = git(work, "rev-parse", "--short=7", "HEAD")
+        script(work, bindir, tmp, queue="1")
+        qbranch = "bot/render-log-" + sha7
+
+        def order(seq):
+            """Each step's first position in the sequence: dequeue, push accepted, push refused, poll, enqueue."""
+            keys = {"dequeue": "dequeuePullRequest", "poll": "/check-runs", "enqueue": "enqueuePullRequest",
+                    "refused": "push refs/heads/%s refused" % qbranch}
+            pos = {k: next((i for i, l in enumerate(seq) if v in l), None) for k, v in keys.items()}
+            pos["push"] = next((i for i, l in enumerate(seq) if l == "push refs/heads/" + qbranch), None)
+            return pos
+
+        # 11. already queued when the run starts: dequeue, push, wait for the required checks on the new commit,
+        #     enqueue again, in that order
+        add_entry(work, "2099-01-10-01-gate-entry.md")
+        before = git(remote, "rev-parse", qbranch)
+        r, calls = script(work, bindir, tmp, open_pr="9 " + qbranch, queue="1", queued_pr="1")
+        pos = order(SEQ)
+        after = git(remote, "rev-parse", qbranch)
+        polled_new = [l for l in SEQ if "/commits/%s/check-runs" % after in l]
+        if (r.returncode != 0 or after == before or None in (pos["dequeue"], pos["push"], pos["poll"], pos["enqueue"])
+                or not pos["dequeue"] < pos["push"] < pos["poll"] < pos["enqueue"] or pos["refused"] is not None
+                or not polled_new):
+            failures.append("11 (open bot pull request already queued): rc %d, sequence %s, stderr %r; want dequeue, "
+                            "then an accepted push, then the required checks polled on the new commit, then enqueue"
+                            % (r.returncode, SEQ, r.stderr[-300:]))
+        checked += 1
+        # 12. it enters the queue between the look and the push: the refused push re-reads the state, dequeues, pushes
+        #     again, waits, enqueues
+        add_entry(work, "2099-01-11-01-gate-entry.md")
+        before = git(remote, "rev-parse", qbranch)
+        r, calls = script(work, bindir, tmp, open_pr="9 " + qbranch, queue="1", queued_pr="become")
+        pos = order(SEQ)
+        if (r.returncode != 0 or git(remote, "rev-parse", qbranch) == before
+                or None in (pos["refused"], pos["dequeue"], pos["push"], pos["poll"], pos["enqueue"])
+                or not pos["refused"] < pos["dequeue"] < pos["push"] < pos["poll"] < pos["enqueue"]
+                or sum("isInMergeQueue" in l for l in SEQ) != 2 or sum("dequeuePullRequest" in l for l in SEQ) != 1):
+            failures.append("12 (open bot pull request queued mid-run): rc %d, sequence %s, stderr %r; want a refused "
+                            "push, the state read again, one dequeue, an accepted push, the checks, then enqueue"
+                            % (r.returncode, SEQ, r.stderr[-300:]))
+        checked += 1
+        # 13. the push is refused and the pull request is not queued: that is a failure, with nothing dequeued or
+        #     enqueued
+        add_entry(work, "2099-01-12-01-gate-entry.md")
+        r, calls = script(work, bindir, tmp, open_pr="9 " + qbranch, queue="1", refuse=True)
+        if (r.returncode == 0 or any("dequeuePullRequest" in l or "enqueuePullRequest" in l for l in SEQ)
+                or "is not in the merge queue" not in r.stderr):
+            failures.append("13 (push refused, not queued): rc %d, sequence %s, stderr %r; want a failure and no "
+                            "dequeue or enqueue" % (r.returncode, SEQ, r.stderr[-300:]))
+        checked += 1
         # 5. a token from another App: refused before anything is committed or called
         add_entry(work, "2099-01-03-01-gate-entry.md")
         head = git(remote, "rev-parse", "main")
@@ -402,13 +518,67 @@ def main():
         for f in failures:
             print("FAIL: " + f)
         return 1
+    if not os.environ.get("RENDER_LOG_GATE_MUTANT"):
+        survived = mutants()
+        if survived is None:
+            return 2
+        if survived:
+            for s in survived:
+                print("FAIL: mutant survived: %s (the case that should catch it cannot fail)" % s)
+            return 1
+        checked_mutants = len(MUTANTS)
+    else:
+        checked_mutants = 0
     print("OK: render-log-pr.sh, %d cases: nothing when current; one bot branch, commit and squash-merged pull request "
           "for a new entry, by the App's bot with no skip marker; an open bot pull request updated, never a second; "
           "idempotent once landed; another App refused; the workflow cannot re-trigger itself; the update path merges "
           "from the workflow's checkout depth (a depth-1 clone reproduces the refusal); under a merge queue it waits "
           "for the ruleset's required checks on the pushed commit (late, failed, never reported, never finished, none "
-          "required) and enqueues through enqueuePullRequest instead of merging" % checked)
+          "required) and enqueues through enqueuePullRequest instead of merging; a queued bot pull request (or one "
+          "queued mid-run) is dequeued, updated, checked and enqueued again; %d mutant(s) caught"
+          % (checked, checked_mutants))
     return 0
+
+
+# Each mutant is this gate run on a copy of the files it reads, with one change; every one must fail it.
+MUTANTS = [
+    ("pushes to a queued bot branch without dequeuing it (#387)", "hack/render-log-pr.sh",
+     '  if in_merge_queue "$node"; then\n    dequeue "$node"\n  fi\n', ""),
+    ("reads every pull request as not queued", "hack/render-log-pr.sh", "    true) return 0 ;;", "    true) return 1 ;;"),
+    ("a push refused because the pull request became queued is a failure", "hack/render-log-pr.sh",
+     '    if in_merge_queue "$node"; then\n      echo "bot pull request #$number entered',
+     '    if false; then\n      echo "bot pull request #$number entered'),
+    ("enqueues before the required checks pass", "hack/render-log-pr.sh",
+     '  wait_for_required_checks "$(git rev-parse HEAD)" || exit 1\n', ""),
+    ("render-log.yaml back at checkout depth 1", ".github/workflows/render-log.yaml", "          fetch-depth: 0\n", ""),
+    ("a check not reported yet is read as failed (run 44280066151)", "hack/render-log-pr.sh",
+     'if [ -z "$line" ]; then missing+=("$name"); continue; fi',
+     'if [ -z "$line" ]; then failed+=("$name (not reported)"); continue; fi'),
+]
+COPY = ["docs", "hack/render-log.py", "hack/render-log-pr.sh", "hack/render-log-app.yaml",
+        "hack/validate-render-log-pr.py", ".github/workflows/render-log.yaml"]
+
+
+def mutants():
+    survived = []
+    for label, rel, old, new in MUTANTS:
+        with tempfile.TemporaryDirectory() as t:
+            for n in COPY:
+                src, dst = os.path.join(ROOT, n), os.path.join(t, n)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                (shutil.copytree if os.path.isdir(src) else shutil.copy)(src, dst)
+            p = os.path.join(t, rel)
+            text = open(p).read()
+            if text.count(old) != 1:
+                print("FAILED MEASUREMENT: mutant %r: its text occurs %d times in %s; update the mutant to the file"
+                      % (label, text.count(old), rel))
+                return None
+            open(p, "w").write(text.replace(old, new, 1))
+            r = subprocess.run([sys.executable, os.path.join(t, "hack", "validate-render-log-pr.py"), t],
+                               capture_output=True, text=True, env=dict(os.environ, RENDER_LOG_GATE_MUTANT="1"))
+            if r.returncode != 1 or "FAIL: " not in r.stdout:
+                survived.append("%s (rc %d)" % (label, r.returncode))
+    return survived
 
 
 if __name__ == "__main__":

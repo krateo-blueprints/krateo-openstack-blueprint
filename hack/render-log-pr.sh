@@ -106,6 +106,26 @@ wait_for_required_checks() {
   done
 }
 
+# Whether the pull request with node id $1 is in the merge queue, read the moment it is asked. An answer that is not
+# true or false (an API error, a renamed field) stops the script: guessing "not queued" is what produced GH006.
+in_merge_queue() {
+  local answer
+  answer=$(gh api graphql -f query='query($id: ID!) { node(id: $id) { ... on PullRequest { isInMergeQueue } } }' \
+    -f id="$1" --jq '.data.node.isInMergeQueue')
+  case "$answer" in
+    true) return 0 ;;
+    false) return 1 ;;
+    *) echo "could not tell whether pull request $1 is in the merge queue (got '$answer')" >&2; exit 1 ;;
+  esac
+}
+
+dequeue() {
+  gh api graphql -f query='mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { mergeQueueEntry { id } } }' \
+    -f id="$1" >/dev/null
+  echo "took bot pull request #$number out of the merge queue to update it; it is enqueued again once its required" \
+    "checks pass"
+}
+
 python3 hack/render-log.py .
 if git diff --quiet -- docs/log.md; then
   echo "docs/log.md is already the render of docs/log.d; nothing to commit"
@@ -146,7 +166,26 @@ if [ -n "$open" ]; then
     exit 1
   fi
   git "${BOT[@]}" commit -q -m "$MSG"
-  git push origin "$branch"
+  # GitHub refuses a push to the branch of a pull request in the merge queue (GH006, "protected branch hook
+  # declined"). Run 44291452478 found #384 queued by the run before it, pushed, was refused and failed, and the entry
+  # it had rendered then waited for the next docs/log.d merge, because the bot's own merge starts no run (the paths
+  # filter, the loop guard). So a queued bot pull request is taken out of the queue, updated, and put back once its
+  # required checks pass on the new commit (below). It can also enter the queue between the look and the push: a
+  # refused push re-reads the state and, if it is queued now, takes the same path once. Anything else fails.
+  node=$(gh pr view "$number" --json id --jq .id)
+  if in_merge_queue "$node"; then
+    dequeue "$node"
+  fi
+  if ! git push origin "$branch"; then
+    if in_merge_queue "$node"; then
+      echo "bot pull request #$number entered the merge queue during this run; taking it out and pushing again"
+      dequeue "$node"
+      git push origin "$branch"
+    else
+      echo "the push to $branch was refused, and bot pull request #$number is not in the merge queue" >&2
+      exit 1
+    fi
+  fi
 else
   branch="$PREFIX$sha7"
   git checkout -b "$branch"
@@ -163,7 +202,8 @@ fi
 # GraphQL mutation enqueuePullRequest: `gh pr merge --auto` (and `gh pr merge` alone, which falls back to it) calls
 # enablePullRequestAutoMerge, and auto-merge is disabled on this repository, so it fails with "Auto merge is not
 # allowed for this repository" (gh 2.86, 2026-11-18). The queue takes a pull request whose required checks passed, so
-# it first waits for them (gh pr checks --required --watch). All of this needs the App token: a merge group enqueued
+# it first waits for them on the pushed commit (wait_for_required_checks, above); a bot pull request taken out of the
+# queue to be updated goes back in here, the same way. All of this needs the App token: a merge group enqueued
 # with GITHUB_TOKEN would start no merge_group workflow (GitHub's documented GITHUB_TOKEN rule lists no merge_group
 # exception). Without a queue it squash-merges at once, as before.
 queued=$(gh api "repos/{owner}/{repo}/rules/branches/$BASE_BRANCH" --jq '[.[] | select(.type == "merge_queue")] | length')
