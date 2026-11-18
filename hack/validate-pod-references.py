@@ -277,6 +277,22 @@ def main() -> int:
         sys.exit(f"FAIL: {e}")
     vary = {c for c in delivered[backends[0]]
             if len({json.dumps(delivered[b].get(c), sort_keys=True) for b in backends}) > 1}
+    # The specs the umbrella delivers, per profile, to the components that profile selects (a spec is delivered only to
+    # a selected component: ceilometer's for identity, which does not select it, has no notification vhosts and is
+    # refused by design). Each distinct (component, spec) is rendered once, for render_identity.
+    profiles = (((json.loads((root / "blueprints" / "openstack" / "chart" / "values.schema.json").read_text())
+                  .get("properties") or {}).get("profile") or {}).get("enum") or [])
+    if not profiles:
+        sys.exit("FAIL: the umbrella schema lists no profile, so no delivered spec can be rendered")
+    as_delivered = {}
+    try:
+        for prof in profiles:
+            sp, sel = us.specs(str(root), {"profile": prof}), us.selected(str(root), {"profile": prof})
+            for c in sorted(sel):
+                key = (c, json.dumps(sp.get(c) or {}, sort_keys=True))
+                as_delivered.setdefault(key, []).append(prof)
+    except us.SpecError as e:
+        sys.exit(f"FAIL: {e}")
     if block - vary:
         sys.exit(f"FAIL: {sorted(block - vary)} require block-storage and their spec does not depend on storage.backend")
 
@@ -292,8 +308,10 @@ def main() -> int:
             modes = [(f"storage.backend {b}", b, delivered[b].get(component) or {}) for b in backends] \
                 if component in vary else [("", None, None)]
             if component not in vary:
-                base = delivered["none" if "none" in delivered else backends[0]]
-                modes.append(("as the umbrella delivers it", "umbrella", base.get(component) or {}))
+                for (c, js), profs in sorted(as_delivered.items()):
+                    if c == component:
+                        modes.append(("as the umbrella delivers it, profile %s" % "/".join(profs), "umbrella",
+                                      json.loads(js)))
             for label, backend, values in modes:
                 tag = f"{component} ({label})" if label else component
                 try:

@@ -23,7 +23,10 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
   - **`hack/render_identity.py`:** no two resources of one render may share group, kind, namespace and name. The gates
     that already render every chart pass their output through it, rather than render the charts again:
     - `validate-pod-references.py`: every component chart at its defaults, under each storage.backend it depends on,
-      and, new, once more as the umbrella delivers it (its spec from compositions.yaml).
+      and, new, as the umbrella delivers it: for each profile, the spec compositions.yaml builds for each component
+      that profile selects (`umbrella_spec.selected`, new), each distinct spec rendered once. The selection matters:
+      ceilometer's spec under identity, which does not select it, has no notification vhosts, and the chart refuses
+      it by design (#281).
     - `validate-messaging-topology.py`: every messaging client in operator mode.
     - `validate-messaging-operator.py`: the rabbitmq chart (3 replicas and 1) and every client in operator mode.
   - **The ledger:** each gate reports the renders and resources checked, and fails when either is 0. Once per gate, a
