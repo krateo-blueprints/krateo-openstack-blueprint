@@ -1,0 +1,273 @@
+{{- /* Public endpoints (#311): one Gateway, an HTTPRoute per public endpoint of a selected component, one Certificate,
+       and the install namespace's ingress NetworkPolicy. Nothing at all when publicEndpoints is off.
+
+       The routes are the umbrella's objects, not the component charts' extraObjects. extraObjects is a LIST in these
+       charts, and helm replaces a list in a merge, so a route the umbrella put there and a user's own extraObjects
+       would silently drop one another (upstream openstack-helm changed it to a map for exactly that, d91658aba8).
+       Here a route exists exactly while its component is selected, and one template carries all of them.
+
+       Each HTTPS route sets X-Forwarded-Proto: https on the request, OVERWRITING what the client sent: the services
+       parse that header (oslo.middleware enable_proxy_headers_parsing, Django SECURE_PROXY_SSL_HEADER) to decide
+       whether the request was secure, and that is only true if no client can supply it. Whether a given Gateway
+       implementation already overwrites it does not matter then. Every HTTPS response gets Strict-Transport-Security.
+
+       hack/validate-public-endpoints.py checks these objects and the component values together. */ -}}
+{{- $pe := .Values.publicEndpoints | default dict }}
+{{- if $pe.enabled }}
+{{- include "osh.publicEndpointsRequire" (list $) }}
+{{- $sel := splitList " " (include "osh.selected" (list $)) }}
+{{- $routes := include "osh.publicRoutes" (list $ $sel) | fromJsonArray }}
+{{- $gw := $pe.gateway.name }}
+{{- $tlsSecret := printf "%s-tls" $gw }}
+{{- $hsts := printf "max-age=%d" (int $pe.hsts.maxAge) }}
+{{- $proxyNs := $pe.proxyNamespace | default .Release.Namespace }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ $gw }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  gatewayClassName: {{ $pe.gatewayClassName | quote }}
+{{- with $pe.gateway.addresses }}
+  addresses:
+{{- range $a := . }}
+    - type: IPAddress
+      value: {{ $a | quote }}
+{{- end }}
+{{- end }}
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: {{ printf "*.%s" $pe.baseDomain | quote }}
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: {{ printf "*.%s" $pe.baseDomain | quote }}
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: {{ $tlsSecret }}
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $tlsSecret }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  secretName: {{ $tlsSecret }}
+  dnsNames:
+{{- range $r := $routes }}
+    - {{ $r.fqdn | quote }}
+{{- end }}
+  issuerRef:
+    group: {{ $pe.tls.issuerRef.group | default "cert-manager.io" | quote }}
+    kind: {{ $pe.tls.issuerRef.kind | default "ClusterIssuer" | quote }}
+    name: {{ $pe.tls.issuerRef.name | quote }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $gw }}-https-redirect
+  namespace: {{ .Release.Namespace }}
+spec:
+  parentRefs:
+    - name: {{ $gw }}
+      sectionName: http
+  hostnames:
+{{- range $r := $routes }}
+    - {{ $r.fqdn | quote }}
+{{- end }}
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+{{- range $r := $routes }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ printf "%s-%s" $gw $r.host }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    openstack.krateo.io/component: {{ $r.component }}
+spec:
+  parentRefs:
+    - name: {{ $gw }}
+      sectionName: https
+  hostnames:
+    - {{ $r.fqdn | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: X-Forwarded-Proto
+                value: https
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: {{ $hsts | quote }}
+      backendRefs:
+        - name: {{ $r.backend.name }}
+          port: {{ $r.backend.port }}
+{{- end }}
+{{- $np := $pe.networkPolicy | default dict }}
+{{- if $np.enabled }}
+{{- /* The install namespace's ingress policy. Deny by default; everything allowed is one of the five rules below, and
+       nothing else crosses into the namespace (hack/validate-public-endpoints.py asserts exactly that set of peers).
+
+       "Every pod" is written as a selector on the label krateo.io/networkpolicy-exempt: the policies select every pod
+       WITHOUT it (DoesNotExist), which is every pod, in block style (an empty selector can only be written `{}`), and
+       a pod given the label is selected by none of them, so it is left unrestricted: an explicit, visible opt-out
+       (who can label pods here can already run any workload here). The same-namespace PEER is that selector OR its
+       complement (Exists), i.e. every pod of the namespace, exempt or not.
+
+       Same namespace: every component talks to every other one by Service name, and OpenStack-Helm's per-application
+       policies would be a 36-component matrix to keep in step with the charts.
+       Nodes: neutron's agents, nova-compute, libvirt and openvswitch are hostNetwork pods; their traffic carries the
+       node's address, which no podSelector matches. Kubelet probes come from there too.
+       Gateway proxy: to the routed backends' ports only. Internet to the proxy: only when the proxy runs in this
+       namespace, so that this namespace's default deny does not cut off the Gateway's own listeners. */}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openstack-default-deny-ingress
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: krateo.io/networkpolicy-exempt
+        operator: DoesNotExist
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openstack-allow-same-namespace
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: krateo.io/networkpolicy-exempt
+        operator: DoesNotExist
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: krateo.io/networkpolicy-exempt
+                operator: DoesNotExist
+        - podSelector:
+            matchExpressions:
+              - key: krateo.io/networkpolicy-exempt
+                operator: Exists
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openstack-allow-nodes
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: krateo.io/networkpolicy-exempt
+        operator: DoesNotExist
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+{{- range $c := $np.nodeCIDRs }}
+        - ipBlock:
+            cidr: {{ $c | quote }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openstack-allow-gateway
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: krateo.io/networkpolicy-exempt
+        operator: DoesNotExist
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $proxyNs | quote }}
+          podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: {{ $gw | quote }}
+      ports:
+{{- $ports := list }}
+{{- range $r := $routes }}{{- $ports = append $ports (int $r.backend.port) }}{{- end }}
+{{- range $p := $ports | uniq | sortAlpha }}
+        - protocol: TCP
+          port: {{ $p }}
+{{- end }}
+{{- if eq $proxyNs .Release.Namespace }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openstack-allow-gateway-listeners
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      gateway.networking.k8s.io/gateway-name: {{ $gw | quote }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+        - ipBlock:
+            cidr: ::/0
+{{- end }}
+{{- with $np.allowNamespaces }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openstack-allow-namespaces
+  namespace: {{ $.Release.Namespace }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: krateo.io/networkpolicy-exempt
+        operator: DoesNotExist
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+{{- range $n := . }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $n | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

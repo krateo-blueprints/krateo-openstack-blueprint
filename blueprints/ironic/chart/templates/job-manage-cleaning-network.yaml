@@ -22,6 +22,9 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: ironic-manage-cleaning-network
+  # Krateo (#206): the release's hook-cleanup selects Jobs by release_group, so the Job carries the labels.
+  labels:
+{{ tuple $envAll "ironic" "manage-cleaning-network" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
 {{ tuple "manage-cleaning-network" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
 {{- if .Values.helm3_hook }}
