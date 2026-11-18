@@ -32,6 +32,19 @@ Curated history; release notes live in GitHub Releases.
   selector can reach. They now carry helm-toolkit's labels; their pod templates are unchanged. libvirt, memcached, openvswitch and redis render no hook Job unless
   `images.local_registry.active` turns on image-repo-sync, and have no python image, so they get no cleanup.
 
+- **image-scan retries a scan cut short by a layer download (#316, #334).**
+  - **What failed:** image-scan run 44202269356 (on `feat/309-h0-h1`) failed in
+    `scan (quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble)`. The cause was no new CVE: Trivy stopped
+    with `failed to analyze layer ... unable to read the file: unexpected EOF`, a layer download cut short. The gate
+    then failed, correctly, on the image's missing report.
+  - **Measured on 2026-11-18:** the waived series tag still serves the recorded digest (`sha256:12c53f1f…`), so it
+    had not moved upstream. Main's image-scan on `08ec684`, a few minutes later, scanned the same digest with no
+    finding outside the allowlist.
+  - **The fix:** the scan step now tries up to three times and drops only the layer-analysis cache between attempts.
+    A real finding can't be retried away, because findings are judged from the report. An image that fails all
+    three attempts still has no report, and the gate fails it by name.
+  - **The allowlist doesn't change:** there was no new finding, and entries are only made for measured findings.
+
 - **Pre-release channel: verify a commit on GKE before its tag exists (#342 follows).** Every `X.Y.Z` tag reaches the
   Marketplace, so `prerelease.yaml` (dispatch, input `ref`) publishes a commit's charts to GHCR at `X.Y.Z-main.g<sha7>`.
   It attaches the stamped CompositionDefinitions, RBAC grants and examples as the run artifact `prerelease-<version>`.
