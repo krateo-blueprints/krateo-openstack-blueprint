@@ -215,6 +215,12 @@ _gv_spec = _gv_util.spec_from_file_location(
     "gate_values", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "gate_values.py"))
 gate_values = _gv_util.module_from_spec(_gv_spec)
 _gv_spec.loader.exec_module(gate_values)
+# How a probe's (or a script's) --config-dir arguments are read: one parser, shared with
+# hack/validate-probe-config-args.py, so the two gates cannot disagree on what a probe reads.
+_ca_spec = _gv_util.spec_from_file_location(
+    "config_argv", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "config_argv.py"))
+config_argv = _gv_util.module_from_spec(_ca_spec)
+_ca_spec.loader.exec_module(config_argv)
 
 
 def fail(msg):
@@ -1735,10 +1741,16 @@ def mq_dropin_check(chart, cid, sentinel, docs_s, docs, label=""):
                 if not files & carrier_paths:
                     continue
                 MQ_PROBES_CHECKED.append((chart, podname, cname, probe))
-                # --config-dir-if-present is the worker probe's form of the start script's `$([ -d D ] && echo
-                # --config-dir D)`: the drop-in is mounted into D, so D exists and is read.
-                if not any(re.search(r"--config-dir(?:-if-present)?(?:=|\s+)%s/?(?=\s|$)" % re.escape(dd), text)
-                           for dd in dirs):
+                # Read through hack/config_argv.py: --config-dir D, --config-dir=D, the scripts' `$([ -d D ] && echo
+                # --config-dir D)` and the worker probe's --config-dir-if-present D. The last two read D when it
+                # exists, and D here is where the drop-in is mounted, so it exists whenever the container runs.
+                read = config_argv.dirs_read(text)
+                # Positive control on the real probe: with its directory arguments removed it must NOT read D, or
+                # this check could not fail.
+                if any(dd.rstrip("/") in config_argv.dirs_read(config_argv.strip_dirs(text)) for dd in dirs):
+                    fail("22m%s: %s: positive control: %s container %s's %s still reads its drop-in directory with "
+                         "every --config-dir argument removed" % (label, chart, podname, cname, probe))
+                if not any(dd.rstrip("/") in read for dd in dirs):
                     fail("22m%s: %s: %s container %s's %s parses %s with --config-file but passes no --config-dir %s: "
                          "it never reads the drop-in, so it has no transport URL and checks nothing" % (
                              label, chart, podname, cname, probe, sorted(files & carrier_paths), " or ".join(sorted(dirs))))
@@ -3252,6 +3264,8 @@ def main():
     if not INIT_CONFD_CHECKED:
         fail("19c: no init container that starts an OpenStack program and mounts its project's main config was found in "
              "any chart; the check had no input")
+    for problem in config_argv.self_test():
+        fail("22m: hack/config_argv.py misreads a probe: %s" % problem)
     if checked and not MQ_PROBES_CHECKED:
         fail("22m: no exec probe parsing a config that carried a transport URL was found; the probe check had no input")
     if checked and not RABBIT_INIT_CHECKED:

@@ -40,7 +40,6 @@ ROOT = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else ".")
 BP = os.path.join(ROOT, "blueprints")
 TOOLKIT = os.path.join(ROOT, "charts", "helm-toolkit")
 SCRIPT = "/tmp/worker-health-probe.py"
-FLAGS = ("--config-file", "--config-dir", "--config-dir-if-present")
 WORKLOADS = ("Deployment", "StatefulSet", "DaemonSet")
 
 
@@ -86,7 +85,7 @@ def probe_sites(docs):
                 continue
             args = cmd[cmd.index(SCRIPT) + 1:]
             proc = args[args.index("--process") + 1]
-            conf = [(args[i], args[i + 1]) for i in range(len(args) - 1) if args[i] in FLAGS]
+            conf = load("config_argv").probe_config(args)
             scripts = [os.path.basename(a) for a in (c.get("command") or []) + (c.get("args") or [])
                        if re.match(r"^/tmp/[\w.-]+\.sh$", str(a))]
             where = "%s/%s container %s" % (d["kind"], d["metadata"]["name"], c["name"])
