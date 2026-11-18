@@ -29,6 +29,13 @@ limitations under the License.
 {{- $tlsPath := index . "tlsPath" | default "/etc/rabbitmq/certs" -}}
 {{- $tlsSecret := index . "tlsSecret" | default "" -}}
 
+{{- /* Krateo (#309 H2b): with the RabbitMQ cluster-operator (endpoints.oslo_messaging.operator.cluster, set by the
+       umbrella's messaging.backend operator), the user, vhost, permissions and policies are messaging-topology-operator
+       custom resources instead of this Job: helm-toolkit.manifests.rabbitmq_topology. Pods that waited on this Job wait
+       on those resources instead (helm-toolkit.utils.dependency_jobs_filter). */}}
+{{- if (($envAll.Values.endpoints.oslo_messaging | default dict).operator | default dict).cluster }}
+{{ include "helm-toolkit.manifests.rabbitmq_topology" (dict "envAll" $envAll "serviceName" $serviceName "serviceUser" $serviceUser) }}
+{{- else }}
 {{- $serviceAccountName := printf "%s-%s" $serviceUserPretty "rabbit-init" }}
 {{ tuple $envAll "rabbit_init" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
@@ -140,5 +147,6 @@ spec:
 {{- end }}
 {{- if $envAll.Values.manifests.certificates }}
 {{- dict "enabled" $envAll.Values.manifests.certificates "name" $tlsSecret | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
+{{- end }}
 {{- end }}
 {{- end -}}

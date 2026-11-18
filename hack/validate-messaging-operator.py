@@ -30,8 +30,9 @@ host lists, and the clients' queue settings.
        - every transport URL it renders lists exactly the cluster's pods (statefulset holders) or its headless Service;
        - every [oslo_messaging_rabbit] it renders has no rabbit_ha_queues true, and at least one has every
          messagingQuorumConf value;
-       - its rabbit-init's RABBITMQ_AUXILIARY_CONFIGURATION, where it has policies, keeps them without any ha-* key
-         (and keeps message-ttl); the chart-mode render still carries ha-mode, unchanged.
+       - a rabbit-init's RABBITMQ_AUXILIARY_CONFIGURATION, where one is still rendered, has no ha-* key and keeps
+         message-ttl (in operator mode rabbit-init is replaced by topology resources, whose Policies
+         hack/validate-messaging-topology.py checks); the chart-mode render still carries ha-mode, unchanged.
 
 Fails when helm or PyYAML is missing, and when any part finds nothing to check.
 """
@@ -229,6 +230,7 @@ def part2(uv, tmp):
                 om["hosts"] = {"default": "%s-nodes" % name}
             if n in topo["messagingQuorum"]:
                 om["quorum_queues"] = True
+                om["operator"] = {"cluster": name}
                 add["conf"] = {n: {"oslo_messaging_rabbit": topo["messagingQuorumConf"]}}
             if om:
                 add["endpoints"] = {"oslo_messaging": om}
