@@ -86,10 +86,20 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
 
+      # The organisation's one chart push (charts PUBLISHING.md rule 14), as release-tag.yaml locates it: the same pin,
+      # so a pre-release is pushed the way the release on that commit will be.
+      - name: Locate the shared chart push
+        id: chart-push
+        uses: krateo-platformops/.github/.github/actions/chart-push@e1d3e99215e80ae56eca4a67e9e061b2c73168b8 # 1.0.0
+
       # The release's own script, with the pre-release channel: it refuses a version without the
       # pre-release shape before it stamps or pushes anything. The tarballs it keeps are not
       # uploaded: nothing downstream of this run indexes charts.
       - name: Package and push every chart
+        env:
+          CHART_PUSH: ${{ steps.chart-push.outputs.path }}
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: hack/publish-charts.sh prerelease "${VERSION}" "${OCI_REPO}" charts-dist
 
       - name: Stage the files the README applies

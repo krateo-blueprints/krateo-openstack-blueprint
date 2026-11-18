@@ -90,11 +90,62 @@ def triggers(doc):
     return doc.get("on", doc.get(True)) or {}
 
 
+def code(run):
+    """A step's shell without its comment lines. A comment that names a command is not that command: a check keyed on
+    text would otherwise pass on `# hack/publish-charts.sh release` with nothing pushing at all."""
+    return "\n".join(l for l in str(run or "").splitlines() if not l.lstrip().startswith("#"))
+
+
 def runs(doc):
     for job in (doc.get("jobs") or {}).values():
         for step in (job or {}).get("steps") or []:
             if isinstance(step, dict) and isinstance(step.get("run"), str):
-                yield step["run"]
+                yield code(step["run"])
+
+
+# --- rule 14: charts are pushed only through the pinned shared chart-push action ------------------
+CHART_PUSH_PIN = re.compile(r"^krateo-platformops/\.github/\.github/actions/chart-push@[0-9a-f]{40}$")
+
+
+def check_push_wiring(name, doc, text, channel):
+    """The workflow locates the shared push.sh with one pinned chart-push step, and its one step that runs
+    hack/publish-charts.sh <channel> comes after it with CHART_PUSH and the registry credentials set. No step runs
+    `helm push` itself. A workflow with no push step fails here: a check that found nothing to check has checked
+    nothing (hack/validate-prerelease-channel.py once keyed on "helm push", which the migration removed)."""
+    problems = []
+    steps = [s for job in (doc.get("jobs") or {}).values() for s in ((job or {}).get("steps") or [])
+             if isinstance(s, dict)]
+    locate = [i for i, s in enumerate(steps) if s.get("id") == "chart-push"]
+    if len(locate) != 1:
+        problems.append(f"{name}: needs exactly one step with id chart-push (the shared chart-push action), found "
+                        f"{len(locate)}")
+    else:
+        uses = str(steps[locate[0]].get("uses", ""))
+        if not CHART_PUSH_PIN.match(uses):
+            problems.append(f"{name}: the chart-push step uses {uses!r}; it must be "
+                            "krateo-platformops/.github/.github/actions/chart-push@<40-hex commit> (rules 9 and 14)")
+        elif not re.search(r"^\s*uses: " + re.escape(uses) + r" # (\d+\.\d+\.\d+|main \d{4}-\d{2}-\d{2})\s*$",
+                           text, re.M):
+            problems.append(f"{name}: the chart-push pin has no `# X.Y.Z` (or `# main YYYY-MM-DD`) comment")
+    push = [i for i, s in enumerate(steps) if re.search(r"hack/publish-charts\.sh\s+%s\b" % channel, code(s.get("run")))]
+    if len(push) != 1:
+        problems.append(f"{name}: needs exactly one step that runs hack/publish-charts.sh {channel} (comments do not "
+                        f"count), found {len(push)}")
+    else:
+        env = steps[push[0]].get("env") or {}
+        if "steps.chart-push.outputs.path" not in str(env.get("CHART_PUSH", "")):
+            problems.append(f"{name}: the publish step's CHART_PUSH must be the chart-push step's path output, got "
+                            f"{env.get('CHART_PUSH')!r}")
+        for v in ("REGISTRY_USERNAME", "REGISTRY_PASSWORD"):
+            if not env.get(v):
+                problems.append(f"{name}: the publish step does not set {v} (push.sh reads the manifest back with it)")
+        if locate and push[0] < locate[0]:
+            problems.append(f"{name}: the publish step runs before the chart-push step locates push.sh")
+    for i, s in enumerate(steps):
+        if re.search(r"\bhelm\s+push\b", code(s.get("run"))):
+            problems.append(f"{name}: step {s.get('name', i)!r} runs `helm push` itself; charts are pushed only "
+                            "through the shared chart-push action (charts PUBLISHING.md rule 14)")
+    return problems
 
 
 def channel_calls(doc, script):
@@ -149,6 +200,7 @@ def check_prerelease(text):
                 problems.append(f"{PRE}: runs hack/{script} with channel {c!r}, not 'prerelease'")
     if not re.search(r"hack/release-version\.sh derive\b", "\n".join(runs(doc))):
         problems.append(f"{PRE}: does not derive its version with hack/release-version.sh derive")
+    problems += check_push_wiring(PRE, doc, text, "prerelease")
     return problems
 
 
@@ -161,15 +213,22 @@ def check_release(text):
         problems.append(f"{REL}: must trigger only on push of tags {RELEASE_GLOB!r} (GitHub matches "
                         f"the whole tag name, so it cannot match a pre-release), got {on!r}")
     steps = ((doc.get("jobs") or {}).get("package-and-push") or {}).get("steps") or []
-    texts = [s.get("run", "") if isinstance(s, dict) else "" for s in steps]
+    texts = [code(s.get("run", "")) if isinstance(s, dict) else "" for s in steps]
     check_at = [i for i, t in enumerate(texts)
                 if re.search(r'hack/release-version\.sh check release "\$\{GITHUB_REF_NAME\}"', t)]
-    push_at = [i for i, t in enumerate(texts) if "hack/publish-charts.sh" in t or "helm push" in t]
+    # The push step is the one that runs hack/publish-charts.sh release (rule 14 put every push in there). Keyed on
+    # the invocation in the step's code, never on its comments, and its absence is a failure, not a pass: up to
+    # 2026-11-18 this keyed on "helm push", which the migration removed from every step.
+    push_at = [i for i, t in enumerate(texts) if re.search(r"hack/publish-charts\.sh\s+release\b", t)]
+    if not push_at:
+        problems.append(f"{REL}: package-and-push has no step that runs hack/publish-charts.sh release, so nothing "
+                        "can be checked to come after the tag-shape check")
     if not check_at:
         problems.append(f"{REL}: package-and-push never checks the tag with "
                         "`hack/release-version.sh check release \"${GITHUB_REF_NAME}\"`")
     elif push_at and check_at[0] > push_at[0]:
         problems.append(f"{REL}: checks the tag's shape only after it pushes")
+    problems += check_push_wiring(REL, doc, text, "release")
     for script in ("publish-charts.sh", "stage-release-assets.sh"):
         calls = channel_calls(doc, script)
         if not calls:
@@ -357,6 +416,8 @@ def fixture(tmp, scripts):
     with open(stub, "w") as f:
         f.write('#!/bin/sh\necho "$@" >> "$HELM_LOG"\nexit 1\n')
     os.chmod(stub, os.stat(stub).st_mode | stat.S_IEXEC)
+    with open(os.path.join(tmp, "bin", "push.sh"), "w") as f:
+        f.write('#!/bin/sh\necho "$@" >> "$HELM_LOG.push"\nexit 1\n')
 
 
 def act(scripts, script, channel, version):
@@ -365,7 +426,7 @@ def act(scripts, script, channel, version):
         fixture(tmp, scripts)
         log = os.path.join(tmp, "helm.log")
         env = dict(os.environ, PATH=os.path.join(tmp, "bin") + os.pathsep + os.environ["PATH"],
-                   HELM_LOG=log)
+                   HELM_LOG=log, CHART_PUSH=os.path.join(tmp, "bin", "push.sh"))
         args = {"publish-charts.sh": [channel, version, "oci://example.invalid/charts", "dist"],
                 "stage-release-assets.sh": [channel, version, "out"]}[script]
         r = subprocess.run(["bash", os.path.join("hack", script), *args], cwd=tmp, env=env,
@@ -402,6 +463,90 @@ def scripts_check_first(scripts):
     return problems
 
 
+# --- publish-charts.sh pushes through $CHART_PUSH, once per chart (rule 14) ---------------------
+PUSH_HELM = r'''#!/bin/bash
+echo "$*" >> "$HELM_LOG"
+case "$1" in
+  dependency) exit 0 ;;
+  package)
+    # helm package DIR --version V --destination DEST: an archive with the chart's name as its top directory
+    dir=$2 v=$4 dest=$6
+    name=$(awk '/^name:/{print $2; exit}' "$dir/Chart.yaml")
+    t=$(mktemp -d); cp -R "$dir" "$t/$name"; tar czf "$dest/$name-$v.tgz" -C "$t" "$name"; rm -rf "$t" ;;
+  show) exit 0 ;;
+  *) exit 3 ;;
+esac
+'''
+PUSH_STUB = r'''#!/bin/sh
+echo "$1 $2 user=${REGISTRY_USERNAME:-} password=${REGISTRY_PASSWORD:+set}" >> "$PUSH_LOG"
+case "$1" in *"${PUSH_FAIL_ON:-^}"*) exit 1 ;; esac
+exit 0
+'''
+
+
+def push_once_per_chart(scripts):
+    """publish-charts.sh, run on two blueprint charts with stand-ins for helm and push.sh: CHART_PUSH is called once per
+    chart with its archive and the repository, with the registry credentials in its environment, helm never pushes, a
+    push that fails stops the release with no second attempt, and with no CHART_PUSH nothing is stamped."""
+    problems = []
+
+    def go(env_extra, label):
+        with tempfile.TemporaryDirectory() as tmp:
+            for rel, text in scripts.items():
+                p = os.path.join(tmp, "hack", rel)
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                open(p, "w").write(text)
+                os.chmod(p, 0o755)
+            for n in ("alpha", "beta"):
+                files = {f"blueprints/{n}/compositiondefinition.yaml": "spec:\n  chart:\n    version: CHART_VERSION\n",
+                         f"blueprints/{n}/chart/Chart.yaml": f"apiVersion: v2\nname: {n}\nversion: CHART_VERSION\n",
+                         f"blueprints/{n}/chart/values.schema.json": "{}\n"}
+                for rel, text in files.items():
+                    os.makedirs(os.path.dirname(os.path.join(tmp, rel)), exist_ok=True)
+                    open(os.path.join(tmp, rel), "w").write(text)
+            os.makedirs(os.path.join(tmp, "bin"))
+            for name, body in (("helm", PUSH_HELM), ("push.sh", PUSH_STUB)):
+                open(os.path.join(tmp, "bin", name), "w").write(body)
+                os.chmod(os.path.join(tmp, "bin", name), 0o755)
+            env = dict(os.environ, PATH=os.path.join(tmp, "bin") + os.pathsep + os.environ["PATH"],
+                       HELM_LOG=os.path.join(tmp, "helm.log"), PUSH_LOG=os.path.join(tmp, "push.log"),
+                       CHART_PUSH=os.path.join(tmp, "bin", "push.sh"), REGISTRY_USERNAME="bot", REGISTRY_PASSWORD="t")
+            for k, v in env_extra.items():
+                if v is None:
+                    env.pop(k, None)
+                else:
+                    env[k] = v
+            r = subprocess.run(["bash", "hack/publish-charts.sh", "release", "0.3.74", "oci://example.invalid/charts",
+                                "dist"], cwd=tmp, env=env, capture_output=True, text=True)
+            read = lambda p: open(p).read().splitlines() if os.path.exists(p) else []
+            return (r, read(os.path.join(tmp, "push.log")), read(os.path.join(tmp, "helm.log")),
+                    "CHART_VERSION" in open(os.path.join(tmp, "blueprints/alpha/compositiondefinition.yaml")).read())
+
+    r, pushes, helm, _ = go({}, "both")
+    want = sorted("%s-0.3.74.tgz oci://example.invalid/charts user=bot password=set" % n for n in ("alpha", "beta"))
+    if r.returncode != 0 or sorted(pushes) != want or any(l.startswith("push") for l in helm):
+        problems.append(f"publish-charts.sh: pushes {pushes}, helm calls {helm}, rc {r.returncode}, stderr "
+                        f"{r.stderr[-300:]!r}; want $CHART_PUSH once per chart ({want}) and no helm push")
+    r, pushes, _, _ = go({"PUSH_FAIL_ON": "beta-"}, "fail")
+    if r.returncode == 0 or sum("beta-" in l for l in pushes) != 1:
+        problems.append(f"publish-charts.sh: with beta's push failing, rc {r.returncode} and pushes {pushes}; want a "
+                        "failure after exactly one attempt at beta (push.sh retries only GHCR's tag race itself)")
+    r, pushes, helm, unstamped = go({"CHART_PUSH": None}, "missing")
+    if r.returncode == 0 or pushes or helm or not unstamped:
+        problems.append(f"publish-charts.sh: with no CHART_PUSH, rc {r.returncode}, pushes {pushes}, helm {helm}, "
+                        f"CD still unstamped {unstamped}; want a refusal before anything is stamped")
+    return problems
+
+
+PUBLISH_MUTATIONS = [
+    ("pushes with helm push again", 'if ! bash "${CHART_PUSH}" "${name}-${VERSION}.tgz" "${OCI_REPO}"; then',
+     'if ! helm push "${name}-${VERSION}.tgz" "${OCI_REPO}"; then'),
+    ("a failed push is ignored", 'if ! bash "${CHART_PUSH}" "${name}-${VERSION}.tgz" "${OCI_REPO}"; then',
+     'if ! { bash "${CHART_PUSH}" "${name}-${VERSION}.tgz" "${OCI_REPO}" || true; }; then'),
+    ("no CHART_PUSH check", 'if [ -z "${CHART_PUSH:-}" ] || [ ! -f "${CHART_PUSH}" ]; then', "if false; then"),
+]
+
+
 # --- mutations ----------------------------------------------------------------------------------
 def mutate(text, old, new, label):
     if old not in text:
@@ -431,6 +576,33 @@ PRE_MUTATIONS = [
     ("stage-release-assets with the release channel", "hack/stage-release-assets.sh prerelease",
      "hack/stage-release-assets.sh release"),
     ("version not derived", "hack/release-version.sh derive", "echo"),
+    ("prerelease's push without CHART_PUSH", "          CHART_PUSH: ${{ steps.chart-push.outputs.path }}\n", ""),
+    ("prerelease pushes with helm push", 'run: hack/publish-charts.sh prerelease "${VERSION}" "${OCI_REPO}" charts-dist',
+     'run: |\n          hack/publish-charts.sh prerelease "${VERSION}" "${OCI_REPO}" charts-dist\n'
+     '          helm push extra.tgz "${OCI_REPO}"'),
+]
+# Rule 14's mutants for release-tag.yaml. "Only a comment" is the one that proves comments cannot satisfy the gate:
+# the push step's command is commented out, so its text is still in the run block, and nothing pushes.
+PUSH_STEP = ('      - name: Package and push every chart\n'
+             '        env:\n'
+             '          CHART_PUSH: ${{ steps.chart-push.outputs.path }}\n'
+             '          REGISTRY_USERNAME: ${{ github.actor }}\n'
+             '          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}\n'
+             '        run: hack/publish-charts.sh release "${VERSION}" "${OCI_REPO}" charts-dist\n')
+REL_PUSH_MUTATIONS = [
+    ("the push step removed", PUSH_STEP, ""),
+    ("the push step only a comment", 'run: hack/publish-charts.sh release "${VERSION}" "${OCI_REPO}" charts-dist',
+     'run: |\n          # hack/publish-charts.sh release "${VERSION}" "${OCI_REPO}" charts-dist\n          true'),
+    ("helm push beside the script", 'run: hack/publish-charts.sh release "${VERSION}" "${OCI_REPO}" charts-dist',
+     'run: |\n          hack/publish-charts.sh release "${VERSION}" "${OCI_REPO}" charts-dist\n'
+     '          helm push extra.tgz "${OCI_REPO}"'),
+    ("chart-push pinned to a branch", "actions/chart-push@e1d3e99215e80ae56eca4a67e9e061b2c73168b8 # 1.0.0",
+     "actions/chart-push@main"),
+    ("chart-push pin without its comment", "actions/chart-push@e1d3e99215e80ae56eca4a67e9e061b2c73168b8 # 1.0.0",
+     "actions/chart-push@e1d3e99215e80ae56eca4a67e9e061b2c73168b8"),
+    ("no chart-push step", "        id: chart-push\n", ""),
+    ("CHART_PUSH not passed", "          CHART_PUSH: ${{ steps.chart-push.outputs.path }}\n", ""),
+    ("no registry password for the read-back", "          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}\n", ""),
 ]
 REL_MUTATIONS = [
     ("trigger loosened to any suffix", f'      - "{RELEASE_GLOB}"\n', f'      - "{RELEASE_GLOB}*"\n'),
@@ -649,9 +821,21 @@ def main():
     for label, old, new in PRE_MUTATIONS:
         if not check_prerelease(mutate(workflows[PRE], old, new, label)):
             survived.append(f"{PRE}: {label}")
-    for label, old, new in REL_MUTATIONS:
+    for label, old, new in REL_MUTATIONS + REL_PUSH_MUTATIONS:
         if not check_release(mutate(workflows[REL], old, new, label)):
             survived.append(f"{REL}: {label}")
+    # The push step removed must be caught by the push-step check itself, not only by a neighbouring one that
+    # happens to read the same step (the "never runs hack/publish-charts.sh" channel check).
+    removed = check_release(mutate(workflows[REL], PUSH_STEP, "", "the push step removed"))
+    if not any("has no step that runs hack/publish-charts.sh release" in p for p in removed) \
+            or not any("needs exactly one step that runs hack/publish-charts.sh release" in p for p in removed):
+        survived.append(f"{REL}: the push step removed, as seen by the push-step checks ({removed})")
+    problems += push_once_per_chart(scripts)
+    for label, old, new in PUBLISH_MUTATIONS:
+        m = dict(scripts)
+        m["publish-charts.sh"] = mutate(scripts["publish-charts.sh"], old, new, label)
+        if not push_once_per_chart(m):
+            survived.append(f"publish-charts.sh: {label}")
     lint = dict(workflows)
     if "lint.yaml" not in workflows:
         measurement_failed("no .github/workflows/lint.yaml to mutate")
@@ -674,7 +858,8 @@ def main():
             survived.append(f"{s}: version check removed")
 
     n_mut = (len(PRE_MUTATIONS) + len(REL_MUTATIONS) + 1 + len(VERSION_MUTATIONS) + 2
-             + len(PRUNE_MUTATIONS) + len(PRUNE_SCRIPT_MUTATIONS) + len(HOOK_MUTATIONS))
+             + len(PRUNE_MUTATIONS) + len(PRUNE_SCRIPT_MUTATIONS) + len(HOOK_MUTATIONS)
+             + len(REL_PUSH_MUTATIONS) + 1 + len(PUBLISH_MUTATIONS))
     for p in problems:
         print(f"  - {p}")
     for s in survived:

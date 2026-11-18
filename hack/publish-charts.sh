@@ -6,6 +6,7 @@
 #
 # Usage: hack/publish-charts.sh release|prerelease VERSION OCI_REPO DIST_DIR
 #   OCI_REPO  e.g. oci://ghcr.io/<owner>/charts (the caller must already be logged in)
+#   CHART_PUSH (env) the shared push.sh from the chart-push action; REGISTRY_USERNAME and REGISTRY_PASSWORD beside it
 #   DIST_DIR  receives <name>-VERSION.tgz for every blueprints/*/chart, the same bytes pushed
 #
 # Stamps the checkout IN PLACE (CHART_VERSION in every CompositionDefinition, Chart.yaml,
@@ -19,6 +20,13 @@ CHANNEL="${1:-}"; VERSION="${2:-}"; OCI_REPO="${3:-}"; DIST="${4:-}"
 # First, before anything is stamped or pushed: the version must have the shape of its channel.
 "$(dirname "$0")/release-version.sh" check "$CHANNEL" "$VERSION"
 [ -n "$OCI_REPO" ] && [ -n "$DIST" ] || { echo "::error::usage: $0 release|prerelease VERSION OCI_REPO DIST_DIR" >&2; exit 1; }
+# Second, before anything is stamped: the shared push.sh must be there to push with (rule 14). The workflow sets
+# CHART_PUSH from the chart-push action's `path` output, with REGISTRY_USERNAME and REGISTRY_PASSWORD beside it for
+# push.sh's read-back of the manifest. Without it nothing could be pushed, so nothing is stamped either.
+if [ -z "${CHART_PUSH:-}" ] || [ ! -f "${CHART_PUSH}" ]; then
+  echo "::error::CHART_PUSH must name the shared push.sh (the chart-push action's path output), got '${CHART_PUSH:-}'" >&2
+  exit 1
+fi
 
 # Stamp every standalone CompositionDefinition too. These sit at
 # blueprints/<component>/compositiondefinition.yaml (one level ABOVE the chart dir),
@@ -83,19 +91,15 @@ find . -type f -name Chart.yaml -not -path '*/charts/*' -print0 | while IFS= rea
       done
       ;;
   esac
-  # Retry: this push fails transiently. The 0.3.13 release died on
+  # One push per chart, through the organisation's shared push.sh (krateo-blueprints/charts PUBLISHING.md rule 14).
+  # Up to 2026-11-18 this was a blind three-attempt `helm`-push loop, written after the 0.3.13 release died on
   #   failed to perform "Tag" on destination: sha256:405b...: not found
-  # for one chart after others had pushed fine, and an unchanged re-run succeeded.
-  # Without a retry, one registry hiccup leaves the registry holding this version for
-  # some components and not others (#76).
-  pushed=""
-  for attempt in 1 2 3; do
-    if helm push "${name}-${VERSION}.tgz" "${OCI_REPO}"; then pushed=yes; break; fi
-    echo "::warning::helm push ${name}:${VERSION} failed (attempt ${attempt}/3); retrying"
-    sleep $(( attempt * 10 ))
-  done
-  if [ -z "$pushed" ]; then
-    echo "::error::helm push ${name}:${VERSION} failed after 3 attempts"
+  # for one chart (#76). That error is GHCR's read-after-write race on the tag step. push.sh retries exactly that
+  # error, once the registry serves the digest, and fails if the tag would land on another digest. Every other error
+  # fails on the first attempt, where the loop retried anything three times. No retry here, then: a failure stops the
+  # release, and the check below never sees a partial push reported as complete.
+  if ! bash "${CHART_PUSH}" "${name}-${VERSION}.tgz" "${OCI_REPO}"; then
+    echo "::error::pushing ${name}:${VERSION} to ${OCI_REPO} failed (${CHART_PUSH})"
     exit 1
   fi
   echo "Published ${OCI_REPO}/${name}:${VERSION}"
