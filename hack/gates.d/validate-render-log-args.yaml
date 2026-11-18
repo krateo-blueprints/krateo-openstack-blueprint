@@ -1,0 +1,9 @@
+# hack/render-log.py dropped every "--" argument it did not know and fell through to WRITE mode, so `--help` or a typo
+# such as --chek rewrote docs/log.md, which a pull request must never carry. This checks that an unknown flag, two
+# roots, both modes at once and a root that is not this repository are refused with nothing written, that --help only
+# prints the usage, and, as positive controls, that the documented forms still write or check.
+name: "render-log.py refuses arguments it does not know, writing nothing"
+job: capability-roles
+order: 472
+run: |
+  python3 hack/validate-render-log-args.py .
