@@ -85,7 +85,7 @@ spec:
         {{ end }}
       containers:
         - name: cinder-scheduler
-{{ dict "envAll" $envAll "component" "scheduler" "container" "default" "args" (list "--process" "cinder-scheduler" "--exchange" "openstack" "--rpc-topic" "cinder-scheduler") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "scheduler" "container" "default" "args" (list "--process" "cinder-scheduler" "--exchange" "openstack" "--rpc-topic" "cinder-scheduler") "config" (include "cinder.config_args.scheduler" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "cinder_scheduler" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.scheduler | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "cinder_scheduler" "container" "cinder_scheduler" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}

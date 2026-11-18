@@ -1,13 +1,17 @@
 # The presence gate above cannot tell a probe that works from one that always fails (every
 # worker it guards stays out of Ready) or always passes (#231 again). This runs the worker
 # probe's rendered text against oslo.messaging's real RPC server and dispatcher and against
-# real processes and sockets in /proc. Pinned to stable/2026.1's upper-constraints, the
-# versions in the images. Fails when a test is skipped or none ran.
+# real processes and sockets in /proc -- started through oslo.service's threading and eventlet
+# backends and cotyledon, so their cmdline is TITLED as in the 2026.1 images (0.3.74's defect B:
+# the argv-shaped tests passed while 14 titled workers never became Ready). Pinned to the
+# versions in the images. Native Linux only (GitHub's amd64 runners): the tests fail, never
+# skip, on a host that does not rewrite cmdline. Fails when a test is skipped or none ran.
 name: "The worker readiness probe answers ready only for a serving RPC server"
 job: capability-roles
 order: 454
 # Was its own step, "Install the worker readiness probe's test dependencies", just before this gate.
 setup: |
-  pip install "oslo.messaging==17.3.2" "oslo.config==10.3.0" "kombu==5.6.2"
+  pip install "oslo.messaging==17.3.2" "oslo.config==10.3.0" "kombu==5.6.2" \
+    "oslo.service==4.5.1" "cotyledon==2.2.0" "setproctitle==1.3.7" "eventlet==0.40.4"
 run: |
   python3 hack/validate-health-probe.py .

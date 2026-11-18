@@ -16,7 +16,5 @@ limitations under the License.
 
 set -x
 exec neutron-bgp-dragent \
-      --config-file /etc/neutron/neutron.conf \
-      --config-file /etc/neutron/bgp_dragent.ini \
-      --config-dir /etc/neutron/neutron.conf.d \
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "neutron.config_args.bgp_dragent" . | fromYamlArray) "format" "shell" "indent" 6 "continued" true) }}
       --debug

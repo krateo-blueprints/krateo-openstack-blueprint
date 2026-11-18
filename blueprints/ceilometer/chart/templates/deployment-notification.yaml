@@ -71,7 +71,7 @@ spec:
 {{ tuple $envAll "notification" $mounts_ceilometer_notification_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
         - name: ceilometer-notification
-{{ dict "envAll" $envAll "component" "notification" "container" "default" "args" (list "--process" "ceilometer-agent-notification" "--broker") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "notification" "container" "default" "args" (list "--process" "ceilometer-agent-notification" "--broker") "config" (include "ceilometer.config_args.notification" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "ceilometer_notification" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.notification | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           command:

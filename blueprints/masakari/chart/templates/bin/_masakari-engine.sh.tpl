@@ -19,7 +19,8 @@ set -ex
 COMMAND="${@:-start}"
 
 function start () {
-   exec masakari-engine --config-file /etc/masakari/masakari.conf $([ -d /etc/masakari/masakari.conf.d ] && echo --config-dir /etc/masakari/masakari.conf.d)
+   exec masakari-engine \
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "masakari.config_args.engine" . | fromYamlArray) "format" "shell" "indent" 6) }}
 }
 
 function stop () {
