@@ -4,15 +4,17 @@
     config_argv.probe_config(words) -> [(flag, path)]   a worker probe's exec command, in order
     config_argv.dirs_read(text)     -> {dir}            every directory the text reads as a --config-dir
     config_argv.strip_dirs(text)    -> text             the same text with every directory argument removed
+    config_argv.guarded(text)       -> {path}           every path passed only when it exists
 
 A directory is read in any of four spellings, which mean the same thing to oslo.config:
   --config-dir D, --config-dir=D            always
   $([ -d D ] && echo --config-dir D)         the start scripts: only when D exists (oslo.config aborts on a missing one)
   --config-dir-if-present D                  the worker readiness probe's form of the line above
                                              (helm-toolkit.snippets.oslo_config_args renders both from one list)
-hack/validate-credentials.py (check 22m: a probe that parses a carrier reads its drop-in directory) and
-hack/validate-probe-config-args.py (the probe's list equals its exec line's) both read probe arguments through this,
-so they cannot disagree on what a probe reads. A trailing slash on a directory is not significant.
+hack/validate-credentials.py (check 22m: a probe that parses a carrier reads its drop-in directory),
+hack/validate-probe-config-args.py (the probe's list equals its exec line's) and hack/validate-config-file-refs.py
+(which references are optional because they are passed only when present) all read through this, so they cannot
+disagree on what a program or a probe reads. A trailing slash on a directory is not significant.
 """
 import re
 
@@ -42,6 +44,18 @@ def dirs_read(text):
     return out
 
 
+_GUARDED_ANY = re.compile(r"\[\s+-[df]\s+(/[^\s\]]+?)/?\s+\]\s*&&\s*echo\s+--(?:config-file|config-dir)[=\s]+(\S+?)/?(?=[\s)\"']|$)")
+_IF_PRESENT = re.compile(r"--config-dir-if-present(?:=|\s+)[\"']?(/[^\s\"'\\)]+)")
+
+
+def guarded(text):
+    """Every path `text` passes only when it exists: `[ -d|-f P ] && echo --config-dir|--config-file P` in a script,
+    --config-dir-if-present P in a probe. Such a reference is optional by construction (oslo.config aborts on a missing
+    --config-dir, so a chart that delivers its drop-ins file by file has no conf.d at defaults)."""
+    out = {a.rstrip("/") for a, b in _GUARDED_ANY.findall(text or "") if a.rstrip("/") == b.rstrip("/")}
+    return out | {p.rstrip("/") for p in _IF_PRESENT.findall(text or "")}
+
+
 def strip_dirs(text):
     """`text` with every directory argument removed: the positive control's input."""
     text = _GUARDED.sub("", text or "")
@@ -62,9 +76,19 @@ SELF_TEST = [
 ]
 
 
+GUARDED_TEST = [
+    ("prog $([ -d /etc/x/x.conf.d ] && echo --config-dir /etc/x/x.conf.d)", {"/etc/x/x.conf.d"}),
+    ("prog $([ -f /tmp/h.conf ] && echo --config-file /tmp/h.conf)", {"/tmp/h.conf"}),
+    ("probe --config-file /etc/x/x.conf --config-dir-if-present /etc/x/x.conf.d", {"/etc/x/x.conf.d"}),
+    ("prog --config-file /etc/x/x.conf --config-dir /etc/x/x.conf.d", set()),
+    ("prog $([ -d /etc/x/x.conf.d ] && echo --config-dir /etc/y/y.conf.d)", set()),
+]
+
+
 def self_test():
     """[problem] when the parser misreads a known case, its stripped form included."""
-    bad = []
+    bad = ["%r: guarded paths %s, want %s" % (t, sorted(guarded(t)), sorted(w)) for t, w in GUARDED_TEST
+           if guarded(t) != w]
     for text, d, want in SELF_TEST:
         if (d in dirs_read(text)) != want:
             bad.append("%r: reads %s is %s, want %s" % (text, d, not want, want))

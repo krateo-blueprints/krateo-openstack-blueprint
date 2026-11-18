@@ -42,8 +42,8 @@ FLAG_RE = re.compile(
     r"--(?:config-file|config-dir|log-config-append)[=\s]+[\"']?(/[^\s\"'\\)]+)")
 # A flag passed only when its path exists, `$([ -d /p ] && echo --config-dir /p)` (#228, 0.3.66: a chart that mounts
 # its drop-ins file by file has no conf.d at defaults, and oslo.config aborts on a --config-dir that does not exist).
-# Such a reference is optional by construction: the script never names a path that is not there.
-GUARDED_RE = re.compile(r"\[\s+-[df]\s+(/[^\s\]]+?)/?\s+\]\s*&&\s*echo\s+--(?:config-file|config-dir)[=\s]+(\S+?)/?(?=[\s)\"']|$)")
+# Such a reference is optional by construction: the script never names a path that is not there. Recognised by
+# hack/config_argv.py, the parser validate-credentials and validate-probe-config-args read programs and probes with.
 
 
 GUARDED = set()
@@ -57,11 +57,15 @@ _gv_spec = _gv_util.spec_from_file_location(
     "gate_values", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "gate_values.py"))
 gate_values = _gv_util.module_from_spec(_gv_spec)
 _gv_spec.loader.exec_module(gate_values)
+_ca_spec = _gv_util.spec_from_file_location(
+    "config_argv", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "config_argv.py"))
+config_argv = _gv_util.module_from_spec(_ca_spec)
+_ca_spec.loader.exec_module(config_argv)
 
 
 def flag_refs(text):
     """Paths named by a config flag, minus those guarded by an existence test on the same path (counted)."""
-    guarded = {a.rstrip("/") for a, b in GUARDED_RE.findall(text) if a.rstrip("/") == b.rstrip("/")}
+    guarded = config_argv.guarded(text)
     GUARDED.update(guarded)
     return {r for r in FLAG_RE.findall(text) if r.rstrip("/") not in guarded}
 # uwsgi ini line: `wsgi-file = /path`
@@ -214,6 +218,9 @@ def script_for(container, cms):
 
 
 def main():
+    bad = config_argv.self_test()
+    if bad:
+        sys.exit("FAIL: hack/config_argv.py misreads a known case: " + "; ".join(bad))
     if not os.path.isfile(WAIVERS):
         sys.exit(f"FAIL: missing waiver declaration {WAIVERS} -- "
                  "the gate refuses to run without it")
