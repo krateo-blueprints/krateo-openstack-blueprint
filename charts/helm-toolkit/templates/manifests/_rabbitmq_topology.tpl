@@ -107,16 +107,25 @@ spec:
         property: {{ $from.key | quote }}
 {{- end }}
 ---
+{{- /* #309 C2: during a rotation the umbrella passes endpoints.oslo_messaging.operator.users, one {suffix, secret} per
+       generation that must exist (the active one and the next, or the active one and the one still draining): one User
+       and one Permission each, on the same vhost, so queues (which belong to the vhost) do not move. Without it, the
+       one user of today. Names: <su>-rabbitmq-user<suffix> and <su>-rabbitmq-permission<suffix>; generation 0 has suffix
+       "". The waits (helm-toolkit.utils.rabbitmq_topology_waits) name the ACTIVE generation (operator.activeSuffix). */ -}}
+{{- $users := $om.operator.users | default list -}}
+{{- if not $users -}}{{- $users = list (dict "suffix" "" "secret" $proj) -}}{{- end -}}
+{{- range $u := $users }}
 apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
-  name: {{ printf "%s-rabbitmq-user" $su }}
+  name: {{ printf "%s-rabbitmq-user%s" $su ($u.suffix | default "") }}
 spec:
   rabbitmqClusterReference:
     name: {{ $cluster | quote }}
   importCredentialsSecret:
-    name: {{ $proj }}
+    name: {{ $u.secret }}
 ---
+{{- end }}
 apiVersion: rabbitmq.com/v1beta1
 kind: Vhost
 metadata:
@@ -128,14 +137,15 @@ spec:
   rabbitmqClusterReference:
     name: {{ $cluster | quote }}
 ---
+{{- range $u := $users }}
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
-  name: {{ printf "%s-rabbitmq-permission" $su }}
+  name: {{ printf "%s-rabbitmq-permission%s" $su ($u.suffix | default "") }}
 spec:
   vhost: {{ $vhost | quote }}
   userReference:
-    name: {{ printf "%s-rabbitmq-user" $su }}
+    name: {{ printf "%s-rabbitmq-user%s" $su ($u.suffix | default "") }}
   permissions:
     configure: ".*"
     write: ".*"
@@ -143,6 +153,7 @@ spec:
   rabbitmqClusterReference:
     name: {{ $cluster | quote }}
 ---
+{{- end }}
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:

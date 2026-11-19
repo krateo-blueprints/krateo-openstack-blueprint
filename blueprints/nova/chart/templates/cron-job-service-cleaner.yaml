@@ -47,6 +47,10 @@ spec:
         metadata:
           labels:
 {{ tuple $envAll "nova" "service-cleaner" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 12 }}
+{{- with (tuple "nova_service_cleaner" . | include "helm-toolkit.snippets.custom_pod_annotations") }}
+          annotations:
+{{ . | indent 12 }}
+{{- end }}
         spec:
 {{ tuple "nova_service_cleaner" . | include "helm-toolkit.snippets.kubernetes_pod_priority_class" | indent 10 }}
 {{ tuple "nova_service_cleaner" . | include "helm-toolkit.snippets.kubernetes_pod_runtime_class" | indent 10 }}

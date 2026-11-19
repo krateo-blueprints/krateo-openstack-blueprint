@@ -913,8 +913,51 @@ new root, as the "Upgrading to …" sections below describe.
   so is a token whose generation already existed. Rotate again with a new token.
 - **The active generation** is the root the component's Composition references:
   `kubectl -n openstack get heat heat -o jsonpath='{.spec.endpoints.oslo_messaging.auth.heat.passwordFrom.secret}'`.
-- In this version a token mints the next root; the second RabbitMQ user, the switch once it is Ready, and the old user's
-  deletion once every reader has rolled are #309 C2.
+
+### Rotating a RabbitMQ service user
+
+One step: set `rotate.oslo-messaging-<service>` to a new token (the current time) and apply. The umbrella does the rest
+over the next reconciles, deriving each step from what exists in the cluster (#309 C2):
+
+1. **Minting.** The new root, and the umbrella's projection of it,
+   `<service>-rabbitmq-topology-user-g<8 hex>` (username `<service>-g<8 hex>`). Once that Secret exists, the service's
+   release renders a second RabbitMQ user, `<service>-rabbitmq-user-g<8 hex>`, with its own Permission on the same vhost,
+   so no queue moves. Both users work.
+2. **Switch.** Once the new User is Ready, the service's Composition names the new root and username. Every pod of the
+   service rolls: each pod template carries `krateo.io/messaging-generation: -g<8 hex>`, because nothing else in a pod
+   template changes when only a Secret that External Secrets projects changes. Pods restarting meanwhile wait on the
+   active generation's User.
+3. **Draining.** The previous user stays until every reader has moved:
+   - every Deployment, StatefulSet, DaemonSet and CronJob of the release carries the new generation, and has rolled out
+     as `kubectl rollout status` judges it (kubectl v1.36.4). A StatefulSet partition counts as not rolled while any pod
+     is below it;
+   - no Job or CronJob Job is still running;
+   - the service's release for the switched spec has been applied, **hooks included**: its Composition's
+     `status.observedGeneration` has caught up. core-provider's controller writes it only after the helm upgrade,
+     which runs and waits for the hooks, has succeeded. A Composition marked `krateo.io/hooks-unverified` waits until
+     you have checked its hooks and removed the mark;
+   - the service's projections of the new root (`<service>-rabbitmq-user`, `<service>-transport`) have synced, so every
+     pod started from then on reads the new credential.
+4. **Retired.** The previous user leaves the release. Its User is deleted, and the topology operator deletes the
+   RabbitMQ user.
+
+While a rotation is in progress, `status.credentialRotation` lists its id. ConfigMap
+`openstack-credential-rotation-<id>` shows the phase (`minting` or `draining`) and what it waits on:
+
+```
+kubectl -n openstack get configmap openstack-credential-rotation-oslo-messaging-heat -o jsonpath='{.data.blockers}'
+```
+
+**Some waits need you; nothing is forced.**
+- A StatefulSet or DaemonSet with `updateStrategy: OnDelete`, or a bare Pod, never moves by itself. Delete its pods, one
+  at a time.
+- A partition above 0 keeps its pods on the previous user. Set the partition to 0.
+- A workload the umbrella cannot read is kept as a blocker, never assumed rolled.
+- A CronJob whose Jobs are always running holds the previous user for as long as they run.
+
+A second token set while the previous rotation still drains waits for it: never more than two users at a time. Edit or
+delete neither root during a rotation: an edit of a generation root is reported like any other
+(`status.credentialDrift`).
 
 ## Upgrading an existing install
 

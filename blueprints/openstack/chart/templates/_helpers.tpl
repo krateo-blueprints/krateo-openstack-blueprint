@@ -461,9 +461,12 @@ true
 krateo.io/composition-version
 {{- end -}}
 
-{{/* The live state of <kind>/<name>, read at <ver>, as JSON {"spec": ..., "version": ..., "managed": ...}:
-     its spec, the version its osh.compositionVersionLabel says it was last written through ("" when
-     the label is absent), and its status.managed. "" when no such object exists.
+{{/* The live state of <kind>/<name>, read at <ver>, as JSON {"spec": ..., "version": ..., "managed": ...,
+     "generation": ..., "observedGeneration": ..., "hooksUnverified": ...}: its spec, the version its
+     osh.compositionVersionLabel says it was last written through ("" when the label is absent), and
+     what a RabbitMQ user rotation needs (#309 C2): its status.managed, metadata.generation,
+     status.observedGeneration and whether krateo.io/hooks-unverified is set. "" when no such object
+     exists.
 
      One named GET of the one object, made ONLY while osh.holdValues holds or the component has a
      rotate.<id> token (#309 C): compositions.yaml calls it once, under that condition, and hands the
@@ -489,7 +492,7 @@ krateo.io/composition-version
 {{- $o := lookup (include "osh.apiVersionAt" (list $ver)) $kind $top.Release.Namespace $name -}}
 {{- if $o -}}
 {{- $labels := (($o.metadata).labels) | default dict -}}
-{{- dict "spec" (($o.spec) | default dict) "version" ((index $labels (include "osh.compositionVersionLabel" $top)) | default "") "managed" ((($o.status) | default dict).managed | default list) | toJson -}}
+{{- dict "spec" (($o.spec) | default dict) "version" ((index $labels (include "osh.compositionVersionLabel" $top)) | default "") "managed" ((($o.status) | default dict).managed | default list) "generation" (($o.metadata).generation | default 0) "observedGeneration" ((($o.status) | default dict).observedGeneration | default 0) "hooksUnverified" (hasKey ((($o.metadata).annotations) | default dict) "krateo.io/hooks-unverified") | toJson -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -899,7 +902,8 @@ true
 {{- end -}}
 
 {{/* (list $ <name>): the ExternalSecret <name> in this namespace, as JSON ("{}" when absent). One named GET; the umbrella
-     renders these objects, so its render identity may read them. The only ExternalSecret read in the chart. */}}
+     renders these objects (the generation roots), so its render identity may read them. A rotation also reads the
+     component's own projections through osh.lookupNamed (osh.generationRolled). */}}
 {{- define "osh.lookupExternalSecret" -}}
 {{- $top := index . 0 -}}
 {{- lookup "external-secrets.io/v1" "ExternalSecret" $top.Release.Namespace (index . 1) | default dict | toJson -}}
@@ -1465,6 +1469,52 @@ krateo-openstack-node-reader
 {{- $out | toJson -}}
 {{- end -}}
 
+{{- /* osh.messagingProjectionES (list $ $c $p suffix root): the umbrella's RabbitMQ user projection of component $c
+       (osh.messagingProjection is $p) for one generation (#309 C2): named <projection><suffix>, user <username><suffix>,
+       read from <root>. Generation 0 (suffix "", the base root) is templates/messaging-projections.yaml; the others are
+       rendered with the rotation that needs them (compositions.yaml). One template, so they cannot differ. */ -}}
+{{- define "osh.messagingProjectionES" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}{{- $p := index . 2 -}}{{- $sfx := toString (index . 3) -}}{{- $root := index . 4 }}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ printf "%s%s" $p.secret $sfx }}
+  namespace: {{ $top.Release.Namespace }}
+  labels:
+    krateo.io/messaging-projection: {{ $c.name }}
+  annotations:
+    # Deleted by helm WITH the release, after its pre-delete hooks (#254).
+    krateo.io/teardown: with-release
+spec:
+  # OnChange (#309 C): refreshed only when this ExternalSecret itself changes (a new root, a new
+  # template), never on a timer, so a root edited by hand (which ESO regenerates) reaches no live
+  # credential until a rotation; the umbrella reports the edit (status.credentialDrift).
+  refreshPolicy: OnChange
+  secretStoreRef:
+    kind: SecretStore
+    name: {{ $p.store | quote }}
+  target:
+    name: {{ printf "%s%s" $p.secret $sfx }}
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      engineVersion: v2
+      metadata:
+        labels:
+          # The topology operator reads only Secrets with this label (v1.20.5 cmd/main.go:281-283), and its User webhook
+          # refuses an import Secret without it (internal/webhook/v1beta1/label_validation.go). #404.
+          rabbitmq.com/topology-operator: "true"
+      data:
+        username: {{ printf "%s%s" $p.username $sfx | quote }}
+        password: {{ "{{ .password }}" | quote }}
+  data:
+    - secretKey: password
+      remoteRef:
+        key: {{ $root | quote }}
+        property: {{ $p.key | quote }}
+{{- end -}}
+
 {{- /* osh.lookupSecret (list $ name): the Secret <name> in the release namespace, as JSON ("{}" when absent). One named
        GET, so a gate can stand it in: helm template's lookup returns nothing, and an offline render therefore emits no
        component that waits on one (hack/validate-messaging-operator.py part 5 renders this gate with a stand-in). */ -}}
@@ -1473,9 +1523,11 @@ krateo-openstack-node-reader
 {{- lookup "v1" "Secret" $top.Release.Namespace (index . 1) | default dict | toJson -}}
 {{- end -}}
 
-{{- /* osh.messagingRotation (list $ $c $liveSpec): the rotation state of component $c's RabbitMQ user (#309 C, Diego's
-       (d): immutable roots per generation, dual users), derived from what exists, never from remembered state, as JSON
-       {base, target, active, previous, phase, refuse, token}. "{}" when $c has no umbrella projection (osh.messagingProjection).
+{{- /* osh.messagingRotation (list $ $c $liveSpec [$liveStatus]): the rotation state of component $c's RabbitMQ user (#309 C,
+       Diego's (d): immutable roots per generation, dual users), derived from what exists, never from remembered state, as
+       JSON. "{}" when $c has no umbrella projection (osh.messagingProjection). $liveStatus is what osh.liveState read
+       besides the spec: status.managed (CDC builds it from the release manifest), metadata.generation,
+       status.observedGeneration and hooksUnverified.
          base     its root, credentials.items oslo-messaging-<component>: generation 0, never modified;
          target   base when rotate.<id> is unset, else <base>-g<first 8 hex of sha256(token)>, a NEW root ESO mints once;
          active   the root the LIVE component Composition references now ($liveSpec's
@@ -1483,12 +1535,27 @@ krateo-openstack-node-reader
          previous for a target other than base, the active root when the target was first rendered, stamped on the target
                   root's ExternalSecret (krateo.io/previous-root) and read back by lookup: the ConfigMap
                   openstack-credential-generations is not needed, so losing it loses nothing;
-         phase    steady (target == active) or minting (target != active: mint the target root);
          refuse   a message when the token cannot be honoured: the target root already exists with a previous-root other
-                  than the active one (the token names an old or retired generation), or the token was removed after a
-                  rotation (target base, active a generation root). Never silently re-activates an old root. */ -}}
+                  than the active one (the token names an old or retired generation), the token was removed after a
+                  rotation (target base, active a generation root), or componentValues sets the component's
+                  passwordFrom (the rotation would override it). Never silently re-activates an old root.
+       C2, the switch. A generation's suffix is "" for the base root and -g<8 hex> otherwise; its user is
+       <username><suffix>, its projection <projection><suffix>, its User <su>-rabbitmq-user<suffix>. One render at a time:
+         minting   target != active. The target root and its umbrella projection are rendered; once that projection's
+                   Secret exists, labelled for the topology operator, the target's User joins `users` (the component
+                   renders it next to the active one, on the same vhost); once that User is Ready, this render SWITCHES:
+                   the component's passwordFrom and username name the target, activeSuffix its suffix. A target waits
+                   while the active generation's own previous user is still draining (never three users);
+         draining  target == active, and the previous generation's User still exists: it stays in `users` until every
+                   reader has rolled onto the active generation (osh.generationRolled); `blockers` says what each waits on.
+                   Once rolled it leaves `users`, the component's release deletes its User, and the topology operator its
+                   RabbitMQ user;
+         steady    nothing to do.
+       `pass` is false until a first rotation: the component's spec does not change (hack/validate-messaging-rotation.py
+       renders all three phases from stand-ins, and that nothing changes without a token). */ -}}
 {{- define "osh.messagingRotation" -}}
 {{- $top := index . 0 -}}{{- $c := index . 1 -}}{{- $live := index . 2 | default dict -}}
+{{- $liveStatus := dict -}}{{- if gt (len .) 3 -}}{{- $liveStatus = index . 3 | default dict -}}{{- end -}}
 {{- $p := include "osh.messagingProjection" (list $top $c) | fromJson -}}
 {{- $out := dict -}}
 {{- if $p.secret -}}
@@ -1502,7 +1569,10 @@ krateo-openstack-node-reader
 {{- $_ := set $out "token" $tok -}}{{- $_ := set $out "id" $id -}}
 {{- $es := include "osh.lookupExternalSecret" (list $top $target) | fromJson -}}
 {{- $stamp := toString ((($es.metadata | default dict).annotations | default dict) | dig "krateo.io/previous-root" "") -}}
-{{- if eq $target $active -}}
+{{- $cvAuth := (((((index ($top.Values.componentValues | default dict) $c.name | default dict).endpoints | default dict).oslo_messaging | default dict).auth | default dict) | dig $c.name "passwordFrom" dict) -}}
+{{- if and $tok $cvAuth -}}
+{{- $_ := set $out "refuse" (printf "rotate.%s is set, but componentValues.%s.endpoints.oslo_messaging.auth.%s.passwordFrom is too: a rotation names the root itself. Remove the componentValues entry." $id $c.name $c.name) -}}
+{{- else if eq $target $active -}}
 {{- $_ := set $out "phase" "steady" -}}
 {{- if ne $target $base -}}{{- $_ := set $out "previous" $stamp -}}{{- end -}}
 {{- else if eq $target $base -}}
@@ -1513,8 +1583,217 @@ krateo-openstack-node-reader
 {{- $_ := set $out "phase" "minting" -}}
 {{- $_ := set $out "previous" ($stamp | default $active) -}}
 {{- end -}}
+{{- if not $out.refuse -}}
+{{- $su := $c.name | replace "_" "-" -}}
+{{- $aSfx := include "osh.generationSuffix" (list $base $active) -}}
+{{- $users := list -}}{{- $roots := list -}}{{- $blockers := list -}}
+{{- /* The ACTIVE generation's own previous one (stamped on the active root): kept while its User exists and the
+       readers have not all rolled onto the active generation. */ -}}
+{{- $draining := false -}}
+{{- if ne $active $base -}}
+{{- $aes := include "osh.lookupExternalSecret" (list $top $active) | fromJson -}}
+{{- $prev := toString ((($aes.metadata | default dict).annotations | default dict) | dig "krateo.io/previous-root" "") -}}
+{{- if $prev -}}
+{{- $pSfx := include "osh.generationSuffix" (list $base $prev) -}}
+{{- $pu := include "osh.lookupNamed" (list $top "rabbitmq.com/v1beta1" "User" (printf "%s-rabbitmq-user%s" $su $pSfx)) | fromJson -}}
+{{- if and $pu.metadata (not $pu.metadata.deletionTimestamp) -}}
+{{- if ne $prev $base -}}{{- $roots = append $roots $prev -}}{{- end -}}
+{{- $r := include "osh.generationRolled" (list $top $c $aSfx $active $liveStatus) | fromJson -}}
+{{- if not $r.rolled -}}
+{{- $draining = true -}}
+{{- $users = append $users (dict "suffix" $pSfx "secret" (printf "%s%s" $p.secret $pSfx)) -}}
+{{- $blockers = concat $blockers (list (printf "the previous generation %s is kept until every reader has rolled onto %s:" $prev $active)) $r.blockers -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $users = append $users (dict "suffix" $aSfx "secret" (printf "%s%s" $p.secret $aSfx)) -}}
+{{- if ne $active $base -}}{{- $roots = append $roots $active -}}{{- end -}}
+{{- $final := $active -}}{{- $fSfx := $aSfx -}}
+{{- if ne $target $active -}}
+{{- $tSfx := include "osh.generationSuffix" (list $base $target) -}}
+{{- $roots = append $roots $target -}}
+{{- if $draining -}}
+{{- $blockers = append $blockers (printf "the new generation %s waits until the previous rotation has drained" $target) -}}
+{{- else -}}
+{{- $tp := include "osh.lookupSecret" (list $top (printf "%s%s" $p.secret $tSfx)) | fromJson -}}
+{{- if ne (toString ((($tp.metadata | default dict).labels | default dict) | dig "rabbitmq.com/topology-operator" "")) "true" -}}
+{{- $blockers = append $blockers (printf "waiting for External Secrets to write the projection %s%s from %s" $p.secret $tSfx $target) -}}
+{{- else -}}
+{{- $users = append $users (dict "suffix" $tSfx "secret" (printf "%s%s" $p.secret $tSfx)) -}}
+{{- $tu := include "osh.lookupNamed" (list $top "rabbitmq.com/v1beta1" "User" (printf "%s-rabbitmq-user%s" $su $tSfx)) | fromJson -}}
+{{- $ready := false -}}
+{{- range $cond := (($tu.status | default dict).conditions | default list) -}}
+{{- if and (eq (toString $cond.type) "Ready") (eq (toString $cond.status) "True") -}}{{- $ready = true -}}{{- end -}}
+{{- end -}}
+{{- if $ready -}}
+{{- $final = $target -}}{{- $fSfx = $tSfx -}}
+{{- $_ := set $out "switched" true -}}
+{{- $blockers = append $blockers (printf "switched to %s in this render; %s is kept until every reader has rolled" $target $active) -}}
+{{- else -}}
+{{- $blockers = append $blockers (printf "waiting for the User %s-rabbitmq-user%s to be Ready" $su $tSfx) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $phase := "steady" -}}
+{{- if $out.switched -}}{{- $phase = "draining" -}}
+{{- else if ne $target $active -}}{{- $phase = "minting" -}}
+{{- else if $draining -}}{{- $phase = "draining" -}}
+{{- end -}}
+{{- $_ := set $out "phase" $phase -}}
+{{- $_ := set $out "su" $su -}}
+{{- $_ := set $out "users" $users -}}
+{{- $_ := set $out "roots" $roots -}}
+{{- $_ := set $out "blockers" $blockers -}}
+{{- $_ := set $out "activeRoot" $final -}}
+{{- $_ := set $out "activeSuffix" $fSfx -}}
+{{- $_ := set $out "username" (printf "%s%s" $p.username $fSfx) -}}
+{{- $_ := set $out "pass" (or (ne $active $base) (ne $target $base)) -}}
+{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
+{{- end -}}
+
+{{- /* osh.generationSuffix (list base root): "" for the base root (generation 0), else what the root's name adds to it
+       (-g<8 hex>). */ -}}
+{{- define "osh.generationSuffix" -}}
+{{- $base := index . 0 -}}{{- $root := index . 1 -}}
+{{- if ne $root $base -}}{{- trimPrefix $base $root -}}{{- end -}}
+{{- end -}}
+
+{{- /* osh.lookupNamed (list $ apiVersion kind name): the object <kind>/<name> in the release namespace, as JSON ("{}" when
+       absent). One named GET: chart-inspector's tracer records every named request of the dry-run render, lookups and
+       404s included (internal/tracer/tracer.go RoundTrip), and derives the release's RBAC from them. Never a list.
+       Stood in by hack/validate-messaging-rotation.py. */ -}}
+{{- define "osh.lookupNamed" -}}
+{{- $top := index . 0 -}}
+{{- lookup (index . 1) (index . 2) $top.Release.Namespace (index . 3) | default dict | toJson -}}
+{{- end -}}
+
+{{- /* osh.messagingReaders (list $c): the component chart's ExternalSecrets that project its RabbitMQ root, the
+       connection Secret (secrets.oslo_messaging) and the transport drop-in. hack/validate-messaging-rotation.py renders
+       all 20 messaging charts and fails unless this is exactly the set that reads the root. */ -}}
+{{- define "osh.messagingReaders" -}}
+{{- $n := (index . 0).name | replace "_" "-" -}}
+{{- list (printf "%s-rabbitmq-user" $n) (printf "%s-transport" $n) | toJson -}}
+{{- end -}}
+
+{{- /* osh.generationRolled (list $ $c $suffix $activeRoot $liveStatus): whether every reader of component $c's RabbitMQ
+       credential has moved to the generation <suffix>, as JSON {rolled, blockers}. Named lookups only; whatever cannot
+       be read, or cannot roll by itself, is kept and reported, never forced.
+
+       The release, hooks included: the component Composition's status.observedGeneration == metadata.generation and no
+       krateo.io/hooks-unverified. The composition-dynamic-controller core-provider 2.13.111 deploys
+       (krateo-platformops/core-provider tag 2.13.111, commit 7cd0848, go/composition-dynamic-controller) writes
+       observedGeneration only in setStatus (internal/composition/support.go:377, unstructured-runtime v1.27.1
+       statusprojection.go:177: = metadata.generation as read), which runs only after the reconcile succeeded: a failed
+       reconcile returns before it (composition.go Observe :700). That reconcile (plumbing v1.95.0 helm/v3/reconcile.go
+       steps 5-8) merge-applies the render, then, when anything changed, runs ONE real helm upgrade, which runs and waits
+       for the hooks. So a hook Job of the switching release, which may have started on the previous credential, has
+       ended. hooks-unverified (an interrupted operation recovered without its hooks, #563) is reported, not waited out.
+
+       Workloads, each object status.managed lists (built by CDC from the release manifest), by kubectl v1.36.4's rollout
+       status (staging/src/k8s.io/kubectl/pkg/polymorphichelpers/rollout_status.go) and one stricter rule:
+         every Deployment, StatefulSet, DaemonSet and CronJob carries the pod-template annotation
+           krateo.io/messaging-generation: <suffix> (helm-toolkit custom_pod_annotations): its pods are the new ones;
+         Deployment (:75-87): metadata.generation <= status.observedGeneration; not ProgressDeadlineExceeded;
+           updatedReplicas == spec.replicas; status.replicas == updatedReplicas; availableReplicas == updatedReplicas;
+         DaemonSet (:107-112): OnDelete refused (kubectl refuses it too: its pods keep the previous credential until
+           deleted, so it is reported with that action); observedGeneration; updatedNumberScheduled and numberAvailable
+           == desiredNumberScheduled;
+         StatefulSet (:130-146): OnDelete as DaemonSet; observedGeneration; readyReplicas == spec.replicas; a partition
+           counts as not rolled while any pod is below it (stricter than kubectl, which accepts the partition: those
+           pods hold the previous credential); updateRevision == currentRevision;
+         CronJob and Job: no Job running (status.active), since a Job keeps the credential it started with;
+         a bare Pod not Succeeded or Failed: never restarts, reported.
+       The component's projections of the active root (osh.messagingReaders) must read it and be synced at their own
+       generation (ESO v2.14.0: syncedResourceVersion is "<metadata.generation>-<HashMeta>"), so every pod started from
+       now on reads the new credential. */ -}}
+{{- define "osh.generationRolled" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}{{- $sfx := toString (index . 2) -}}{{- $root := index . 3 -}}{{- $ls := index . 4 | default dict -}}
+{{- $managed := $ls.managed | default list -}}
+{{- $blk := list -}}
+{{- if $ls.hooksUnverified -}}
+{{- $blk = append $blk "the component carries krateo.io/hooks-unverified: an interrupted helm operation was recovered without its hooks, so they may not have run; verify them and remove the annotation (README)" -}}
+{{- end -}}
+{{- if lt (int64 ($ls.observedGeneration | default 0)) (int64 ($ls.generation | default 0)) -}}
+{{- $blk = append $blk (printf "the component's release for its current spec (generation %d) has not been applied yet, hooks included (observed %d)" (int64 ($ls.generation | default 0)) (int64 ($ls.observedGeneration | default 0))) -}}
+{{- end -}}
+{{- $kinds := dict "deployments" "Deployment" "statefulsets" "StatefulSet" "daemonsets" "DaemonSet" "cronjobs" "CronJob" "jobs" "Job" "pods" "Pod" -}}
+{{- if not $managed -}}{{- $blk = append $blk "the component Composition lists no status.managed yet" -}}{{- end -}}
+{{- range $m := $managed -}}
+{{- $kind := index $kinds (toString $m.resource) | default "" -}}
+{{- if $kind -}}
+{{- $o := include "osh.lookupNamed" (list $top (toString $m.apiVersion) $kind (toString $m.name)) | fromJson -}}
+{{- $n := printf "%s/%s" $kind $m.name -}}
+{{- if not $o.metadata -}}
+{{- $blk = append $blk (printf "%s: cannot be read; kept until it can" $n) -}}
+{{- else -}}
+{{- $sp := $o.spec | default dict -}}{{- $st := $o.status | default dict -}}
+{{- $gen := int64 ($o.metadata.generation | default 0) -}}{{- $og := int64 ($st.observedGeneration | default 0) -}}
+{{- $tpl := $sp.template | default dict -}}
+{{- if eq $kind "CronJob" -}}{{- $tpl = ((($sp.jobTemplate | default dict).spec | default dict).template | default dict) -}}{{- end -}}
+{{- $want := 1 -}}{{- if hasKey $sp "replicas" -}}{{- $want = int64 $sp.replicas -}}{{- end -}}
+{{- $strategy := toString (((index $sp (ternary "updateStrategy" "strategy" (ne $kind "Deployment"))) | default dict).type | default "") -}}
+{{- if has $kind (list "Deployment" "StatefulSet" "DaemonSet" "CronJob") -}}
+{{- $ann := toString (index ((($tpl.metadata | default dict).annotations) | default dict) "krateo.io/messaging-generation" | default "") -}}
+{{- if ne $ann $sfx -}}
+{{- $blk = append $blk (printf "%s: its pod template is at generation %q, not %q: the release that switched it is not applied yet" $n $ann $sfx) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (has $kind (list "StatefulSet" "DaemonSet")) (eq $strategy "OnDelete") -}}
+{{- $blk = append $blk (printf "%s: updateStrategy OnDelete, so its pods keep the previous credential until deleted: delete them (kubectl -n %s delete pod -l <its selector>), one at a time" $n $top.Release.Namespace) -}}
+{{- else if and (has $kind (list "Deployment" "StatefulSet" "DaemonSet")) (gt $gen $og) -}}
+{{- $blk = append $blk (printf "%s: generation %d not observed yet (observed %d)" $n $gen $og) -}}
+{{- else if eq $kind "Deployment" -}}
+{{- range $cond := ($st.conditions | default list) -}}
+{{- if and (eq (toString $cond.type) "Progressing") (eq (toString $cond.reason) "ProgressDeadlineExceeded") -}}
+{{- $blk = append $blk (printf "%s: exceeded its progress deadline" $n) -}}
+{{- end -}}
+{{- end -}}
+{{- $upd := int64 ($st.updatedReplicas | default 0) -}}
+{{- if lt $upd $want -}}{{- $blk = append $blk (printf "%s: %d of %d pods updated" $n $upd $want) -}}
+{{- else if gt (int64 ($st.replicas | default 0)) $upd -}}{{- $blk = append $blk (printf "%s: %d old pods pending termination" $n (sub (int64 ($st.replicas | default 0)) $upd)) -}}
+{{- else if lt (int64 ($st.availableReplicas | default 0)) $upd -}}{{- $blk = append $blk (printf "%s: %d of %d updated pods available" $n (int64 ($st.availableReplicas | default 0)) $upd) -}}
+{{- end -}}
+{{- else if eq $kind "StatefulSet" -}}
+{{- $part := int64 (((($sp.updateStrategy | default dict).rollingUpdate | default dict).partition) | default 0) -}}
+{{- if lt (int64 ($st.readyReplicas | default 0)) $want -}}{{- $blk = append $blk (printf "%s: %d of %d pods ready" $n (int64 ($st.readyReplicas | default 0)) $want) -}}
+{{- else if and (gt $part 0) (lt (int64 ($st.updatedReplicas | default 0)) $want) -}}{{- $blk = append $blk (printf "%s: partition %d leaves %d pod(s) on the previous credential: set its partition to 0" $n $part (sub $want (int64 ($st.updatedReplicas | default 0)))) -}}
+{{- else if ne (toString ($st.updateRevision | default "")) (toString ($st.currentRevision | default "")) -}}{{- $blk = append $blk (printf "%s: update revision %s not current yet" $n ($st.updateRevision | default "")) -}}
+{{- end -}}
+{{- else if eq $kind "DaemonSet" -}}
+{{- $des := int64 ($st.desiredNumberScheduled | default 0) -}}
+{{- if lt (int64 ($st.updatedNumberScheduled | default 0)) $des -}}{{- $blk = append $blk (printf "%s: %d of %d pods updated" $n (int64 ($st.updatedNumberScheduled | default 0)) $des) -}}
+{{- else if lt (int64 ($st.numberAvailable | default 0)) $des -}}{{- $blk = append $blk (printf "%s: %d of %d updated pods available" $n (int64 ($st.numberAvailable | default 0)) $des) -}}
+{{- end -}}
+{{- else if eq $kind "CronJob" -}}
+{{- if ($st.active | default list) -}}{{- $blk = append $blk (printf "%s: %d Job(s) running, which keep the credential they started with" $n (len $st.active)) -}}{{- end -}}
+{{- else if eq $kind "Job" -}}
+{{- if gt (int64 ($st.active | default 0)) 0 -}}{{- $blk = append $blk (printf "%s: running, and keeps the credential it started with" $n) -}}{{- end -}}
+{{- else if eq $kind "Pod" -}}
+{{- if not (has (toString (($st.phase) | default "")) (list "Succeeded" "Failed")) -}}{{- $blk = append $blk (printf "%s: a bare Pod never restarts with the new credential: delete it" $n) -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- range $name := include "osh.messagingReaders" (list $c) | fromJsonArray -}}
+{{- $e := include "osh.lookupNamed" (list $top "external-secrets.io/v1" "ExternalSecret" $name) | fromJson -}}
+{{- if not $e.metadata -}}
+{{- $blk = append $blk (printf "ExternalSecret/%s: cannot be read; kept until it can" $name) -}}
+{{- else -}}
+{{- $reads := false -}}
+{{- range $d := (($e.spec | default dict).data | default list) -}}{{- if eq (toString (($d.remoteRef | default dict).key)) $root -}}{{- $reads = true -}}{{- end -}}{{- end -}}
+{{- $est := $e.status | default dict -}}
+{{- if not $reads -}}
+{{- $blk = append $blk (printf "ExternalSecret/%s: does not read %s yet" $name $root) -}}
+{{- else if not (hasPrefix (printf "%d-" (int64 ($e.metadata.generation | default 0))) (toString ($est.syncedResourceVersion | default ""))) -}}
+{{- $blk = append $blk (printf "ExternalSecret/%s: not synced at its generation %d yet" $name (int64 ($e.metadata.generation | default 0))) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- dict "rolled" (not $blk) "blockers" $blk | toJson -}}
 {{- end -}}
 
 {{- /* osh.generationRoot (list $ $rot): the ROOT of a rotation's target generation (#309 C), in the form of every generated
@@ -1583,8 +1862,24 @@ spec:
 {{- $prev := $prevCM.data | default dict -}}
 {{- $ack := (($top.Values.credentialDrift | default dict).acknowledge | default dict) -}}
 {{- $state := dict -}}{{- $drift := list -}}
+{{- /* The items' roots, and (#309 C2) each messaging generation root a rotation token names and the one its stamp says
+       preceded it, latched by Secret name: an edited generation root is reported the same way. */ -}}
+{{- $roots := list -}}
 {{- range $i := (($top.Values.credentials | default dict).items | default list) -}}
-{{- if ne ($i.source | default "") "provided" -}}
+{{- if ne ($i.source | default "") "provided" -}}{{- $roots = append $roots (dict "id" $i.id "secret" $i.secret) -}}{{- end -}}
+{{- end -}}
+{{- range $c := ($top.Values.components | default list) -}}
+{{- $p := include "osh.messagingProjection" (list $top $c) | fromJson -}}
+{{- $tok := toString (index ($top.Values.rotate | default dict) (printf "oslo-messaging-%s" $c.name) | default "") -}}
+{{- if and $p.secret $tok -}}
+{{- $g := printf "%s-g%s" $p.root (trunc 8 (sha256sum $tok)) -}}
+{{- $roots = append $roots (dict "id" $g "secret" $g) -}}
+{{- $es := include "osh.lookupExternalSecret" (list $top $g) | fromJson -}}
+{{- $pr := toString ((($es.metadata | default dict).annotations | default dict) | dig "krateo.io/previous-root" "") -}}
+{{- if and $pr (ne $pr $p.root) -}}{{- $roots = append $roots (dict "id" $pr "secret" $pr) -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- range $i := $roots -}}
 {{- $s := include "osh.lookupSecret" (list $top $i.secret) | fromJson -}}
 {{- if $s.data -}}
 {{- $sha := toJson $s.data | sha256sum -}}
@@ -1594,7 +1889,6 @@ spec:
 {{- else -}}
 {{- $_ := set $state $i.id $base -}}
 {{- $drift = append $drift (dict "id" $i.id "secret" $i.secret "sha" $sha) -}}
-{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -1816,6 +2110,10 @@ spec:
 {{- $_ := set $om "operator" (dict "cluster" $name) -}}
 {{- /* Its user projection is the umbrella's (osh.messagingProjection): the chart imports this name and renders none. */ -}}
 {{- with (include "osh.messagingProjection" (list $top $c) | fromJson).secret -}}{{- $_ := set $om.operator "userSecret" . -}}{{- end -}}
+{{- /* Its service user (#309 C2): its entrypoint waits name ITS User and Permission (of the active generation), and only
+       the vhost and the administrator's permission of any other service's rabbit-init it waits on, whose generation it
+       cannot know (helm-toolkit.utils.rabbitmq_topology_waits). */ -}}
+{{- $_ := set $om.operator "serviceUser" ($c.name | replace "_" "-") -}}
 {{- $_ := set $out "conf" (dict $c.name (dict "oslo_messaging_rabbit" (deepCopy $topo.messagingQuorumConf))) -}}
 {{- end -}}
 {{- if $om -}}{{- $_ := set $out "endpoints" (dict "oslo_messaging" $om) -}}{{- end -}}

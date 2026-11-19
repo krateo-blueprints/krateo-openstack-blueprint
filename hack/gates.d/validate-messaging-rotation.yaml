@@ -1,0 +1,9 @@
+# #309 C2 (Diego's (d), dual users): a RabbitMQ user rotation switches a service to its new user only once that user is
+# Ready, rolls every pod that reads the credential, and deletes the previous user only once every reader has rolled
+# (kubectl v1.36.4 rollout predicates, stricter on partitions; running Jobs; the hook deadline), derived from what
+# exists; and the entrypoint waits name only the service's own, active user.
+name: "A rotation switches only to a ready user and retires the old one only once every reader has rolled"
+job: capability-roles
+order: 492
+run: |
+  python3 hack/validate-messaging-rotation.py .

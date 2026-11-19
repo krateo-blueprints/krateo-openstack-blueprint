@@ -52,7 +52,9 @@ def specs(root, values=None):
         open(cy, "w").write(body.replace("CHART_VERSION", "0.0.0-gate"))
         open(os.path.join(w, "templates", "zz-umbrella-spec-probe.yaml"), "w").write(
             '{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n'
-            '{{- range $c := .Values.components }}\n' + span + '\n'
+            # $rot: compositions.yaml's RabbitMQ rotation state (#309 C2), derived from the live component; offline nothing
+            # is live, so it is empty, as the chart's own render finds it.
+            '{{- range $c := .Values.components }}\n{{- $rot := dict }}\n' + span + '\n'
             # printf, not literal text: a right-trimming action at the end of the span would swallow a literal newline
             # and join two components' lines.
             '{{ printf "\\n# UMBRELLASPEC %s %s\\n" $c.name ($ov | toJson) }}\n{{- end }}\n')

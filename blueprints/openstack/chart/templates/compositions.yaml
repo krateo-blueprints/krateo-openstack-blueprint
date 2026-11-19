@@ -89,6 +89,20 @@
        not exist yet (#257 -- measured: Ready=True at 21:47:26 with cyborg, the last tier, emitted only
        at 21:48:21). The selection and emission decisions stay here, in one place; the projection only
        reads whether the chart said "pending". */ -}}
+{{- /* #309 C2: the credential generations latch (osh.credentialDrift's ConfigMap), read ONCE per render and only with
+       the operator broker (the only mode that rotates): it tells which components were ever rotated ($rotMark below).
+       ABSENT (lost, or an install from before it existed) the rotation state is unknown, so every existing component
+       with an umbrella RabbitMQ projection is read live on that render: a removed token is still refused, and
+       templates/credential-drift.yaml re-creates the ConfigMap in the same render, so the next one reads nothing again.
+       credential-drift.yaml reads it too; helm renders each template with its own values, so the read cannot be shared
+       across the two files. */ -}}
+{{- $gens := dict }}
+{{- $gensKnown := true }}
+{{- if eq (include "osh.messagingBackend" $) "operator" }}
+{{- $gensCM := include "osh.lookupConfigMap" (list $ "openstack-credential-generations") | fromJson }}
+{{- $gensKnown = not (empty $gensCM) }}
+{{- $gens = $gensCM.data | default dict }}
+{{- end }}
 {{- $pending := list }}
 {{- range $c := .Values.components }}
 {{- if has $c.name $sel }}
@@ -118,28 +132,60 @@
 {{- $emitVer := include "osh.emitVersion" (list $ $c.kind $c.name $crds $exists $approved) }}
 {{- $crd := include "osh.crdExists" (list $c.kind $emitVer $crds) }}
 {{- /* Whether this component's values are HELD (TWO PHASES, below, where the decision is consumed; osh.holdValues). A pure
-       function of the reads above, decided here because it is one of the two reasons to read the live object. */ -}}
+       function of the reads above, decided here because it is one of the reasons to read the live object. */ -}}
 {{- $hold := include "osh.holdValues" (list (include "osh.version" (list $)) $emitVer $approved $exists (include "osh.definitionApiVersion" (list $cd)) (include "osh.definitionReady" (list $cd))) }}
+{{- /* #309 C2: whether this component was ever rotated, from what the umbrella already holds: a generation root of its
+       RabbitMQ credential latched in openstack-credential-generations (osh.credentialDrift latches every generation root
+       a token names). With its token removed after a switch, this is what still reaches the live read below, so the
+       removal is refused (osh.messagingRotation) instead of switching the service back uncoordinated. */ -}}
+{{- $mp := include "osh.messagingProjection" (list $ $c) | fromJson }}
+{{- $rotMark := "" }}
+{{- if $mp.secret }}
+{{- if not $gensKnown }}{{- $rotMark = "true" }}{{- end }}
+{{- range $k, $_ := $gens }}{{- if hasPrefix (printf "%s-g" $mp.root) $k }}{{- $rotMark = "true" }}{{- end }}{{- end }}
+{{- end }}
 {{- /* THE LIVE READ: the component's live Composition (osh.liveState: spec, composition-version label, status.managed),
        read ONCE, here, and only when something needs it: the hold re-emits its spec, and a RabbitMQ user rotation (#309 C)
-       derives the active generation from it. A rotation is in progress or has happened exactly while its
-       rotate.<id> token is set: a used token must stay set (osh.messagingRotation refuses a removed one, which C2
-       extends to a token removed without a live read). So a render that holds nothing and rotates nothing reads
-       nothing (hack/validate-two-phase-values.py counts these reads: 0 plain, 1 holding, 1 rotating, 1 both). */ -}}
+       derives the active generation and its readers from it. A rotation is in progress or has happened while its
+       rotate.<id> token is set, or (token removed) while a generation root of it is latched or the latch is absent
+       ($rotMark). So a render that
+       holds nothing and rotates nothing reads nothing (hack/validate-two-phase-values.py counts these reads). */ -}}
 {{- $rotTok := toString (index ($.Values.rotate | default dict) (printf "oslo-messaging-%s" $c.name) | default "") }}
 {{- $live := "" }}
-{{- if or (eq $hold "true") (and $rotTok (eq $exists "true")) }}
+{{- if or (eq $hold "true") (and (or $rotTok $rotMark) (eq $exists "true")) }}
 {{- $live = include "osh.liveState" (list $ $c.kind $c.name $emitVer $crds) }}
 {{- end }}
-{{- /* #309 C: a component's RabbitMQ user rotation (osh.messagingRotation), derived from the live Composition and the
-       target root's stamps. A token that cannot be honoured refuses the render, naming why, on the umbrella's status. */ -}}
-{{- if (include "osh.messagingProjection" (list $ $c) | fromJson).secret }}
-{{- $rotLive := dict }}
-{{- if $live }}{{- $rotLive = (fromJson $live).spec | default dict }}{{- end }}
-{{- $rot := include "osh.messagingRotation" (list $ $c $rotLive) | fromJson }}
+{{- /* #309 C: a component's RabbitMQ user rotation (osh.messagingRotation), derived from the live Composition (its spec
+       and status.managed) and the generation roots' stamps. A token that cannot be honoured refuses the render, naming
+       why, on the umbrella's status. C2: the umbrella projection of every generation still in use, and while a rotation
+       is not steady a ConfigMap openstack-credential-rotation-<id> saying what it waits on (status.credentialRotation). */ -}}
+{{- $rot := dict }}
+{{- if $mp.secret }}
+{{- $rotLive := dict }}{{- $rotStatus := dict }}
+{{- if $live }}{{- $rotStatus = fromJson $live }}{{- $rotLive = $rotStatus.spec | default dict }}{{- end }}
+{{- $rot = include "osh.messagingRotation" (list $ $c $rotLive $rotStatus) | fromJson }}
 {{- if $rot.refuse }}{{- fail (printf "\n\n%s\n" $rot.refuse) }}{{- end }}
 {{- if ne $rot.target $rot.base }}
 {{- include "osh.generationRoot" (list $ $rot) }}
+{{- end }}
+{{- range $root := ($rot.roots | default list) }}
+{{- include "osh.messagingProjectionES" (list $ $c $mp (include "osh.generationSuffix" (list $rot.base $root)) $root) }}
+{{- end }}
+{{- if ne (toString $rot.phase) "steady" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "openstack-credential-rotation-%s" $rot.id }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    krateo.io/credential-rotation: {{ $rot.id }}
+data:
+  credential: {{ $rot.id | quote }}
+  phase: {{ $rot.phase | quote }}
+  active: {{ $rot.activeRoot | quote }}
+  target: {{ $rot.target | quote }}
+  blockers: {{ join "\n" $rot.blockers | quote }}
 {{- end }}
 {{- end }}
 {{- /* Partition this component's dependencies by the gate each edge is in, so that which
@@ -281,6 +327,18 @@
 {{- end }}
 {{- end }}
 {{- /* end of the monitoring span (#312): hack/validate-openstack-monitoring.py renders from `$ov :=` to here. */ -}}
+{{- /* RabbitMQ user rotation (#309 C2, osh.messagingRotation): once a component has been rotated, the generation it
+       connects as (username and root), the users its release renders (the active one, and the previous or next one
+       while a switch drains or prepares) and the active suffix its waits and pod annotation name. Merged OVER
+       componentValues, which may not set this passwordFrom while a token is set (refused). Nothing before a first
+       rotation; while the component's values are held (TWO PHASES, below) its live spec replaces all of this. Offline
+       nothing is live, so $rot is empty (hack/umbrella_spec.py's probe defines it so). hack/validate-messaging-rotation.py
+       renders this span with the lookups stood in. */ -}}
+{{- if $rot.pass }}
+{{- $rotAuth := dict $c.name (dict "username" $rot.username "passwordFrom" (dict "secret" $rot.activeRoot)) }}
+{{- $ov = mergeOverwrite (deepCopy $ov) (dict "endpoints" (dict "oslo_messaging" (dict "auth" $rotAuth "operator" (dict "users" $rot.users "activeSuffix" $rot.activeSuffix)))) }}
+{{- end }}
+{{- /* end of the rotation span */ -}}
 {{- /* TWO PHASES: a live component's NEW values are written only at the new apiVersion, and only
        once its CompositionDefinition serves it (status.apiVersion at the current version, Ready
        status True). Until then the object is not changed at all: its live spec is re-emitted at the

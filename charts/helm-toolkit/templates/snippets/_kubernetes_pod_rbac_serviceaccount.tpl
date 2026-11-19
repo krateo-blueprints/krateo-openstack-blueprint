@@ -83,7 +83,7 @@ imagePullSecrets:
        (helm-toolkit.utils.dependency_jobs_filter); grant them here too, or those waits are Forbidden. */}}
 {{- if and ((($envAll.Values.endpoints.oslo_messaging | default dict).operator | default dict).cluster) $envAll.Values.manifests.job_rabbit_init (hasKey $envAll.Values.dependencies "dynamic") }}
 {{- with (index ($envAll.Values.dependencies.dynamic.job_rabbit_init | default dict) $component) }}
-{{- $crWaits = concat $crWaits (include "helm-toolkit.utils.rabbitmq_topology_waits" .jobs | fromJsonArray) }}
+{{- $crWaits = concat $crWaits (include "helm-toolkit.utils.rabbitmq_topology_waits" (dict "jobs" .jobs "suffix" (($envAll.Values.endpoints.oslo_messaging.operator | default dict).activeSuffix | default "") "own" (($envAll.Values.endpoints.oslo_messaging.operator | default dict).serviceUser | default "")) | fromJsonArray) }}
 {{- end }}
 {{- end }}
 {{- $crRules := list }}
