@@ -12,7 +12,12 @@ ceph-external adds to the spec the umbrella delivers it, compared with none: kra
 references to the copied keys, and the rbd1 pool, user and libvirt secret UUID. They are computed from the umbrella's own
 spec-building lines (hack/umbrella_spec.py), never written here, so they cannot drift from what the umbrella does. One
 render covers both Ceph backends: the chart receives the same values for ceph-rook, whose references name the same
-copied roots. For every other chart: no arguments, so its render is the command it always was, byte for byte.
+copied roots.
+
+For a chart whose umbrella entry requires shared-filesystem (manila, #426), the umbrella provides no backend yet, so
+there is nothing it delivers to render with; the chart renders as the documented operator path does, from one file,
+hack/share-backend-operator-example.yaml (krateo.shareBackend unmanaged, one CephFS-native backend). For every other
+chart: no arguments, so its render is the command it always was, byte for byte.
 
 The component is the staged chart's Chart.yaml `name`, which equals its blueprint directory for every chart here, so a
 gate need not thread the name through its staging. Raises GateValuesError when the umbrella cannot be rendered: a gate
@@ -62,10 +67,33 @@ def delta(new, old):
     return out
 
 
+def shared_filesystem_components(root=ROOT):
+    uv = yaml.safe_load(open(os.path.join(root, "blueprints", "openstack", "chart", "values.yaml"))) or {}
+    return {c["name"] for c in uv.get("components") or [] if "shared-filesystem" in (c.get("requires") or [])}
+
+
+SHARE_BACKEND_EXAMPLE = os.path.join("hack", "share-backend-operator-example.yaml")
+
+
 def values_for(component, root=ROOT):
     key = (root, component)
     if key in _cache:
         return _cache[key]
+    if component in shared_filesystem_components(root):
+        # manila (#426): its chart refuses with no share backend chosen, and the umbrella provides none yet, so there is
+        # nothing the umbrella delivers to render it with. It renders as the documented operator path does instead:
+        # krateo.shareBackend unmanaged plus one backend, from one file (hack/share-backend-operator-example.yaml).
+        p = os.path.join(root, SHARE_BACKEND_EXAMPLE)
+        try:
+            with open(p) as f:
+                v = yaml.safe_load(f) or {}
+        except OSError as e:
+            raise GateValuesError("cannot read %s, the values %s renders with: %s" % (SHARE_BACKEND_EXAMPLE, component, e))
+        if (v.get("krateo") or {}).get("shareBackend") != "unmanaged":
+            raise GateValuesError("%s sets no krateo.shareBackend unmanaged: %s would render its refusal"
+                                  % (SHARE_BACKEND_EXAMPLE, component))
+        _cache[key] = v
+        return v
     if component not in block_storage_components(root):
         _cache[key] = {}
         return {}

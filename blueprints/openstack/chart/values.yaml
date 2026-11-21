@@ -1266,6 +1266,14 @@ components:
       - glance
       - nova
     tier: compute
+    ## Selected by `profile: full-strict` only when the install provides shared-filesystem, which nothing does yet: the
+    ## real backend, CephFS, comes with #308. Upstream's default backend, generic, never started here: its
+    ## service-instance helper runs `ip`, which no airshipit manila image ships (measured on the images 0.3.23, 0.3.73
+    ## and 0.3.74 ran), and it needs Cinder volumes on Nova service instances. Before 0.3.74 nothing probed manila-share,
+    ## so it reported Ready while serving nothing. Manila's chart now refuses to render without a backend chosen and
+    ## refuses the generic driver (#426), and hack/provisioning-preconditions.yaml says what it needs.
+    requires:
+      - shared-filesystem
   - name: mistral
     kind: Mistral
     rabbitmqVhost: mistral

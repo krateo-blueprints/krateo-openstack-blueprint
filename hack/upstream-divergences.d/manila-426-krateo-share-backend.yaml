@@ -1,0 +1,29 @@
+component: manila
+issue: 426
+reason: >-
+  Upstream's default share backend, generic, cannot start on these images: its service-instance
+  helper runs `ip`, which no airshipit manila image ships, and it needs Cinder volumes on Nova
+  service instances. Under the umbrella, manila renders only with a backend chosen, refusing
+  otherwise and refusing the generic driver, naming what to set.
+assertions:
+  - file: templates/krateo-share-backend.yaml
+    present: eq $backend "none"
+    why: >-
+      The refusal. Without it, manila renders upstream's generic backend again, and manila-share
+      stays Running with its service thread dead in init_host, the state #426 was filed for.
+      hack/validate-share-backend.py renders it.
+  - file: templates/krateo-share-backend.yaml
+    present: contains "GenericShareDriver"
+    why: >-
+      The generic driver is refused under krateo.shareBackend unmanaged too: it is not a
+      default to avoid but a backend that cannot run on these images.
+  - file: templates/krateo-share-backend.yaml
+    present: .Values.krateo.shareBackend | default "none"
+    why: >-
+      An absent value refuses too; it does not fall back to upstream's generic backend.
+  - file: values.yaml
+    present: "shareBackend: none"
+    why: >-
+      The chart's own default, which refuses. A re-vendor keeps values overrides, but this key and
+      its template are one fix; if the key goes, the schema prunes it and a standalone Manila
+      Composition gets upstream's generic backend again.
