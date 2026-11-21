@@ -23,6 +23,14 @@ through the unchanged template. This measures it, on the ESO version create.sh i
      every #309 C generation works): the OnChange projection follows it at once.
   0. Before all that: an OnChange projection created before its root exists syncs once the root appears (ESO returns the
      read error and controller-runtime requeues it, v2.14.0 externalsecret_controller.go:417-418, whatever the policy).
+  7. The store's READ GRANT (H2 run 5, defect H). The umbrella's reader Role (templates/credentials.yaml) grants `get`
+     on secrets by resourceNames only, so a root missing from that list is unreadable: the new generation root was, and
+     the rotation stopped in minting. Steps 1-6 use a store whose Role reads every secret, so they cannot see that. Here
+     a store whose Role has the umbrella's exact shape (get by resourceNames, plus selfsubjectrulesreviews create) lists
+     only `root`: a projection of `root-g7` must FAIL to sync (SecretSyncedError), which shows ESO enforces the list.
+     Then `root-g7` is added to the list and the same projection must sync, with no change of its own (ESO requeues a
+     failed read). That the umbrella's rendered Role lists every root its projections read, generation roots included,
+     is hack/validate-messaging-rotation.py part 2 (grant_gaps); this step proves the list is what decides.
 
 Fails when helm, kind, kubectl or PyYAML is missing, and when ESO never syncs (nothing measured).
 """
@@ -86,8 +94,8 @@ def wait(pred, timeout, step=3):
     return None
 
 
-def projection(name, policy, interval=None, annotations=None, root="root"):
-    spec = {"secretStoreRef": {"kind": "SecretStore", "name": "gate-store"},
+def projection(name, policy, interval=None, annotations=None, root="root", store="gate-store"):
+    spec = {"secretStoreRef": {"kind": "SecretStore", "name": store},
             "target": {"name": name, "creationPolicy": "Owner",
                        "template": {"type": "Opaque", "engineVersion": "v2",
                                     "data": {"url": "rabbit://heat:{{ .password }}@openstack-mq-nodes:5672/heat"}}},
@@ -217,6 +225,57 @@ def main():
                 failures.append("6: the OnChange projection did not follow its root's rename (a release-driven rotation)")
             else:
                 print("6: a root rename (the remoteRef moved) reached the OnChange projection at once")
+            # 7. the read grant decides: a Role of the umbrella's shape that omits the root blocks the sync
+            def narrow_role(names):
+                return {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role",
+                        "metadata": {"name": "gate-narrow", "namespace": NS},
+                        "rules": [{"apiGroups": [""], "resources": ["secrets"], "resourceNames": names, "verbs": ["get"]},
+                                  {"apiGroups": ["authorization.k8s.io"], "resources": ["selfsubjectrulesreviews"],
+                                   "verbs": ["create"]}]}
+            apply(kc, [
+                {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": {"name": "gate-narrow", "namespace": NS}},
+                narrow_role(["root"]),
+                {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": {"name": "gate-narrow", "namespace": NS},
+                 "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "gate-narrow"},
+                 "subjects": [{"kind": "ServiceAccount", "name": "gate-narrow", "namespace": NS}]},
+                {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "root-g7", "namespace": NS},
+                 "stringData": {"password": "generation-seven-value"}},
+            ])
+            apply(kc, [{"apiVersion": "external-secrets.io/v1", "kind": "SecretStore",
+                        "metadata": {"name": "gate-narrow-store", "namespace": NS},
+                        "spec": {"provider": {"kubernetes": {
+                            "remoteNamespace": NS,
+                            "server": {"caProvider": {"type": "ConfigMap", "name": "kube-root-ca.crt", "key": "ca.crt"}},
+                            "auth": {"serviceAccount": {"name": "gate-narrow"}}}}}}])
+            apply(kc, [projection("narrow", "OnChange", root="root-g7", store="gate-narrow-store")])
+
+            def sync_error():
+                st = get(kc, "externalsecret", "narrow").get("status") or {}
+                return next((c for c in st.get("conditions") or []
+                             if c.get("type") == "Ready" and c.get("status") == "False"
+                             and c.get("reason") == "SecretSyncedError"), None)
+            refused = wait(sync_error, 120)
+            if synced(kc, "narrow"):
+                failures.append("7: a store whose Role omits root-g7 synced its projection anyway: the read grant is not "
+                                "what decides, so the umbrella's grant check (grant_gaps) measures nothing real")
+            elif not refused:
+                st = get(kc, "externalsecret", "narrow").get("status") or {}
+                failures.append("7: the projection outside the grant neither synced nor reported SecretSyncedError in "
+                                "120 s (status %s): the refusal was not observed" % json.dumps(st)[:300])
+            else:
+                print("7a: a Role of the umbrella's shape without root-g7: the projection is refused (%s: %s)"
+                      % (refused.get("reason"), (refused.get("message") or "")[:120]))
+                apply(kc, [narrow_role(["root", "root-g7"])])
+                ok = wait(lambda: synced(kc, "narrow") and data_sha(kc, "narrow")[0], 240)
+                if not ok:
+                    failures.append("7: root-g7 added to the Role's resourceNames, but the projection never synced")
+                else:
+                    url = base64.b64decode(data_sha(kc, "narrow")[1].get("url", "")).decode()
+                    if "generation-seven-value" not in url:
+                        failures.append("7: the projection synced after the grant but does not carry root-g7's value")
+                    else:
+                        print("7b: root-g7 added to the Role's resourceNames: the same projection synced, with no "
+                              "change of its own")
         finally:
             run(["kind", "delete", "cluster", "--name", name, "--kubeconfig", kc])
     if failures:
@@ -225,7 +284,7 @@ def main():
         sys.exit(1)
     print("OK: ESO %s: switching a projection to OnChange keeps its Secret byte-identical; OnChange ignores a root change "
           "a 10s Periodic twin follows, refreshes on its own change, follows a root rename, and syncs once a missing root "
-          "appears" % ESO_VERSION)
+          "appears; a store's resourceNames grant decides whether a root can be read" % ESO_VERSION)
 
 
 main()

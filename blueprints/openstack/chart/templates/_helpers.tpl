@@ -1846,6 +1846,30 @@ spec:
 {{- lookup "v1" "ConfigMap" $top.Release.Namespace (index . 1) | default dict | toJson -}}
 {{- end -}}
 
+{{- /* osh.generationRoots (list $): the generation roots (#309 C2) a render may read, as a JSON list of Secret names: for
+       each component with an umbrella RabbitMQ projection and a rotate.<id> token, the root that token names, and the
+       generation root stamped on it as its predecessor (krateo.io/previous-root, read back by lookup), which a draining
+       rotation still projects. Generation 0 is an item of credentials.items and is not listed. ONE list, read by the
+       drift latch (osh.credentialDrift) and by the SecretStore's read grant (templates/credentials.yaml): H2 run 5 found
+       the grant listing only the items, so the store got 403 on the new generation root and the rotation stopped in
+       minting (hack/validate-messaging-rotation.py now checks that the grant covers every root a projection reads). */ -}}
+{{- define "osh.generationRoots" -}}
+{{- $top := index . 0 -}}
+{{- $out := list -}}
+{{- range $c := ($top.Values.components | default list) -}}
+{{- $p := include "osh.messagingProjection" (list $top $c) | fromJson -}}
+{{- $tok := toString (index ($top.Values.rotate | default dict) (printf "oslo-messaging-%s" $c.name) | default "") -}}
+{{- if and $p.secret $tok -}}
+{{- $g := printf "%s-g%s" $p.root (trunc 8 (sha256sum $tok)) -}}
+{{- $out = append $out $g -}}
+{{- $es := include "osh.lookupExternalSecret" (list $top $g) | fromJson -}}
+{{- $pr := toString ((($es.metadata | default dict).annotations | default dict) | dig "krateo.io/previous-root" "") -}}
+{{- if and $pr (ne $pr $p.root) (not (has $pr $out)) -}}{{- $out = append $out $pr -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
 {{- /* osh.credentialDrift (list $): the drift latch (#309 C), as JSON {state: {id: "<sha256>"}, drift: [{id, secret, sha}]}.
        For each GENERATED credential item whose root Secret exists, its data's sha256 (sprig; ESO's own data-hash is
        SHA3-224 of Go's %+v rendering, which a template cannot compute) is compared with the baseline latched in the
@@ -1868,16 +1892,8 @@ spec:
 {{- range $i := (($top.Values.credentials | default dict).items | default list) -}}
 {{- if ne ($i.source | default "") "provided" -}}{{- $roots = append $roots (dict "id" $i.id "secret" $i.secret) -}}{{- end -}}
 {{- end -}}
-{{- range $c := ($top.Values.components | default list) -}}
-{{- $p := include "osh.messagingProjection" (list $top $c) | fromJson -}}
-{{- $tok := toString (index ($top.Values.rotate | default dict) (printf "oslo-messaging-%s" $c.name) | default "") -}}
-{{- if and $p.secret $tok -}}
-{{- $g := printf "%s-g%s" $p.root (trunc 8 (sha256sum $tok)) -}}
+{{- range $g := include "osh.generationRoots" (list $top) | fromJsonArray -}}
 {{- $roots = append $roots (dict "id" $g "secret" $g) -}}
-{{- $es := include "osh.lookupExternalSecret" (list $top $g) | fromJson -}}
-{{- $pr := toString ((($es.metadata | default dict).annotations | default dict) | dig "krateo.io/previous-root" "") -}}
-{{- if and $pr (ne $pr $p.root) -}}{{- $roots = append $roots (dict "id" $pr "secret" $pr) -}}{{- end -}}
-{{- end -}}
 {{- end -}}
 {{- range $i := $roots -}}
 {{- $s := include "osh.lookupSecret" (list $top $i.secret) | fromJson -}}
