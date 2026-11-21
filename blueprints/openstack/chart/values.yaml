@@ -203,6 +203,15 @@ publicEndpoints:
 compute:
   virtType: qemu
 
+# network.underlayMTU (#433): the MTU of the node NICs that carry neutron's VXLAN tunnels (the underlay). neutron gets it
+# as global_physnet_mtu and ML2 path_mtu, so a VXLAN network advertises underlayMTU - 50 to its guests (1450 at the
+# default). When the nodes' MTU is below 1500, set it to that MTU, or full-size guest frames are dropped: on a 1460
+# underlay (the GKE nodes dp303 ran on) neutron used to advertise 1450 while only 1410 fit (dp303 run 4). The OVS agent's
+# init refuses to start on a node whose tunnel NIC's MTU is below this value, naming what to set. Always passed to
+# neutron, 1500 included; an explicit componentValues.neutron conf entry wins. README "neutron's underlay MTU".
+network:
+  underlayMTU: 1500
+
 # kogCredentials (#303): opt-in credentials for Krateo KOG operators, from the install's own generated admin root
 # (nothing copied by hand, #228). enabled renders, through keystone and in the release's namespace (the KOGs are
 # installed there; cross-namespace is not supported yet): openstack-kog-clouds (a clouds.yaml for the auth proxies of

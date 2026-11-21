@@ -1693,6 +1693,40 @@ written into each stored neutron object (#179), and upgrading doesn't remove it.
           tunnel: ""        # or the NIC, e.g. eth0
   ```
 
+### neutron's underlay MTU
+
+neutron's VXLAN networks ride on the node NICs that carry the tunnel traffic, the underlay. Each VXLAN packet carries
+50 bytes of overhead, so neutron gives a VXLAN network an MTU of the underlay's MTU minus 50, and tells its guests so
+through DHCP. It learns the underlay's MTU from `network.underlayMTU`, default 1500, which reaches neutron as
+`global_physnet_mtu` and ML2 `path_mtu`.
+
+**Set it when your nodes' MTU is below 1500**, to that MTU:
+
+```yaml
+network:
+  underlayMTU: 1460
+```
+
+- **Why:** on 1460-MTU nodes, with the default 1500, neutron advertised 1450 while only 1410 fit through the tunnel.
+  Small packets and SSH worked, and full-size frames were dropped. dp303 run 4 measured this with a full-size
+  don't-fragment ping (#433).
+- **The refusal:** the OVS agent's init reads the tunnel NIC's MTU, the NIC it already finds from the route (above). It
+  refuses to start when that MTU is below the value neutron uses for tunnels. Its message names the value to set. A NIC
+  whose MTU cannot be read is refused too.
+- **Examples, not requirements:** the GKE nodes dp303 ran on had NIC MTU 1460 (measured 2026-11-21), so `underlayMTU:
+  1460` there. Check your VPC's MTU. Jumbo-frame underlays can raise it, up to 9216.
+- **An explicit `componentValues.neutron` entry wins** (`conf.neutron.DEFAULT.global_physnet_mtu`,
+  `conf.plugins.ml2_conf.ml2.path_mtu`). A standalone Neutron Composition sets those two directly. The refusal compares
+  `path_mtu`, else `global_physnet_mtu`, else 1500.
+- **Existing networks keep their MTU:** neutron fixes a network's MTU when it creates the network. After raising or lowering
+  `underlayMTU`, change older VXLAN networks with `openstack network set --mtu <underlayMTU - 50> <network>`. Their guests
+  pick the new value up when their DHCP lease renews.
+
+`hack/validate-underlay-mtu.py` checks all of this and runs the refusal.
+
+**Upgrading to the release that adds it:** if your nodes' MTU is below 1500, set `network.underlayMTU` before you
+upgrade. With the default, the OVS agent refuses to start on those nodes, and neutron's agents stay down until you set it.
+
 ### Running guests on KVM
 
 By default (`compute.virtType: qemu`) nova runs guests in QEMU software emulation. That works on any node, slowly.

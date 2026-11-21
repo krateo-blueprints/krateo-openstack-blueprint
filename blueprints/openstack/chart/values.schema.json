@@ -1120,6 +1120,24 @@
         }
       }
     },
+    "network": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "Network",
+      "description": "underlayMTU: the MTU of the node NICs that carry neutron's VXLAN tunnels (default 1500). neutron gets it as global_physnet_mtu and ML2 path_mtu, so a VXLAN network advertises underlayMTU - 50 to its guests, and the OVS agent's init refuses to start on a node whose tunnel NIC's MTU is below it. Set it to the nodes' MTU when that is below 1500. README \"neutron's underlay MTU\" (#433).",
+      "additionalProperties": false,
+      "properties": {
+        "underlayMTU": {
+          "type": "integer",
+          "minimum": 1280,
+          "maximum": 9216,
+          "default": 1500,
+          "description": "Underlay (node NIC) MTU for neutron's tunnels: 1280-9216, default 1500 (#433)."
+        }
+      }
+    },
     "kogCredentials": {
       "type": [
         "object",

@@ -277,6 +277,15 @@ data:
 {{- $ov = mergeOverwrite (dict "conf" (dict "libvirt" (dict "virt_type" "kvm"))) (deepCopy $ov) }}
 {{- end }}
 {{- end }}
+{{- /* Underlay MTU (#433): network.underlayMTU, the MTU of the node NICs neutron's tunnels ride on, to neutron as
+       conf.neutron.DEFAULT.global_physnet_mtu and conf.plugins.ml2_conf.ml2.path_mtu, so a VXLAN network advertises
+       underlayMTU - 50. neutron's OVS agent init refuses a node whose tunnel NIC's MTU is below it (upstream divergence
+       neutron-433). Always passed, 1500 included. Merged UNDER componentValues: an explicit entry wins.
+       hack/validate-underlay-mtu.py renders this span. */ -}}
+{{- if eq $c.name "neutron" }}
+{{- $mtu := int (($.Values.network | default dict).underlayMTU | default 1500) }}
+{{- $ov = mergeOverwrite (dict "conf" (dict "neutron" (dict "DEFAULT" (dict "global_physnet_mtu" $mtu)) "plugins" (dict "ml2_conf" (dict "ml2" (dict "path_mtu" $mtu))))) (deepCopy $ov) }}
+{{- end }}
 {{- /* kogCredentials (#303): keystone renders the KOG credentials from the admin root it already receives, and nova's
        hook writes nova_url into keystone's openstack-kog-endpoints. Off: nothing is passed. Merged UNDER
        componentValues. hack/validate-kog-credentials.py renders this span. */ -}}

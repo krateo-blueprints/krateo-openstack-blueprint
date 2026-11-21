@@ -442,6 +442,28 @@ function init_ovs_dpdk_bridges {
   done
 }
 
+# krateo (#433, upstream divergence neutron-433): neutron advertises min(path_mtu, global_physnet_mtu) - 50 to a VXLAN
+# network's guests. When the tunnel NIC's real MTU is lower, full-size guest frames do not fit through the tunnel and
+# are dropped (dp303 run 4 on a 1460 underlay: 1450 advertised, 1410 carried). Refuse to start instead, naming the value
+# to set. UNDERLAY_MTU is what neutron uses for tunnels: ML2 path_mtu if set, else global_physnet_mtu, else neutron's
+# default 1500. The umbrella sets both from network.underlayMTU. hack/validate-underlay-mtu.py runs this function.
+{{- $pmtu := int (dig "plugins" "ml2_conf" "ml2" "path_mtu" 0 .Values.conf) }}
+{{- $gmtu := int (dig "neutron" "DEFAULT" "global_physnet_mtu" 0 .Values.conf) }}
+UNDERLAY_MTU={{ if gt $pmtu 0 }}{{ $pmtu }}{{ else if gt $gmtu 0 }}{{ $gmtu }}{{ else }}1500{{ end }}
+function check_underlay_mtu {
+  local iface=$1 want=$2 sysnet=${3:-/sys/class/net} have
+  have=$(cat "${sysnet}/${iface}/mtu" 2>/dev/null || true)
+  if ! [[ "${have}" =~ ^[0-9]+$ ]]; then
+    echo "neutron-ovs-agent-init: cannot read the MTU of the tunnel interface '${iface}' (${sysnet}/${iface}/mtu), so the underlay MTU ${want} cannot be checked. Refusing to start." >&2
+    return 1
+  fi
+  if [ "${have}" -lt "${want}" ]; then
+    echo "neutron-ovs-agent-init: the tunnel interface ${iface} has MTU ${have}, below the underlay MTU ${want} neutron is configured with (ML2 path_mtu, else global_physnet_mtu). VXLAN networks would advertise $((want - 50)) to their guests, but only $((have - 50)) fits through the tunnel, so full-size guest frames would be dropped. Set network.underlayMTU: ${have} in the Openstack spec (for a standalone Neutron: conf.plugins.ml2_conf.ml2.path_mtu and conf.neutron.DEFAULT.global_physnet_mtu) to this node's MTU. Refusing to start." >&2
+    return 1
+  fi
+  echo "neutron-ovs-agent-init: tunnel interface ${iface} MTU ${have} >= underlay MTU ${want}: ok"
+}
+
 # handle any bridge mappings
 # /tmp/auto_bridge_add is one line json file: {"br-ex1":"eth1","br-ex2":"eth2"}
 for bmap in `sed 's/[{}"]//g' /tmp/auto_bridge_add | tr "," "\n"`
@@ -492,6 +514,7 @@ if [[ -n "${tunnel_types}" ]] ; then
     echo "Var LOCAL_IP is empty"
     exit 1
   fi
+  check_underlay_mtu "${tunnel_interface}" "${UNDERLAY_MTU}" || exit 1
 
 tee > /tmp/pod-shared/ml2-local-ip.ini << EOF
 [ovs]
