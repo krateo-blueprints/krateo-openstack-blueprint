@@ -1724,8 +1724,15 @@ network:
 
 `hack/validate-underlay-mtu.py` checks all of this and runs the refusal.
 
-**Upgrading to the release that adds it:** if your nodes' MTU is below 1500, set `network.underlayMTU` before you
-upgrade. With the default, the OVS agent refuses to start on those nodes, and neutron's agents stay down until you set it.
+**Upgrading to the release that adds it:**
+- **If your nodes' MTU is below 1500,** set `network.underlayMTU` before you upgrade. With the default, the OVS agent
+  refuses to start on those nodes, and neutron's agents stay down until you set it.
+- **neutron rolls once, on every install, even at 1500.** The first upgrade to this release adds `global_physnet_mtu`
+  to `neutron.conf` and `path_mtu` to `ml2_conf.ini`; before it, neither line was rendered. Each neutron workload carries
+  a hash of its configuration, so neutron-server, the RPC server and the OVS, L3, DHCP and metadata agents restart once.
+- **A brief neutron API gap is expected.** neutron-server runs one replica by default, and its rollout allows one
+  unavailable (#286), so the network API is briefly unavailable while it restarts. That is the rollout, not a fault.
+  Later upgrades that leave `underlayMTU` unchanged do not roll neutron for it.
 
 ### Running guests on KVM
 
