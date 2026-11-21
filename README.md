@@ -325,6 +325,22 @@ brings up **all 36 components** (needs a large amd64 cluster — see `quickstart
 > `Cinder` Composition must choose its own `krateo.storageBackend` (see "Upgrading: a standalone
 > Cinder Composition must choose its storage backend").
 
+> **manila now needs a share backend, and `full-strict` leaves it out (#426).** Upstream's
+> default share backend, `generic`, never started here: its service-instance helper runs `ip`,
+> which no airshipit manila image ships (measured on the images 0.3.23, 0.3.73 and 0.3.74 ran),
+> and it needs Cinder volumes on Nova service instances. Until 0.3.74 nothing probed
+> `manila-share`, so it reported `Ready` while its service thread had died at start; 0.3.74's
+> readiness probe reports it truthfully, so an install that selects manila never reaches `Ready`.
+> manila's umbrella entry now requires `shared-filesystem`, which nothing provides yet (CephFS
+> comes with #308), so `full-strict` leaves it out. A manila selected anyway — `profile: full`,
+> or `enabled:` — does not install: its Composition reports *manila needs a share backend, and
+> none is configured (#426)*. To run manila with a backend of your own, set
+> `componentValues.manila.krateo.shareBackend: unmanaged` and configure the backend under
+> `componentValues.manila.conf.manila`; the generic driver is refused there too.
+
+> **Upgrading an existing `full-strict` install to 0.3.74 or later uninstalls its `manila`
+> Composition.** That manila never served a share (see the notice above).
+
 > **Upgrading an existing `full-strict` install to 0.3.43 or later uninstalls its `cinder`
 > Composition.** From 0.3.43 `cinder` is one of the components `full-strict` leaves out, because
 > its only shipped volume backend is Ceph and nothing provides a Ceph cluster (#196). On a
@@ -333,17 +349,17 @@ brings up **all 36 components** (needs a large amd64 cluster — see `quickstart
 > install (#204). Up to the #196 fix, an install that had provisioned Ceph could keep cinder with
 > `profile: full` or `enabled:`; that path is now closed (see the notice above).
 
-Four components — `cinder`, `ironic`, `octavia` and `swift` — each require infrastructure that no
-Kubernetes cluster provides and that this blueprint does not create, listed as a capability under
-`components[].requires` in the umbrella (`block-storage`, `pxe-interface`, `lb-mgmt-net`,
-`rwx-storage-class`). They are in `profile: full`, and they stay there. `profile: full-strict` is
-the same set **minus each one whose capability the install does not provide**. Only
-`block-storage` can be provided today, by `storage.backend`; with the default `none` that is all
-four:
+Five components — `cinder`, `ironic`, `manila`, `octavia` and `swift` — each require infrastructure
+that no Kubernetes cluster provides and that this blueprint does not create, listed as a capability
+under `components[].requires` in the umbrella (`block-storage`, `pxe-interface`,
+`shared-filesystem`, `lb-mgmt-net`, `rwx-storage-class`). They are in `profile: full`, and they
+stay there. `profile: full-strict` is the same set **minus each one whose capability the install
+does not provide**. Only `block-storage` can be provided today, by `storage.backend`; with the
+default `none` that is all five:
 
 ```yaml
 spec:
-  profile: full-strict   # 32 components, none of which needs provisioning you must do yourself
+  profile: full-strict   # 31 components, none of which needs provisioning you must do yourself
 ```
 
 It also needs one node label fewer — three rather than four, since octavia is the only consumer
@@ -353,6 +369,7 @@ of `openstack-network-node` (see the labelling block above).
 |---|---|---|
 | `cinder` | `block-storage`: a `storage.backend` other than `none` — a Ceph cluster, consumed as "Storage: consuming a Ceph cluster" describes | its Composition reports the render error *cinder needs a volume backend, and storage.backend is none (#196)*. Before the fix: `cinder-storage-init` and `cinder-volume` stayed in `Init` on `FailedMount` for `ceph-etc` |
 | `ironic` | an interface named `ironic-pxe` on each conductor node — the bare-metal provisioning NIC | `ironic-conductor-init` exits 1 with `Could not find IP for pxe to bind to`; the pod sits in `Init:CrashLoopBackOff` |
+| `manila` | `shared-filesystem`: a share backend that runs on the airshipit image. None is provided yet (CephFS comes with #308); `componentValues.manila.krateo.shareBackend: unmanaged` with your own backend under `conf.manila` | its Composition reports the render error *manila needs a share backend, and none is configured (#426)*. Before the fix: `manila-share` stayed `Running` with its service thread dead on `FileNotFoundError: 'ip'`, and from 0.3.74 its probe reported *no ESTABLISHED connection to RabbitMQ* |
 | `octavia` | `lb-mgmt-net` plus a Neutron port per node, named `octavia-{worker,health-manager}-port-<hostname>` | the `get-port` init containers log `No Port found for octavia-worker-port-…` and never finish |
 | `swift` | a StorageClass offering `ReadWriteMany` (upstream uses an `nfs-provisioner` default this repo does not ship) | `swift-ring-builder` and `swift-storage` stay `Pending`, `swift-proxy` stays in `Init` |
 

@@ -38,6 +38,23 @@ preconditions:
       pool <pool>" when the pool or the user's caps are missing. Before the #196 fix the same install sat in Init forever on FailedMount for ceph-etc (#179, #204).
     check: kubectl get externalsecret openstack-credential-ceph-client-cinder openstack-credential-ceph-mon-host
     issue: 196
+  - component: manila
+    capability: shared-filesystem
+    requires: >-
+      A share backend that can run on the airshipit manila image. None is provided by the umbrella yet: CephFS, the
+      intended one, comes with the Ceph work (#308). Upstream's default, the generic driver
+      (GenericShareDriver, driver_handles_share_servers = true), is refused: its service-instance helper runs `ip`,
+      which no airshipit manila image ships, and it needs Cinder volumes on Nova service instances. A Manila selected
+      anyway (profile full, or enabled:) must be given krateo.shareBackend: unmanaged and its own backends under
+      conf.manila, through componentValues.manila.
+    symptom: >-
+      With no backend chosen, profile full-strict leaves manila out, and a manila selected anyway does not install: its
+      Composition reports the render error "manila needs a share backend, and none is configured (#426)". Before the
+      #426 fix it installed with the generic backend: manila-share stayed Running, its service thread having died in
+      init_host on FileNotFoundError 'ip', and from 0.3.74 its readiness probe reported "manila-share holds no
+      ESTABLISHED connection to RabbitMQ".
+    check: kubectl -n openstack get manila manila -o jsonpath='{.status.conditions}'
+    issue: 426
   - component: ironic
     capability: pxe-interface
     requires: >-

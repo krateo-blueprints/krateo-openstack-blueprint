@@ -1,0 +1,26 @@
+# The values a gate renders manila with (hack/gate_values.py, #426): an operator's own share backend.
+#
+# manila's chart refuses to render with no share backend chosen (krateo.shareBackend: none, its default), and the
+# umbrella provides none yet: the shared-filesystem capability manila requires comes with CephFS (#308). So, unlike
+# cinder, there is no "what the umbrella delivers" to render manila with. A gate that renders every chart at its defaults
+# would render manila's refusal and measure nothing of its templates (probes, config files, drop-ins).
+#
+# This is the documented operator path instead (README "Manila needs a share backend"): krateo.shareBackend unmanaged,
+# with one backend of the operator's choosing configured under conf.manila. The example is CephFS's native driver, the
+# backend #308 will provide, with driver_handles_share_servers false, so it uses no service instance and no `ip`.
+# hack/validate-share-backend.py renders this file too: it must render, and replacing its driver with the generic one
+# must be refused.
+krateo:
+  shareBackend: unmanaged
+conf:
+  manila:
+    DEFAULT:
+      enabled_share_backends: cephfsnative
+    cephfsnative:
+      share_backend_name: CEPHFSNATIVE
+      share_driver: manila.share.drivers.cephfs.driver.CephFSDriver
+      driver_handles_share_servers: false
+      cephfs_protocol_helper_type: CEPHFS
+      cephfs_auth_id: manila
+      cephfs_cluster_name: ceph
+      cephfs_conf_path: /etc/ceph/ceph.conf

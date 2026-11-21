@@ -327,6 +327,15 @@
       "description": "Controls that belong to the blueprint, not to OpenStack-Helm (#297).",
       "additionalProperties": false,
       "properties": {
+        "shareBackend": {
+          "type": "string",
+          "enum": [
+            "none",
+            "unmanaged"
+          ],
+          "default": "none",
+          "description": "Which share backend this manila renders (#426). none (the default) is refused: upstream's default backend, generic, cannot start on these images (no ip in any airshipit manila image) and needs Cinder volumes. unmanaged: you configure your own backends under conf.manila (enabled_share_backends and a section per backend); a backend whose share_driver is the generic driver is refused there too. The umbrella requires shared-filesystem for manila, which nothing provides yet (CephFS comes with #308), so profile full-strict leaves manila out."
+        },
         "rerunHooksToken": {
           "type": "string",
           "description": "Rendered nowhere. The umbrella sets it from rerunHooks.<component>; changing it makes core-provider run a helm upgrade, which re-runs every hook (#297)."

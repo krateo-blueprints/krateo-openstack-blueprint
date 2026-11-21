@@ -57,6 +57,13 @@ ALLOWED = {
         "minted at runtime by powerdns's api-key-init Job",
     ("designate", "Secret", "powerdns-api-key"):
         "minted at runtime by the powerdns component's api-key-init Job",
+    # manila with an operator's own CephFS backend (krateo.shareBackend unmanaged, #426): upstream's manila-share mounts
+    # the Ceph config and the manila client keyring, which on that path the operator provides, as for a standalone
+    # cinder's unmanaged rbd1 wiring. The umbrella will project them from Ceph's own keys when CephFS lands (#308).
+    ("manila", "ConfigMap", "ceph-etc"):
+        "provided by the operator of an unmanaged CephFS share backend (#426); projected by the umbrella with #308",
+    ("manila", "Secret", "manila-keyring"):
+        "provided by the operator of an unmanaged CephFS share backend (#426); projected by the umbrella with #308",
 }
 
 # Real defects, each with an open issue. Listed on every run as KNOWN, so they stay visible, and
@@ -75,6 +82,11 @@ KNOWN_DEFECTS = {}
 REFUSALS = {
     "none": "storage.backend is none (#196)",
 }
+# A chart that requires shared-filesystem (manila, #426) refuses as the umbrella delivers it: the umbrella provides no
+# share backend yet, so profile full delivers it none. That refusal is designed and is asserted (it must refuse, with its
+# own message); its templates are checked at the gate's chart render instead, which hack/gate_values.py gives the
+# documented operator backend (hack/share-backend-operator-example.yaml).
+SHARE_REFUSAL = "manila needs a share backend, and none is configured (#426)"
 
 
 def umbrella(root: Path):
@@ -84,6 +96,23 @@ def umbrella(root: Path):
 def block_storage_components(root: Path):
     """Components the umbrella lists as requiring block-storage."""
     return {c["name"] for c in umbrella(root).get("components") or [] if "block-storage" in (c.get("requires") or [])}
+
+
+def share_values(root: Path, component: str):
+    """The operator share-backend values hack/gate_values.py renders a shared-filesystem chart with."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("gate_values", str(root / "hack" / "gate_values.py"))
+    gv = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gv)
+    v = gv.values_for(component, str(root))
+    if not v:
+        sys.exit(f"FAIL: hack/gate_values.py gives {component} no values, so its refusal would be all this gate sees")
+    return v
+
+
+def shared_filesystem_components(root: Path):
+    """Components the umbrella lists as requiring shared-filesystem."""
+    return {c["name"] for c in umbrella(root).get("components") or [] if "shared-filesystem" in (c.get("requires") or [])}
 
 
 def load_render_identity(root: Path):
@@ -292,6 +321,7 @@ def main() -> int:
     if not charts:
         sys.exit("FAIL: no component charts found -- nothing was measured")
     block = block_storage_components(root)
+    share = shared_filesystem_components(root)
     backends = storage_backends(root)
     if block and "none" not in backends:
         sys.exit(f"FAIL: the umbrella schema's storage.backend enum is {backends}, without none, so "
@@ -333,11 +363,18 @@ def main() -> int:
     proj_checked, proj_problems, proj_control = 0, [], False
     total_pods, failures, unrendered, not_refused = 0, [], [], []
     delivered_ok = set()
+    delivered_refused = set()
     with tempfile.TemporaryDirectory() as td:
         for chart in charts:
             component = chart.parent.name
-            modes = [(f"storage.backend {b}", b, delivered[b].get(component) or {}) for b in backends] \
-                if component in vary else [("", None, None)]
+            if component in vary:
+                modes = [(f"storage.backend {b}", b, delivered[b].get(component) or {}) for b in backends]
+            elif component in share:
+                # manila (#426) refuses at its chart default; its templates are checked with the documented operator
+                # backend, the same values every other gate renders it with (hack/gate_values.py).
+                modes = [("operator share backend", None, share_values(root, component))]
+            else:
+                modes = [("", None, None)]
             if component not in vary and component != PLANT_DROP:
                 for (c, js), profs in sorted(as_delivered.items()):
                     if c == component:
@@ -352,11 +389,17 @@ def main() -> int:
                     if want and want in str(e):
                         print(f"REFUSED {tag}: renders nothing, as designed: {want!r}")
                         continue
+                    if backend == "umbrella" and component in share and SHARE_REFUSAL in str(e):
+                        print(f"REFUSED {tag}: renders nothing, as designed: {SHARE_REFUSAL!r}")
+                        delivered_refused.add(component)
+                        continue
                     unrendered.append((tag, str(e)))
                     continue
                 ledger.control(rendered)
                 before = len(ledger.failures)
                 ledger.check(tag, rendered)
+                if backend == "umbrella" and component in share:
+                    not_refused.append((tag, SHARE_REFUSAL))
                 if backend == "umbrella":
                     c_n, c_p = projection_problems(rendered, generated_roots)
                     proj_checked += c_n
@@ -414,7 +457,7 @@ def main() -> int:
     def undelivered(rendered_ok):
         return sorted(want - rendered_ok)
 
-    missing = undelivered(delivered_ok)
+    missing = undelivered(delivered_ok | delivered_refused)
     if missing:
         identity.append("no successful render as the umbrella delivers it for %s" % missing)
     if not want:

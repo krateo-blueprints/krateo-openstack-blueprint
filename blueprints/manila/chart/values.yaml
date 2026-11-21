@@ -1310,6 +1310,10 @@ extraObjects: []
 
 # Krateo blueprint addition (#297): controls that belong to the blueprint, not to OpenStack-Helm.
 krateo:
+  # shareBackend (#426): none (the default) refuses to render, because upstream's default backend, generic, cannot start
+  # on these images (no `ip` in any airshipit manila image) and needs Cinder volumes. unmanaged: you configure your own
+  # backends under conf.manila; the generic driver is refused there too (templates/krateo-share-backend.yaml).
+  shareBackend: none
   # rerunHooksToken: rendered nowhere. The umbrella sets it from rerunHooks.<component>. Changing it changes this
   # component's values, so core-provider runs a real helm upgrade, which runs every hook again (each install hook is an
   # upgrade hook too, hack/validate-rerun-hooks.py). It is the documented way to re-run hooks that were never run

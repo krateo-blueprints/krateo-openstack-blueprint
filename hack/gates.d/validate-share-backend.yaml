@@ -1,0 +1,9 @@
+# manila's upstream default backend, generic, never started here: its service-instance helper runs `ip`, which no
+# airshipit manila image ships, and nothing probed manila-share before 0.3.74 (#426). manila requires
+# shared-filesystem, which nothing provides yet, so full-strict leaves it out; its chart refuses without a backend
+# chosen and refuses the generic driver.
+name: "manila renders only with a share backend chosen, never the generic driver"
+job: capability-roles
+order: 353
+run: |
+  python3 hack/validate-share-backend.py .
