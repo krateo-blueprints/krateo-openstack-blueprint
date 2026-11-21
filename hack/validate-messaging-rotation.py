@@ -72,9 +72,13 @@ Sources the predicate rests on (read, not assumed):
        e. a pod restarting after generation 0 is gone (steady: the new user only): its init waits name the active
           generation's User and Permission, and generation 0's User is not rendered;
        f. without a rotation: no messaging-generation annotation and the generation-0 names only.
+     And (H2 run 5, defect H) the SecretStore's identity may read every root a rendered projection reads, the new
+     generation root while minting and the predecessor a second rotation drains: a stand-in for ESO cannot see a
+     missing RBAC grant, so the Role's resourceNames are compared with what the projections read.
   4. MUTANTS, each of which must fail the part it breaks: the waits ignoring the suffix (heat); the waits naming another
-     service's User (ceilometer); the pod annotation removed; the partition rule dropped; the hook bound dropped;
-     switching without the new User Ready.
+     service's User (ceilometer); the pod annotation removed; the partition rule dropped; the Composition's
+     observedGeneration ignored; hooks-unverified ignored; switching without the new User Ready; the generation roots
+     dropped from the SecretStore's read grant.
 
 Fails when helm or PyYAML is missing, and when a part checks nothing.
 """
@@ -128,7 +132,7 @@ STANDINS = {
 }
 
 
-def stage_umbrella(tmp, name, mutate=None):
+def stage_umbrella(tmp, name, mutate=None, mutate_dir=None):
     w = os.path.join(tmp, name)
     shutil.copytree(UMBRELLA, w)
     cy = os.path.join(w, "Chart.yaml")
@@ -147,7 +151,31 @@ def stage_umbrella(tmp, name, mutate=None):
     if mutate:
         h = mutate(h)
     open(hp, "w").write(h)
+    if mutate_dir:
+        mutate_dir(w)
     return w
+
+
+def grant_gaps(docs, extra=()):
+    """Roots a rendered ExternalSecret reads through the credentials SecretStore, plus `extra`, that the store's
+    reader Role (<store>-reader) does not grant `get` on. H2 run 5: the grant listed only credentials.items, so the
+    store got 403 on the new generation root and the rotation stopped in minting; a stand-in for ESO cannot see that."""
+    STORE = (UV.get("credentials") or {}).get("store")
+    role = next((d for d in docs if d.get("kind") == "Role" and d["metadata"]["name"] == "%s-reader" % STORE), None)
+    if role is None:
+        return None
+    granted = set()
+    for r in role.get("rules") or []:
+        if "secrets" in (r.get("resources") or []) and "get" in (r.get("verbs") or []):
+            granted |= set(r.get("resourceNames") or [])
+    read = set(extra)
+    for d in docs:
+        if d.get("kind") == "ExternalSecret" and ((d.get("spec") or {}).get("secretStoreRef") or {}).get("name") == STORE:
+            for x in (d["spec"].get("data") or []):
+                key = (x.get("remoteRef") or {}).get("key")
+                if key:
+                    read.add(key)
+    return sorted(read - granted)
 
 
 def stage_chart(tmp, chart, name=None, toolkit_mutate=None):
@@ -619,6 +647,38 @@ def part2(tmp):
             o = ((s.get("endpoints") or {}).get("oslo_messaging") or {}).get("operator") or {}
             if other != c and ("users" in o or "activeSuffix" in o):
                 fail("2: %s has no rotation but its spec carries operator users/activeSuffix" % other)
+    # The store may read every root a projection reads (H2 run 5, defect H). In the render (minting g1), every root a
+    # rendered ExternalSecret reads through the store is granted, g1 included.
+    r = helm(w, "openstack-gate", merged(BASE_VALS, {"rotate": {"oslo-messaging-heat": "t1"},
+                                                     "gateObj": {"Secret/" + proj + s1: labelled_secret()}}), umbrella=True)
+    gaps = grant_gaps([d for d in yaml.safe_load_all(r.stdout) if d], (g1,)) if r.returncode == 0 else None
+    if gaps is None:
+        fail("2: grant (minting): no render or no Role %s-reader: %s" % ((UV.get("credentials") or {}).get("store"),
+                                                                       r.stderr.strip()[:200]))
+    elif gaps:
+        fail("2: grant (minting): the SecretStore's identity may not read %s, which a projection reads" % gaps)
+    else:
+        n += 1
+    # A second rotation while the first drains (offline the live spec, and so the active root, cannot be stood in, so
+    # osh.generationRoots is probed directly): the new root AND its stamped predecessor g1, still projected while it
+    # drains, are listed, so the grant (which renders exactly that list) covers both.
+    g2 = gen(c, "t2")
+    # A staged copy without compositions.yaml: there, with no live spec, the stamp would read as a reused token and
+    # refuse the render before the helper could be read.
+    wg = stage_umbrella(tmp, "genroots")
+    os.unlink(os.path.join(wg, "templates", "compositions.yaml"))
+    open(os.path.join(wg, "templates", "zz-gate-genroots.yaml"), "w").write(
+        '# GENROOTS {{ include "osh.generationRoots" (list $) }}\n')
+    r = helm(wg, "openstack-gate", merged(BASE_VALS, {"rotate": {"oslo-messaging-heat": "t2"}, "gateObj": {
+        "ExternalSecret/" + g2: {"metadata": {"annotations": {"krateo.io/previous-root": g1}}}}}),
+             umbrella=True, extra=("--show-only", "templates/zz-gate-genroots.yaml"))
+    m = re.search(r"^# GENROOTS (.*)$", r.stdout, re.M)
+    got = json.loads(m.group(1)) if m else None
+    if got != [g2, g1]:
+        fail("2: osh.generationRoots for a second rotation lists %r, want [%s, %s] (the new root and the one draining)"
+             % (got if got is not None else r.stderr.strip()[:200], g2, g1))
+    else:
+        n += 1
     sp0 = SPECS0
     if sp0 and c in sp0:
         om = (sp0[c][0].get("endpoints") or {}).get("oslo_messaging") or {}
@@ -887,6 +947,24 @@ def part4(tmp):
             '{{- if and (eq (toString $cond.type) "Ready") (eq (toString $cond.status) "True") -}}{{- $ready = true -}}{{- end -}}\n{{- end -}}',
             '{{- end -}}{{- $ready = true -}}')),
     ]
+    # the read grant: generation roots dropped from the Role (credentials.yaml) must fail part 2's grant check
+    def drop_grant(w):
+        p = os.path.join(w, "templates", "credentials.yaml")
+        t = open(p).read()
+        anchor = '{{- range $g := include "osh.generationRoots" (list $) | fromJsonArray }}'
+        if t.count(anchor) != 1:
+            raise SystemExit("FAILED MEASUREMENT: the grant mutant's anchor is not in credentials.yaml")
+        open(p, "w").write(t.replace(anchor, '{{- range $g := list }}'))
+    wm = stage_umbrella(tmp, "mut-grant", mutate_dir=drop_grant)
+    c, s1 = "heat", sfx("heat", gen("heat", "t1"))
+    r = helm(wm, "openstack-gate", merged(BASE_VALS, {"rotate": {"oslo-messaging-heat": "t1"}, "gateObj": {
+        "Secret/heat-rabbitmq-topology-user" + s1: labelled_secret()}}), umbrella=True)
+    gaps = grant_gaps([d for d in yaml.safe_load_all(r.stdout) if d], (gen("heat", "t1"),)) if r.returncode == 0 else None
+    if gaps:
+        n += 1
+    else:
+        fail("4: mutant 'generation roots dropped from the read grant' passes the grant check (gaps %r, rc %d)"
+             % (gaps, r.returncode))
     for i, (what, case, f) in enumerate(helper_mutants):
         def mutate(h, f=f, what=what):
             h2 = f(h)
