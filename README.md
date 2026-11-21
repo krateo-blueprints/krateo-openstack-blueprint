@@ -1792,8 +1792,19 @@ How the token and the endpoints are written:
   backs off after a rejection.
 
 **Install oasgen-provider 0.80.0 from OCI**, with its chart and CRDs in step, once per cluster, before the KOGs. Some KOG
-READMEs show an unpinned install from `charts.krateo.io`, which serves 0.10.0; don't use it. nova-kog's owner measured
-all 6 nova Kinds reconciling on 0.80.0.
+READMEs show an unpinned install from `charts.krateo.io`, which serves 0.10.0; don't use it. The evidence for 0.80.0:
+- 2026-11-17, nova-kog's owner: all 6 nova Kinds of that time had their RestDefinitions Ready and Synced on 0.80.0. This
+  was a local kind cluster against an unreachable endpoint, so nothing was created. It is recorded in nova-kog's
+  [docs/configuration.md](https://github.com/krateo-blueprints/openstack-nova-operator-kog/blob/main/docs/configuration.md),
+  in the oasgen-provider version table.
+- 2026-11-21, this repo's data-plane test, on GKE with blueprint 0.3.74-main.gc16973f: the four KOGs' 14 RestDefinitions
+  were Ready, and a nova `Instance` was created, went `ACTIVE` on KVM and was deleted, against a real Nova.
+- 2026-11-21, nova-kog's owner: 0.80.0 grants the controllers read access to their API-key Secret.
+
+0.80.0 lacks the fix for a 401 during create (oasgen-provider PR #793, first released in 0.82.0); without it, a create
+refused with 401 can strand the resource. So mint the KOG credentials shortly before creating resources. Before you choose any other version, check oasgen-provider's own
+[retracted-versions.yaml](https://github.com/krateo-platformops/oasgen-provider/blob/main/retracted-versions.yaml). On
+2026-11-21 it lists 0.53.0, 0.54.0, 0.66.0, 0.69.0, 0.70.0, 0.77.0, 0.83.0, 0.85.0 and 0.85.1.
 
 ### High availability
 
