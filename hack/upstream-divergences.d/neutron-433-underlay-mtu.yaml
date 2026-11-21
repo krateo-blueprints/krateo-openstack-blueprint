@@ -1,0 +1,25 @@
+component: neutron
+issue: 433
+reason: >-
+  Upstream's OVS agent init finds the tunnel NIC and starts the agent whatever that NIC's MTU
+  is. neutron then advertises min(path_mtu, global_physnet_mtu) - 50 to a VXLAN network's
+  guests, so on nodes whose NIC MTU is below that value full-size guest frames do not fit
+  through the tunnel and are dropped (dp303 run 4: 1450 advertised over a 1460 underlay, 1410
+  carried). The init now refuses to start on such a node and names the value to set.
+assertions:
+  - file: templates/bin/_neutron-openvswitch-agent-init.sh.tpl
+    present: function check_underlay_mtu
+    why: >-
+      The refusal. Without it, a node with a smaller NIC runs the agent, and guests fail later on
+      large packets only, far from the cause. hack/validate-underlay-mtu.py runs this function.
+  - file: templates/bin/_neutron-openvswitch-agent-init.sh.tpl
+    present: check_underlay_mtu "${tunnel_interface}" "${UNDERLAY_MTU}" || exit 1
+    why: >-
+      The call, after LOCAL_IP is found, inside the tunnel block. A re-vendor that keeps the
+      function but drops the call refuses nothing.
+  - file: templates/bin/_neutron-openvswitch-agent-init.sh.tpl
+    present: dig "plugins" "ml2_conf" "ml2" "path_mtu" 0 .Values.conf
+    why: >-
+      The value compared is the one neutron uses for tunnels: ML2 path_mtu, else
+      global_physnet_mtu, else neutron's default 1500. The umbrella sets both from
+      network.underlayMTU.

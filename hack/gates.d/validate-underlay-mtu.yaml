@@ -1,0 +1,7 @@
+# network.underlayMTU: neutron's global_physnet_mtu and ML2 path_mtu in the rendered config files, and the OVS agent's
+# init refusing a node whose tunnel NIC is smaller, the refusal function run here, with mutants (#433).
+name: "The underlay MTU and the OVS agent's MTU refusal"
+job: capability-roles
+order: 132
+run: |
+  python3 hack/validate-underlay-mtu.py .
