@@ -156,7 +156,7 @@ jobs:
     # write token (krateo-blueprints/charts PUBLISHING.md rule 9); Dependabot proposes upgrades. It also
     # reads the served index and installs every chart anonymously before it succeeds.
     # 1.1.0 adds rule 13: the publisher itself refuses a version that is not plain X.Y.Z.
-    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@70095ab05f1c5dc6c8dd39d0b1fdbbc7382a841c # 1.4.3
+    uses: krateo-blueprints/charts/.github/workflows/publish-chart.yaml@f0bbd3da219685bafb130e77922c192558972a43 # 1.4.4
     with:
       source_repo: ${{ github.repository }}
       git_tag: ${{ github.ref_name }}
