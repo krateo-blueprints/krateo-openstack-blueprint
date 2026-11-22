@@ -1414,21 +1414,26 @@ Then set `componentValues.glance.volume.size`, for example `10Gi`.
 | live 20Gi, `size: 10Gi` | 20Gi |
 | a size that isn't a quantity | refused |
 
-### Upgrading to 0.3.74 or later: the MariaDB server restarts once
+### Upgrading to 0.3.74 or later: MariaDB and RabbitMQ restart once
 
-The first upgrade to 0.3.74 restarts the MariaDB server once, on every install. Expect about 2 minutes in which
-anything that needs the database fails: Keystone's token API (measured on GKE upgrading 0.3.71, r074), and the
-upgrade's own Keystone-user Jobs, which retry until it is back.
+The first upgrade to 0.3.74 restarts the MariaDB server and the RabbitMQ server once each, on every install. Each runs
+one replica, so expect a short outage of what needs them. Measured on GKE upgrading 0.3.71 (r074): the RabbitMQ pod
+was down for about 40 s (terminating to Ready, 18:33:24-18:34:01Z) and the MariaDB pod for about 70 s
+(18:34:27-18:35:34Z); Keystone's token API failed for about 2 minutes around the MariaDB restart. The upgrade's own
+Keystone-user Jobs retry until it is back. Nothing has to be done afterwards.
 
-- **Why:** the server StatefulSet's pod template carried a hash of the whole `mariadb-bin` ConfigMap, which also holds
-  scripts the server never runs. 0.3.74 changed one of them, the controller's `mariadb_controller.py` (its readiness
-  heartbeat, #335), so the one-replica server restarted for it.
-- **The fix, in the same release (#445):** each workload hashes only the `mariadb-bin` keys it mounts. The server
-  hashes `start.py`, `stop.sh` and `health.sh`; the controller, `mariadb_controller.py`. The new annotation value is
-  itself a pod-template change, so this one restart cannot be avoided, but later changes to the controller's, the test
-  pod's or the Jobs' scripts no longer restart the database. `hack/validate-mariadb-bin-hash.py` checks it.
-- **Plan for it:** upgrade when a short outage of the APIs that need the database is acceptable. Nothing has to be
-  done afterwards.
+Why each pod template changes (a field-by-field render diff of 0.3.71 against this release):
+- **MariaDB server:**
+  - its dbadmin, sst and dbaudit credential ExternalSecrets changed from an hourly refresh to
+    `refreshPolicy: OnChange` (#422), and the pod template carries a hash of each of those manifests;
+  - `configmap-bin-hash` changed. It was the hash of the whole `mariadb-bin` ConfigMap, which also holds scripts the
+    server never runs, and 0.3.74 changed one of them, the controller's `mariadb_controller.py` (#335). Since #445 the
+    server hashes only the keys it mounts (`start.py`, `stop.sh`, `health.sh`), so later changes to the controller's,
+    the test pod's or the Jobs' scripts no longer restart the database; the new value is itself part of this one
+    restart. `hack/validate-mariadb-bin-hash.py` checks it.
+- **RabbitMQ server:** the hashes of its admin and Erlang-cookie ExternalSecrets changed (#422, as above), and its
+  `rabbitmq-password` init container's image moved to the dated tag `2026.1-ubuntu_noble-20261117` (#343).
+- **Plan for it:** upgrade when a few minutes without the database and the message queue are acceptable.
 
 ### Upgrading: a component that leaves the selection is removed from Keystone
 
