@@ -1,0 +1,24 @@
+component: skyline
+issue: 444
+reason: >-
+  Upstream's skyline-nginx-generator writes a literal-host proxy_pass per catalog endpoint with
+  no resolver, and nginx resolves literal hosts when it loads its config. One catalog entry whose
+  host does not resolve keeps the whole dashboard from starting: on the 0.3.71 -> 0.3.74 upgrade,
+  manila's leftover endpoints crash-looped Skyline's nginx and the umbrella never went Ready. The
+  init script now rewrites each endpoint location to resolve per request through the cluster
+  DNS, so a dead endpoint fails its own location.
+assertions:
+  - file: templates/bin/_skyline-apiserver-init.sh.tpl
+    present: python3 /tmp/skyline-nginx-tolerant.py /etc/nginx/nginx.conf
+    why: >-
+      The call, after skyline-nginx-generator. A re-vendor of the init script that drops it
+      brings back the literal config, and with it #444's crash loop.
+  - file: templates/configmap-bin.yaml
+    present: skyline-nginx-tolerant.py
+    why: >-
+      The script itself, rendered into skyline-bin. hack/validate-skyline-nginx.py runs it on
+      upstream's own template and runs nginx -t before and after.
+  - file: templates/deployment.yaml
+    present: mountPath: /tmp/skyline-nginx-tolerant.py
+    why: >-
+      The api-init container must see the script at the path the init script calls.

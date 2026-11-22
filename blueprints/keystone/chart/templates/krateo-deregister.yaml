@@ -1,0 +1,150 @@
+{{/*
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{/*
+Krateo blueprint addition (#444): deregister what a component that LEFT the selection left behind.
+
+Found by the 0.3.71 -> 0.3.74 upgrade test (r074). The upgrade removed manila. `helm uninstall` runs the hooks of the
+DEPLOYED release, manila's 0.3.71 chart, which has no deregistration. So manila's Keystone service (sharev2) and its
+endpoints stayed in the catalog, pointing at a Service that no longer exists, and manila's hook Job pods stayed too.
+Skyline's nginx crash-looped on the dead endpoint. No change to a removed chart can reach an install upgrading from an
+older release. This Job comes from the NEW release, and the umbrella decides what it removes:
+
+  krateo.deregister.services    [{component, type, name}]: the Keystone services of every not-selected component the
+                                umbrella's state machine found GONE (osh.deregistration: neither its Composition nor
+                                any Service its chart renders exists any more), minus any type a selected component
+                                registers. A component still being removed, or run on its own outside the umbrella,
+                                is never listed. The (type, name) pairs come from osh.keystoneRegistrations, which
+                                hack/gen-keystone-registrations.py derives from the charts' own ks-service Jobs.
+  krateo.deregister.components  those components' names, whose leftover hook Jobs are deleted.
+
+It is idempotent: a service is deleted, endpoints first, only when its type AND its name are what that component
+registers, so a service someone created by hand with the same type and another name is kept and reported. Absent
+services are a no-op. It runs as keystone's post-install/post-upgrade hook. A component moving to GONE changes keystone's
+values, so CDC upgrades keystone on that reconcile and the hook runs then, after the component's objects are gone.
+
+Two steps, as kog-credentials.yaml splits them. The init container `catalog` is the only one that holds the admin
+password (the chart's admin openrc, from the generated root, #228). It logs in once per attempt and tries at most 4
+times, under keystone's 5-failure lockout. The container `jobs` holds no password. It deletes, through the Kubernetes
+API, only Jobs labelled application=<a listed component> that carry a helm.sh/hook annotation (leftover hook Jobs),
+with background propagation so their pods go too. hack/validate-deregistration.py renders this and runs both programs.
+*/}}
+{{- $dereg := .Values.krateo.deregister | default dict }}
+{{- if or $dereg.services $dereg.components }}
+{{- $envAll := . }}
+{{- $from := .Values.endpoints.identity.auth.admin.passwordFrom | default dict }}
+{{- range $field := list "store" "secret" "key" }}
+{{- if not (index $from $field) }}
+{{- fail (printf "krateo.deregister needs endpoints.identity.auth.admin.passwordFrom.%s: the deregistration logs in with the install's generated admin root, never a password in values (#228, #444)" $field) }}
+{{- end }}
+{{- end }}
+---
+# The deregistration's `jobs` step may list and delete Jobs in this namespace. The program deletes only leftover hook
+# Jobs of the listed (not-selected) components; Kubernetes cannot scope a list by label, so the filter is the program's,
+# and hack/validate-deregistration.py runs it against Jobs of selected components too.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: keystone-deregister-jobs
+rules:
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - list
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: keystone-deregister-jobs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: keystone-deregister-jobs
+subjects:
+  - kind: ServiceAccount
+    name: keystone-deregister
+    namespace: {{ .Release.Namespace }}
+{{- /* The pod's ServiceAccount, with the Role kubernetes-entrypoint needs to wait for keystone-api (helm-toolkit). */}}
+{{ tuple $envAll "deregister" "keystone-deregister" | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keystone-deregister
+  labels:
+{{ tuple $envAll "keystone" "deregister" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+  annotations:
+{{ tuple "deregister" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+{{ tuple $envAll "keystone" "deregister" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+    spec:
+{{- if $envAll.Values.pod.tolerations.keystone.enabled }}
+{{ tuple $envAll "keystone" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
+      serviceAccountName: keystone-deregister
+      restartPolicy: Never
+      nodeSelector:
+        {{ .Values.labels.job.node_selector_key }}: {{ .Values.labels.job.node_selector_value }}
+      initContainers:
+{{ tuple $envAll "deregister" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
+        # The only container that holds the admin password. It deletes catalog entries and nothing else.
+        - name: catalog
+{{ tuple $envAll "ks_user" | include "helm-toolkit.snippets.image" | indent 10 }}
+          env:
+            - name: DEREGISTER_SERVICES
+              value: {{ $dereg.services | default list | toJson | quote }}
+{{- with $env := dict "ksUserSecret" .Values.secrets.identity.admin "useCA" (and .Values.manifests.certificates .Values.secrets.tls.identity.api.internal) }}
+{{- include "helm-toolkit.snippets.keystone_openrc_env_vars" $env | indent 12 }}
+{{- end }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -u
+              cat > /tmp/deregister-catalog.py <<'PY'
+{{ .Files.Get "files/deregister-catalog.py" | indent 14 }}
+              PY
+              for attempt in 1 2 3 4; do
+                if python3 /tmp/deregister-catalog.py; then
+                  exit 0
+                fi
+                echo "attempt ${attempt} of 4 failed" >&2
+                sleep 15
+              done
+              echo "the catalog was not cleaned after 4 attempts: stopping before keystone's lockout (5 failures)" >&2
+              exit 1
+      containers:
+        # Holds no password: deletes the listed components' leftover hook Jobs through the Kubernetes API.
+        - name: jobs
+{{ tuple $envAll "ks_user" | include "helm-toolkit.snippets.image" | indent 10 }}
+          env:
+            - name: DEREGISTER_COMPONENTS
+              value: {{ $dereg.components | default list | toJson | quote }}
+            - name: DEREGISTER_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          command:
+            - python3
+            - -c
+            - |
+{{ .Files.Get "files/deregister-jobs.py" | indent 14 }}
+{{- end }}

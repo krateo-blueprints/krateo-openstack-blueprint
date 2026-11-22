@@ -1,0 +1,11 @@
+# Skyline's nginx must start when a catalog endpoint's host does not resolve (#444: a removed component's leftover
+# endpoints crash-looped it on the 0.3.71 -> 0.3.74 upgrade). The rewrite runs on upstream's own template; nginx -t
+# fails before it and passes after; a running nginx proxies the same path and answers the dead host 502; 3 mutants.
+name: "Skyline's nginx tolerates an endpoint that does not resolve"
+job: capability-roles
+order: 134
+setup: |
+  pip install -c "$(python3 hack/constraints.py url)" Jinja2
+run: |
+  python3 hack/constraints.py check Jinja2
+  python3 hack/validate-skyline-nginx.py .
