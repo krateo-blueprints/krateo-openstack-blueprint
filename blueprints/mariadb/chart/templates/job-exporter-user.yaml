@@ -8,8 +8,9 @@
        connections. NOT `SELECT ON *.*`, which upstream's README grants: it would let this user read every OpenStack
        database, Keystone's included, and no default collector needs it.
 
-       Switched on by krateo.exporterUser, which the umbrella sets with its `monitoring` value. Its script is inline:
-       mariadb-bin is hashed into the StatefulSet, so a new key there would restart the database. A
+       Switched on by krateo.exporterUser, which the umbrella sets with its `monitoring` value. Its script is inline,
+       kept out of mariadb-bin; since #445 the StatefulSet hashes only the keys it mounts, so a new key there would not
+       restart the database either. A
        post-install,post-upgrade hook in the exporter-create-user band, re-run on every upgrade (CREATE OR REPLACE). */ -}}
 {{- if .Values.krateo.exporterUser }}
 {{- $envAll := . }}
