@@ -97,7 +97,7 @@ metadata:
   name: {{ tuple "oslo_db" "direct" . | include "helm-toolkit.endpoints.hostname_short_endpoint_lookup" }}
   annotations:
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
-    configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
+    configmap-bin-hash: {{ tuple (include "mariadb.server_bin_keys" . | fromJsonArray) . | include "mariadb.bin_hash" }}
     configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
     mariadb-dbadmin-password-hash: {{ tuple "secret-dbadmin-password.yaml" . | include "helm-toolkit.utils.hash" }}
     mariadb-sst-password-hash: {{ tuple "secret-sst-password.yaml" . | include "helm-toolkit.utils.hash" }}
@@ -119,7 +119,9 @@ spec:
 {{ tuple $envAll "mariadb" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
       annotations:
 {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
-        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
+        # #445: only the mariadb-bin keys the server mounts (start.py, stop.sh, health.sh), never the controller's,
+        # the test pod's or the Jobs' scripts: a change to those must not restart the database.
+        configmap-bin-hash: {{ tuple (include "mariadb.server_bin_keys" . | fromJsonArray) . | include "mariadb.bin_hash" }}
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
         mariadb-dbadmin-password-hash: {{ tuple "secret-dbadmin-password.yaml" . | include "helm-toolkit.utils.hash" }}
         mariadb-sst-password-hash: {{ tuple "secret-sst-password.yaml" . | include "helm-toolkit.utils.hash" }}

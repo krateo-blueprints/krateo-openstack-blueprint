@@ -1414,6 +1414,22 @@ Then set `componentValues.glance.volume.size`, for example `10Gi`.
 | live 20Gi, `size: 10Gi` | 20Gi |
 | a size that isn't a quantity | refused |
 
+### Upgrading to 0.3.74 or later: the MariaDB server restarts once
+
+The first upgrade to 0.3.74 restarts the MariaDB server once, on every install. Expect about 2 minutes in which
+anything that needs the database fails: Keystone's token API (measured on GKE upgrading 0.3.71, r074), and the
+upgrade's own Keystone-user Jobs, which retry until it is back.
+
+- **Why:** the server StatefulSet's pod template carried a hash of the whole `mariadb-bin` ConfigMap, which also holds
+  scripts the server never runs. 0.3.74 changed one of them, the controller's `mariadb_controller.py` (its readiness
+  heartbeat, #335), so the one-replica server restarted for it.
+- **The fix, in the same release (#445):** each workload hashes only the `mariadb-bin` keys it mounts. The server
+  hashes `start.py`, `stop.sh` and `health.sh`; the controller, `mariadb_controller.py`. The new annotation value is
+  itself a pod-template change, so this one restart cannot be avoided, but later changes to the controller's, the test
+  pod's or the Jobs' scripts no longer restart the database. `hack/validate-mariadb-bin-hash.py` checks it.
+- **Plan for it:** upgrade when a short outage of the APIs that need the database is acceptable. Nothing has to be
+  done afterwards.
+
 ### Upgrading: a standalone Cinder Composition must choose its storage backend
 
 From #308 step 4, cinder's chart default for `krateo.storageBackend` is `none`, which refuses to render, instead of
