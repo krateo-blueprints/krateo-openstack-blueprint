@@ -3,9 +3,10 @@
        Upstream hashes the whole rendered configmap-bin.yaml into every workload that mounts mariadb-bin. That
        ConfigMap also carries scripts the server never runs: mariadb_controller.py (the controller Deployment's),
        test.sh (the test pod's), mariadb-wait-for-cluster.py (the cluster-wait Job's) and the backup scripts. So a change
-       to any of them rolled the server StatefulSet, and with one replica that is a database outage: #335's controller
-       heartbeat restarted MariaDB on the 0.3.71 -> 0.3.74 upgrade (measured on GKE, r074: Keystone's token API failed
-       for about 2 minutes).
+       to any of them rolled the server StatefulSet, and with one replica that is a database outage. #335's controller
+       heartbeat was one of the two changes that would have restarted MariaDB on the 0.3.71 -> 0.3.74 upgrade
+       (measured on GKE, r074: down about 70 s, Keystone's token API failing for about 2 minutes); the other, #422's
+       credential ExternalSecret hashes, is #449.
 
        usage: tuple (list "start.py" "health.sh") $ | include "mariadb.bin_hash"
        The value is the sha256 of the JSON of exactly those keys of the RENDERED mariadb-bin (the ConfigMap itself, read

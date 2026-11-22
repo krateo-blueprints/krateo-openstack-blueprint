@@ -2,8 +2,9 @@ component: mariadb
 issue: 445
 reason: >-
   Upstream hashes the whole rendered configmap-bin.yaml into every workload that mounts mariadb-bin. That ConfigMap also
-  holds scripts the server never runs, so a change to the controller's mariadb_controller.py (#335's heartbeat)
-  restarted the one-replica server StatefulSet: a database outage on the 0.3.71 -> 0.3.74 upgrade (r074, GKE). Each
+  holds scripts the server never runs, so a change to the controller's mariadb_controller.py (#335's heartbeat) rolls
+  the one-replica server StatefulSet: a database outage. It was one of the two changes that would have restarted it on
+  the 0.3.71 -> 0.3.74 upgrade (r074, GKE); the other, the credential ExternalSecret hashes, is #449. Each
   workload now hashes only the mariadb-bin keys it mounts (templates/_bin_hash.tpl). A re-vendor that brings back
   upstream's annotation would restore the restart silently; hack/validate-mariadb-bin-hash.py would fail on it.
 assertions:

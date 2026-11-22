@@ -4,9 +4,9 @@
 Upstream hashes the whole rendered configmap-bin.yaml into every workload that mounts mariadb-bin. That ConfigMap also
 holds scripts the server never runs (the controller's mariadb_controller.py, the test pod's test.sh, the cluster-wait
 Job's script, the backup scripts), so a change to any of them rolled the one-replica server StatefulSet: a database
-outage. Measured on GKE (r074, 0.3.71 -> 0.3.74-main.gc16973f): #335's controller heartbeat restarted MariaDB and
-Keystone's token API failed for about 2 minutes. templates/_bin_hash.tpl now hashes, per workload, only the keys it
-mounts.
+outage. On GKE (r074, 0.3.71 -> 0.3.74-main.gc16973f) #335's controller heartbeat was one of the two changes that would
+have restarted MariaDB (down about 70 s, Keystone's token API failing for about 2 minutes); the other, #422's
+credential ExternalSecret hashes, is #449. templates/_bin_hash.tpl now hashes, per workload, only the keys it mounts.
 
 This gate renders the mariadb chart (default gate values, and again with conf.backup.enabled so the backup keys exist)
 and, for every key of the rendered mariadb-bin whose source is a templates/bin/ file, appends one comment line to that
