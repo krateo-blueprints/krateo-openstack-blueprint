@@ -602,7 +602,7 @@ def part_switch(root, tmp, counts):
         return fails + ["3d: compositions.yaml has no span from `{{- $ov := ` to the end of the monitoring span"]
     open(os.path.join(u, "templates", "zz-gate-monitoring-probe.yaml"), "w").write(
         '{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n'
-        '{{- range $c := .Values.components }}\n' + comp[start:end] + '\n'
+        '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n' + comp[start:end] + '\n'
         '# MONSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n'
         '# MONSEL {{ $sel | toJson }}\n')
     specs, sels = {}, {}
@@ -645,8 +645,24 @@ def part_switch(root, tmp, counts):
                                  "does not win")
                 if any(k in (a or {}) for k in ("openstack", "collector", "alerts")):
                     fails.append("3d: with monitoring off, openstack-monitoring's spec still carries monitoring values")
+            elif n == "keystone":
+                # keystone deregisters the components outside the selection (#444): with monitoring off,
+                # openstack-monitoring is one, with no Composition or Service in this offline render, so it is handed
+                # over in krateo.deregister.components; on, it is selected and leaves that list. Nothing else moves
+                # (it registers no catalog service, so krateo.deregister.services is the same either way).
+                comps = (((a or {}).get("krateo") or {}).get("deregister") or {}).get("components") or []
+                if CHART not in comps:
+                    fails.append("3d: with monitoring off, keystone's krateo.deregister.components does not list %s, "
+                                 "which is outside the selection and gone" % CHART)
+                want = copy.deepcopy(a)
+                if CHART in comps:
+                    want["krateo"]["deregister"]["components"] = [c for c in comps if c != CHART]
+                if b != want:
+                    fails.append("3d: with monitoring on, keystone's spec is not its spec with %s out of "
+                                 "krateo.deregister.components; only that may move" % CHART)
             elif a != b:
-                fails.append("3d: monitoring on changes %s's spec; only mariadb and openstack-monitoring may move" % n)
+                fails.append("3d: monitoring on changes %s's spec; only mariadb, keystone's krateo.deregister and "
+                             "openstack-monitoring may move" % n)
         if CHART not in sels["on"] or CHART in sels["off"] or CHART in sels["default"] or CHART in sels["caps"]:
             fails.append("3d: the selection does not follow the monitoring value alone")
         counts["3d"] = len(names)

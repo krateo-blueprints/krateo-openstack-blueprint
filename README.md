@@ -1414,6 +1414,45 @@ Then set `componentValues.glance.volume.size`, for example `10Gi`.
 | live 20Gi, `size: 10Gi` | 20Gi |
 | a size that isn't a quantity | refused |
 
+### Upgrading: a component that leaves the selection is removed from Keystone
+
+When a component leaves the selection, the umbrella removes what it registered:
+- **When it applies:** an upgrade that drops it (0.3.74's full-strict drops manila), or your own change of `profile` or
+  `enabled`.
+- **Why it's needed:** `helm uninstall` of the removed component runs its OLD chart's hooks, which never did this. Its
+  catalog entries outlived it and pointed at a deleted Service. On the 0.3.71 -> 0.3.74 upgrade, that kept Skyline,
+  and with it the umbrella, from ever going Ready (#444).
+- **How it works:** on every reconcile the umbrella looks up, by name, the component's Composition and every Service its
+  chart renders.
+  - While any of them exists, the component is still being removed. Nothing is deregistered, and the ConfigMap
+    `openstack-deregistration-pending` names what is still there.
+  - Once none exists, the component is handed to keystone as `krateo.deregister`. That changes keystone's values, so
+    keystone is upgraded, and its hook Job `keystone-deregister` deletes the component's Keystone services, with their
+    endpoints, and its leftover hook Jobs and their pods.
+  - Nothing is remembered between reconciles, so the order in which the removal and keystone's upgrade happen doesn't
+    matter, and deleting what is already gone is a no-op.
+  - Selecting a component takes it back out of `krateo.deregister`. So any change of the selection, including
+    `monitoring.enabled`, upgrades keystone once and runs its hooks again. Its pods don't restart: `krateo.deregister`
+    reaches only the hook Job.
+- **What is deleted:**
+  - only a service whose type AND name are what the component registers. The list is derived from the charts' own
+    ks-service Jobs;
+  - never a type a selected component registers. A service you created by hand with the same type and another name is
+    kept, and the Job's log names it;
+  - only hook Jobs labelled with the component's `application` name.
+- **A component you run on its own is left alone:** if you run, say, Manila's standalone Composition next to the
+  umbrella with manila not selected, its `manila-api` Service exists, so it stays listed in
+  `openstack-deregistration-pending` and its catalog entries are never deleted.
+- **Nothing to do on upgrade:** the first upgrade to this release removes what earlier removals left.
+- **A pinned keystone gets nothing:** a keystone Composition whose migration is not approved (`Paused`, or `Manual`
+  without the annotation, above) is read through its origin schema. It never receives `krateo.deregister`, so nothing
+  is deregistered. Approve its migration, or delete the service by hand: `openstack service delete <id>`.
+
+**Skyline no longer depends on every catalog endpoint resolving.** Its nginx used to refuse to start when any catalog
+host did not resolve. Now each endpoint location resolves per request through the cluster DNS, so a dead endpoint
+answers that location with 502 and the dashboard still serves. Upstream divergence `skyline-444`;
+`hack/validate-skyline-nginx.py` runs `nginx -t` on upstream's own template before and after.
+
 ### Upgrading: a standalone Cinder Composition must choose its storage backend
 
 From #308 step 4, cinder's chart default for `krateo.storageBackend` is `none`, which refuses to render, instead of

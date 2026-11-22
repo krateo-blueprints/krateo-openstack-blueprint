@@ -26,3 +26,8 @@ skyline-nginx-generator ${GENERATOR_ARGS}
 # "en-US" which doesn't match the expected "en", so we set a cookie as a fallback.
 sed -i '/add_header Cache-Control "public";/a\            add_header Set-Cookie "lang={{ .Values.conf.nginx.default_language }}; Path=/; SameSite=Lax";' /etc/nginx/nginx.conf
 {{- end }}
+
+# krateo (#444, upstream divergence skyline-444): resolve each catalog endpoint per request through the cluster DNS, so
+# an endpoint whose host does not resolve (a removed component's leftover catalog entry) fails its own location
+# instead of keeping nginx from starting. hack/validate-skyline-nginx.py runs this on upstream's template.
+python3 /tmp/skyline-nginx-tolerant.py /etc/nginx/nginx.conf

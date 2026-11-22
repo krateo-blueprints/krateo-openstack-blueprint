@@ -238,7 +238,7 @@ def part2(uv, tmp):
     u = stage(UMBRELLA, tmp, "umbrella")
     open(os.path.join(u, "templates", "zz-gate-mq-probe.yaml"), "w").write(
         '{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n'
-        '{{- range $c := .Values.components }}\n' + base_span + '\n# BASESPEC {{ $c.name }} {{ $ov | toJson }}\n'
+        '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n' + base_span + '\n# BASESPEC {{ $c.name }} {{ $ov | toJson }}\n'
         '{{- end }}\n{{- range $c := .Values.components }}\n' + op_span +
         '\n# OPSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n')
     mq3 = {"rabbitmq": {"pod": {"replicas": {"server": 3}}}}
@@ -503,7 +503,7 @@ def part5(tmp):
     open(hp, "w").write(rx.sub(lambda m: m.group(1) + "\n{{- index ((index . 0).Values.gateSecrets | default dict) (index . 1) "
                                "| default dict | toJson -}}\n" + m.group(2), h, count=1))
     open(os.path.join(u, "templates", "zz-gate-mq-ready-probe.yaml"), "w").write(
-        '{{- range $c := .Values.components }}\n'
+        '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n'
         '{{ printf "\\n# MQREADY %s %s\\n" $c.name (include "osh.messagingProjectionReady" (list $ $c)) }}\n{{- end }}\n')
     base = {"profile": "full", "messaging": {"backend": "operator"},
             "componentValues": {"rabbitmq": {"pod": {"replicas": {"server": 3}}}}}

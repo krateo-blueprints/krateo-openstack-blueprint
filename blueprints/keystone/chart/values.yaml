@@ -517,6 +517,11 @@ dependencies:
       services:
       - endpoint: internal
         service: identity
+    # Krateo (#444): the deregistration calls keystone (service and endpoint deletes).
+    deregister:
+      services:
+      - endpoint: internal
+        service: identity
     # Krateo (#303): the KOG token minter calls keystone (openstack token issue).
     kog_token:
       services:
@@ -1165,6 +1170,13 @@ krateo:
   # upgrade hook too, hack/validate-rerun-hooks.py). It is the documented way to re-run hooks that were never run
   # (Ready=False/HooksMayNotHaveRun, README).
   rerunHooksToken: ""
+  # deregister (#444): set by the umbrella, never by hand. What not-selected components registered, which
+  # templates/krateo-deregister.yaml deletes as a post-install/post-upgrade hook: services [{component, type, name}]
+  # (each deleted with its endpoints, only when type AND name match) and components (their leftover hook Jobs).
+  # Empty: no Job renders.
+  deregister:
+    services: []
+    components: []
 
 # Krateo blueprint addition (#303): credentials for Krateo KOG operators, from the install's generated admin root
 # (templates/kog-credentials.yaml), in this release's namespace. The umbrella sets enabled from kogCredentials.

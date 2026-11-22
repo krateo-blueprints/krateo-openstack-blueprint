@@ -570,7 +570,12 @@ def e2e(crds, exists, cd, origin, live):
                        ("osh.originVersion", origin),
                        ("osh.liveState", "" if live is None else gotmpl_raw(json.dumps(live)).join(("{{- ", " -}}"))),
                        ("osh.depsReady", "true"),
-                       ("osh.depsExist", "true")):
+                       ("osh.depsExist", "true"),
+                       # keystone's krateo.deregister (#444) is derived from the cluster's state through osh.exists,
+                       # which this part stubs per case to move the HOLD; held constant here so the computed spec
+                       # varies with nothing but the hold. hack/validate-deregistration.py measures the state machine.
+                       ("osh.deregistration", '{{- dict "services" (list) "components" (list) "removing" (dict) '
+                                              '| toYaml -}}')):
         h = stub_define(h, name, body)
     (E2E_CHART / "templates/compositions.yaml").write_text(comp)
     (E2E_CHART / "templates/_helpers.tpl").write_text(h)

@@ -968,6 +968,75 @@ true
 {{- end -}}
 
 {{/* storage.backend, `none` when unset. */}}
+{{- /* osh.deregistration (list $ <selected names>) (#444): the deregistration state machine, as YAML.
+
+       When a component leaves the selection -- a release that drops it (0.3.74 drops manila, #429) or a user who
+       deselects it -- its release is uninstalled by its OWN deployed chart, whose hooks may predate any cleanup. Its
+       Keystone services and endpoints then stay in the catalog, pointing at Services that no longer exist, and Skyline's
+       nginx refused to start on them (upgrade test r074). So the umbrella decides when keystone deregisters them, and
+       it decides from what exists, re-read on every reconcile -- never from remembered state, the same discipline as
+       osh.messagingRotation.
+
+       Per component NOT in the selection (one that renders no Service is judged by its Composition alone):
+         removing  its umbrella Composition still exists, or any Service its chart renders (osh.componentServices)
+                   still exists by name. Nothing is deregistered yet. This is also the permanent state of a component
+                   someone runs on its own outside the umbrella (a standalone Manila keeps its manila-api Service), so a
+                   working service is never deregistered.
+         gone      none of them exists. Its services (minus any type a selected component registers) and its name are
+                   handed to keystone as krateo.deregister. That changes keystone's values, so CDC upgrades keystone,
+                   and keystone's post-upgrade hook deletes the services with their endpoints, and the component's
+                   leftover hook Jobs. Deleting what is already gone is a no-op, so `gone` is safe on every render.
+
+       (list $ $sel $crds): $crds is the cluster's CRD list compositions.yaml reads once per render; a helper never lists
+       a whole resource itself (hack/validate-origin-version-pin.py part 4: helpers run per component). Every read here
+       is one named GET (osh.lookupNamed, osh.compositionPresent): chart-inspector derives the release's RBAC from them.
+       Returns {services: [{component, type, name}], components: [name], removing: {name: [what still
+       exists]}}. hack/validate-deregistration.py renders every state from stand-ins. */ -}}
+{{- define "osh.deregistration" -}}
+{{- $top := index . 0 -}}
+{{- $sel := index . 1 -}}
+{{- $crds := index . 2 -}}
+{{- $reg := include "osh.keystoneRegistrations" $top | fromYaml -}}
+{{- $svc := include "osh.componentServices" $top | fromYaml -}}
+{{- $keep := dict -}}
+{{- range $n := $sel }}{{- range $r := (index $reg $n | default list) }}{{- $_ := set $keep $r.type true }}{{- end }}{{- end -}}
+{{- $services := list -}}
+{{- $components := list -}}
+{{- $removing := dict -}}
+{{- range $c := $top.Values.components }}
+{{- if not (has $c.name $sel) }}
+{{- $regs := index $reg $c.name | default list -}}
+{{- $names := index $svc $c.name | default list -}}
+{{- $present := list -}}
+{{- if eq (include "osh.compositionPresent" (list $top $c $crds)) "true" }}
+{{- $present = append $present (printf "%s/%s" $c.kind $c.name) -}}
+{{- end }}
+{{- range $s := $names }}
+{{- if (include "osh.lookupNamed" (list $top "v1" "Service" $s) | fromJson).metadata }}
+{{- $present = append $present (printf "Service/%s" $s) -}}
+{{- end }}
+{{- end }}
+{{- if $present }}
+{{- $_ := set $removing $c.name $present -}}
+{{- else }}
+{{- $components = append $components $c.name -}}
+{{- range $r := $regs }}
+{{- if not (hasKey $keep $r.type) }}
+{{- $services = append $services (dict "component" $c.name "type" $r.type "name" $r.name) -}}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end -}}
+{{- dict "services" $services "components" $components "removing" $removing | toYaml -}}
+{{- end -}}
+
+{{- /* osh.compositionPresent (list $ $c <CRD list>): "true" while component $c's umbrella Composition exists, at any
+       served version (osh.exists). Its own define so hack/validate-deregistration.py can stand it in. */ -}}
+{{- define "osh.compositionPresent" -}}
+{{- include "osh.exists" (list (index . 0) (index . 1).kind (index . 1).name (index . 2)) -}}
+{{- end -}}
+
 {{- define "osh.storageBackend" -}}
 {{- $top := index . 0 -}}
 {{- (($top.Values.storage | default dict).backend | default "none") -}}

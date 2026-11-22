@@ -722,7 +722,7 @@ def check30(tmp, uv):
         t = t.replace(STORE_LOOKUP, '{{- ($top.Values.gateLookup | default dict).store | default dict | toJson -}}')
         open(p, "w").write(t)
         open(os.path.join(w, "templates", "zz-ceph-hold-probe.yaml"), "w").write(
-            '{{- range $c := .Values.components }}\n'
+            '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n'
             '{{ printf "\\n# CEPHREADY %s %s\\n" $c.name (include "osh.cephRootsReady" (list $ $c)) }}\n{{- end }}\n')
     u = stage(UMBRELLA, tmp, "umbrella-30", stubbed)
     items = {i["id"]: i for i in uv["credentials"]["items"]}
