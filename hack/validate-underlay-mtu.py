@@ -120,7 +120,7 @@ def umbrella_probe(tmp, name, comp):
     open(os.path.join(u, "templates", "compositions.yaml"), "w").write(comp)
     open(os.path.join(u, "templates", "zz-gate-mtu-probe.yaml"), "w").write(
         '{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n'
-        '{{- range $c := .Values.components }}\n' + comp[start:end + len("{{- end }}")] + '\n'
+        '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n' + comp[start:end + len("{{- end }}")] + '\n'
         '# MTUSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n')
     return u
 

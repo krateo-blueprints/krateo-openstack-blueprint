@@ -256,7 +256,8 @@ messaging:
 # Off, the render is byte-identical to a release without this value: no component, no CompositionDefinition, no
 # credential root, and mariadb's spec unchanged. On, it adds the openstack-monitoring component (after keystone and
 # mariadb), its credential root identity-user-openstack-exporter, and krateo.exporterUser on mariadb, which creates the
-# exporter's MariaDB user without restarting the database. Listing openstack-monitoring in `enabled:` is refused: this
+# exporter's MariaDB user without restarting the database, and takes openstack-monitoring out of keystone's
+# krateo.deregister (#444), which runs keystone's hooks once without restarting it. Listing openstack-monitoring in `enabled:` is refused: this
 # value is the one switch. hack/validate-openstack-monitoring.py asserts all of it.
 monitoring:
   enabled:

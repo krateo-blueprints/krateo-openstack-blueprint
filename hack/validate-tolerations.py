@@ -121,7 +121,7 @@ def umbrella_check(tmp):
         return
     span = comp[start:end + len("{{- end }}")]
     with open(os.path.join(u, "templates", "zz-gate-tolerations-probe.yaml"), "w") as f:
-        f.write("{{- range $c := .Values.components }}\n" + span + "\n# TOLSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n")
+        f.write("{{- $dr := include \"osh.deregistration\" (list $ (splitList \" \" (include \"osh.selected\" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n" + span + "\n# TOLSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n")
     uv = yaml.safe_load(open(os.path.join(UMBRELLA, "values.yaml")))
     names = [c["name"] for c in uv.get("components") or []]
     explicit = [{"key": "gate.krateo.io/explicit", "operator": "Exists"}]

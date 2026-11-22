@@ -459,6 +459,42 @@
         "rerunHooksToken": {
           "type": "string",
           "description": "Rendered nowhere. The umbrella sets it from rerunHooks.<component>; changing it makes core-provider run a helm upgrade, which re-runs every hook (#297)."
+        },
+        "deregister": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Set by the umbrella (#444), never by hand: what not-selected components registered. services are deleted with their endpoints (type and name must both match); components' leftover hook Jobs are deleted. Empty: nothing renders.",
+          "properties": {
+            "services": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "component",
+                  "type",
+                  "name"
+                ],
+                "properties": {
+                  "component": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "components": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },

@@ -56,6 +56,10 @@
        site, for the same reason the dependency partition below lives here and not in a
        helper. */ -}}
 {{- $crds := (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "").items }}
+{{- /* The deregistration state (#444, osh.deregistration), derived ONCE per render from $sel and $crds: keystone's
+       krateo.deregister (in the component range) and the openstack-deregistration-pending ConfigMap (after it) read
+       the same state. */ -}}
+{{- $dr := include "osh.deregistration" (list $ $sel $crds) | fromYaml }}
 {{- /* The cluster's node list, fetched ONCE for the whole render in the same place and for the
        same reason as $crds above, and threaded into osh.requireNodeLabels as an argument. It is
        read here, before any component is emitted, because what it gates is the whole install
@@ -286,6 +290,17 @@ data:
 {{- $mtu := int (($.Values.network | default dict).underlayMTU | default 1500) }}
 {{- $ov = mergeOverwrite (dict "conf" (dict "neutron" (dict "DEFAULT" (dict "global_physnet_mtu" $mtu)) "plugins" (dict "ml2_conf" (dict "ml2" (dict "path_mtu" $mtu))))) (deepCopy $ov) }}
 {{- end }}
+{{- /* Deregistration (#444): keystone receives, as krateo.deregister, what osh.deregistration finds GONE -- the
+       Keystone services of every not-selected component none of whose objects still exists (its Composition, the
+       Services its chart renders), minus any type a selected component registers, and those components' names. Its
+       post-install/post-upgrade hook deletes those services with their endpoints, and those components' leftover hook
+       Jobs. A component still being removed, or running on its own outside the umbrella, is `removing` and is not
+       handed over; it moves to `gone` on the reconcile that no longer finds it, which changes keystone's values, so CDC
+       upgrades keystone and the hook runs then. Merged OVER componentValues: not overridable, so a stale catalog cannot
+       be configured back in. hack/validate-deregistration.py renders this span. */ -}}
+{{- if eq $c.name "keystone" }}
+{{- $ov = mergeOverwrite (deepCopy $ov) (dict "krateo" (dict "deregister" (dict "services" ($dr.services | default list) "components" ($dr.components | default list)))) }}
+{{- end }}
 {{- /* kogCredentials (#303): keystone renders the KOG credentials from the admin root it already receives, and nova's
        hook writes nova_url into keystone's openstack-kog-endpoints. Off: nothing is passed. Merged UNDER
        componentValues. hack/validate-kog-credentials.py renders this span. */ -}}
@@ -435,6 +450,23 @@ spec: {}
 {{- else }}
 {{- $pending = append $pending $c.name }}
 {{- end }}
+{{- end }}
+{{- end }}
+{{- /* What the deregistration state machine (#444) is waiting on: one entry per not-selected component still REMOVING
+       -- its Composition or a Service its chart renders still exists. Absent when nothing is waiting. A component that
+       runs on its own outside the umbrella stays listed here, by design: it is never deregistered. */ -}}
+{{- if $dr.removing }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openstack-deregistration-pending
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    krateo.io/deregistration-pending: "true"
+data:
+{{- range $n, $what := $dr.removing }}
+  {{ $n }}: {{ printf "not deregistered while %s exists (removal in progress, or it runs outside the umbrella)" (join ", " $what) | quote }}
 {{- end }}
 {{- end }}
 {{- if $pending }}

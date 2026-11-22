@@ -273,9 +273,9 @@ def part2(uv, tmp):
     u = stage(UMBRELLA, tmp, "umbrella")
     open(os.path.join(u, "templates", "zz-gate-ha-probe.yaml"), "w").write(
         '{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n'
-        '{{- range $c := .Values.components }}\n' + base_span + '\n# BASESPEC {{ $c.name }} {{ $ov | toJson }}\n'
+        '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n' + base_span + '\n# BASESPEC {{ $c.name }} {{ $ov | toJson }}\n'
         '{{- end }}\n'
-        '{{- range $c := .Values.components }}\n' + ha_span + '\n# HASPEC {{ $c.name }} {{ $ov | toJson }}\n'
+        '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n' + ha_span + '\n# HASPEC {{ $c.name }} {{ $ov | toJson }}\n'
         '{{- end }}\n')
     mq3 = {"componentValues": {"rabbitmq": {"pod": {"replicas": {"server": 3}}}}}
     # profile full, so that every component's spec is complete (ceilometer's notification vhosts follow the selection).

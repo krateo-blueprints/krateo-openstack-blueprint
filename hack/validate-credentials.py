@@ -1983,7 +1983,7 @@ def notification_vhosts_check(tmp, components):
         with open(os.path.join(u, "templates", "zz-gate-vhosts-probe.yaml"), "w") as f:
             f.write('{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n'
                     '# SELECTED {{ join " " $sel }}\n'
-                    '{{- range $c := .Values.components }}\n{{- if has $c.name $sel }}\n' + span + '\n'
+                    '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n{{- if has $c.name $sel }}\n' + span + '\n'
                     '# VHSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n{{- end }}\n')
         rc, out, err = helm_template(u, "openstack-gate", vals)
         if rc != 0:
@@ -2752,7 +2752,7 @@ def main():
         else:
             span = comp[start:comp.index("\n", merge)]
         with open(os.path.join(u, "templates", "zz-gate-probe.yaml"), "w") as f:
-            f.write('{{- range $c := .Values.components }}\n' + span + '\n'
+            f.write('{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n' + span + '\n'
                     '# CREDSPEC {{ $c.name }} {{ $ov | toJson }}\n'
                     '{{- end }}\n')
         override = {"endpoints": {"identity": {"auth": {"admin": {"passwordFrom": {"store": "gate-explicit-store"}}}}}}

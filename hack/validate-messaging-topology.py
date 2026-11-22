@@ -145,7 +145,7 @@ def op_specs(tmp):
         return None
     u = stage(UMBRELLA, tmp, "umbrella")
     open(os.path.join(u, "templates", "zz-gate-topology-probe.yaml"), "w").write(
-        '{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n{{- range $c := .Values.components }}\n'
+        '{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n'
         + comp[start:end + len("{{- end }}")] + '\n# TOPOSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n')
     rc, out, err = helm_template(u, "openstack-gate", {"profile": "full", "messaging": {"backend": "operator"},
                                                        "componentValues": {"rabbitmq": {"pod": {"replicas": {

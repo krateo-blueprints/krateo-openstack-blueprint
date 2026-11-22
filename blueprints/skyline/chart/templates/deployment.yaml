@@ -67,6 +67,10 @@ spec:
               mountPath: /tmp/skyline-apiserver-init.sh
               subPath: skyline-apiserver-init.sh
               readOnly: true
+            - name: skyline-bin
+              mountPath: /tmp/skyline-nginx-tolerant.py
+              subPath: skyline-nginx-tolerant.py
+              readOnly: true
             - name: {{ ternary "skyline-config" "skyline-etc" (not (empty (include "skyline.config_from_roots" .))) }}
               mountPath: /etc/skyline/skyline.yaml
               subPath: skyline.yaml

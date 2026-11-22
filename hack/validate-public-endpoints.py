@@ -502,7 +502,7 @@ def main():
             measurement_failed("cannot find the start of the publicEndpoints block in compositions.yaml")
         without = comp[start:block_start]
         probe = ('{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n'
-                 '{{- range $c := .Values.components }}\n{{- if has $c.name $sel }}\n%s\n'
+                 '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n{{- if has $c.name $sel }}\n%s\n'
                  '# PESPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n{{- end }}\n')
         specs = {}
         every = {"profile": "full", "monitoring": {"enabled": True}}

@@ -1,0 +1,9 @@
+# A component that leaves the selection leaves no Keystone service, endpoint or hook Job behind (#444: manila's
+# sharev2 outlived its removal on the 0.3.71 -> 0.3.74 upgrade and crash-looped Skyline). The registrations table is
+# derived from the charts and current; keystone is told exactly the not-selected components' services; its hook Job
+# deletes them with their endpoints, and their leftover hook Jobs, run against stand-ins; 4 mutants.
+name: "A deselected component's Keystone services and hook Jobs are removed"
+job: capability-roles
+order: 136
+run: |
+  python3 hack/validate-deregistration.py .

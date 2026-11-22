@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Generate the umbrella's table of the Keystone services each component registers, from the component charts (#444).
+
+    python3 hack/gen-keystone-registrations.py [root]           write blueprints/openstack/chart/templates/_keystone-registrations.tpl
+    python3 hack/gen-keystone-registrations.py [root] --check   exit 1 if it differs; write nothing
+
+When a component leaves the selection, the umbrella deregisters the Keystone services it registered (#444). That needs
+to know which services each component registers. A hand-kept list would drift the day a chart adds a service type or
+renames one. So the list is read from the charts: each chart is rendered as the gates render it (hack/gate_values.py),
+and every Job container that carries both OS_SERVICE_NAME and OS_SERVICE_TYPE contributes one (type, name)
+registration. Every rendered Service object's name is recorded too, as a second define, osh.componentServices
+({component: [service name, ...]}): osh.deregistration looks each one up, by name, to tell a component that is gone
+from one still being removed or running on its own. Those two variables are what helm-toolkit's ks-service and ks-endpoints Jobs pass to `openstack service
+create` (helm-toolkit manifests/_job-ks-service.tpl: OS_SERVICE_NAME from the endpoint's name lookup, OS_SERVICE_TYPE
+from the chart's serviceTypes). The result is a define, osh.keystoneRegistrations, returning
+{component: [{type, name}, ...]} as YAML.
+
+hack/validate-deregistration.py runs this with --check, and asserts:
+- manila registers sharev2;
+- no service type belongs to two components;
+- every component the umbrella lists is in the table.
+
+Requires helm and PyYAML. Fails, never writes, when a chart does not render: an absent component would otherwise read
+as "registers nothing", and its services would never be deregistered.
+"""
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+import yaml
+
+ROOT = os.path.abspath(next((a for a in sys.argv[1:] if not a.startswith("--")), "."))
+CHECK = "--check" in sys.argv
+OUT = os.path.join(ROOT, "blueprints", "openstack", "chart", "templates", "_keystone-registrations.tpl")
+TOOLKIT = os.path.join(ROOT, "charts", "helm-toolkit")
+sys.path.insert(0, os.path.join(ROOT, "hack"))
+import gate_values  # noqa: E402
+
+
+def registrations(chart, tmp):
+    w = os.path.join(tmp, os.path.basename(os.path.dirname(chart)))
+    shutil.copytree(chart, w)
+    cy = os.path.join(w, "Chart.yaml")
+    txt = open(cy).read()
+    open(cy, "w").write(txt.replace("CHART_VERSION", "0.0.0-gate"))
+    if "helm-toolkit" in txt:
+        os.makedirs(os.path.join(w, "charts"), exist_ok=True)
+        shutil.copytree(TOOLKIT, os.path.join(w, "charts", "helm-toolkit"))
+    r = subprocess.run(["helm", "template", os.path.basename(w) + "-gate", w, "--namespace", "openstack", "--kube-version",
+                        "1.36.0", *gate_values.helm_args(w)], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit("gen-keystone-registrations: %s does not render, so its registrations are unknown: %s"
+                         % (os.path.basename(w), r.stderr.strip()[:300]))
+    regs = set()
+    svcs = set()
+    for d in yaml.safe_load_all(r.stdout):
+        if d and d.get("kind") == "Service":
+            svcs.add(str(d["metadata"]["name"]))
+        if not d or d.get("kind") != "Job":
+            continue
+        pod = d.get("spec", {}).get("template", {}).get("spec", {})
+        for c in (pod.get("containers") or []) + (pod.get("initContainers") or []):
+            env = {e.get("name"): e.get("value") for e in c.get("env") or [] if "value" in e}
+            if env.get("OS_SERVICE_TYPE") and env.get("OS_SERVICE_NAME"):
+                regs.add((str(env["OS_SERVICE_TYPE"]), str(env["OS_SERVICE_NAME"])))
+    return sorted(regs), sorted(svcs)
+
+
+def main():
+    if shutil.which("helm") is None:
+        raise SystemExit("gen-keystone-registrations: helm not on PATH")
+    uv = yaml.safe_load(open(os.path.join(ROOT, "blueprints", "openstack", "chart", "values.yaml")))
+    names = sorted(c["name"] for c in uv.get("components") or [])
+    if not names:
+        raise SystemExit("gen-keystone-registrations: the umbrella lists no component")
+    table = {}
+    services = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for n in names:
+            chart = os.path.join(ROOT, "blueprints", n, "chart")
+            if not os.path.isfile(os.path.join(chart, "Chart.yaml")):
+                raise SystemExit("gen-keystone-registrations: component %s has no chart at %s" % (n, chart))
+            regs, svcs = registrations(chart, tmp)
+            table[n] = [{"type": t, "name": nm} for t, nm in regs]
+            services[n] = svcs
+    body = yaml.safe_dump(table, default_flow_style=False, sort_keys=True)
+    sbody = yaml.safe_dump(services, default_flow_style=False, sort_keys=True)
+    text = ('{{- /* GENERATED by hack/gen-keystone-registrations.py from each component chart\'s rendered ks-service and\n'
+            '       ks-endpoints Jobs (OS_SERVICE_TYPE, OS_SERVICE_NAME). Do not edit: regenerate, and\n'
+            '       hack/validate-deregistration.py checks it is current. The Keystone services each component registers,\n'
+            '       which the umbrella deregisters when the component leaves the selection (#444). */ -}}\n'
+            '{{- define "osh.keystoneRegistrations" -}}\n' + body + '{{- end -}}\n\n'
+            '{{- /* GENERATED with the table above: the Kubernetes Services each component chart renders, by name. While\n'
+            '       any of them exists, a component that left the selection is still being removed (or runs on its own,\n'
+            '       outside the umbrella), and osh.deregistration does not deregister it (#444). */ -}}\n'
+            '{{- define "osh.componentServices" -}}\n' + sbody + '{{- end -}}\n')
+    if CHECK:
+        cur = open(OUT).read() if os.path.exists(OUT) else ""
+        if cur != text:
+            print("STALE: %s differs from what the charts register; run hack/gen-keystone-registrations.py" % OUT)
+            sys.exit(1)
+        print("OK: %s is current (%d component(s), %d registration(s))"
+              % (os.path.relpath(OUT, ROOT), len(table), sum(len(v) for v in table.values())))
+        return
+    open(OUT, "w").write(text)
+    print("wrote %s: %d component(s), %d registration(s)" % (OUT, len(table), sum(len(v) for v in table.values())))
+
+
+main()
