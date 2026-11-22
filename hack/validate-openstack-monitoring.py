@@ -602,7 +602,7 @@ def part_switch(root, tmp, counts):
         return fails + ["3d: compositions.yaml has no span from `{{- $ov := ` to the end of the monitoring span"]
     open(os.path.join(u, "templates", "zz-gate-monitoring-probe.yaml"), "w").write(
         '{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n'
-        '{{- range $c := .Values.components }}\n' + comp[start:end] + '\n'
+        '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n' + comp[start:end] + '\n'
         '# MONSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n'
         '# MONSEL {{ $sel | toJson }}\n')
     specs, sels = {}, {}

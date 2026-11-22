@@ -252,7 +252,7 @@ def span_specs(tmp, rots, tag):
     w = stage_umbrella(tmp, "span-" + tag)
     open(os.path.join(w, "templates", "zz-gate-rot-span.yaml"), "w").write(
         '{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n'
-        '{{- range $c := .Values.components }}\n'
+        '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n'
         '{{- $rot := index ($.Values.gateRot | default dict) $c.name | default dict }}\n'
         + comp[start:end] + '\n'
         '{{ printf "\\n# ROTSPEC %s %s %s\\n" $c.name ($ov | toJson) (include "osh.messagingReaders" (list $c)) }}\n'

@@ -22,7 +22,7 @@ Skyline's nginx crash-looped on the dead endpoint. helm uninstall runs the hooks
      - never lists a type a selected component registers;
      - cannot be overridden by componentValues.
      No other component's spec carries it.
-  2b. THE STATE MACHINE. osh.deregistration's lookups (osh.lookupNamed, osh.compositionPresent, osh.crdList) are stood
+  2b. THE STATE MACHINE. osh.deregistration's lookups (osh.lookupNamed, osh.compositionPresent) are stood
      in, and keystone's krateo.deregister is rendered with profile full-strict (manila not selected) in three states:
      - gone: nothing of manila exists. manila and its sharev2 are handed to keystone;
      - removing: manila's umbrella Composition still exists. manila is NOT handed over, and the pending list names it;
@@ -139,7 +139,7 @@ def check_table(table, names, fails, label=""):
 # ---- 2. the umbrella -------------------------------------------------------------------------------------------------
 def umbrella_probe(tmp, name, comp_text):
     start = comp_text.find("{{- $ov := ")
-    mark = comp_text.find("osh.deregistration", start)
+    mark = comp_text.find('(dict "krateo" (dict "deregister"', start)   # keystone's merge of the hoisted $dr
     end = comp_text.find("{{- end }}", mark) if mark >= 0 else -1
     if start < 0 or mark < 0 or end < 0:
         return None
@@ -148,7 +148,7 @@ def umbrella_probe(tmp, name, comp_text):
     open(os.path.join(u, "templates", "zz-gate-dereg-probe.yaml"), "w").write(
         '{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n'
         '# DRSEL {{ $sel | toJson }}\n'
-        '{{- range $c := .Values.components }}\n' + comp_text[start:end + len("{{- end }}")] + '\n'
+        '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n' + comp_text[start:end + len("{{- end }}")] + '\n'
         '# DRSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n')
     return u
 
@@ -211,7 +211,6 @@ STANDINS = {
                        '| default dict | toJson -}}',
     "osh.compositionPresent": '{{- if index ((index . 0).Values.gateObj | default dict) (printf "%s/%s" (index . 1).kind '
                               '(index . 1).name) }}true{{- end -}}',
-    "osh.crdList": '{{- list | toJson -}}',
 }
 
 
@@ -234,7 +233,7 @@ def fsm_probe(tmp, name, comp_text, mutate=None):
     open(hp, "w").write(h)
     pp = os.path.join(u, "templates", "zz-gate-dereg-probe.yaml")
     open(pp, "a").write('# DRSTATE {{ include "osh.deregistration" (list $ (splitList " " (include "osh.selected" '
-                        '(list $)))) | fromYaml | toJson }}\n')
+                        '(list $))) (list)) | fromYaml | toJson }}\n')
     return u
 
 
@@ -317,7 +316,7 @@ def check_chart(w, spec, fails, label=""):
         # restart keystone on a selection change.
         def others(text):
             return sorted((json.dumps(d, sort_keys=True) for d in yaml.safe_load_all(text) if d
-                           and not d["metadata"]["name"].startswith("keystone-deregister")))
+                           and "keystone-deregister" not in d["metadata"]["name"]))   # release-prefixed names too
         with_dr, without = others(out), others(out0)
         if not without:
             fails.append("3%s: keystone rendered nothing besides the deregistration, so nothing was compared" % label)

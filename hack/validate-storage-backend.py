@@ -154,7 +154,7 @@ def main():
             probe = os.path.join(u, "templates", "zz-gate-storage-probe.yaml")
             open(probe, "w").write(
                 '{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n'
-                '{{- range $c := .Values.components }}\n' + span + '\n'
+                '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n' + span + '\n'
                 '# SBSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n')
             specs = {}
             for b in backends:

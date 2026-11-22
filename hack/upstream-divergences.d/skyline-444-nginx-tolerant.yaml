@@ -19,6 +19,6 @@ assertions:
       The script itself, rendered into skyline-bin. hack/validate-skyline-nginx.py runs it on
       upstream's own template and runs nginx -t before and after.
   - file: templates/deployment.yaml
-    present: mountPath: /tmp/skyline-nginx-tolerant.py
+    present: "mountPath: /tmp/skyline-nginx-tolerant.py"
     why: >-
       The api-init container must see the script at the path the init script calls.

@@ -987,17 +987,17 @@ true
                    and keystone's post-upgrade hook deletes the services with their endpoints, and the component's
                    leftover hook Jobs. Deleting what is already gone is a no-op, so `gone` is safe on every render.
 
-       Every read is one named GET (osh.lookupNamed, osh.compositionPresent): chart-inspector derives the release's RBAC
-       from them. Returns {services: [{component, type, name}], components: [name], removing: {name: [what still
+       (list $ $sel $crds): $crds is the cluster's CRD list compositions.yaml reads once per render; a helper never lists
+       a whole resource itself (hack/validate-origin-version-pin.py part 4: helpers run per component). Every read here
+       is one named GET (osh.lookupNamed, osh.compositionPresent): chart-inspector derives the release's RBAC from them.
+       Returns {services: [{component, type, name}], components: [name], removing: {name: [what still
        exists]}}. hack/validate-deregistration.py renders every state from stand-ins. */ -}}
 {{- define "osh.deregistration" -}}
 {{- $top := index . 0 -}}
 {{- $sel := index . 1 -}}
+{{- $crds := index . 2 -}}
 {{- $reg := include "osh.keystoneRegistrations" $top | fromYaml -}}
 {{- $svc := include "osh.componentServices" $top | fromYaml -}}
-{{- /* The CRD list osh.exists needs, read once here and only when a Composition must be asked about. It is not a
-       parameter, so the spec span stays renderable by every gate probe that reproduces it with $sel alone. */ -}}
-{{- $crds := list -}}{{- $crdsRead := false -}}
 {{- $keep := dict -}}
 {{- range $n := $sel }}{{- range $r := (index $reg $n | default list) }}{{- $_ := set $keep $r.type true }}{{- end }}{{- end -}}
 {{- $services := list -}}
@@ -1008,7 +1008,6 @@ true
 {{- $regs := index $reg $c.name | default list -}}
 {{- $names := index $svc $c.name | default list -}}
 {{- $present := list -}}
-{{- if not $crdsRead }}{{- $crds = include "osh.crdList" $top | fromJsonArray -}}{{- $crdsRead = true -}}{{- end }}
 {{- if eq (include "osh.compositionPresent" (list $top $c $crds)) "true" }}
 {{- $present = append $present (printf "%s/%s" $c.kind $c.name) -}}
 {{- end }}
@@ -1033,12 +1032,7 @@ true
 {{- end -}}
 
 {{- /* osh.compositionPresent (list $ $c <CRD list>): "true" while component $c's umbrella Composition exists, at any
-       served version (osh.exists). Its own define so hack/validate-deregistration.py can stand it in, as it stands in
-       osh.crdList (the cluster's CRD list, the same read compositions.yaml makes once per render). */ -}}
-{{- define "osh.crdList" -}}
-{{- (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "").items | default list | toJson -}}
-{{- end -}}
-
+       served version (osh.exists). Its own define so hack/validate-deregistration.py can stand it in. */ -}}
 {{- define "osh.compositionPresent" -}}
 {{- include "osh.exists" (list (index . 0) (index . 1).kind (index . 1).name (index . 2)) -}}
 {{- end -}}
