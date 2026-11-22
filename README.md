@@ -1785,8 +1785,32 @@ network:
 `hack/validate-underlay-mtu.py` checks all of this and runs the refusal.
 
 **Upgrading to the release that adds it:**
-- **If your nodes' MTU is below 1500,** set `network.underlayMTU` before you upgrade. With the default, the OVS agent
-  refuses to start on those nodes, and neutron's agents stay down until you set it.
+- **If your nodes' MTU is below 1500, set neutron's MTU through `componentValues` BEFORE you upgrade, on the release
+  you are running.** `network.underlayMTU` cannot be set before the upgrade: releases before this one have no `network`
+  field, so the API server drops it, the upgrade writes the default 1500, and the OVS agent refuses to start on the
+  first node it reaches. That node's DHCP, L3, metadata and nova-compute agents then stay down until the value is set
+  (measured on GKE, 1460-MTU nodes, upgrading 0.3.71: r074 run 2). Earlier releases do accept neutron's own settings
+  under `componentValues.neutron`, and this release lets them win over `network.underlayMTU`, so set both to your nodes'
+  MTU in the Openstack spec first:
+
+  ```yaml
+  componentValues:
+    neutron:
+      conf:
+        neutron:
+          DEFAULT:
+            global_physnet_mtu: 1460
+        plugins:
+          ml2_conf:
+            ml2:
+              path_mtu: 1460
+  ```
+
+  Wait for neutron to be Ready on the release you are running (it restarts once for this setting), then upgrade: the
+  OVS agent reads 1460 and starts. Afterwards you may move the value to `network.underlayMTU: 1460` and remove the
+  `componentValues.neutron` entry; neutron receives the same spec either way, so that does not restart it.
+  `hack/validate-underlay-mtu.py` part 5 checks this block: 0.3.71's schema keeps it and has no `network`; this release
+  renders 1460 into neutron and its refusal check; and the spec is the same after the move.
 - **neutron rolls once, on every install, even at 1500.** The first upgrade to this release adds `global_physnet_mtu`
   to `neutron.conf` and `path_mtu` to `ml2_conf.ini`; before it, neither line was rendered. Each neutron workload carries
   a hash of its configuration, so neutron-server, the RPC server and the OVS, L3, DHCP and metadata agents restart once.

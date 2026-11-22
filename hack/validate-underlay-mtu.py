@@ -25,6 +25,19 @@ when the tunnel NIC's real MTU is below the MTU neutron uses for tunnels.
      - a missing, empty or non-numeric MTU is refused.
   4. MUTANTS. The same checks are run on three mutants: the comparison removed from the function, the call removed
      from the script, and the umbrella's merge removed. Each must be caught, or the checks above prove nothing.
+  5. THE UPGRADE PROCEDURE (README "Upgrading to the release that adds it"). Releases before #433 have no `network`, so
+     network.underlayMTU cannot be set before the upgrade (r074 run 2: dropped, defaulted to 1500, refused on GKE).
+     The README's YAML block sets neutron's MTU through componentValues on the old release instead. Parsed from the
+     README itself:
+     - against 0.3.71's umbrella schema (hack/fixtures/openstack-0.3.71-values.schema.json, frozen from the tag): it has
+       no `network` and its top level is not preserve-unknown, so the generated CRD prunes `network` (the premise);
+       componentValues.neutron is x-kubernetes-preserve-unknown-fields (kept, not pruned), and 0.3.71's neutron conf is
+       preserve-unknown too (hack/fixtures/neutron-0.3.71-values.schema.json); helm accepts the block against that schema;
+     - against this release: the umbrella gives neutron global_physnet_mtu and path_mtu equal to the block's value, the
+       chart renders UNDERLAY_MTU as that value, and check_underlay_mtu passes a NIC of that MTU;
+     - the move afterwards: neutron's spec from the block equals its spec from network.underlayMTU at that value, so
+       the move does not restart neutron;
+     - a mutant block (neutron's key misspelt) must be caught.
 
 Fails when helm or PyYAML is missing, and when any part finds nothing to check.
 """
@@ -238,6 +251,103 @@ def check_call(s, fails, label=""):
         fails.append("2: neutron%s calls check_underlay_mtu outside the tunnel block, or before LOCAL_IP" % label)
 
 
+# ---- 5. the upgrade procedure -----------------------------------------------------------------------------------------
+README = os.path.join(ROOT, "README.md")
+OLD_UMBRELLA_SCHEMA = os.path.join(ROOT, "hack", "fixtures", "openstack-0.3.71-values.schema.json")
+OLD_NEUTRON_SCHEMA = os.path.join(ROOT, "hack", "fixtures", "neutron-0.3.71-values.schema.json")
+UPGRADE_HEADING = "**Upgrading to the release that adds it:**"
+
+
+def readme_block():
+    """the YAML block of the README's MTU upgrade note, parsed; None when the note or its block is missing"""
+    t = open(README).read()
+    i = t.find("### neutron's underlay MTU")
+    j = t.find(UPGRADE_HEADING, i) if i >= 0 else -1
+    end = t.find("\n### ", j) if j >= 0 else -1
+    if j < 0:
+        return None
+    m = re.search(r"```yaml\n(.*?)```", t[j:end if end > 0 else None], re.S)
+    if not m:
+        return None
+    body = "\n".join(l[2:] if l.startswith("  ") else l for l in m.group(1).splitlines())
+    return yaml.safe_load(body)
+
+
+def block_mtu(b):
+    n = ((b or {}).get("componentValues") or {}).get("neutron") or {}
+    c = n.get("conf") or {}
+    return ((c.get("neutron") or {}).get("DEFAULT") or {}).get("global_physnet_mtu"), \
+        (((c.get("plugins") or {}).get("ml2_conf") or {}).get("ml2") or {}).get("path_mtu")
+
+
+def old_schema_accepts(tmp, values):
+    """helm's schema check of `values` against 0.3.71's umbrella schema, on a chart holding only that schema"""
+    w = os.path.join(tmp, "old-umbrella-%d" % len(os.listdir(tmp)))
+    os.makedirs(os.path.join(w, "templates"))
+    open(os.path.join(w, "Chart.yaml"), "w").write("apiVersion: v2\nname: openstack\nversion: 0.3.71\n")
+    shutil.copy(OLD_UMBRELLA_SCHEMA, os.path.join(w, "values.schema.json"))
+    open(os.path.join(w, "templates", "x.yaml"), "w").write("")
+    rc, _, err = helm_template(w, "openstack-old", values)
+    return rc == 0, err
+
+
+def check_procedure(u, w, tmp, fails, block=None, label=""):
+    b = readme_block() if block is None else block
+    if not b:
+        fails.append("5%s: the README's MTU upgrade note has no YAML block under %r" % (label, UPGRADE_HEADING))
+        return
+    g, p = block_mtu(b)
+    if not (isinstance(g, int) and g == p):
+        fails.append("5%s: the README block sets global_physnet_mtu %r and path_mtu %r; both must be the same integer"
+                     % (label, g, p))
+        return
+    old = json.load(open(OLD_UMBRELLA_SCHEMA))
+    oldn = json.load(open(OLD_NEUTRON_SCHEMA))
+    props = old.get("properties") or {}
+    # The premise: on 0.3.71 a top-level `network` is undeclared, and the top level is not preserve-unknown, so the
+    # Openstack CRD generated from this schema PRUNES it (structural schema). helm would accept it (no
+    # additionalProperties: false at the top), which is why the API server, not helm, lost the value in r074 run 2.
+    if "network" in props or old.get("x-kubernetes-preserve-unknown-fields") is True:
+        fails.append("5%s: 0.3.71's schema declares `network` or preserves unknown top-level fields: the premise of the "
+                     "componentValues route (network.underlayMTU is pruned on 0.3.71) is wrong" % label)
+    cvn = ((props.get("componentValues") or {}).get("properties") or {}).get("neutron") or {}
+    if cvn.get("x-kubernetes-preserve-unknown-fields") is not True:
+        fails.append("5%s: 0.3.71's componentValues.neutron is not preserve-unknown: the API server would prune the block"
+                     % label)
+    if ((oldn.get("properties") or {}).get("conf") or {}).get("x-kubernetes-preserve-unknown-fields") is not True:
+        fails.append("5%s: 0.3.71's neutron conf is not preserve-unknown: its Composition would prune the block" % label)
+    ok, err = old_schema_accepts(tmp, b)
+    if not ok:
+        fails.append("5%s: 0.3.71's schema refuses the README block: %s" % (label, err.strip()[:200]))
+    if u is None or w is None:
+        return
+    s, err = specs_of(u, b)
+    if s is None:
+        fails.append("5%s: this release's umbrella does not render with the README block: %s" % (label, err.strip()[:200]))
+        return
+    n = s.get("neutron") or {}
+    got = ((n.get("conf") or {}).get("neutron") or {}).get("DEFAULT", {}).get("global_physnet_mtu"), \
+        (((n.get("conf") or {}).get("plugins") or {}).get("ml2_conf") or {}).get("ml2", {}).get("path_mtu")
+    if got != (g, g):
+        fails.append("5%s: with the README block (network absent) neutron's spec has %s, %s, want %s, %s"
+                     % (label, got[0], got[1], g, g))
+    moved, err = specs_of(u, {"network": {"underlayMTU": g}})
+    if moved is None or moved.get("neutron") != n:
+        fails.append("5%s: neutron's spec from the README block differs from its spec with network.underlayMTU %s, so "
+                     "the README's 'move it afterwards' would restart neutron" % (label, g))
+    docs = render_neutron(w, n, fails, "%s (README block)" % label)
+    if docs is not None:
+        sc = init_script(docs)
+        if "UNDERLAY_MTU=%s\n" % g not in sc:
+            fails.append("5%s: neutron rendered with the README block does not set UNDERLAY_MTU=%s" % (label, g))
+        fn = function_of(sc)
+        if fn:
+            rc, msg = run_fn(fn, tmp, "%s\n" % g, g)
+            if rc != 0:
+                fails.append("5%s: with the README block, check_underlay_mtu refuses a %s NIC: %s" % (label, g, msg[:200]))
+    counts["5"] = counts.get("5", 0) + 1
+
+
 # ---- 3. the refusal -------------------------------------------------------------------------------------------------
 def function_of(s):
     m = re.search(r"^function check_underlay_mtu \{\n.*?^\}\n", s, re.M | re.S)
@@ -300,6 +410,18 @@ def main():
             w = stage(NEUTRON, tmp, "neutron")
             s = check_chart(w, specs, fails)
             check_refusal(s, tmp, fails)
+            # 5. the README's upgrade procedure, and a mutant block that must be caught
+            check_procedure(u, w, tmp, fails)
+            b = readme_block()
+            if b:
+                bad = json.loads(json.dumps(b))
+                bad["componentValues"]["neutronx"] = bad["componentValues"].pop("neutron")
+                mf = []
+                check_procedure(u, w, tmp, mf, block=bad, label=" (mutant block)")
+                if not mf:
+                    fails.append("5: a README block with neutron's key misspelt passes part 5: it cannot see the block")
+                else:
+                    caught.append("README block with neutron misspelt -> %s" % mf[0][:110])
         # 4. mutants: each must be caught by the checks above
         mutants = {
             "the comparison removed": ("chart", (INIT, 'if [ "${have}" -lt "${want}" ]; then', 'if false; then')),
@@ -328,7 +450,7 @@ def main():
             else:
                 caught.append("%s -> %s" % (what, mf[0][:110]))
             counts["4"] = counts.get("4", 0) + 1
-    for k in ("1", "2", "3", "4"):
+    for k in ("1", "2", "3", "4", "5"):
         if not counts.get(k):
             fails.append("part %s checked nothing" % k)
     if fails:
@@ -337,7 +459,8 @@ def main():
         sys.exit(1)
     print("OK: network.underlayMTU: %d component spec(s) compared (only neutron receives it, componentValues wins); schema "
           "bounds %d case(s); %d rendered neutron.conf/ml2_conf.ini file(s); the init's UNDERLAY_MTU in %d render(s); check_underlay_mtu "
-          "run %d time(s); %d mutant(s) caught" % (counts["1"], counts.get("schema", 0), counts.get("files", 0), counts["2"], counts["3"], counts["4"]))
+          "run %d time(s); %d mutant(s) caught; the README's upgrade procedure (componentValues on 0.3.71) checked %d time(s)"
+          % (counts["1"], counts.get("schema", 0), counts.get("files", 0), counts["2"], counts["3"], counts["4"], counts["5"]))
     for c in caught:
         print("   mutant caught: " + c)
 
