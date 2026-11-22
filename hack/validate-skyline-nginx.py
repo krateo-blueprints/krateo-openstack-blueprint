@@ -22,7 +22,9 @@ locations to resolve per request through the cluster DNS.
      control). AFTER it, `nginx -t` must pass. A running nginx then:
      - proxies a request through the 127.0.0.1 endpoint with the same upstream path and query as the literal config
        sends (rewrite semantics equal);
-     - answers the unresolvable location with 502, while it keeps running.
+     - answers the unresolvable location with 502, while it keeps running. Its `resolver` points at a stand-in DNS on
+       127.0.0.1 that answers NXDOMAIN at once, as the cluster DNS does for a missing Service (nothing answers at
+       10.96.0.10 on a runner, so nginx would only time out), and nginx must have asked it for the dead host.
   4. MUTANTS. The script with its rewrite disabled, with its resolver dropped, and with its path suffix ($1) dropped.
      Each must be caught.
 
@@ -194,6 +196,46 @@ def for_test(text, d):
     return text.replace("pid /run/nginx.pid;", "pid %s/nginx.pid;" % d)
 
 
+class NxDns:
+    """The cluster DNS, as the running nginx meets it: a nameserver that answers NXDOMAIN at once for a Service that does
+    not exist. The rewritten config's `resolver` names the pod's nameserver (10.96.0.10 here, checked in part 2); on a
+    runner nothing answers there, so nginx would wait out its resolver timeout and the request would time out, which is
+    not what a pod sees. The live run points `resolver` at this server instead (live_resolver), and every name it was
+    asked is recorded, so the 502 is shown to come from a lookup nginx made, not from a refusal before one."""
+
+    def __init__(self):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(("127.0.0.1", 0))
+        self.port = self.sock.getsockname()[1]
+        self.asked = []
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while True:
+            try:
+                q, addr = self.sock.recvfrom(4096)
+            except OSError:
+                return
+            if len(q) < 12:
+                continue
+            labels, i = [], 12
+            while i < len(q) and q[i]:
+                labels.append(q[i + 1:i + 1 + q[i]].decode("ascii", "replace"))
+                i += 1 + q[i]
+            end = i + 5                                   # the root label, QTYPE, QCLASS
+            self.asked.append(".".join(labels))
+            # the query's ID, then QR|RD|RA with RCODE 3 (NXDOMAIN), the one question echoed, no answers
+            self.sock.sendto(q[:2] + b"\x81\x83" + b"\x00\x01\x00\x00\x00\x00\x00\x00" + q[12:end], addr)
+
+    def close(self):
+        self.sock.close()
+
+
+def live_resolver(text, port):
+    """the rewritten config's resolver line pointed at NxDns; nothing else the rewrite wrote is touched"""
+    return re.sub(r"^(\s*resolver\s+)\S.*?(\s+valid=30s;)$", r"\g<1>127.0.0.1:%d\g<2>" % port, text, flags=re.M)
+
+
 class Echo(http.server.BaseHTTPRequestHandler):
     seen = []
 
@@ -260,8 +302,22 @@ def check_nginx(ng, script, tmp, fails, label=""):
             return
         req = "/api/openstack/regionone/echo/a/b%20c/?x=1&y=two"
         Echo.seen = []
-        a = serve_and_get(ng, d, write(d, "run-after.conf", for_test(after, d)), lport, [req, "/api/openstack/regionone/manila/shares"])
+        dns = NxDns()
+        try:
+            live = live_resolver(after, dns.port)
+            if not label and live == after:
+                fails.append("3: the rewritten config has no `resolver ... valid=30s;` line to point at the stand-in DNS")
+            t0 = time.monotonic()
+            a = serve_and_get(ng, d, write(d, "run-after.conf", for_test(live, d)), lport,
+                              [req, "/api/openstack/regionone/manila/shares"])
+            took = time.monotonic() - t0
+        finally:
+            dns.close()
         after_seen = list(Echo.seen)
+        dead_host = DEAD.split(":")[0]
+        if not label and dead_host not in dns.asked:
+            fails.append("3: nginx never asked the stand-in DNS for %s (asked: %s), so a 502 would not show a lookup "
+                         "failing at request time" % (dead_host, sorted(set(dns.asked))))
         # the same request through the LITERAL config, with only the resolvable endpoint (it cannot load otherwise)
         lit = re.sub(r"\n\s*# RegionOne manila\n\s*location /api/openstack/regionone/manila/ \{.*?\n\s*\}\n", "\n", base, flags=re.S)
         Echo.seen = []
@@ -273,9 +329,9 @@ def check_nginx(ng, script, tmp, fails, label=""):
             fails.append("3%s: the rewritten config sends %s upstream, the literal one %s (status %s)"
                          % (label, after_seen, lit_seen, a.get(req, (None,))[0]))
         if a.get("/api/openstack/regionone/manila/shares", (None,))[0] != 502 or not a.get("alive"):
-            fails.append("3%s: the unresolvable location answered %s (want 502), nginx alive %s"
-                         % (label, a.get("/api/openstack/regionone/manila/shares"), a.get("alive")))
-        counts["3"] = counts.get("3", 0) + 4
+            fails.append("3%s: the unresolvable location answered %s (want 502), nginx alive %s (run took %.1fs)"
+                         % (label, a.get("/api/openstack/regionone/manila/shares"), a.get("alive"), took))
+        counts["3"] = counts.get("3", 0) + 5
     finally:
         echo.shutdown()
 

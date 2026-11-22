@@ -33,7 +33,8 @@ Skyline's nginx crash-looped on the dead endpoint. helm uninstall runs the hooks
      - its password only in the `catalog` init container, from the generated root's openrc Secret, never a literal;
      - a `jobs` container with no password;
      - a Role granting exactly list and delete on batch/jobs.
-     With an empty krateo.deregister, nothing renders.
+     With an empty krateo.deregister, nothing renders, and every other keystone object is identical to the render
+     with it: the value moves with every selection change, and must restart nothing.
   4. THE PROGRAMS RUN. The rendered catalog program runs against a stand-in catalog holding:
      - manila's sharev2 with two endpoints;
      - a hand-made sharev2 service with another name;
@@ -310,6 +311,22 @@ def check_chart(w, spec, fails, label=""):
     rc, out0, _ = helm_template(w, "keystone-gate1234", empty)
     if rc != 0 or "keystone-deregister" in out0:
         fails.append("3%s: with an empty krateo.deregister keystone still renders the deregistration" % label)
+    else:
+        # krateo.deregister moves with every selection change (monitoring.enabled included), so it must reach nothing
+        # but the deregistration's own objects: anything else that moved (a pod template, a hashed ConfigMap) would
+        # restart keystone on a selection change.
+        def others(text):
+            return sorted((json.dumps(d, sort_keys=True) for d in yaml.safe_load_all(text) if d
+                           and not d["metadata"]["name"].startswith("keystone-deregister")))
+        with_dr, without = others(out), others(out0)
+        if not without:
+            fails.append("3%s: keystone rendered nothing besides the deregistration, so nothing was compared" % label)
+        elif with_dr != without:
+            moved = sorted({"%s/%s" % (d["kind"], d["metadata"]["name"])
+                            for d in map(json.loads, set(with_dr) ^ set(without))})
+            fails.append("3%s: krateo.deregister changes keystone objects other than the deregistration's: %s; a "
+                         "selection change would restart keystone" % (label, moved))
+        counts["3"] = counts.get("3", 0) + 1
     counts["3"] = counts.get("3", 0) + 1
     script = cat["command"][2]
     m = re.search(r"<<'PY'\n(.*?)\nPY\n", script, re.S)

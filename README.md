@@ -1431,6 +1431,9 @@ When a component leaves the selection, the umbrella removes what it registered:
     endpoints, and its leftover hook Jobs and their pods.
   - Nothing is remembered between reconciles, so the order in which the removal and keystone's upgrade happen doesn't
     matter, and deleting what is already gone is a no-op.
+  - Selecting a component takes it back out of `krateo.deregister`. So any change of the selection, including
+    `monitoring.enabled`, upgrades keystone once and runs its hooks again. Its pods don't restart: `krateo.deregister`
+    reaches only the hook Job.
 - **What is deleted:**
   - only a service whose type AND name are what the component registers. The list is derived from the charts' own
     ks-service Jobs;
