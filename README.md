@@ -162,7 +162,33 @@ kubectl create namespace openstack-system
 # reads the RabbitMQ connection 0.3.69 moved there and retries localhost forever. Stay on 0.3.68; the fix
 # ships in 0.3.70.
 #
-# What 0.3.71 has actually been run through (2026-11-17), stated so you know what is NOT covered:
+# What 0.3.74 has actually been run through (2026-11-23), stated so you know what is NOT covered. All on 3-node GKE
+# clusters (n2-standard-16, zonal, node MTU 1460), profile: full-strict, which is 31 components from 0.3.74 (manila is
+# left out, #426):
+#   - 0.3.74's tag commit freshly installed with these exact steps, as its pre-release (the published charts are
+#     byte-identical to the tag's tree), on core-provider 2.13.111, with network.underlayMTU 1460: all 31 components and
+#     the umbrella Ready 35 min after the apply, with no intervention. GKE resized the control plane mid-install; eight
+#     composition controllers lost their leases and restarted, and no first install was interrupted. 242 pods, none
+#     Pending; one container restarted (mariadb-controller, once). Every neutron agent and nova-compute ran on all 3
+#     nodes with no MTU refusal, and neutron-server read 1460 for global_physnet_mtu and path_mtu. No internal catalog
+#     endpoint was dead. No Keystone, MariaDB or RabbitMQ login was refused during the install;
+#   - the released 0.3.74 freshly installed the same way on core-provider 2.13.128: all 31 components and the umbrella
+#     Ready 31 min after the apply, with no intervention and no container restarted (241 pods). The same checks passed.
+#     GKE did not resize the control plane, so 2.13.128's automatic reinstall of an interrupted first install
+#     (core-provider#629) was NOT exercised;
+#   - a fresh 0.3.71 install upgraded straight to 0.3.74 as "Upgrading an existing install" below and "neutron's underlay
+#     MTU" describe (componentValues set before the upgrade), instrumented, on core-provider 2.13.111 only: 31 components
+#     Ready 17 min after the upgrade started, with no intervention. It ran at 5bc3e765; the tag differs from it by one
+#     image digest in libvirt's values that the default render does not use. manila was removed, with its Keystone
+#     service, hook Jobs and 11 credentials (#444); the other 395 credential projections were byte-identical. keystone-api
+#     did not restart for the deregistration. MariaDB and RabbitMQ restarted once each (84 s and 38 s). No login was
+#     refused after the upgrade. Keystone, MariaDB and RabbitMQ accepted the generated passwords (33, 24 and 16 users)
+#     and rejected every published one, and no published default remained in the 580 Secrets and ConfigMaps scanned.
+#     Keystone's token API failed 10 of 90 samples around the MariaDB restart (2 min), and the other APIs 0 to 2 of 80
+#     during their rollouts (#286); cyborg-conductor crashed once while placement restarted, and recovered;
+#   - NOT run at 0.3.74: an upgrade on core-provider 2.13.128, profile: identity, OIDC federation, the Ceph path (#308),
+#     and the README's recovery from HooksMayNotHaveRun.
+# Earlier releases, the same way:
 #   - 0.3.71 freshly installed with these exact steps, profile: full-strict, on a 3-node GKE cluster
 #     (n2-standard-16, core-provider 2.13.107): all 32 components and the umbrella Ready 35 min after the
 #     apply, with no intervention, although GKE resized the cluster's control plane mid-install (the
@@ -229,14 +255,15 @@ kubectl create namespace openstack-system
 # Known, measured, not yet fixed:
 #   - a component can read Ready while a pod of it crash-loops (#231);
 #   - every API runs one replica, so an upgrade or config change drops it for 1-2 min (#286);
-#   - on a fresh install ceilometer's notification agent starts before nova's RabbitMQ vhost exists, and
-#     its worker crashes until nova's rabbit-init has run, then recovers on its own (#298);
-#   - on a fresh install manila's bootstrap Job does not wait for the APIs it calls and fails until
-#     nova-api is up, then succeeds (#299);
+#   - with publicEndpoints off, 16 public catalog endpoints name Services nothing creates; use the internal interface
+#     (#451);
+#   - any change to MariaDB's or RabbitMQ's credential ExternalSecret manifests restarts them, data or not (#449);
 #   - if the API server goes away while a component is in its FIRST install (e.g. a managed control
-#     plane resizing), core-provider up to 2.13.107 can leave it deployed with its install hooks never
-#     run and its pods waiting forever. Recovery: delete that component's Composition, and the umbrella
-#     re-creates it (core-provider#563; 2.13.108 marks it Ready=False/HooksMayNotHaveRun, #297).
+#     plane resizing), its install hooks may never run and its pods wait forever. core-provider up to 2.13.107 does not
+#     say so: delete that component's Composition, and the umbrella re-creates it (core-provider#563). 2.13.108 to
+#     2.13.127 mark it Ready=False/HooksMayNotHaveRun (seen on a fresh 0.3.74 pre-release, 2.13.111, #297): see
+#     "A component reads Ready=False/HooksMayNotHaveRun" below. 2.13.128 reinstalls it by itself (core-provider#629; not
+#     exercised here).
 #   - cinder needs a block-storage backend: a Ceph cluster, through storage.backend ceph-rook or
 #     ceph-external ("Storage: consuming a Ceph cluster" below; the Ceph path is not yet verified on a
 #     live cluster, #308). With the default none, full-strict leaves it out, and selected anyway
@@ -246,7 +273,7 @@ kubectl create namespace openstack-system
 # version: the 36-component profile: full, kind, a VNC console in a browser, and the
 # per-component path further down.
 
-BP_VERSION=0.3.71
+BP_VERSION=0.3.74
 
 kubectl apply -f https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/compositiondefinition-openstack.yaml
 
@@ -299,6 +326,10 @@ helm upgrade --install openstack-capabilities \
 # the API server would serve it, and that apply got the same 503 (#244). `kubectl wait` on the
 # CompositionDefinition is version-blind: during an upgrade the previous version is still served.
 # ...then one Composition rolls out a whole install in dependency order.
+#
+# NODES WITH AN MTU BELOW 1500 (GKE's are 1460), with any profile that runs neutron: download the example, set
+# `network.underlayMTU` in it to the nodes' MTU, and set OS to your copy. From 0.3.74 the OVS agent refuses to start
+# without it (see "neutron's underlay MTU"). The published example is profile: identity, which runs no neutron.
 kubectl create namespace openstack
 OS=https://github.com/krateo-blueprints/krateo-openstack-blueprint/releases/download/${BP_VERSION}/example-openstack.yaml
 i=0; until kubectl apply --dry-run=server -f "$OS" >/dev/null 2>&1; do
@@ -2003,6 +2034,12 @@ hooks never created. That happens when every composition-dynamic-controller lose
 while GKE resizes the control plane (measured 2026-11-17: cyborg's pods sat in `Init` forever). A core-provider that
 carries the fix marks such a release `krateo.io/hooks-unverified`, and the component reads
 `Ready=False/HooksMayNotHaveRun`. Removing that annotation by hand only stops the report. It does not run the hooks.
+
+**From core-provider 2.13.128** an interrupted FIRST install (a release that never had a deployed revision) is uninstalled
+without hooks and installed again, hooks included, at most 3 times; then the component reads `HooksMayNotHaveRun` as
+before (core-provider#629). The annotation `krateo.io/interrupted-install-recovery: manual`, on the CompositionDefinition
+or the composition, keeps the manual path. No run of this blueprint has exercised it yet, nor the recovery below at
+0.3.74.
 
 Recover in this order:
 
