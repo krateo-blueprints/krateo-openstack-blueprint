@@ -769,6 +769,9 @@ The exceptions are named, never silent:
   uses Recreate. A shared store lifts this (#308).
 - **redis runs one pod.** It is an unreplicated in-memory store, and a second replica would be a second, empty store
   (`hack/single-replica-serving.yaml`, #309).
+- **The two metrics exporters run one pod each** (`openstack-exporter`, `openstack-mysqld-exporter`, with `monitoring` on).
+  They are scrape targets, not APIs: a second replica would poll every source twice and publish every series twice. A
+  rollout costs a short scrape gap (same file, #312).
 
 `hack/validate-api-availability.py` and `hack/validate-pod-resources.py` assert all of this against the rendered
 charts.

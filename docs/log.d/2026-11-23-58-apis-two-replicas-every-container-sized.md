@@ -21,7 +21,9 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
     skyline gains the anti-affinity it lacked.
   - **The exceptions are decided by the render.** glance-api and tacker mount ReadWriteOnce claims, so they stay at one
     pod and must not surge. tacker now uses Recreate: Kubernetes' default would have stalled a rollout on Multi-Attach.
-    redis is the one reasoned exception file entry (`hack/single-replica-serving.yaml`).
+    The reasoned exceptions are in `hack/single-replica-serving.yaml`: redis, whose second replica would be a second,
+    empty store, and the two metrics exporters, which are scrape targets and would publish every series twice (Diego,
+    2026-11-23).
   - **Watcher's decision engine** read `pod.replicas.engine` (null), so the documented `decision_engine` key reached
     nothing. cyborg's and swift's schema replica defaults (1) disagreed with their values (3).
   - **Requests:** `pod.resources.enabled: true` in all 36 charts. Every container gets requests and a memory limit,

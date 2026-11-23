@@ -47,7 +47,7 @@ cinder with storage.backend ceph-external, and manila's documented operator path
 (hack/share-backend-operator-example.yaml). Every other chart renders with no extra values.
 
 The one exception to check 1 is hack/single-replica-serving.yaml: a serving Deployment whose second replica would be a
-second, unreplicated copy of its data. Each entry carries a reason and an issue, and an entry that no longer names a
+second, unreplicated copy of its data, or a metrics scrape target, which nothing but a collector reads. Each entry carries a reason and an issue, and an entry that no longer names a
 single-replica serving Deployment fails.
 
 Fails when helm or PyYAML is missing, when a chart named on the command line does not exist, when no chart rendered and
