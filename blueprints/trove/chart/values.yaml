@@ -344,6 +344,15 @@ conf:
       # swift_url: ""
       # glance_url: ""
       # heat_url: ""
+      # Its clients use the internal endpoints (#462). The service's own default is the public ones, which nothing serves
+      # while publicEndpoints is off, and which leave the cluster and come back in through the gateway while it is on.
+      # The *_url options above don't replace these: trove's admin clients read them only with a project id. swift is
+      # left at its default: its URL is handed to the database instances, which are outside the cluster.
+      nova_compute_endpoint_type: internalURL
+      neutron_endpoint_type: internalURL
+      cinder_endpoint_type: internalURL
+      glance_endpoint_type: internalURL
+      trove_endpoint_type: internalURL
       trove_volume_support: true
       network_isolation: false
     database:

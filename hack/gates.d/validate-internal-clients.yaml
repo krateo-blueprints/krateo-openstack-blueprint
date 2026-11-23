@@ -1,0 +1,9 @@
+# Every service's clients of other services use the internal endpoints (#462): the options whose own default is the public
+# endpoint are set in the rendered config, a public one needs a written reason, and a service that keeps one Keystone
+# session for its process's lifetime depends on what it calls.
+name: "Services call each other on the internal endpoints"
+job: capability-roles
+order: 112
+run: |
+  python3 hack/validate-internal-clients.py --self-test
+  python3 hack/validate-internal-clients.py .

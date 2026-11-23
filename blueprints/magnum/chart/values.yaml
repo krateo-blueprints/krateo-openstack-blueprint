@@ -115,6 +115,23 @@ conf:
       policy_file: /etc/magnum/policy.yaml
     certificates:
       cert_manager_type: barbican
+    # Its clients use the internal endpoints (#462). The service's own default is the public ones, which nothing serves
+    # while publicEndpoints is off, and which leave the cluster and come back in through the gateway while it is on.
+    # magnum_client keeps its default: that URL is handed to the clusters' nodes, which are outside.
+    nova_client:
+      endpoint_type: internalURL
+    neutron_client:
+      endpoint_type: internalURL
+    heat_client:
+      endpoint_type: internalURL
+    glance_client:
+      endpoint_type: internalURL
+    barbican_client:
+      endpoint_type: internalURL
+    cinder_client:
+      endpoint_type: internalURL
+    octavia_client:
+      endpoint_type: internalURL
     database:
       max_retries: -1
       # -- Database connection URI. When empty the URI is auto-generated

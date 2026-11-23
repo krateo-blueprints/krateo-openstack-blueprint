@@ -598,6 +598,10 @@ conf:
       enabled: true
       notify: false
       workers: 1
+    # Its clients use the internal endpoints (#462). The service's own default is the public ones, which nothing serves
+    # while publicEndpoints is off, and which leave the cluster and come back in through the gateway while it is on.
+    network_api:neutron:
+      endpoint_type: internalURL
     oslo_middleware:
       enable_proxy_headers_parsing: true
     oslo_policy:

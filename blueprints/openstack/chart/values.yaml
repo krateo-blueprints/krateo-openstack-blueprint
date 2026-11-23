@@ -1221,6 +1221,8 @@ components:
       - rabbitmq
       - mariadb
       - neutron
+      - glance
+      - nova
     tier: compute
     ## Not selected by `profile: full-strict`: nothing in the umbrella provides lb-mgmt-net. Each
     ## octavia worker and health-manager waits for a Neutron port named after its own node on the
@@ -1385,6 +1387,9 @@ components:
       - keystone
       - rabbitmq
       - mariadb
+      - glance
+      - neutron
+      - nova
     tier: compute
   - name: watcher
     kind: Watcher
