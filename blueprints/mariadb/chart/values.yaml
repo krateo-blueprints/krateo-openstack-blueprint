@@ -615,6 +615,13 @@ pod:
   resources:
     enabled: true
     jobs:
+      # The pre-delete Job that deletes this release's hook Jobs at uninstall (helm-toolkit, #206).
+      hook_cleanup:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 1024Mi
       image_repo_sync:
         requests:
           cpu: 100m

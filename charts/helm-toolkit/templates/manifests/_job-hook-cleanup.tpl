@@ -28,6 +28,7 @@ release's install/upgrade hook Jobs when the release is uninstalled, and itself 
     python in, as the image's default user (the openstack client of ks-user and rabbit-init, or db-init.py), so no new
     image is pulled and no new user is assumed. A pod that cannot start at all still fails the hook at its 300 s
     deadline, as any pre-delete hook (db-drop, clean) would.
+  - It is sized from pod.resources.jobs.hook_cleanup, as every other Job is from its own key (#283).
 
 hack/validate-hook-cleanup.py renders every chart with hook Jobs and checks all of the above, including a run of the
 script against a stand-in API.
@@ -128,6 +129,13 @@ spec:
             capabilities:
               drop:
                 - ALL
+{{- /* Sized like every other Job (#283), from the chart's pod.resources.jobs.hook_cleanup: a pod that requests
+       nothing is BestEffort and refused by a ResourceQuota on cpu or memory, and a refused pod fails this hook at its
+       deadline. A chart that sets no hook_cleanup key renders `resources: null`, which hack/validate-pod-resources.py
+       fails. */}}
+{{- if $envAll.Values.pod.resources.enabled }}
+{{ tuple $envAll $envAll.Values.pod.resources.jobs.hook_cleanup | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{- end }}
           env:
             - name: NAMESPACE
               valueFrom:
