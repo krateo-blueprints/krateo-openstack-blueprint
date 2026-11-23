@@ -172,11 +172,17 @@ kubectl create namespace openstack-system
 #     Pending; one container restarted (mariadb-controller, once). Every neutron agent and nova-compute ran on all 3
 #     nodes with no MTU refusal, and neutron-server read 1460 for global_physnet_mtu and path_mtu. Every internal
 #     catalog endpoint names an existing Service. No Keystone, MariaDB or RabbitMQ login was refused during the install.
-#     Seven APIs never answered a request successfully (#459, below), although all 31 components read Ready;
+#     Three services answered no valid request, or not all of them (#462, #463, below), although all 31 components read
+#     Ready;
 #   - the released 0.3.74 freshly installed the same way on core-provider 2.13.128: all 31 components and the umbrella
 #     Ready 31 min after the apply, with no intervention and no container restarted (241 pods). The same checks passed.
-#     GKE did not resize the control plane, so 2.13.128's automatic reinstall of an interrupted first install
-#     (core-provider#629) was NOT exercised;
+#     GKE did not resize the control plane;
+#   - the same again, with two first installs interrupted on purpose: tacker's and cyborg's composition controllers were
+#     force-deleted while an install hook ran. 2.13.128 reinstalled each once (core-provider#629), every install hook
+#     completed, and the 31 components and the umbrella were Ready 38 min after the apply. The databases were kept
+#     (cyborg's with its drop hook enabled; an ordinary delete does drop it). Tacker's 3 volume claims were replaced by
+#     new ones. GKE resized the control plane twice during cyborg's install. A tacker that had been deployed once was
+#     then killed mid-upgrade: not reinstalled, its claims and data kept, its hooks run again;
 #   - a fresh 0.3.71 install upgraded straight to 0.3.74 as "Upgrading an existing install" below and "neutron's underlay
 #     MTU" describe (componentValues set before the upgrade), instrumented, on core-provider 2.13.111 only: 31 components
 #     Ready 17 min after the upgrade started, with no intervention. It ran at 5bc3e765; the tag differs from it by one
@@ -188,7 +194,7 @@ kubectl create namespace openstack-system
 #     Keystone's token API failed 10 of 90 samples around the MariaDB restart (2 min), and the other APIs 0 to 2 of 80
 #     during their rollouts (#286); cyborg-conductor crashed once while placement restarted, and recovered;
 #   - NOT run at 0.3.74: an upgrade on core-provider 2.13.128, profile: identity, OIDC federation, the Ceph path (#308),
-#     and the README's recovery from HooksMayNotHaveRun.
+#     and the recovery of a component that reads HooksMayNotHaveRun (its steps a and c ran on healthy components).
 # Earlier releases, the same way:
 #   - 0.3.71 freshly installed with these exact steps, profile: full-strict, on a 3-node GKE cluster
 #     (n2-standard-16, core-provider 2.13.107): all 32 components and the umbrella Ready 35 min after the
@@ -256,11 +262,10 @@ kubectl create namespace openstack-system
 # Known, measured, not yet fixed:
 #   - a component can read Ready while a pod of it crash-loops (#231);
 #   - every API runs one replica, so an upgrade or config change drops it for 1-2 min (#286);
-#   - READY IS NOT WORKING for seven APIs (#459). On five GKE runs, from 0.3.71 on, trove, masakari and blazar answered 500
-#     to every list request and cloudkitty dropped every connection; freezer answered 404, and magnum and zaqar 400, which
-#     may be the probe's own request. The causes are not established. 14 others answered 200: accelerator, alarming,
-#     compute, dns, image, infra-optim, key-manager, metric, network, nfv-orchestration, orchestration, placement,
-#     workflowv2, and Keystone's tokens;
+#   - READY IS NOT WORKING for three services (#459): trove answers 500 to an instance list (#462), and masakari and
+#     cloudkitty fail every request that carries a valid token (#463). 18 other services answered 200 to a list request
+#     with the admin token; heat's CloudFormation API was not tried with a signed request. Earlier READMEs also named
+#     blazar, freezer and magnum: those errors were the probe's own malformed requests;
 #   - with publicEndpoints off, no public catalog endpoint is served (#451): use the internal interface
 #     (--os-interface internal);
 #   - any change to MariaDB's or RabbitMQ's credential ExternalSecret manifests restarts them, data or not (#449);
@@ -268,8 +273,8 @@ kubectl create namespace openstack-system
 #     plane resizing), its install hooks may never run and its pods wait forever. core-provider up to 2.13.107 does not
 #     say so: delete that component's Composition, and the umbrella re-creates it (core-provider#563). 2.13.108 to
 #     2.13.127 mark it Ready=False/HooksMayNotHaveRun (seen on a fresh 0.3.74 pre-release, 2.13.111, #297): see
-#     "A component reads Ready=False/HooksMayNotHaveRun" below. 2.13.128 reinstalls it by itself (core-provider#629; not
-#     exercised here).
+#     "A component reads Ready=False/HooksMayNotHaveRun" below. 2.13.128 reinstalls it by itself (core-provider#629;
+#     exercised above). The reinstall replaces the component's volume claims.
 #   - cinder needs a block-storage backend: a Ceph cluster, through storage.backend ceph-rook or
 #     ceph-external ("Storage: consuming a Ceph cluster" below; the Ceph path is not yet verified on a
 #     live cluster, #308). With the default none, full-strict leaves it out, and selected anyway
@@ -2121,8 +2126,15 @@ carries the fix marks such a release `krateo.io/hooks-unverified`, and the compo
 **From core-provider 2.13.128** an interrupted FIRST install (a release that never had a deployed revision) is uninstalled
 without hooks and installed again, hooks included, at most 3 times; then the component reads `HooksMayNotHaveRun` as
 before (core-provider#629). The annotation `krateo.io/interrupted-install-recovery: manual`, on the CompositionDefinition
-or the composition, keeps the manual path. No run of this blueprint has exercised it yet, nor the recovery below at
-0.3.74.
+or the composition, keeps the manual path.
+- **Measured at 0.3.74 on GKE (2026-11-23):** tacker's and cyborg's controllers were force-deleted during their first
+  install. Each was reinstalled once and became Ready with every hook Job Complete. Their databases were kept. Tacker's
+  volume claims were deleted and created again: they belong to a release that had never been deployed.
+- **An interrupted upgrade is not reinstalled.** A once-deployed tacker killed mid-upgrade was rolled back and upgraded
+  again, with its claims and data kept. Its Helm history keeps the interrupted revision as `pending-upgrade` beside the
+  newer `deployed` one (2.13.128): to tell whether an operation is in progress, read the latest revision only.
+- **The recovery below, at 0.3.74:** step a was used to start that upgrade, and step c on cyborg (Ready about 3 minutes
+  after the delete). Both components were healthy, so neither cleared a real `hooks-unverified` annotation.
 
 Recover in this order:
 
