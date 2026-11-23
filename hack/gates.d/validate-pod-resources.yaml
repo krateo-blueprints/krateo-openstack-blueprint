@@ -4,6 +4,6 @@
 # feature in hack/feature-renders.yaml.
 name: "Every container requests cpu and memory"
 job: capability-roles
-order: 490
+order: 458
 run: |
   python3 hack/validate-pod-resources.py .

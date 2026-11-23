@@ -6,6 +6,6 @@
 # hack/single-replica-serving.yaml.
 name: "APIs stay up through a rollout or a drain"
 job: capability-roles
-order: 480
+order: 457
 run: |
   python3 hack/validate-api-availability.py .
