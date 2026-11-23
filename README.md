@@ -170,8 +170,9 @@ kubectl create namespace openstack-system
 #     the umbrella Ready 35 min after the apply, with no intervention. GKE resized the control plane mid-install; eight
 #     composition controllers lost their leases and restarted, and no first install was interrupted. 242 pods, none
 #     Pending; one container restarted (mariadb-controller, once). Every neutron agent and nova-compute ran on all 3
-#     nodes with no MTU refusal, and neutron-server read 1460 for global_physnet_mtu and path_mtu. No internal catalog
-#     endpoint was dead. No Keystone, MariaDB or RabbitMQ login was refused during the install;
+#     nodes with no MTU refusal, and neutron-server read 1460 for global_physnet_mtu and path_mtu. Every internal
+#     catalog endpoint names an existing Service. No Keystone, MariaDB or RabbitMQ login was refused during the install.
+#     Seven APIs never answered a request successfully (#459, below), although all 31 components read Ready;
 #   - the released 0.3.74 freshly installed the same way on core-provider 2.13.128: all 31 components and the umbrella
 #     Ready 31 min after the apply, with no intervention and no container restarted (241 pods). The same checks passed.
 #     GKE did not resize the control plane, so 2.13.128's automatic reinstall of an interrupted first install
@@ -255,8 +256,13 @@ kubectl create namespace openstack-system
 # Known, measured, not yet fixed:
 #   - a component can read Ready while a pod of it crash-loops (#231);
 #   - every API runs one replica, so an upgrade or config change drops it for 1-2 min (#286);
-#   - with publicEndpoints off, 16 public catalog endpoints name Services nothing creates; use the internal interface
-#     (#451);
+#   - READY IS NOT WORKING for seven APIs (#459). On five GKE runs, from 0.3.71 on, trove, masakari and blazar answered 500
+#     to every list request and cloudkitty dropped every connection; freezer answered 404, and magnum and zaqar 400, which
+#     may be the probe's own request. The causes are not established. 14 others answered 200: accelerator, alarming,
+#     compute, dns, image, infra-optim, key-manager, metric, network, nfv-orchestration, orchestration, placement,
+#     workflowv2, and Keystone's tokens;
+#   - with publicEndpoints off, no public catalog endpoint is served (#451): use the internal interface
+#     (--os-interface internal);
 #   - any change to MariaDB's or RabbitMQ's credential ExternalSecret manifests restarts them, data or not (#449);
 #   - if the API server goes away while a component is in its FIRST install (e.g. a managed control
 #     plane resizing), its install hooks may never run and its pods wait forever. core-provider up to 2.13.107 does not
