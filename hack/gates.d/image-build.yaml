@@ -1,0 +1,8 @@
+# #463: hack/image-build.yaml builds only from pinned commits and digest-pinned base images, to a dated tag under
+# ghcr.io/krateo-blueprints/images/, and only for images the charts run.
+name: "Every image built here is pinned and published under an immutable tag"
+job: job-hooks
+order: 207
+run: |
+  python3 hack/image-build.py --self-test
+  python3 hack/image-build.py . --check
