@@ -23,6 +23,11 @@ containers included. Checked here, for every component chart:
      credential Jobs, libvirt's kvm-check init container) is rendered from hack/feature-renders.yaml; an entry that
      fails to render, or adds no container, fails.
 
+cinder and manila refuse to render with no backend chosen (#196, #426), so every render here carries
+hack/gate_values.py's values, as the other gates that render component charts do: what the umbrella delivers
+cinder with storage.backend ceph-external, and manila's documented operator path
+(hack/share-backend-operator-example.yaml). Every other chart renders with no extra values.
+
 Fails when helm or PyYAML is missing, when a chart named on the command line does not exist, when no chart rendered and
 when no container was checked. Naming charts limits the run to them (a local check); CI runs it with none, over all.
 """
@@ -60,6 +65,17 @@ except OSError as e:
     sys.exit(2)
 
 
+# What the umbrella delivers for a chart's storage (#308): cinder's default refuses with no volume backend (#196) and
+# manila's with no share backend (#426), so a chart render carries hack/gate_values.py's arguments (nothing for every
+# other chart), as every other gate that renders component charts does.
+import importlib.util as _gv_util
+import os as _gv_os
+_gv_spec = _gv_util.spec_from_file_location(
+    "gate_values", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "gate_values.py"))
+gate_values = _gv_util.module_from_spec(_gv_spec)
+_gv_spec.loader.exec_module(gate_values)
+
+
 def fail(m, chart):
     failures.append(m)
     FAILING.add(chart)
@@ -90,7 +106,7 @@ def helm_template(chart, release, values):
         vf = f.name
     try:
         r = subprocess.run(["helm", "template", release, chart, "--namespace", "openstack", "--kube-version", "1.36.0",
-                            "-f", vf], capture_output=True, text=True)
+                            *gate_values.helm_args(chart), "-f", vf], capture_output=True, text=True)
     finally:
         os.unlink(vf)
     return r.returncode, r.stdout, r.stderr

@@ -33,6 +33,9 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
       (`pod.resources.jobs.kog_token` and `jobs.kog_endpoints`) and libvirt's kvm-check init container are sized too.
       They render only behind a switch, so `hack/feature-renders.yaml` declares the values that turn each one on, and
       both gates render them.
+    - The pre-delete hook-cleanup Job (#206) that 33 charts render through helm-toolkit is sized from
+      `pod.resources.jobs.hook_cleanup`, like every other Job. openstack-monitoring (#312) sizes its
+      kubernetes-entrypoint init containers and drops the CPU limits its exporters, collector and ks-user Job carried.
     - The figures are OpenStack-Helm's own unless a reason is written next to them, because no per-container usage
       has been measured. `full-strict` now requests 9.8 CPU and 14.6 GiB for the control plane, plus 1.3 CPU and
       1.9 GiB per node (README, "Cluster size").
@@ -43,6 +46,8 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
       replicas; schema defaults equal values.
     - `hack/validate-pod-resources.py`: every container and init container is sized, at defaults, with every
       workload manifest on, and with each feature in `hack/feature-renders.yaml`.
+    - Both render cinder and manila through `hack/gate_values.py`, as the other chart gates do: each refuses to
+      render with no backend chosen (#196, #426).
     - On main they fail in 28 and 36 charts:
       - 29 serving Deployments below 2 replicas, and 30 that drop a pod to roll;
       - 11 budget defects, and 3 multi-replica workloads that do not spread;
