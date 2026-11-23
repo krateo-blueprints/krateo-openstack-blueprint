@@ -1,0 +1,11 @@
+# The worker readiness probe read its program's --config-file/--config-dir back from the program's /proc cmdline, which
+# the 2026.1 images' oslo.service threading backend and cotyledon rewrite into a title, so every titled worker lost
+# its configuration and never became Ready (0.3.74 defect B). Each program's configuration is now one list rendered
+# into both its exec line and its probe; this guards that construction against a hand edit of either: the probe's
+# list must equal the exec line's, evaluated by bash with each conf.d present and absent, for every chart at its
+# defaults and as the umbrella delivers it, with two positive controls.
+name: "Every worker probe reads exactly its program's configuration"
+job: capability-roles
+order: 456
+run: |
+  python3 hack/validate-probe-config-args.py .

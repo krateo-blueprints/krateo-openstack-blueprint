@@ -77,7 +77,11 @@
           "type": "boolean"
         },
         "cron_job_db_purge": {
-          "type": "boolean"
+          "type": "boolean",
+          "enum": [
+            false
+          ],
+          "description": "Removed (#289): trove-manage on 2026.1 has no db_purge, and trove has no database purge command, so the CronJob could only fail. false is accepted for older Compositions; true is refused."
         },
         "deployment_api": {
           "type": "boolean"

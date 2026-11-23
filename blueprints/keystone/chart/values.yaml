@@ -517,6 +517,11 @@ dependencies:
       services:
       - endpoint: internal
         service: identity
+    # Krateo (#444): the deregistration calls keystone (service and endpoint deletes).
+    deregister:
+      services:
+      - endpoint: internal
+        service: identity
     # Krateo (#303): the KOG token minter calls keystone (openstack token issue).
     kog_token:
       services:
@@ -711,22 +716,22 @@ images:
     - image_repo_sync
   pull_policy: IfNotPresent
   tags:
-    bootstrap: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
-    db_drop: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
-    db_init: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+    bootstrap: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
+    db_drop: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
+    db_init: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
     image_repo_sync: docker.io/docker:17.07.0
-    keystone_api: quay.io/airshipit/keystone:2026.1-ubuntu_noble
-    keystone_bootstrap: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
-    keystone_credential_cleanup: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
-    keystone_credential_rotate: quay.io/airshipit/keystone:2026.1-ubuntu_noble
-    keystone_credential_setup: quay.io/airshipit/keystone:2026.1-ubuntu_noble
-    keystone_db_sync: quay.io/airshipit/keystone:2026.1-ubuntu_noble
-    keystone_domain_manage: quay.io/airshipit/keystone:2026.1-ubuntu_noble
-    keystone_fernet_rotate: quay.io/airshipit/keystone:2026.1-ubuntu_noble
-    keystone_fernet_setup: quay.io/airshipit/keystone:2026.1-ubuntu_noble
-    ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
-    rabbit_init: docker.io/rabbitmq:3.13-management
+    keystone_api: quay.io/airshipit/keystone:2026.1-ubuntu_noble-20261117
+    keystone_bootstrap: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
+    keystone_credential_cleanup: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
+    keystone_credential_rotate: quay.io/airshipit/keystone:2026.1-ubuntu_noble-20261117
+    keystone_credential_setup: quay.io/airshipit/keystone:2026.1-ubuntu_noble-20261117
+    keystone_db_sync: quay.io/airshipit/keystone:2026.1-ubuntu_noble-20261117
+    keystone_domain_manage: quay.io/airshipit/keystone:2026.1-ubuntu_noble-20261117
+    keystone_fernet_rotate: quay.io/airshipit/keystone:2026.1-ubuntu_noble-20261117
+    keystone_fernet_setup: quay.io/airshipit/keystone:2026.1-ubuntu_noble-20261117
+    ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
+    rabbit_init: docker.io/rabbitmq:3.13.7-management
     test: docker.io/xrally/xrally-openstack:2.0.0
 jobs:
   credential_rotate:
@@ -1179,6 +1184,13 @@ krateo:
   # upgrade hook too, hack/validate-rerun-hooks.py). It is the documented way to re-run hooks that were never run
   # (Ready=False/HooksMayNotHaveRun, README).
   rerunHooksToken: ""
+  # deregister (#444): set by the umbrella, never by hand. What not-selected components registered, which
+  # templates/krateo-deregister.yaml deletes as a post-install/post-upgrade hook: services [{component, type, name}]
+  # (each deleted with its endpoints, only when type AND name match) and components (their leftover hook Jobs).
+  # Empty: no Job renders.
+  deregister:
+    services: []
+    components: []
 
 # Krateo blueprint addition (#303): credentials for Krateo KOG operators, from the install's generated admin root
 # (templates/kog-credentials.yaml), in this release's namespace. The umbrella sets enabled from kogCredentials.

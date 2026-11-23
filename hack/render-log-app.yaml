@@ -1,0 +1,5 @@
+# The GitHub App the render-log bot acts as (.github/workflows/render-log.yaml, hack/render-log-pr.sh). Its slug
+# names the bot account `<slug>[bot]`, the only author whose bot/render-log-* pull request may change docs/log.md
+# (hack/validate-log-untouched.py). The workflow refuses to run when the App behind its secrets has another slug, so
+# the exemption and the App cannot drift apart. docs/release.md says how the App is created.
+slug: krateo-openstack-render-log

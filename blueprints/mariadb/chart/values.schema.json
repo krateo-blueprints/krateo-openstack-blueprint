@@ -70,7 +70,30 @@
       "type": "object",
       "title": "OpenStack-Helm conf overrides",
       "description": "Deep-merged into the chart's conf values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
-      "x-kubernetes-preserve-unknown-fields": true
+      "x-kubernetes-preserve-unknown-fields": true,
+      "properties": {
+        "backup": {
+          "type": "object",
+          "x-kubernetes-preserve-unknown-fields": true,
+          "properties": {
+            "remote_backup": {
+              "type": "object",
+              "title": "Removed (#302)",
+              "description": "The Swift/RGW remote-backup path was removed: it needed a Keystone user created by a mariadb install hook that deadlocked a first install, with a published password. Backups stay local (conf.backup, manifests.cron_job_mariadb_backup). Only enabled: false is accepted, so an older Composition keeps validating.",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "enum": [
+                    false
+                  ],
+                  "description": "Removed (#302); must be false or absent."
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "manifests": {
       "type": "object",
@@ -102,7 +125,11 @@
           "type": "boolean"
         },
         "job_ks_user": {
-          "type": "boolean"
+          "type": "boolean",
+          "enum": [
+            false
+          ],
+          "description": "Removed (#302) with the Swift remote-backup path it served: the ks-user Job was a mariadb install hook waiting on keystone, which waits on mariadb, so a first install deadlocked, and it created an admin-role Keystone user with a published password. false is accepted for older Compositions; true is refused."
         },
         "network_policy": {
           "type": "boolean"
@@ -294,6 +321,10 @@
         "rerunHooksToken": {
           "type": "string",
           "description": "Rendered nowhere. The umbrella sets it from rerunHooks.<component>; changing it makes core-provider run a helm upgrade, which re-runs every hook (#297)."
+        },
+        "exporterUser": {
+          "type": "boolean",
+          "description": "Create MariaDB's exporter user for any host, for openstack-monitoring's standalone mysqld-exporter (#312). Set by the umbrella's monitoring value; does not restart the database."
         }
       }
     }

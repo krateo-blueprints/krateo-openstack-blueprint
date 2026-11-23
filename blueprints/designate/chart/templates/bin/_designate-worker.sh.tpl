@@ -16,8 +16,7 @@ COMMAND="${@:-start}"
 
 function start () {
   designate-worker \
-      --config-file /etc/designate/designate.conf \
-      --config-dir /etc/designate/designate.conf.d
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "designate.config_args.worker" . | fromYamlArray) "format" "shell" "indent" 6) }}
 }
 
 function stop () {

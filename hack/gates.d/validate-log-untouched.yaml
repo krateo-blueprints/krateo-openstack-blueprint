@@ -1,0 +1,17 @@
+# docs/log.md is rendered on main by the render-log workflow and lands through its bot pull request; a pull request
+# that edits or regenerates it conflicts with every branch in flight (#340's committed render did). Only the bot's
+# own pull request (branch bot/render-log-* AND the render-log App's bot account) may change it. The rule is checked
+# case by case first, so a wider exemption fails before it can pass. A pull request is measured from the merge base of
+# HEAD and origin/$GITHUB_BASE_REF (hack/pr_range.py) -- an explicit base, never inferred from HEAD's shape: a branch
+# head that merged main looks like a merge ref and was charged with main's render (#412, locally).
+name: "A pull request never touches docs/log.md; only the render-log bot does"
+job: job-hooks
+order: 5
+# Set by this job's runner step in lint.yaml, from a GitHub expression the runner cannot evaluate.
+workflow-env:
+  - BASE
+  - EVENT_NAME
+  - HEAD_REF
+  - PR_AUTHOR
+run: |
+  python3 hack/validate-log-untouched.py .

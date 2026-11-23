@@ -28,6 +28,9 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: magnum-domain-ks-user
+  # Krateo (#206): the release's hook-cleanup selects Jobs by release_group, so the Job carries the labels.
+  labels:
+{{ tuple $envAll "magnum" "domain-ks-user" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
 {{ tuple "domain-ks-user" $envAll (ternary "pre-upgrade" "post-upgrade" $rotate) | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
     {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}

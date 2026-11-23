@@ -19,12 +19,7 @@ COMMAND="${@:-start}"
 
 function start () {
   exec ironic-neutron-agent \
-        --config-file /etc/neutron/neutron.conf \
-{{- if and ( empty .Values.conf.neutron.DEFAULT.host ) ( .Values.pod.use_fqdn.neutron_agent ) }}
-  --config-file /tmp/pod-shared/neutron-agent.ini \
-{{- end }}
-        --config-file /etc/neutron/plugins/ml2/ml2_conf.ini \
-        --config-dir /etc/neutron/neutron.conf.d
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "neutron.config_args.ironic_agent" . | fromYamlArray) "format" "shell" "indent" 8) }}
 }
 
 function stop () {

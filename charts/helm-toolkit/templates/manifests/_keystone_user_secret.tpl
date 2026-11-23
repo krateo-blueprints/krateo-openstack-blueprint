@@ -56,7 +56,10 @@ metadata:
     krateo.io/teardown: with-release
 {{ tuple "identity" $userClass $envAll | include "helm-toolkit.snippets.custom_secret_annotations" | indent 4 }}
 spec:
-  refreshInterval: 1h
+  # OnChange (#309 C): refreshed only when this ExternalSecret itself changes (a new root, a new
+  # template), never on a timer, so a root edited by hand (which ESO regenerates) reaches no live
+  # credential until a rotation; the umbrella reports the edit (status.credentialDrift).
+  refreshPolicy: OnChange
   secretStoreRef:
     kind: SecretStore
     name: {{ $from.store | quote }}
@@ -130,7 +133,10 @@ metadata:
     krateo.io/teardown: with-release
 {{ tuple "identity" $userClass $envAll | include "helm-toolkit.snippets.custom_secret_annotations" | indent 4 }}
 spec:
-  refreshInterval: 1h
+  # OnChange (#309 C): refreshed only when this ExternalSecret itself changes (a new root, a new
+  # template), never on a timer, so a root edited by hand (which ESO regenerates) reaches no live
+  # credential until a rotation; the umbrella reports the edit (status.credentialDrift).
+  refreshPolicy: OnChange
   secretStoreRef:
     kind: SecretStore
     name: {{ $from.store | quote }}

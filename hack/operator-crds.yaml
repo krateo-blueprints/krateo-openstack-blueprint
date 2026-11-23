@@ -1,0 +1,29 @@
+# The CustomResourceDefinitions that every rabbitmq.com object this repository renders must be admitted by
+# (hack/validate-operator-admission.py). One source: the upstream manifests rabbitmq-operator-blueprint vendors, read
+# at the commit of the operator build this repository is tested against (pre-release 0.1.0-main.ge22d03a, H2), never a
+# copy kept here. When that blueprint moves, bump `commit` and every `sha256` together; the gate refuses a file whose
+# hash differs, and a manifest that holds none of the CRDs `require` names.
+source:
+  repository: krateo-blueprints/rabbitmq-operator-blueprint
+  commit: e22d03a02714e892791710dfad4beb3c9be6fc80
+files:
+  - path: blueprints/rabbitmq-cluster-operator/chart/files/upstream/cluster-operator.yml
+    sha256: 58b74bd515767123c3ba3bcdd01016e808565c93fda501eb4f05679bf4dc773f
+    # Byte-identical to the upstream release asset (same sha256, checked 2026-11-18):
+    upstream: https://github.com/rabbitmq/cluster-operator/releases/download/v2.23.2/cluster-operator.yml
+  - path: blueprints/rabbitmq-topology-operator/chart/files/upstream/messaging-topology-operator-with-certmanager.yaml
+    sha256: 01c8487002d027415f54bdf5d3ca030f3e78a7d2d38e596057e9a625a0009029
+    # Byte-identical to the upstream release asset (same sha256, checked 2026-11-18):
+    upstream: https://github.com/rabbitmq/messaging-topology-operator/releases/download/v1.20.5/messaging-topology-operator-with-certmanager.yaml
+require:
+  - rabbitmqclusters.rabbitmq.com
+  - users.rabbitmq.com
+  - vhosts.rabbitmq.com
+  - permissions.rabbitmq.com
+  - policies.rabbitmq.com
+# The operators' admission webhooks (#405) are served with certificates cert-manager issues: phase 2 of the gate installs
+# it, then both manifests above whole (their Deployments, webhook configurations, Issuers and Certificates). The same
+# version create.sh installs on GKE.
+certManager:
+  url: https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml
+  sha256: c04a51295adda2b1a775146751f973e787190778c7f35180861d9678876e5c74

@@ -65,6 +65,16 @@ VARIANTS = {
 failures = []
 
 
+# What the umbrella delivers for a chart's storage (#308): cinder's default refuses, so a chart render carries
+# hack/gate_values.py's arguments (nothing for every other chart).
+import importlib.util as _gv_util
+import os as _gv_os
+_gv_spec = _gv_util.spec_from_file_location(
+    "gate_values", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "gate_values.py"))
+gate_values = _gv_util.module_from_spec(_gv_spec)
+_gv_spec.loader.exec_module(gate_values)
+
+
 def fail(m):
     failures.append(m)
 
@@ -86,7 +96,7 @@ def helm_template(chart, release, values):
         yaml.safe_dump(values or {}, f)
     try:
         r = subprocess.run(["helm", "template", release, chart, "--namespace", "openstack", "--kube-version", "1.36.0",
-                            "-f", f.name], capture_output=True, text=True)
+                            *gate_values.helm_args(chart), "-f", f.name], capture_output=True, text=True)
     finally:
         os.unlink(f.name)
     return r.returncode, r.stdout, r.stderr

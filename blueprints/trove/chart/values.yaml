@@ -38,17 +38,16 @@ release_group: null
 images:
   tags:
     test: docker.io/xrally/xrally-openstack:2.0.0
-    db_init: quay.io/airshipit/heat:2026.1-ubuntu_noble
-    trove_db_sync: quay.io/airshipit/trove:2026.1-ubuntu_noble
-    db_drop: quay.io/airshipit/heat:2026.1-ubuntu_noble
-    rabbit_init: docker.io/rabbitmq:3.13-management
-    ks_user: quay.io/airshipit/heat:2026.1-ubuntu_noble
-    ks_service: quay.io/airshipit/heat:2026.1-ubuntu_noble
-    ks_endpoints: quay.io/airshipit/heat:2026.1-ubuntu_noble
-    trove_api: quay.io/airshipit/trove:2026.1-ubuntu_noble
-    trove_conductor: quay.io/airshipit/trove:2026.1-ubuntu_noble
-    trove_taskmanager: quay.io/airshipit/trove:2026.1-ubuntu_noble
-    trove_db_purge: quay.io/airshipit/trove:2026.1-ubuntu_noble
+    db_init: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
+    trove_db_sync: quay.io/airshipit/trove:2026.1-ubuntu_noble-20261117
+    db_drop: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
+    rabbit_init: docker.io/rabbitmq:3.13.7-management
+    ks_user: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
+    ks_service: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
+    ks_endpoints: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
+    trove_api: quay.io/airshipit/trove:2026.1-ubuntu_noble-20261117
+    trove_conductor: quay.io/airshipit/trove:2026.1-ubuntu_noble-20261117
+    trove_taskmanager: quay.io/airshipit/trove:2026.1-ubuntu_noble-20261117
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: "IfNotPresent"
@@ -57,14 +56,6 @@ images:
     exclude:
       - dep_check
       - image_repo_sync
-
-jobs:
-  db_purge:
-    cron: "0 0 * * *"
-    starting_deadline: 600
-    history:
-      success: 3
-      failed: 1
 
 pod:
   probes:
@@ -101,13 +92,6 @@ pod:
           params:
             initialDelaySeconds: 30
   security_context:
-    db_purge:
-      pod:
-        runAsUser: 42424
-      container:
-        trove_db_purge:
-          readOnlyRootFilesystem: true
-          allowPrivilegeEscalation: false
     trove_api:
       pod:
         runAsUser: 42424
@@ -165,11 +149,6 @@ pod:
     trove_taskmanager:
       init_container: null
       trove_taskmanager:
-        volumeMounts:
-        volumes:
-    trove_db_purge:
-      init_container: null
-      trove_db_purge:
         volumeMounts:
         volumes:
     trove_tests:
@@ -252,12 +231,6 @@ pod:
         limits:
           memory: 1024Mi
       db_drop:
-        requests:
-          memory: 128Mi
-          cpu: 100m
-        limits:
-          memory: 1024Mi
-      db_purge:
         requests:
           memory: 128Mi
           cpu: 100m
@@ -484,12 +457,6 @@ dependencies:
           - endpoint: node
             service: local_image_registry
   static:
-    db_purge:
-      jobs:
-        - trove-db-sync
-      services:
-        - endpoint: internal
-          service: oslo_db
     api:
       jobs:
         - trove-db-sync
@@ -863,7 +830,6 @@ manifests:
   certificates: false
   configmap_bin: true
   configmap_etc: true
-  cron_job_db_purge: true
   deployment_api: true
   deployment_conductor: true
   deployment_taskmanager: true

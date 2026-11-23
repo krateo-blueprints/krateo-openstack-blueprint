@@ -1,0 +1,137 @@
+# Publishes a PRE-RELEASE of a commit: every chart pushed to GHCR at X.Y.Z-main.g<sha7>, and the
+# stamped CompositionDefinitions, RBAC grants and example Compositions as a workflow artifact, so
+# the GKE pair can install a commit on main the way it installs a release BEFORE any tag exists.
+# Every X.Y.Z tag reaches the Marketplace; a pre-release must not, and here it cannot:
+#
+#   * The Marketplace lists what https://krateo-blueprints.github.io/charts/<channel>/index.yaml
+#     lists, read live and through the krateo-marketplace-catalog snapshot built from that same
+#     file. The only writer of that file is krateo-blueprints/charts publish-chart.yaml, a reusable
+#     workflow that downloads tarballs from ITS CALLER'S run and pushes with CHARTS_PUBLISH_TOKEN.
+#     Nothing reads GHCR, or this repository's Releases or artifacts, into an index.
+#   * This workflow calls no reusable workflow, references no secret but GITHUB_TOKEN (which can
+#     write this repository's packages and nothing in krateo-blueprints/charts), and holds
+#     `contents: read`, so it cannot create a tag or a GitHub release here either: no
+#     /releases/download/ URL, no tag for release-notes' `git describe` to mistake for the
+#     previous release. hack/validate-prerelease-channel.py checks all of that on every PR, and
+#     mutates this file to prove each check fires.
+#   * The version is a semver pre-release (hack/release-version.sh): helm resolves an OCI chart
+#     with no --version to the newest version that is NOT a pre-release, so it is installed only
+#     by its exact version (or --devel), and core-provider serves it at its own apiVersion
+#     (v0-3-74-main-gabc1234), never at the release's.
+#
+# How to use it, and the flow it belongs to (merge, pre-release, GKE pair, tag the same commit):
+# docs/release.md.
+name: prerelease
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit, branch or tag to publish. A commit on main gets -main.g<sha>; anything else -dev.g<sha>."
+        required: true
+        default: main
+      base:
+        description: "The release this precedes, X.Y.Z. Default: the patch after the newest release tag."
+        required: false
+        default: ""
+
+# Exactly these two. `contents: read` is what makes a tag or a GitHub release impossible from here;
+# `packages: write` is GHCR. The gate refuses any other set, and any job-level override.
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: prerelease-${{ github.event.inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history and tags: the version is derived from the newest release tag, and main-or-not
+      # from origin/main. The scripts run from the commit being published, not from the ref this
+      # workflow was dispatched on, so the commit packages itself with its own logic.
+      - name: Checkout the commit to publish
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.ref }}
+          fetch-depth: 0
+
+      - name: Derive the pre-release version
+        env:
+          BASE: ${{ github.event.inputs.base }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          version=$(hack/release-version.sh derive "$sha" "$BASE")
+          {
+            echo "SHA=${sha}"
+            echo "VERSION=${version}"
+            echo "OCI_REPO=oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"
+          } >> "$GITHUB_ENV"
+          echo "pre-release ${version} of ${sha}"
+
+      # The same refusal as a release: a commit no gate ran against is not worth a GKE pair.
+      - name: The commit must have passed lint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: hack/require-lint-passed.sh "${{ github.repository }}" "${SHA}"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      # The organisation's one chart push (charts PUBLISHING.md rule 14), as release-tag.yaml locates it: the same pin,
+      # so a pre-release is pushed the way the release on that commit will be.
+      - name: Locate the shared chart push
+        id: chart-push
+        uses: krateo-platformops/.github/.github/actions/chart-push@e1d3e99215e80ae56eca4a67e9e061b2c73168b8 # 1.0.0
+
+      # The release's own script, with the pre-release channel: it refuses a version without the
+      # pre-release shape before it stamps or pushes anything. The tarballs it keeps are not
+      # uploaded: nothing downstream of this run indexes charts.
+      - name: Package and push every chart
+        env:
+          CHART_PUSH: ${{ steps.chart-push.outputs.path }}
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: hack/publish-charts.sh prerelease "${VERSION}" "${OCI_REPO}" charts-dist
+
+      - name: Stage the files the README applies
+        run: |
+          set -euo pipefail
+          hack/stage-release-assets.sh prerelease "${VERSION}" dist
+          {
+            echo "PRE-RELEASE ${VERSION}. NOT A RELEASE, NOT IN THE MARKETPLACE."
+            echo "commit: ${SHA}"
+            echo "built by: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "charts: ${OCI_REPO}/<name> --version ${VERSION}"
+          } > dist/PRERELEASE.txt
+
+      - name: Attach them to this run
+        uses: actions/upload-artifact@v7
+        with:
+          name: prerelease-${{ env.VERSION }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Summary
+        run: |
+          {
+            echo "## Pre-release \`${VERSION}\`"
+            echo
+            echo "Not a release and not in the Marketplace index. Commit \`${SHA}\`."
+            echo
+            echo '```console'
+            echo "BP_VERSION=${VERSION}"
+            echo "BP_ASSETS=\$(mktemp -d)"
+            echo "gh run download ${GITHUB_RUN_ID} -R ${GITHUB_REPOSITORY} -n prerelease-${VERSION} -D \"\$BP_ASSETS\""
+            echo '```'
+            echo
+            echo "Then the README install block, with each \`.../releases/download/\${BP_VERSION}\` replaced by \`\$BP_ASSETS\` (docs/release.md)."
+          } >> "$GITHUB_STEP_SUMMARY"

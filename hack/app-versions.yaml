@@ -46,9 +46,9 @@ charts:
   blueprints/libvirt/chart:
     source: measured
     image: libvirt
-    tag: 2026.1-ubuntu_noble
+    tag: 2026.1-ubuntu_noble-20261117
     version: "10.0.0"
-    how: "exec in the running pod of that exact image (GKE, blueprint 0.3.64 cold install, 2026-11-15): libvirtd --version -> libvirtd (libvirt) 10.0.0"
+    how: "Trivy package list of that exact image, linux/amd64 (CI run 44192027861, 2026-11-17): libvirt-daemon, libvirt0 and libvirt-clients 10.0.0. Earlier, on the 2026-11-15 build of the series tag: libvirtd --version -> libvirtd (libvirt) 10.0.0 (GKE, 0.3.64)"
   blueprints/magnum/chart:
     source: series
   blueprints/manila/chart:
@@ -75,6 +75,20 @@ charts:
   blueprints/openstack/chart:
     source: series-of
     chart: blueprints/keystone/chart
+  # Krateo's own chart (#312): what it runs that versions it is openstack-exporter; the collector and mysqld-exporter
+  # images carry their own versions in their tags. Measured, not `tag`: the tag rule drops a suffix after `-`, which
+  # would read 2.0.0-alpha as the release 2.0.0.
+  blueprints/openstack-monitoring/chart:
+    source: measured
+    image: openstack_exporter
+    tag: 2.0.0-alpha
+    version: "2.0.0-alpha"
+    how: "docker run --version of that exact image, linux/amd64, digest sha256:2a864f41db28a1656a5034e8a17831fb37986e8856fd3f5361586a05f928950a (2026-11-18): revision 38c8acfd06300b27d3f7cc3eb705dc5713c936e6, the commit tag v2.0.0-alpha points at, go1.26.5; the binary's own version field is empty, so the version is the tag of that commit"
+    # A pre-release-named tag, kept as an explicit exception (Diego, 2026-11-18). hack/validate-openstack-monitoring.py
+    # refuses a pre-release-named image in that chart without an exception that gives a reason and an issue.
+    exception:
+      reason: "no plain release since 1.7.0 (2024), which has 4 CRITICAL CVEs (Go 1.18 stdlib: CVE-2023-24538, CVE-2023-24540, CVE-2024-24790, CVE-2025-68121); 2.0.0-alpha is upstream's newest release (GitHub latest, tags end there) and GHCR latest is a moving main build that cannot be pinned"
+      issue: "348"
   blueprints/openvswitch/chart:
     source: measured
     image: openvswitch_vswitchd

@@ -23,8 +23,8 @@ four things hold, and each is checked here:
      MariaDB root DB_CONNECTION Secret (templates/secret-db.yaml) and to mariadb itself;
      oslo-messaging-admin to exactly the charts rendering a RabbitMQ admin connection Secret
      (templates/secret-rabbitmq.yaml) and to rabbitmq itself, whose administrator it is (at
-     auth.user); oslo-messaging-guest and oslo-messaging-erlang-cookie to rabbitmq alone; oslo-db-sst,
-     oslo-db-audit and oslo-db-exporter to mariadb alone.
+     auth.user); oslo-messaging-guest and oslo-messaging-erlang-cookie to rabbitmq alone; oslo-db-sst and
+     oslo-db-audit to mariadb alone; oslo-db-exporter to mariadb and openstack-monitoring (#312).
   3. NO VALUE FROM VALUES. Each listed chart is rendered with its references AND with the admin
      password in values replaced by a unique sentinel. The sentinel must appear NOWHERE: not in any
      rendered text (configs, scripts) and not in any Secret's data once base64-decoded. A substring
@@ -207,6 +207,22 @@ if shutil.which("helm") is None:
 failures = []
 
 
+# What the umbrella delivers for a chart's storage (#308): cinder's default refuses, so a chart render carries
+# hack/gate_values.py's arguments (nothing for every other chart).
+import importlib.util as _gv_util
+import os as _gv_os
+_gv_spec = _gv_util.spec_from_file_location(
+    "gate_values", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "gate_values.py"))
+gate_values = _gv_util.module_from_spec(_gv_spec)
+_gv_spec.loader.exec_module(gate_values)
+# How a probe's (or a script's) --config-dir arguments are read: one parser, shared with
+# hack/validate-probe-config-args.py, so the two gates cannot disagree on what a probe reads.
+_ca_spec = _gv_util.spec_from_file_location(
+    "config_argv", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "config_argv.py"))
+config_argv = _gv_util.module_from_spec(_ca_spec)
+_ca_spec.loader.exec_module(config_argv)
+
+
 def fail(msg):
     failures.append(msg)
 
@@ -229,7 +245,7 @@ def helm_template(chart, release, values=None):
         yaml.safe_dump(values or {}, f)
         vf = f.name
     try:
-        r = subprocess.run(args + ["-f", vf], capture_output=True, text=True)
+        r = subprocess.run(args + gate_values.helm_args(chart) + ["-f", vf], capture_output=True, text=True)
     finally:
         os.unlink(vf)
     return r.returncode, r.stdout, r.stderr
@@ -308,13 +324,18 @@ RULES = {
         "password_path": lambda chart: "endpoints.oslo_db.auth.audit.password",
         "projections": lambda chart, cv: ["mariadb-dbaudit-generated"],
     },
+    # The mysqld-exporter user: MariaDB creates it (the sidecar's 'exporter'@'127.0.0.1', and with krateo.exporterUser
+    # the standalone exporter's 'exporter'@'%', #312), and openstack-monitoring's standalone exporter logs in as it.
     "oslo-db-exporter": {
-        "what": "is MariaDB itself (the mysqld-exporter user)",
-        "consumes": lambda d, has: d == "mariadb",
+        "what": "is MariaDB itself, or openstack-monitoring's standalone mysqld-exporter (the mysqld-exporter user)",
+        "consumes": lambda d, has: d in ("mariadb", "openstack-monitoring"),
         "password_path": lambda chart: "endpoints.oslo_db.auth.exporter.password",
-        "projections": lambda chart, cv: ["mysql-exporter-generated"],
-        # Created only with monitoring on: render it on, or the sentinel would pass vacuously.
-        "enable": lambda chart: {"monitoring": {"prometheus": {"enabled": True}}},
+        "projections": lambda chart, cv: (["mysql-exporter-generated", "mariadb-exporter-user"] if chart == "mariadb"
+                                          else [cv["secrets"]["mysqld_exporter_cnf"]]),
+        # Created only with monitoring on (and the standalone user with krateo.exporterUser): render both on, or the
+        # sentinel would pass vacuously.
+        "enable": lambda chart: ({"monitoring": {"prometheus": {"enabled": True}}, "krateo": {"exporterUser": True}}
+                                 if chart == "mariadb" else {}),
     },
 }
 
@@ -1450,6 +1471,9 @@ def one_account_check(tmp):
         fail("25: hack/db-users.yaml names no MariaDB user under two keys of one chart; the check had no input")
 
 
+MARIADB_OWN_USERS = ("admin", "sst", "audit", "exporter")
+
+
 def db_map_check(tmp):
     """15b. hack/db-users.yaml is exactly what the charts render: every chart is rendered with a sentinel per per-service
     endpoints.oslo_db*.auth key (MariaDB's own users and the PostgreSQL family are not per-service MariaDB users), and the
@@ -1465,7 +1489,9 @@ def db_map_check(tmp):
             if not fam.startswith("oslo_db") or fam == "oslo_db_postgresql" or not isinstance(e, dict):
                 continue
             for k, a in (e.get("auth") or {}).items():
-                if k != "admin" and isinstance(a, dict) and "password" in a:
+                # MariaDB's own users are tier 1, one root each (oslo-db-<user>), not per-service: the map's header says
+                # so. openstack-monitoring renders `exporter` (#312), the first chart besides mariadb to hold one.
+                if k not in MARIADB_OWN_USERS and isinstance(a, dict) and "password" in a:
                     keys["%s.%s" % (fam, k)] = a.get("username")
         if not keys:
             continue
@@ -1715,7 +1741,16 @@ def mq_dropin_check(chart, cid, sentinel, docs_s, docs, label=""):
                 if not files & carrier_paths:
                     continue
                 MQ_PROBES_CHECKED.append((chart, podname, cname, probe))
-                if not any(re.search(r"--config-dir(?:=|\s+)%s/?(?=\s|$)" % re.escape(dd), text) for dd in dirs):
+                # Read through hack/config_argv.py: --config-dir D, --config-dir=D, the scripts' `$([ -d D ] && echo
+                # --config-dir D)` and the worker probe's --config-dir-if-present D. The last two read D when it
+                # exists, and D here is where the drop-in is mounted, so it exists whenever the container runs.
+                read = config_argv.dirs_read(text)
+                # Positive control on the real probe: with its directory arguments removed it must NOT read D, or
+                # this check could not fail.
+                if any(dd.rstrip("/") in config_argv.dirs_read(config_argv.strip_dirs(text)) for dd in dirs):
+                    fail("22m%s: %s: positive control: %s container %s's %s still reads its drop-in directory with "
+                         "every --config-dir argument removed" % (label, chart, podname, cname, probe))
+                if not any(dd.rstrip("/") in read for dd in dirs):
                     fail("22m%s: %s: %s container %s's %s parses %s with --config-file but passes no --config-dir %s: "
                          "it never reads the drop-in, so it has no transport URL and checks nothing" % (
                              label, chart, podname, cname, probe, sorted(files & carrier_paths), " or ".join(sorted(dirs))))
@@ -1948,7 +1983,7 @@ def notification_vhosts_check(tmp, components):
         with open(os.path.join(u, "templates", "zz-gate-vhosts-probe.yaml"), "w") as f:
             f.write('{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n'
                     '# SELECTED {{ join " " $sel }}\n'
-                    '{{- range $c := .Values.components }}\n{{- if has $c.name $sel }}\n' + span + '\n'
+                    '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n{{- if has $c.name $sel }}\n' + span + '\n'
                     '# VHSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n{{- end }}\n')
         rc, out, err = helm_template(u, "openstack-gate", vals)
         if rc != 0:
@@ -2623,7 +2658,19 @@ def main():
     if not items:
         print("FAILED MEASUREMENT: the umbrella defines no credentials.items, so nothing protects any install")
         sys.exit(2)
-    components = uv.get("components") or []
+    # `source: provided` items (#308) are copies of keys Ceph mints, rendered only with a ceph storage.backend: they have
+    # no generator, no published default to replace, and no root at the umbrella's defaults. hack/validate-ceph-consumer.py
+    # checks them (27 provided roots, 22c readers, 18c restarts, 28 no client.admin, 29 consistency); every check here is
+    # about generated roots, so they are set aside -- from the items and from each component's list -- and named.
+    provided_ids = sorted(cid for cid, i in items.items() if i.get("source"))
+    # Their roots, though: cinder is rendered as the umbrella delivers it (hack/gate_values.py, #308 step 4), ceph-managed,
+    # so its keyring and ceph.conf projections read these roots, and a known root is what they must read.
+    provided_roots = {i["secret"]: i for i in items.values() if i.get("source")}
+    items = {cid: i for cid, i in items.items() if not i.get("source")}
+    components = [dict(c, credentials=[x for x in (c.get("credentials") or []) if x not in provided_ids])
+                  for c in (uv.get("components") or [])]
+    if provided_ids:
+        print("set aside, checked by hack/validate-ceph-consumer.py: %s" % ", ".join(provided_ids))
     ITEMS_REF.update(items)
     for cid in IDUSER_BY_ITEM:
         if cid in items:
@@ -2705,11 +2752,14 @@ def main():
         else:
             span = comp[start:comp.index("\n", merge)]
         with open(os.path.join(u, "templates", "zz-gate-probe.yaml"), "w") as f:
-            f.write('{{- range $c := .Values.components }}\n' + span + '\n'
+            f.write('{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n' + span + '\n'
                     '# CREDSPEC {{ $c.name }} {{ $ov | toJson }}\n'
                     '{{- end }}\n')
         override = {"endpoints": {"identity": {"auth": {"admin": {"passwordFrom": {"store": "gate-explicit-store"}}}}}}
-        rc, out, err = helm_template(u, "openstack-gate", {"componentValues": {"keystone": override}})
+        # monitoring on: a `monitoring: true` item's root (identity-user-openstack-exporter, #312) renders only then, and
+        # every root must be checked. hack/validate-openstack-monitoring.py checks that it is absent with monitoring off.
+        rc, out, err = helm_template(u, "openstack-gate", {"componentValues": {"keystone": override},
+                                                           "monitoring": {"enabled": True}})
         if rc != 0:
             print("FAILED MEASUREMENT: the umbrella does not render: %s" % err.strip()[:400])
             sys.exit(2)
@@ -2848,7 +2898,7 @@ def main():
                     fail("%s: ExternalSecret %s reads nothing" % (c["name"], name))
                 for entry in spec.get("data") or []:
                     ref = entry.get("remoteRef") or {}
-                    item = root_secrets.get(ref.get("key"))
+                    item = root_secrets.get(ref.get("key")) or provided_roots.get(ref.get("key"))
                     if item is None or ref.get("property") not in (item["key"], item.get("publicKey") or item["key"]):
                         fail("%s: ExternalSecret %s does not read a credential root (reads %s/%s)"
                              % (c["name"], name, ref.get("key"), ref.get("property")))
@@ -2873,6 +2923,9 @@ def main():
                     name = d["metadata"]["name"]
                     spec = d["spec"]
                     tdata = ((spec.get("target") or {}).get("template") or {}).get("data") or {}
+                    refs = [(e.get("remoteRef") or {}).get("key") for e in spec.get("data") or []]
+                    if refs and all(r in provided_roots for r in refs):
+                        continue  # a projection of a key Ceph minted: no values-mode counterpart; validate-ceph-consumer P
                     src = plain.get(RENAMED.get(name, name))
                     if src is None:
                         fileread = {RULES[x]["fileread"](c["name"])["secret"] for x in cids if "fileread" in RULES[x]}
@@ -3211,6 +3264,8 @@ def main():
     if not INIT_CONFD_CHECKED:
         fail("19c: no init container that starts an OpenStack program and mounts its project's main config was found in "
              "any chart; the check had no input")
+    for problem in config_argv.self_test():
+        fail("22m: hack/config_argv.py misreads a probe: %s" % problem)
     if checked and not MQ_PROBES_CHECKED:
         fail("22m: no exec probe parsing a config that carried a transport URL was found; the probe check had no input")
     if checked and not RABBIT_INIT_CHECKED:

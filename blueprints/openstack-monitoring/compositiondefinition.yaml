@@ -1,0 +1,9 @@
+apiVersion: core.krateo.io/v1alpha1
+kind: CompositionDefinition
+metadata:
+  name: openstack-monitoring
+  namespace: openstack-system
+spec:
+  chart:
+    url: oci://ghcr.io/krateo-blueprints/charts/openstack-monitoring
+    version: CHART_VERSION

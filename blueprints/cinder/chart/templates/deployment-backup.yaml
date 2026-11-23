@@ -170,7 +170,7 @@ spec:
         {{ end }}
       containers:
         - name: cinder-backup
-{{ dict "envAll" $envAll "component" "backup" "container" "default" "args" (list "--process" "cinder-backup" "--exchange" "openstack" "--rpc-topic" "cinder-backup") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "backup" "container" "default" "args" (list "--process" "cinder-backup" "--exchange" "openstack" "--rpc-topic" "cinder-backup") "config" (include "cinder.config_args.backup" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "cinder_backup" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.backup | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "cinder_backup" "container" "cinder_backup" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}

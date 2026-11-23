@@ -1,0 +1,23 @@
+component: gnocchi
+issue: 309
+reason: >-
+  gnocchi's tooz coordination backend. Upstream derives coordination_url from the memcache endpoint and takes the tooz
+  driver from endpoints.oslo_cache.hosts.default, which is right only while that host is literally `memcached`. With
+  ha.enabled the umbrella sets it to the headless Service memcached-discovery and a host list, so H2 run 4 rendered
+  memcached-discovery://h0,h1,h2 and gnocchi never became Ready. Here, with storage.driver redis (the default),
+  coordination_url is left unset and gnocchi coordinates on the metric store's redis; any other driver gets a literal
+  memcached driver on one host, and a memcache host list is refused. hack/validate-ha-propagation.py checks every
+  rendered tooz URL with the ha spec.
+assertions:
+  - file: templates/configmap-etc.yaml
+    absent: $driver := .Values.endpoints.oslo_cache.hosts.default
+    why: >-
+      The memcache host name as the tooz driver: memcached-discovery with ha.enabled, which tooz does not register.
+  - file: templates/configmap-etc.yaml
+    present: (ne (.Values.conf.gnocchi.storage.driver | toString) "redis")
+    why: >-
+      With the redis metric store, coordination_url stays unset, so gnocchi's lock backend is that one redis.
+  - file: templates/configmap-etc.yaml
+    present: printf "memcached://%s" $endpointUrl
+    why: >-
+      Otherwise the memcached driver is named literally, never taken from a host name.

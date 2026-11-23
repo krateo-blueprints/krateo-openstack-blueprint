@@ -1,0 +1,91 @@
+{{- /* Krateo blueprint addition (issue #312): creates the exporter user for openstack-monitoring's standalone
+       mysqld-exporter, which connects through the mariadb Service from its own pod, so from any host ('%'), unlike
+       the sidecar's 'exporter'@'127.0.0.1' (exporter-job-create-user.yaml), which it does not touch: MariaDB matches
+       the most specific host, so the two accounts coexist.
+
+       Grants: PROCESS, BINLOG MONITOR (what REPLICATION CLIENT is an alias of since 10.5) and SLAVE MONITOR, for
+       mysqld-exporter's default collectors (global status and variables, slave status, InnoDB status), and at most 3
+       connections. NOT `SELECT ON *.*`, which upstream's README grants: it would let this user read every OpenStack
+       database, Keystone's included, and no default collector needs it.
+
+       Switched on by krateo.exporterUser, which the umbrella sets with its `monitoring` value. Its script is inline,
+       kept out of mariadb-bin; since #445 the StatefulSet hashes only the keys it mounts, so a new key there would not
+       restart the database either. A
+       post-install,post-upgrade hook in the exporter-create-user band, re-run on every upgrade (CREATE OR REPLACE). */ -}}
+{{- if .Values.krateo.exporterUser }}
+{{- $envAll := . }}
+{{- $serviceAccountName := "mariadb-exporter-user" }}
+{{ tuple $envAll "prometheus_create_mysql_user" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mariadb-exporter-user
+  labels:
+{{ tuple $envAll "mariadb" "exporter-user" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
+  annotations:
+{{ tuple "exporter-create-user" $envAll | include "helm-toolkit.snippets.job_upgrade_hook" | indent 4 }}
+spec:
+{{ tuple $envAll .Values.jobs.exporter_create_sql_user.activeDeadlineSeconds | include "helm-toolkit.snippets.job_hook_deadline" | indent 2 }}
+  backoffLimit: 20
+  template:
+    metadata:
+      labels:
+{{ tuple $envAll "mariadb" "exporter-user" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+    spec:
+      serviceAccountName: {{ $serviceAccountName }}
+{{ dict "envAll" $envAll "application" "prometheus_create_mysql_user" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
+      restartPolicy: OnFailure
+{{- if $envAll.Values.pod.tolerations.mariadb.enabled }}
+{{ tuple $envAll "mariadb" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{- end }}
+      nodeSelector:
+        {{ .Values.labels.job.node_selector_key }}: {{ .Values.labels.job.node_selector_value }}
+      initContainers:
+{{ tuple $envAll "prometheus_create_mysql_user" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
+      containers:
+        - name: exporter-user
+{{ tuple $envAll "prometheus_create_mysql_user" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ dict "envAll" $envAll "application" "prometheus_create_mysql_user" "container" "main" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.jobs.prometheus_create_mysql_user | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+          command:
+            - /bin/bash
+            - -c
+            - >-
+              set -e;
+              mariadb --defaults-file=/etc/mysql/admin_user.cnf -e
+              "CREATE OR REPLACE USER '${EXPORTER_USER}'@'%' IDENTIFIED BY '${EXPORTER_PASSWORD}' WITH MAX_USER_CONNECTIONS 3;
+              GRANT PROCESS, BINLOG MONITOR, SLAVE MONITOR ON *.* TO '${EXPORTER_USER}'@'%' ${MARIADB_X509};
+              FLUSH PRIVILEGES;"
+          env:
+            - name: EXPORTER_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb-exporter-user
+                  key: EXPORTER_USER
+            - name: EXPORTER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb-exporter-user
+                  key: EXPORTER_PASSWORD
+            - name: MARIADB_X509
+              value: {{ ternary "REQUIRE X509" "" $envAll.Values.manifests.certificates | quote }}
+          volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
+            - name: mariadb-secrets
+              mountPath: /etc/mysql/admin_user.cnf
+              subPath: admin_user.cnf
+              readOnly: true
+{{ dict "enabled" $envAll.Values.manifests.certificates "name" $envAll.Values.secrets.tls.oslo_db.server.internal "path" "/etc/mysql/certs" | include "helm-toolkit.snippets.tls_volume_mount" | indent 12 }}
+      volumes:
+        - name: pod-tmp
+          emptyDir: {}
+        - name: mariadb-secrets
+          secret:
+            secretName: {{ include "mariadb.secrets_etc_name" $envAll }}
+            defaultMode: 0444
+{{ dict "enabled" $envAll.Values.manifests.certificates "name" $envAll.Values.secrets.tls.oslo_db.server.internal | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
+{{- end }}

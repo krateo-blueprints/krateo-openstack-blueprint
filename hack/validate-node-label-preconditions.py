@@ -122,6 +122,16 @@ POD_SPEC_AT = {
 }
 
 
+# What the umbrella delivers for a chart's storage (#308): cinder's default refuses, so a chart render carries
+# hack/gate_values.py's arguments (nothing for every other chart).
+import importlib.util as _gv_util
+import os as _gv_os
+_gv_spec = _gv_util.spec_from_file_location(
+    "gate_values", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "gate_values.py"))
+gate_values = _gv_util.module_from_spec(_gv_spec)
+_gv_spec.loader.exec_module(gate_values)
+
+
 def measurement_failed(msg):
     # Exit 2 and never 0. A gate that reports success without measuring anything is the same
     # bug as a probe that cannot fail (#120).
@@ -180,7 +190,7 @@ def render(chart_dir, extra=()):
         out = subprocess.run(
             # Without --kube-version a kubeVersion-constrained chart renders nothing, and a
             # gate over an empty document set passes everything.
-            ["helm", "template", "gate", str(work), "--kube-version", "1.36.0", *extra],
+            ["helm", "template", "gate", str(work), "--kube-version", "1.36.0", *gate_values.helm_args(work), *extra],
             capture_output=True, text=True,
         )
     return out
@@ -455,15 +465,36 @@ else:
     # /releases/download/<version>/node-reader-rbac.yaml, and a file that only exists in the
     # tree makes that a 404 -- which is precisely #50, where the CompositionDefinitions the docs
     # told a reader to apply were not published either.
+    #
+    # Measured by RUNNING what the release runs, not by finding the file name in the workflow:
+    # since 2026-11-17 release-tag.yaml calls hack/stage-release-assets.sh and uploads its
+    # dist/*.yaml, so the name is no longer in the workflow at all, and a name in a file was
+    # never proof it was copied anywhere.
+    stage = ROOT / "hack/stage-release-assets.sh"
     if not RELEASE_WORKFLOW.is_file():
         problems.append("no .github/workflows/release-tag.yaml, so this gate cannot tell whether "
                         "the node-read grant is published as a release asset")
-    elif RBAC.name not in RELEASE_WORKFLOW.read_text():
+    elif not re.search(r'hack/stage-release-assets\.sh release "\$\{VERSION\}" dist\b',
+                       RELEASE_WORKFLOW.read_text()) \
+            or "gh release upload \"${VERSION}\" dist/*.yaml" not in RELEASE_WORKFLOW.read_text():
         problems.append(
-            f"release-tag.yaml never publishes {RBAC.name}, so the asset exists in the tree and "
-            "not in any release. The documented `kubectl apply -f "
-            ".../releases/download/<version>/node-reader-rbac.yaml` would 404 and the check "
-            "would be unenforceable by anyone following the README -- the same defect as #50")
+            "release-tag.yaml no longer stages its assets with `hack/stage-release-assets.sh "
+            "release \"${VERSION}\" dist` and uploads dist/*.yaml, so this gate cannot tell whether "
+            f"{RBAC.name} is published; update this check to what the release now runs")
+    else:
+        with tempfile.TemporaryDirectory() as out:
+            run = subprocess.run(["bash", str(stage), "release", "0.0.0", out],
+                                 cwd=ROOT, capture_output=True, text=True)
+            if run.returncode != 0:
+                problems.append(f"hack/stage-release-assets.sh failed, so no asset is published: "
+                                f"{run.stderr.strip()[-400:]}")
+            elif not (Path(out) / RBAC.name).is_file():
+                problems.append(
+                    f"the release's assets do not include {RBAC.name}, so the asset exists in the "
+                    "tree and not in any release. The documented `kubectl apply -f "
+                    ".../releases/download/<version>/node-reader-rbac.yaml` would 404 and the "
+                    "check would be unenforceable by anyone following the README -- the same "
+                    "defect as #50")
 
 
 

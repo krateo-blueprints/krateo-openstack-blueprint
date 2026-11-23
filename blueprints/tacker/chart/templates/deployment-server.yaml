@@ -49,6 +49,7 @@ spec:
       annotations:
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
+{{ tuple "tacker_server" . | include "helm-toolkit.snippets.custom_pod_annotations" | indent 8 }}
     spec:
 {{- if $envAll.Values.pod.tolerations.tacker.enabled }}
 {{ tuple $envAll "tacker" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}

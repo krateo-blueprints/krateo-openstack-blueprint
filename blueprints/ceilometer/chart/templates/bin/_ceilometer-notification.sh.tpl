@@ -17,5 +17,4 @@ limitations under the License.
 set -ex
 
 exec ceilometer-agent-notification \
-  --config-file /etc/ceilometer/ceilometer.conf \
-  --config-dir /etc/ceilometer/ceilometer.conf.d
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "ceilometer.config_args.notification" . | fromYamlArray) "format" "shell" "indent" 2) }}

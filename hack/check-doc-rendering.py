@@ -1,0 +1,601 @@
+#!/usr/bin/env python3
+"""Ask GitHub's renderer whether this repo's admonitions actually render.
+
+    exit 0   every document rendered as many alert boxes as it declares markers
+    exit 1   a document declares N and renders M. The file and the lines are named.
+    exit 2   VOID -- a control failed, and the output says which. Never a pass.
+
+WHY THIS EXISTS AND WHAT IT ADDS. `verify_admonition_not_in_code_fence` in
+scripts/validate.py knows ONE shape: a marker swallowed by an open fence. It
+knows that shape because this repo shipped it in two files for eleven PRs. It
+cannot know the shapes nobody has hit yet -- a mis-cased `[!note]`, a marker
+indented under a list item, a marker separated from its blockquote by a blank
+line. Each of those renders as plain text, silently, and a static screen built
+from one example has no opinion about them. This script does not model markdown
+at all. It asks the renderer and counts what came back.
+
+THE DEFINITION IS THE WHOLE DESIGN, and my first one was blind to the very
+defect that motivated the script. The obvious comparison is
+
+    markers OUTSIDE fences  ==  alert boxes rendered
+
+which passes the swallowed case perfectly: the marker is inside the fence, so
+the left side excludes it, both sides are 0, and the gate reports clean on the
+exact document that started this. So the comparison here is
+
+    ALL markers, fenced or not  ==  alert boxes rendered
+
+which makes this screen a strict superset of the static one. The cost is stated
+rather than discovered: a document that deliberately SHOWS an admonition as
+example code would fail here. None does. If one is added, exempt it by path
+with the reason at the line, and do not loosen the count.
+
+CONTROLS, and why there are two kinds.
+
+  INSTRUMENT, once per run, before any document is judged. A known-good
+  fixture must render exactly 1 alert, and a known-bad one (a marker inside a
+  fence) must render exactly 0. The second is the one that matters: it proves
+  that a swallowed admonition STILL renders as nothing today, rather than
+  trusting a measurement from the day this was written. If GitHub ever starts
+  rendering alerts inside code blocks, this run goes VOID instead of quietly
+  passing every file.
+
+  PER DOCUMENT, because one control per sweep is how 63 rate-limited fetches
+  once read in this repo as "symbol absent". A rate-limited, truncated or wrong
+  response must VOID that one file rather than read as "declares 0, rendered 0,
+  agreed". A single "the API answered once" check at the top of an 18-file loop
+  cannot do that.
+
+  The control asks the strongest available question: does the returned HTML
+  contain a token that is distinctive to this document -- the longest
+  `[A-Za-z0-9_-]{12,}` run, containing a letter, that occurs outside this
+  document's fences and in NO OTHER document of the corpus? That character class
+  cannot be altered by HTML escaping or split by syntax-highlight spans, and
+  unlike "has a heading" a corpus-unique token also fails when the response is a
+  real render of a different document.
+
+  Uniqueness is computed, not assumed, and the output says which kind of token a
+  file got. Four of this repo's documents share
+  `installing-this-pin-onto-a-cluster-that-already-has-a-provider` as their
+  longest token, so picking "longest" alone would have given four files an
+  identifier that cannot tell them apart -- a control that reads as strong and
+  is not. A file with no unique token keeps the longest shared one (still good
+  against truncation, stated as weaker); a file with no token at all falls back
+  to "contains any block-level element".
+
+  The earlier version of this control required a heading element, or a `<p>`
+  when the source had no ATX heading. The openstack-as-a-service session hit its
+  limit while porting this screen: 35 of their documents are front matter plus a
+  single list item, which GitHub renders as `<hr>`, a setext `<h2>` and a
+  `<ul><li>` -- no `<p>` anywhere, so all 35 VOIDed. Their fix was to accept
+  `<li>` too, which is correct and narrower than this one. The lesson is the
+  reason for the change: a control built from the documents in front of me
+  mistook "the shape my repo happens to have" for "evidence the response is this
+  document".
+
+MEASURED FACTS THIS DEPENDS ON, 2026-11-18, from real responses:
+
+    per alert box, GitHub emits  <div class="markdown-alert markdown-alert-note">
+                                   <p class="markdown-alert-title">...</p>
+    so the substring `markdown-alert` appears THREE times per alert and
+    `markdown-alert-title` appears ONCE. Counting the former reports 6 alerts
+    for a 2-alert document -- wrong in a way that looks like data.
+
+    A marker INDENTED INSIDE A LIST ITEM is not an alert. GFM's extension does
+    not reach there: `  > [!WARNING]` under a list item rendered as
+    `<blockquote><p>[!WARNING]<br>...` -- a plain grey quote whose first
+    visible line is the literal marker text. That is what
+    docs/e2e-krateo-openstack.md:40 was, and why the fix was to hoist the block
+    out of the list rather than to reword it. Deliberately NOT one of the
+    instrument controls below: the count comparison stays correct whichever way
+    GitHub decides to treat that case, so a control there would guard an
+    assumption no verdict depends on.
+"""
+import argparse
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "scripts"))
+from mdfence import ADMONITION, fence_scan  # noqa: E402
+
+# THE OPENING TAG, BECAUSE PROSE CANNOT PRODUCE A LITERAL `<`.
+#
+# A document that MENTIONS the alert markup -- documentation about this very
+# screen, for instance -- renders its backticked examples as code spans, and a
+# substring counter reads them as alert boxes. Measured on one document
+# declaring ONE real alert and naming three forms in prose:
+#
+#     markdown-alert-title             -> 4   SPOOFED (3 mentions counted)
+#     class="markdown-alert-title"     -> 3   SPOOFED (2 mentions counted)
+#     <p class="markdown-alert-title"  -> 1   correct
+#     <div class="markdown-alert       -> 1   correct
+#
+# GitHub does NOT escape `"` inside a code span, so the attribute form is
+# spoofable; it DOES escape `<` to `&lt;`, so including the opening tag makes
+# the counter unspoofable by text. The first fix here used the attribute form --
+# the openstack-as-a-service session's suggestion after it bit them -- and this
+# repo's own mutation arm caught that it was still spoofable within a minute.
+#
+# This repo had ZERO documents mentioning any form, so its 18-of-18 was LUCKY
+# rather than correct -- worth writing down, because "all green" is exactly how
+# a latent counter bug stays latent.
+ALERT = '<p class="markdown-alert-title"'
+HEADING = re.compile(r"<h[1-6][\s>]")
+SRC_HEADING = re.compile(r"#{1,6} \S")
+# Any block-level element, used only when a document has no distinctive token.
+BLOCK = re.compile(r"<(?:p|li|h[1-6]|table|pre|blockquote)[\s>]")
+# A token that cannot be altered by HTML escaping or by syntax-highlight spans:
+# letters, digits, underscore and hyphen only, long enough to be specific. It
+# must contain a LETTER -- without that rule kagent/README.md identified itself
+# by a table rule, `--------------------------------`, which every table in the
+# repo contains.
+TOKEN = re.compile(r"[A-Za-z0-9_-]{12,}")
+
+GOOD_FIXTURE = "# H\n\n> [!NOTE]\n> rendered\n"
+BAD_FIXTURE = "# H\n\n```console\n> [!NOTE]\n> swallowed\n```\n"
+
+OK, MISMATCH, VOID = 0, 1, 2
+
+
+def docs():
+    for f in sorted(glob.glob("**/*.md", recursive=True)):
+        if f.startswith(".git" + os.sep) or os.sep + "charts" + os.sep in f:
+            continue
+        yield f
+
+
+def render(text):
+    """POST to GitHub's /markdown. Returns (html, None) or (None, reason)."""
+    body = json.dumps({"text": text, "mode": "gfm"})
+    try:
+        p = subprocess.run(
+            ["gh", "api", "-X", "POST", "/markdown", "--input", "-"],
+            input=body, capture_output=True, text=True, timeout=60)
+    except FileNotFoundError:
+        return None, "the `gh` CLI is not on PATH"
+    except subprocess.TimeoutExpired:
+        return None, "the request did not answer within 60s"
+    if p.returncode != 0:
+        # gh prints error JSON on stdout for a 4xx, so a non-empty stdout is
+        # NOT evidence the call worked. The return code is.
+        return None, "gh exited %d: %s" % (
+            p.returncode, (p.stderr.strip() or p.stdout.strip())[:300])
+    if not p.stdout.strip():
+        return None, "a 0-byte body with a 0 exit status"
+    return p.stdout, None
+
+
+def markers(lines):
+    """[(line number, kind, inside_fence)] for every admonition marker."""
+    inside, _, _, _ = fence_scan(lines)
+    out = []
+    for n, line in enumerate(lines):
+        m = ADMONITION.match(line)
+        if m:
+            out.append((n + 1, m.group(1), inside[n]))
+    return out
+
+
+def comment_mask(lines, inside):
+    """True where a line is inside an HTML comment (fences excluded).
+
+    GitHub's renderer STRIPS HTML comments, so a token that only occurs in one
+    is absent from the output by design. README.md declares this repo's provider
+    floor in a machine-readable `<!-- ... -->` block, and its longest unique
+    token lived there: the control VOIDed the file on its first run, correctly
+    reporting that the response did not contain the token, and wrongly implying
+    the response was not this document. A comment is as invisible to the
+    renderer as a fence makes a token unmatchable, so both are excluded here.
+    """
+    mask = [False] * len(lines)
+    open_comment = False
+    for n, line in enumerate(lines):
+        if inside[n]:
+            continue
+        if open_comment:
+            mask[n] = True
+            if "-->" in line:
+                open_comment = False
+            continue
+        if "<!--" in line:
+            mask[n] = True
+            # A comment that also closes on this line leaves the state clean.
+            if "-->" not in line.split("<!--", 1)[1]:
+                open_comment = True
+    return mask
+
+
+def tokens_of(lines, inside):
+    """Identifying tokens outside this document's fences and HTML comments.
+
+    Outside the fences deliberately: inside a highlighted block GitHub wraps
+    pieces of a line in <span>s, which can split a token and make a present
+    document look absent. Outside comments because the renderer drops them.
+    """
+    commented = comment_mask(lines, inside)
+    out = set()
+    for n, line in enumerate(lines):
+        if inside[n] or commented[n]:
+            continue
+        for m in TOKEN.finditer(line):
+            t = m.group(0)
+            if re.search(r"[A-Za-z]", t):
+                out.add(t)
+    return out
+
+
+def pick_token(tokens, counts):
+    """(token, unique) -- longest corpus-unique token, else longest, else None."""
+    uniq = [t for t in tokens if counts.get(t, 0) == 1]
+    if uniq:
+        return max(uniq, key=len), True
+    if tokens:
+        return max(tokens, key=len), False
+    return None, False
+
+
+def supersets_of(f, corpus):
+    """The other documents that contain f's whole token set -- concatenations of f."""
+    toks = corpus[f]
+    return [g for g in corpus if g != f and toks and toks <= corpus[g]]
+
+
+def identify(f, corpus, full):
+    """(token, unique, tier) for one document, the first tier that yields a token.
+
+      1  the longest token unique across ALL documents (no exclusion);
+      2  else the longest token unique once the documents that contain this one's
+         whole token set are excluded -- its concatenations, such as
+         openstack-as-a-service's docs/log.md over each docs/log.d entry, which
+         repeat every token a source has and would leave it only shared ones;
+      3  else the longest shared token, reported as shared;
+      4  else none: the caller falls back to any block-level element.
+
+    Tier 2 excludes the supersets OF THIS DOCUMENT, not every document that is a
+    superset of some other one. Excluding those globally (the rule's first form)
+    let a document that merely QUOTES a small one -- a README containing every
+    token of a four-line changelog entry -- drop out of the census for everyone,
+    so any third document sharing a token with that README could claim it as
+    unique while the README's render contains it too.
+    """
+    token, unique = pick_token(corpus[f], full)
+    if token is not None and unique:
+        return token, True, 1
+    sups = supersets_of(f, corpus)
+    if sups:
+        local = dict(full)
+        for g in sups:
+            for tok in corpus[g]:
+                local[tok] -= 1
+        token, unique = pick_token(corpus[f], local)
+        if token is not None and unique:
+            return token, True, 2
+    token, unique = pick_token(corpus[f], full)
+    if token is not None:
+        return token, False, 3
+    return None, False, 4
+
+
+def plan(corpus):
+    """[(document, token, unique, tier)] for EVERY document, in order -- the check list."""
+    full = {}
+    for ts in corpus.values():
+        for tok in ts:
+            full[tok] = full.get(tok, 0) + 1
+    return [(f,) + identify(f, corpus, full) for f in sorted(corpus)]
+
+
+def instrument_controls():
+    """Returns a list of reasons the instrument cannot be trusted right now."""
+    bad = []
+    for label, text, want in (("known-good", GOOD_FIXTURE, 1),
+                              ("known-bad", BAD_FIXTURE, 0)):
+        html, why = render(text)
+        if html is None:
+            bad.append("%s fixture did not render: %s" % (label, why))
+            continue
+        got = html.count(ALERT)
+        if got != want:
+            bad.append(
+                "%s fixture rendered %d alert boxes, expected %d. The "
+                "renderer's behaviour has changed, so no verdict below this "
+                "line means anything." % (label, got, want))
+        if not HEADING.search(html):
+            bad.append(
+                "%s fixture rendered no heading element, so the per-document "
+                "control cannot be relied on either" % label)
+    return bad
+
+
+def self_test():
+    """Offline. Every arm must be able to fail for a reason it names."""
+    # 1. Marker extraction, including the fenced one the static screen catches.
+    got = markers(BAD_FIXTURE.split("\n"))
+    assert got == [(4, "NOTE", True)], got
+    got = markers(GOOD_FIXTURE.split("\n"))
+    assert got == [(3, "NOTE", False)], got
+
+    # 2. The definition this script turns on. If `markers` ever stops
+    #    reporting fenced markers, the swallowed case silently starts passing.
+    assert any(inside for _, _, inside in markers(BAD_FIXTURE.split("\n"))), \
+        "a fenced marker must still be COUNTED, or the gate is blind to the " \
+        "defect it was written for"
+
+    # 3. The counter, against markup recorded verbatim from a real response on
+    #    2026-11-18 (svg/path children elided; the class attributes are exact).
+    real_two = (
+        '<h1>H</h1>\n'
+        '<div class="markdown-alert markdown-alert-note">'
+        '<p class="markdown-alert-title"><svg></svg>Note</p><p>one</p>\n</div>\n'
+        '<div class="markdown-alert markdown-alert-warning">'
+        '<p class="markdown-alert-title"><svg></svg>Warning</p><p>two</p>\n</div>\n')
+    assert real_two.count(ALERT) == 2, real_two.count(ALERT)
+    assert real_two.count("markdown-alert") == 6, \
+        "the 3-per-alert inflation is the reason ALERT is the title class"
+
+    # Recorded verbatim from a real response: prose naming three forms of the
+    # markup in backticks, plus one real alert. The fixture asserts BOTH that
+    # the rejected counters are spoofable and that the chosen one is not --
+    # without the first half the arm would pass just as well if ALERT matched
+    # nothing at all.
+    spoof = ('<p>Forms a doc might name: <code class="notranslate">'
+             'markdown-alert-title</code>, <code class="notranslate">'
+             'class="markdown-alert-title"</code>, and <code class="notranslate">'
+             '&lt;p class="markdown-alert-title"&gt;</code>.</p>\n'
+             '<div class="markdown-alert markdown-alert-note">'
+             '<p class="markdown-alert-title"><svg></svg>Note</p>'
+             '<p>one real alert</p>\n</div>')
+    assert spoof.count("markdown-alert-title") == 4, "the bare form is spoofable"
+    assert spoof.count('class="markdown-alert-title"') == 3, \
+        "the attribute form is spoofable too -- `\"` is not escaped in a code span"
+    assert spoof.count(ALERT) == 1, \
+        "the opening-tag form must count the one real alert and no mention"
+    assert HEADING.search(real_two)
+
+    # 4. The mutation that would make this script useless, asserted as wrong
+    #    rather than left to a comment: counting the div class instead.
+    assert real_two.count("markdown-alert") != 2, \
+        "if these ever agree, the fixture no longer expresses the bug"
+
+    # 5. A response that is a lie: 0 bytes with a 0 status, and error JSON on
+    #    stdout. Both must read as VOID, not as 0 alerts.
+    assert HEADING.search("<p>no heading here</p>") is None
+    assert not SRC_HEADING.search("no heading in this source line")
+    assert SRC_HEADING.search("## Install the chart")
+
+    # 6. The per-document control. A token must bear a letter: without that
+    #    rule kagent/README.md identified itself by a table rule.
+    ins, _, _, _ = fence_scan(["--------------------------------",
+                               "about configurationFields here",
+                               "```", "insideTheFenceToken", "```"])
+    toks = tokens_of(["--------------------------------",
+                      "about configurationFields here",
+                      "```", "insideTheFenceToken", "```"], ins)
+    assert "--------------------------------" not in toks, toks
+    assert "configurationFields" in toks, toks
+    assert "insideTheFenceToken" not in toks, "fenced tokens must be excluded"
+
+    # 6b. HTML comments are stripped by the renderer, so a token that only
+    #     occurs inside one is absent from the output BY DESIGN. README.md's
+    #     longest unique token lives in its machine-readable floor comment and
+    #     VOIDed the file on the first live run.
+    doc = ["before the comment", "<!-- a note about tokenOnlyInComment",
+           "   spanning two lines -->", "after tokenAfterComment ends"]
+    i2, _, _, _ = fence_scan(doc)
+    cm = comment_mask(doc, i2)
+    assert cm == [False, True, True, False], cm
+    t2 = tokens_of(doc, i2)
+    assert "tokenOnlyInComment" not in t2, t2
+    assert "tokenAfterComment" in t2, t2
+    one = ["x <!-- shortLivedComment --> y", "tokenAfterOneLiner here"]
+    i3, _, _, _ = fence_scan(one)
+    assert comment_mask(one, i3) == [True, False], "a one-line comment must not latch"
+    assert "tokenAfterOneLiner" in tokens_of(one, i3)
+
+    # 7. Corpus-uniqueness must beat length, or four files in this repo would
+    #    share one identifier and the control would read as strong while being
+    #    unable to tell them apart.
+    counts = {"sharedLongerToken": 2, "uniqueShorter": 1}
+    tok, uniq = pick_token({"sharedLongerToken", "uniqueShorter"}, counts)
+    assert (tok, uniq) == ("uniqueShorter", True), (tok, uniq)
+    tok, uniq = pick_token({"sharedLongerToken"}, counts)
+    assert (tok, uniq) == ("sharedLongerToken", False), (tok, uniq)
+    assert pick_token(set(), counts) == (None, False)
+
+    # 8. THE ARM THAT MAKES THE CONTROL WORTH HAVING: a real render of the
+    #    WRONG document must fail it. Without corpus-uniqueness this arm passes
+    #    on a broken control, which is why it is asserted and not commented.
+    doc_a = ["# A", "", "it discusses theUniqueTokenOfA at length"]
+    doc_b = ["# B", "", "it discusses theUniqueTokenOfB at length"]
+    ia, _, _, _ = fence_scan(doc_a)
+    ib, _, _, _ = fence_scan(doc_b)
+    ta, tb = tokens_of(doc_a, ia), tokens_of(doc_b, ib)
+    cnt = {}
+    for t in list(ta) + list(tb):
+        cnt[t] = cnt.get(t, 0) + 1
+    pa, ua = pick_token(ta, cnt)
+    assert ua and pa == "theUniqueTokenOfA", (pa, ua)
+    render_of_b = "<h1>B</h1><p>it discusses theUniqueTokenOfB at length</p>"
+    assert pa not in render_of_b, "doc A's token must be absent from doc B's render"
+
+    # 9. The superset rule. C is A plus B, as a concatenation is. Counted
+    #    against everything, A's and B's every token is shared with C. With
+    #    each document's OWN supersets excluded (tier 2), A and B are
+    #    identified by unique tokens again -- and C is still CHECKED, by a
+    #    shared token (tier 3). Excluding C from the check instead would lose
+    #    the one document that copies the others; that is asserted.
+    corp = {"a.md": {"alphaOnlyInA", "commonToAllThree"},
+            "b.md": {"bravoOnlyInB", "commonToAllThree"},
+            "c.md": {"alphaOnlyInA", "bravoOnlyInB", "commonToAllThree"}}
+    got = {f: (tok, uniq, tier) for f, tok, uniq, tier in plan(corp)}
+    assert set(got) == set(corp), "every document must be checked, the superset included: %s" % sorted(got)
+    assert got["a.md"] == ("alphaOnlyInA", True, 2), got["a.md"]
+    assert got["b.md"] == ("bravoOnlyInB", True, 2), got["b.md"]
+    assert got["c.md"][1:] == (False, 3) and got["c.md"][0] is not None, got["c.md"]
+
+    # 10. A quoting document is not a concatenation of everyone. Q contains all
+    #     of the small entry E (so Q is a superset, of E alone) and shares one
+    #     long token with S. S also has a token no other document has, and must
+    #     pick it at tier 1. Under the rule's first form -- every superset left
+    #     out of one global census -- S picked the long token it shares with Q,
+    #     reported as unique, and a render of Q would have passed S's check.
+    corp = {"e.md": {"entryTokenOfE"},
+            "q.md": {"entryTokenOfE", "aVeryLongTokenSharedByQandS", "quoteOwnToken"},
+            "s.md": {"aVeryLongTokenSharedByQandS", "sOwnToken12"}}
+    got = {f: (tok, uniq, tier) for f, tok, uniq, tier in plan(corp)}
+    assert got["s.md"] == ("sOwnToken12", True, 1), got["s.md"]
+    assert got["e.md"] == ("entryTokenOfE", True, 2), got["e.md"]
+    assert got["q.md"][2] == 1, got["q.md"]
+    global_census = {}
+    for f, ts in corp.items():
+        if not any(g != f and corp[g] and corp[g] <= ts for g in corp):
+            for tok in ts:
+                global_census[tok] = global_census.get(tok, 0) + 1
+    assert pick_token(corp["s.md"], global_census) == ("aVeryLongTokenSharedByQandS", True), \
+        "the fixture must express the defect: a global census hands S the token Q's render also holds"
+
+    # 11. Tier 2 excludes THIS document's supersets only. X has no globally unique
+    #     token (L, a concatenation, holds all of it). Without L, X's own token is
+    #     unique -- but the longer token X shares with the quoting document Q
+    #     must stay shared, because Q is not a concatenation of X. Excluding
+    #     every superset at once (Q too, as a superset of E) would hand X that
+    #     longer token as "unique", and a render of Q would pass X's check.
+    corp = {"e.md": {"entryTokenOfE"},
+            "q.md": {"entryTokenOfE", "aVeryLongTokenSharedByQandX", "quoteOwnToken"},
+            "x.md": {"aVeryLongTokenSharedByQandX", "xOwnToken12"},
+            "l.md": {"aVeryLongTokenSharedByQandX", "xOwnToken12", "logOwnToken1"}}
+    got = {f: (tok, uniq, tier) for f, tok, uniq, tier in plan(corp)}
+    assert got["x.md"] == ("xOwnToken12", True, 2), got["x.md"]
+    assert got["l.md"][2] == 1, got["l.md"]
+
+    # 7a-7e. THE FIXTURE CONTRACT shared with openstack-nova-operator-kog (its
+    #     #187), whose implementation of the tiers is its own: the two repos
+    #     agree on these cases by name, not on the bytes of the code.
+    def tiers(corp):
+        return {f: (tok, uniq, tier) for f, tok, uniq, tier in plan(corp)}
+
+    # 7a. Uniqueness beats length: the longer token is shared, so each document
+    #     takes its own, at tier 1.
+    got = tiers({"a.md": {"aMuchLongerSharedToken", "uniqueTokenA"},
+                 "b.md": {"aMuchLongerSharedToken", "uniqueTokenB"}})
+    assert got["a.md"] == ("uniqueTokenA", True, 1), ("7a", got["a.md"])
+    assert got["b.md"] == ("uniqueTokenB", True, 1), ("7a", got["b.md"])
+
+    # 7b. A concatenation C = A + B: A and B at tier 2, C at tier 3 (shared).
+    got = tiers({"a.md": {"alphaOnlyInA", "commonToAllThree"},
+                 "b.md": {"bravoOnlyInB", "commonToAllThree"},
+                 "c.md": {"alphaOnlyInA", "bravoOnlyInB", "commonToAllThree"}})
+    assert got["a.md"] == ("alphaOnlyInA", True, 2), ("7b", got["a.md"])
+    assert got["b.md"] == ("bravoOnlyInB", True, 2), ("7b", got["b.md"])
+    assert got["c.md"][1:] == (False, 3), ("7b", got["c.md"])
+
+    # 7c. Quoting: Q holds SOME of E's tokens, so Q is NOT a superset of E, and E
+    #     takes the token Q lacks, at tier 1. The precondition is asserted, so the
+    #     arm cannot pass on a fixture where Q quietly became a superset.
+    corp = {"e.md": {"aVeryLongTokenEandQshare", "entryOwnToken"},
+            "q.md": {"aVeryLongTokenEandQshare", "quoteOwnToken"}}
+    assert "q.md" not in supersets_of("e.md", corp), "7c: Q must not be a superset of E"
+    assert tiers(corp)["e.md"] == ("entryOwnToken", True, 1), ("7c", tiers(corp)["e.md"])
+
+    # 7d. supersets_of is containment, and the empty token set is not everyone's
+    #     subset: a document with no tokens has no supersets.
+    corp = {"empty.md": set(), "x.md": {"someTokenOfX"}}
+    assert supersets_of("empty.md", corp) == [], ("7d", supersets_of("empty.md", corp))
+    assert supersets_of("x.md", corp) == [], ("7d", supersets_of("x.md", corp))
+
+    # 7e. No tokens at all: tier 4, the block-element fallback.
+    assert tiers({"none.md": set()})["none.md"] == (None, False, 4), ("7e", tiers({"none.md": set()}))
+
+    print("check-doc-rendering.py: self-test passed (18 arms)")
+    return OK
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--self-test", action="store_true",
+                    help="offline arms only; makes no network call")
+    args = ap.parse_args()
+    if args.self_test:
+        return self_test()
+
+    bad = instrument_controls()
+    if bad:
+        print("VOID: the instrument cannot disagree with anything right now.")
+        for b in bad:
+            print("  - " + b)
+        return VOID
+
+    # Corpus pass first: a token is only an identifier if no other file has it
+    # (identify() says when a concatenation of this file is left out).
+    corpus = {}
+    for f in docs():
+        lines = open(f, encoding="utf-8", errors="replace").read().split("\n")
+        inside, _, _, _ = fence_scan(lines)
+        corpus[f] = tokens_of(lines, inside)
+    supersets = sorted({g for f in corpus for g in supersets_of(f, corpus)})
+    shared, tiers = 0, {1: 0, 2: 0, 3: 0, 4: 0}
+
+    void, mismatched, clean = [], [], 0
+    for f, token, unique, tier in plan(corpus):
+        tiers[tier] += 1
+        lines = open(f, encoding="utf-8", errors="replace").read().split("\n")
+        declared = markers(lines)
+        html, why = render("\n".join(lines))
+        if html is None:
+            void.append("%s: %s" % (f, why))
+            continue
+        if token is not None:
+            if not unique:
+                shared += 1
+            if token not in html:
+                void.append(
+                    "%s: the render does not contain %r, this document's "
+                    "%s identifying token, so this response is not this "
+                    "document" % (f, token,
+                                  "corpus-unique" if unique else "longest (SHARED)"))
+                continue
+        elif not BLOCK.search(html):
+            void.append(
+                "%s: no token long enough to identify it and no block-level "
+                "element in the render, so nothing confirms the response is "
+                "this document" % f)
+            continue
+        rendered = html.count(ALERT)
+        if rendered != len(declared):
+            mismatched.append((f, declared, rendered))
+        else:
+            clean += 1
+
+    for f, declared, rendered in mismatched:
+        print("%s: declares %d admonition marker(s), GitHub rendered %d alert "
+              "box(es)." % (f, len(declared), rendered))
+        for ln, kind, in_fence in declared:
+            print("    line %-4d [!%s]%s" % (
+                ln, kind, "  <- inside a code fence" if in_fence else ""))
+    for v in void:
+        print("VOID " + v)
+
+    print("\n%d document(s) agreed, %d disagreed, %d VOID" % (
+        clean, len(mismatched), len(void)))
+    if shared:
+        print("%d document(s) had no corpus-unique token and were identified by "
+              "a shared one -- still proof against a truncated response, not "
+              "against a response for a different document." % shared)
+    print("identified at tier 1 (unique everywhere): %d, tier 2 (unique without this document's "
+          "concatenations): %d, tier 3 (shared): %d, tier 4 (block element): %d"
+          % (tiers[1], tiers[2], tiers[3], tiers[4]))
+    if supersets:
+        print("%d document(s) contain another document's whole token set (still checked): %s"
+              % (len(supersets), ", ".join(supersets)))
+    if void:
+        return VOID
+    return MISMATCH if mismatched else OK
+
+
+if __name__ == "__main__":
+    sys.exit(main())

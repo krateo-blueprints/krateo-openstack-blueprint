@@ -55,6 +55,7 @@ spec:
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
         secret-ks-etc-hash: {{ tuple "secret-ks-etc.yaml" . | include "helm-toolkit.utils.hash" }}
+{{ tuple "neutron_rpc_server" . | include "helm-toolkit.snippets.custom_pod_annotations" | indent 8 }}
 {{ dict "envAll" $envAll "podName" "neutron-rpc-server" "containerNames" (list "neutron-rpc-server" "init") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 8 }}
     spec:
 {{ dict "envAll" $envAll "application" "neutron_rpc_server" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
@@ -87,7 +88,7 @@ spec:
         {{- end }}
       containers:
         - name: neutron-rpc-server
-{{ dict "envAll" $envAll "component" "rpc_server" "container" "rpc_server" "args" (list "--process" "neutron-rpc-server" "--exchange" "neutron" "--rpc-topic" "q-plugin") | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
+{{ dict "envAll" $envAll "component" "rpc_server" "container" "rpc_server" "args" (list "--process" "neutron-rpc-server" "--exchange" "neutron" "--rpc-topic" "q-plugin") "config" (include "neutron.config_args.rpc_server" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
 {{ tuple $envAll "neutron_rpc_server" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.rpc_server | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "neutron_rpc_server" "container" "neutron_rpc_server" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}

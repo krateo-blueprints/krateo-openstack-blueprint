@@ -1,0 +1,21 @@
+{{- /*
+#309 H2 (run 4, option 4): with messaging.backend operator, the RabbitMQ user projection of each selected component whose
+rabbit-init runs, written by the UMBRELLA rather than the component's chart (osh.messagingProjection says why). The
+component's Composition is created only once this Secret exists, labelled (osh.messagingProjectionReady), and its chart
+imports the name it is passed (endpoints.oslo_messaging.operator.userSecret) and renders no projection of its own, so one
+writer owns it (hack/validate-messaging-topology.py). Same shape as the chart's: username and password from the
+component's root, labelled for the topology operator, which caches and admits only labelled Secrets (#404).
+A component installed standalone, without the umbrella, is passed no name and keeps its chart-rendered projection,
+retried by CDC until ESO has written it (README).
+*/ -}}
+{{- if eq (include "osh.messagingBackend" $) "operator" }}
+{{- $sel := splitList " " (include "osh.selected" (list $)) }}
+{{- range $c := .Values.components }}
+{{- if has $c.name $sel }}
+{{- $p := include "osh.messagingProjection" (list $ $c) | fromJson }}
+{{- if $p.secret }}
+{{- include "osh.messagingProjectionES" (list $ $c $p "" $p.root) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

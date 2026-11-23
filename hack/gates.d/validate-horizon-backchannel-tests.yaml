@@ -3,10 +3,13 @@ job: capability-roles
 order: 70
 # The validator (a Keycloak 26.4-shaped logout token and every rejection) and the logout
 # path through Django with Keystone and the forward mocked, including a refused forward
-# answering non-200. Fails when no test ran or any was skipped. Versions are pinned so a run
-# is reproducible.
+# answering non-200. Fails when no test ran or any was skipped. Installed against the images'
+# upper-constraints (hack/openstack-constraints.yaml) and checked: until 2026-11-18 this pinned
+# Django 5.2.19 and cryptography 46.0.5 while the horizon image ships 4.2.28 and 43.0.3, so the
+# receiver was tested on a Django major Horizon never runs.
 # Was its own step, "Install the back-channel logout receiver's test dependencies", just before this gate.
 setup: |
-  pip install "Django==5.2.19" "cryptography==46.0.5"
+  pip install -c "$(python3 hack/constraints.py url)" Django cryptography
 run: |
+  python3 hack/constraints.py check Django cryptography
   python3 hack/validate-horizon-backchannel-tests.py .

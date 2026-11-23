@@ -12,21 +12,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- define "novaComputeLivenessProbeTemplate" }}
+{{- /* Krateo (#146): liveness and startup check that the nova-compute process exists, and nothing outside the pod.
+       Upstream runs health-probe.py for both, which pings the service over RPC: during a RabbitMQ outage every
+       nova-compute fails it, and the kubelet restarts the whole compute fleet at once, repairing nothing (measured: 9
+       restarts on each node while RabbitMQ's release was wedged). Readiness keeps the RPC check, so the outage still
+       shows. hack/validate-nova-compute-liveness.py keeps it so. */}}
+{{- define "novaComputeProcessProbe" }}
 exec:
   command:
     - python
-    - /tmp/health-probe.py
-    - --config-file
-    - /etc/nova/nova.conf
-    - --config-dir
-    - /etc/nova/nova.conf.d
-    - --service-queue-name
-    - compute
-    - --liveness-probe
-    {{- if .Values.pod.use_fqdn.compute }}
-    - --use-fqdn
-    {{- end }}
+    - -c
+    - import psutil, sys; sys.exit(0 if any(p.info["name"] == "nova-compute" or any(a == "nova-compute" or a.endswith("/nova-compute") for a in p.info["cmdline"] or []) for p in psutil.process_iter(["name", "cmdline"])) else 1)
+{{- end }}
+
+{{- define "novaComputeLivenessProbeTemplate" }}
+{{- include "novaComputeProcessProbe" . }}
 {{- end }}
 
 {{- define "novaComputeReadinessProbeTemplate" }}
@@ -46,20 +46,7 @@ exec:
 {{- end }}
 
 {{- define "novaComputeStartupProbeTemplate" }}
-exec:
-  command:
-    - python
-    - /tmp/health-probe.py
-    - --config-file
-    - /etc/nova/nova.conf
-    - --config-dir
-    - /etc/nova/nova.conf.d
-    - --service-queue-name
-    - compute
-    - --liveness-probe
-    {{- if .Values.pod.use_fqdn.compute }}
-    - --use-fqdn
-    {{- end }}
+{{- include "novaComputeProcessProbe" . }}
 {{- end }}
 
 {{- define "nova.compute.daemonset" }}
@@ -192,7 +179,7 @@ spec:
               value: "{{ .Values.conf.ceph.cinder.keyring }}"
             {{ end }}
             - name: LIBVIRT_CEPH_SECRET_UUID
-              value: "{{ .Values.conf.ceph.secret_uuid }}"
+              value: "{{ .Values.conf.ceph.cinder.secret_uuid }}"
           command:
             - /tmp/ceph-keyring.sh
           terminationMessagePath: /var/log/termination-log
@@ -309,7 +296,7 @@ spec:
               value: "{{ .Values.conf.ceph.cinder.keyring }}"
             {{ end }}
             - name: LIBVIRT_CEPH_SECRET_UUID
-              value: "{{ .Values.conf.ceph.secret_uuid }}"
+              value: "{{ .Values.conf.ceph.cinder.secret_uuid }}"
           {{ end }}
             - name: RPC_PROBE_TIMEOUT
               value: "{{ .Values.pod.probes.rpc_timeout }}"

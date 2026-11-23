@@ -56,6 +56,10 @@
        site, for the same reason the dependency partition below lives here and not in a
        helper. */ -}}
 {{- $crds := (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "").items }}
+{{- /* The deregistration state (#444, osh.deregistration), derived ONCE per render from $sel and $crds: keystone's
+       krateo.deregister (in the component range) and the openstack-deregistration-pending ConfigMap (after it) read
+       the same state. */ -}}
+{{- $dr := include "osh.deregistration" (list $ $sel $crds) | fromYaml }}
 {{- /* The cluster's node list, fetched ONCE for the whole render in the same place and for the
        same reason as $crds above, and threaded into osh.requireNodeLabels as an argument. It is
        read here, before any component is emitted, because what it gates is the whole install
@@ -77,6 +81,11 @@
 {{- $nodes = ((lookup "v1" "Node" "" "").items | default list) }}
 {{- end }}
 {{- include "osh.requireNodeLabels" (list $ $sel $nodes) -}}
+{{- include "osh.requireStorageNotOverridden" (list $) -}}
+{{- include "osh.requireCephReadGrant" (list $) -}}
+{{- /* ha.enabled needs haTopology.minNodes nodes carrying the control-plane label (#309), refused here for the same
+       reasons and with the same unmeasured case as the labels above. */ -}}
+{{- include "osh.requireHaNodes" (list $ $nodes) -}}
 {{- /* Selected components this render does NOT emit (their dependencies are not Ready yet, or their CRD
        is not served yet). While any remain, the ConfigMap openstack-install-pending below is emitted,
        and the CompositionDefinition's statusDataTemplate projects health Ready=False/Creating from its
@@ -84,6 +93,20 @@
        not exist yet (#257 -- measured: Ready=True at 21:47:26 with cyborg, the last tier, emitted only
        at 21:48:21). The selection and emission decisions stay here, in one place; the projection only
        reads whether the chart said "pending". */ -}}
+{{- /* #309 C2: the credential generations latch (osh.credentialDrift's ConfigMap), read ONCE per render and only with
+       the operator broker (the only mode that rotates): it tells which components were ever rotated ($rotMark below).
+       ABSENT (lost, or an install from before it existed) the rotation state is unknown, so every existing component
+       with an umbrella RabbitMQ projection is read live on that render: a removed token is still refused, and
+       templates/credential-drift.yaml re-creates the ConfigMap in the same render, so the next one reads nothing again.
+       credential-drift.yaml reads it too; helm renders each template with its own values, so the read cannot be shared
+       across the two files. */ -}}
+{{- $gens := dict }}
+{{- $gensKnown := true }}
+{{- if eq (include "osh.messagingBackend" $) "operator" }}
+{{- $gensCM := include "osh.lookupConfigMap" (list $ "openstack-credential-generations") | fromJson }}
+{{- $gensKnown = not (empty $gensCM) }}
+{{- $gens = $gensCM.data | default dict }}
+{{- end }}
 {{- $pending := list }}
 {{- range $c := .Values.components }}
 {{- if has $c.name $sel }}
@@ -112,6 +135,63 @@
 {{- $approved := include "osh.migrationApprovedFor" (list $ $cd) }}
 {{- $emitVer := include "osh.emitVersion" (list $ $c.kind $c.name $crds $exists $approved) }}
 {{- $crd := include "osh.crdExists" (list $c.kind $emitVer $crds) }}
+{{- /* Whether this component's values are HELD (TWO PHASES, below, where the decision is consumed; osh.holdValues). A pure
+       function of the reads above, decided here because it is one of the reasons to read the live object. */ -}}
+{{- $hold := include "osh.holdValues" (list (include "osh.version" (list $)) $emitVer $approved $exists (include "osh.definitionApiVersion" (list $cd)) (include "osh.definitionReady" (list $cd))) }}
+{{- /* #309 C2: whether this component was ever rotated, from what the umbrella already holds: a generation root of its
+       RabbitMQ credential latched in openstack-credential-generations (osh.credentialDrift latches every generation root
+       a token names). With its token removed after a switch, this is what still reaches the live read below, so the
+       removal is refused (osh.messagingRotation) instead of switching the service back uncoordinated. */ -}}
+{{- $mp := include "osh.messagingProjection" (list $ $c) | fromJson }}
+{{- $rotMark := "" }}
+{{- if $mp.secret }}
+{{- if not $gensKnown }}{{- $rotMark = "true" }}{{- end }}
+{{- range $k, $_ := $gens }}{{- if hasPrefix (printf "%s-g" $mp.root) $k }}{{- $rotMark = "true" }}{{- end }}{{- end }}
+{{- end }}
+{{- /* THE LIVE READ: the component's live Composition (osh.liveState: spec, composition-version label, status.managed),
+       read ONCE, here, and only when something needs it: the hold re-emits its spec, and a RabbitMQ user rotation (#309 C)
+       derives the active generation and its readers from it. A rotation is in progress or has happened while its
+       rotate.<id> token is set, or (token removed) while a generation root of it is latched or the latch is absent
+       ($rotMark). So a render that
+       holds nothing and rotates nothing reads nothing (hack/validate-two-phase-values.py counts these reads). */ -}}
+{{- $rotTok := toString (index ($.Values.rotate | default dict) (printf "oslo-messaging-%s" $c.name) | default "") }}
+{{- $live := "" }}
+{{- if or (eq $hold "true") (and (or $rotTok $rotMark) (eq $exists "true")) }}
+{{- $live = include "osh.liveState" (list $ $c.kind $c.name $emitVer $crds) }}
+{{- end }}
+{{- /* #309 C: a component's RabbitMQ user rotation (osh.messagingRotation), derived from the live Composition (its spec
+       and status.managed) and the generation roots' stamps. A token that cannot be honoured refuses the render, naming
+       why, on the umbrella's status. C2: the umbrella projection of every generation still in use, and while a rotation
+       is not steady a ConfigMap openstack-credential-rotation-<id> saying what it waits on (status.credentialRotation). */ -}}
+{{- $rot := dict }}
+{{- if $mp.secret }}
+{{- $rotLive := dict }}{{- $rotStatus := dict }}
+{{- if $live }}{{- $rotStatus = fromJson $live }}{{- $rotLive = $rotStatus.spec | default dict }}{{- end }}
+{{- $rot = include "osh.messagingRotation" (list $ $c $rotLive $rotStatus) | fromJson }}
+{{- if $rot.refuse }}{{- fail (printf "\n\n%s\n" $rot.refuse) }}{{- end }}
+{{- if ne $rot.target $rot.base }}
+{{- include "osh.generationRoot" (list $ $rot) }}
+{{- end }}
+{{- range $root := ($rot.roots | default list) }}
+{{- include "osh.messagingProjectionES" (list $ $c $mp (include "osh.generationSuffix" (list $rot.base $root)) $root) }}
+{{- end }}
+{{- if ne (toString $rot.phase) "steady" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "openstack-credential-rotation-%s" $rot.id }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    krateo.io/credential-rotation: {{ $rot.id }}
+data:
+  credential: {{ $rot.id | quote }}
+  phase: {{ $rot.phase | quote }}
+  active: {{ $rot.activeRoot | quote }}
+  target: {{ $rot.target | quote }}
+  blockers: {{ join "\n" $rot.blockers | quote }}
+{{- end }}
+{{- end }}
 {{- /* Partition this component's dependencies by the gate each edge is in, so that which
        semantics applies to which dependency is visible here and not buried in a helper. */ -}}
 {{- $relaxed := splitList " " (include "osh.depsRelaxed" (list $ $c.name $c.deps)) | compact }}
@@ -153,7 +233,12 @@
        failed exactly that way when this note was first added. */}}
 {{- $strictReady := include "osh.depsReady" (list $ $strict $.Values.components $crds) }}
 {{- $relaxedExist := include "osh.depsExist" (list $ $relaxed $.Values.components $crds) }}
-{{- if and (eq $crd "true") (or (and (eq $strictReady "true") (eq $relaxedExist "true")) (eq $exists "true")) }}
+{{- /* #308: a Ceph consumer is created only once the copies of the keys it reads report Ready (osh.cephRootsReady). */ -}}
+{{- $cephReady := include "osh.cephRootsReady" (list $ $c) }}
+{{- /* #309 H2: with messaging.backend operator, a component whose rabbit-init runs is created only once the umbrella's
+       projection of its RabbitMQ user exists, labelled (osh.messagingProjectionReady), so its User is admitted at once. */ -}}
+{{- $mqReady := include "osh.messagingProjectionReady" (list $ $c) }}
+{{- if and (eq $crd "true") (or (and (eq $strictReady "true") (eq $relaxedExist "true") (eq $cephReady "true") (eq $mqReady "true")) (eq $exists "true")) }}
 {{- $ov := (index ($.Values.componentValues | default dict) $c.name) | default dict }}
 {{- /* Credential references (#228): merged UNDER the component's own values, so an explicit
        componentValues entry wins. osh.credentialRefs says what is passed and why. */ -}}
@@ -173,6 +258,13 @@
 {{- $nv := dict "conf" (dict "notification_vhosts" (include "osh.notificationVhosts" (list $ $sel) | fromJsonArray) "notification_vhost_jobs" (include "osh.notificationVhostJobs" (list $ $sel) | fromJsonArray)) }}
 {{- $ov = mergeOverwrite $nv (deepCopy $ov) }}
 {{- end }}
+{{- /* Public endpoints (#311): with publicEndpoints on, the component's public endpoint moves to its Gateway hostname
+       over HTTPS, its inert Ingress switches go off, and Horizon becomes ClusterIP with Secure cookies
+       (osh.publicEndpointValues). Off it returns nothing and nothing is merged, so the spec is unchanged. Merged UNDER
+       componentValues: an explicit entry wins. hack/validate-public-endpoints.py renders this for every component. */ -}}
+{{- with include "osh.publicEndpointValues" (list $ $c.name $sel) }}
+{{- $ov = mergeOverwrite (fromJson .) (deepCopy $ov) }}
+{{- end }}
 {{- /* Re-run hooks (#297): rerunHooks.<component> reaches that component alone, as krateo.rerunHooksToken. Its values
        change, so core-provider runs a helm upgrade and every hook runs again. Merged UNDER componentValues: an explicit
        entry wins. hack/validate-rerun-hooks.py renders this span with and without a token. */ -}}
@@ -189,12 +281,88 @@
 {{- $ov = mergeOverwrite (dict "conf" (dict "libvirt" (dict "virt_type" "kvm"))) (deepCopy $ov) }}
 {{- end }}
 {{- end }}
+{{- /* Underlay MTU (#433): network.underlayMTU, the MTU of the node NICs neutron's tunnels ride on, to neutron as
+       conf.neutron.DEFAULT.global_physnet_mtu and conf.plugins.ml2_conf.ml2.path_mtu, so a VXLAN network advertises
+       underlayMTU - 50. neutron's OVS agent init refuses a node whose tunnel NIC's MTU is below it (upstream divergence
+       neutron-433). Always passed, 1500 included. Merged UNDER componentValues: an explicit entry wins.
+       hack/validate-underlay-mtu.py renders this span. */ -}}
+{{- if eq $c.name "neutron" }}
+{{- $mtu := int (($.Values.network | default dict).underlayMTU | default 1500) }}
+{{- $ov = mergeOverwrite (dict "conf" (dict "neutron" (dict "DEFAULT" (dict "global_physnet_mtu" $mtu)) "plugins" (dict "ml2_conf" (dict "ml2" (dict "path_mtu" $mtu))))) (deepCopy $ov) }}
+{{- end }}
+{{- /* Deregistration (#444): keystone receives, as krateo.deregister, what osh.deregistration finds GONE -- the
+       Keystone services of every not-selected component none of whose objects still exists (its Composition, the
+       Services its chart renders), minus any type a selected component registers, and those components' names. Its
+       post-install/post-upgrade hook deletes those services with their endpoints, and those components' leftover hook
+       Jobs. A component still being removed, or running on its own outside the umbrella, is `removing` and is not
+       handed over; it moves to `gone` on the reconcile that no longer finds it, which changes keystone's values, so CDC
+       upgrades keystone and the hook runs then. Merged OVER componentValues: not overridable, so a stale catalog cannot
+       be configured back in. hack/validate-deregistration.py renders this span. */ -}}
+{{- if eq $c.name "keystone" }}
+{{- $ov = mergeOverwrite (deepCopy $ov) (dict "krateo" (dict "deregister" (dict "services" ($dr.services | default list) "components" ($dr.components | default list)))) }}
+{{- end }}
 {{- /* kogCredentials (#303): keystone renders the KOG credentials from the admin root it already receives, and nova's
        hook writes nova_url into keystone's openstack-kog-endpoints. Off: nothing is passed. Merged UNDER
        componentValues. hack/validate-kog-credentials.py renders this span. */ -}}
 {{- if and (has $c.name (list "keystone" "nova")) ($.Values.kogCredentials | default dict).enabled }}
 {{- $ov = mergeOverwrite (dict "kog_credentials" (dict "enabled" true)) (deepCopy $ov) }}
 {{- end }}
+{{- /* High availability (#309): the RabbitMQ host count to every component that builds a transport URL, and with
+       ha.enabled memcached's replicas and their list to every component that builds a memcache server list
+       (osh.haValues says what, and what it refuses). Off, with one RabbitMQ replica: nothing is passed. Merged UNDER
+       componentValues. hack/validate-ha-propagation.py renders this span. */ -}}
+{{- with include "osh.haValues" (list $ $c) | fromYaml }}
+{{- $ov = mergeOverwrite . (deepCopy $ov) }}
+{{- end }}
+{{- /* RabbitMQ cluster-operator (#309 H2b): with messaging.backend operator, the RabbitmqCluster to the rabbitmq chart,
+       its pods to every component that lists RabbitMQ hosts, and quorum queues to every component that builds a
+       transport URL (osh.messagingOperatorValues says what, and what it refuses). Chart mode: nothing. Merged UNDER
+       componentValues. hack/validate-messaging-operator.py renders this span. */ -}}
+{{- with include "osh.messagingOperatorValues" (list $ $c) | fromYaml }}
+{{- $ov = mergeOverwrite . (deepCopy $ov) }}
+{{- end }}
+{{- /* Storage backend (#196, #308): a component that requires block-storage receives storage.backend as its
+       krateo.storageBackend, always, `none` included: with none, cinder refuses to render and names the value, rather
+       than waiting in Init on Ceph objects nothing creates. Not overridable (osh.requireStorageNotOverridden refuses a
+       componentValues entry), so the backend full-strict selects by is the one the component renders.
+       hack/validate-storage-backend.py renders this span for each backend. */ -}}
+{{- if has "block-storage" ($c.requires | default list) }}
+{{- $ov = mergeOverwrite (deepCopy $ov) (dict "krateo" (dict "storageBackend" (include "osh.storageBackend" (list $)))) }}
+{{- end }}
+{{- /* Ceph values (#308): the pools, users and libvirt secret UUID the charts must agree on, from storage.ceph alone
+       (osh.storageValues), merged over componentValues, which may not set them. hack/validate-ceph-consumer.py (check 29)
+       renders this span through hack/umbrella_spec.py and the four charts it reaches. */ -}}
+{{- with include "osh.storageValues" (list $ $c) }}
+{{- $ov = mergeOverwrite (deepCopy $ov) (fromYaml .) }}
+{{- end }}
+{{- /* Monitoring (#312), only while osh.monitoringOn: mariadb gets krateo.exporterUser (its Job creates the exporter's
+       MariaDB user; the StatefulSet does not change), and the `monitoring: true` component gets the selection (its alerts
+       and scrapes follow it) and the OTLP endpoint. Its Alert and Metric CRs go to the release namespace, and only on a
+       cluster that serves them (monitoring-precondition.yaml refuses otherwise). Merged UNDER componentValues: an
+       explicit entry wins. Off, no spec changes.
+       hack/validate-openstack-monitoring.py renders this span on and off. */ -}}
+{{- if include "osh.monitoringOn" (list $) }}
+{{- if eq $c.name "mariadb" }}
+{{- $ov = mergeOverwrite (dict "krateo" (dict "exporterUser" true)) (deepCopy $ov) }}
+{{- end }}
+{{- if $c.monitoring }}
+{{- $mv := dict "openstack" (dict "components" $sel) "collector" (dict "otlpEndpoint" $.Values.monitoring.otlpEndpoint) }}
+{{- $ov = mergeOverwrite $mv (deepCopy $ov) }}
+{{- end }}
+{{- end }}
+{{- /* end of the monitoring span (#312): hack/validate-openstack-monitoring.py renders from `$ov :=` to here. */ -}}
+{{- /* RabbitMQ user rotation (#309 C2, osh.messagingRotation): once a component has been rotated, the generation it
+       connects as (username and root), the users its release renders (the active one, and the previous or next one
+       while a switch drains or prepares) and the active suffix its waits and pod annotation name. Merged OVER
+       componentValues, which may not set this passwordFrom while a token is set (refused). Nothing before a first
+       rotation; while the component's values are held (TWO PHASES, below) its live spec replaces all of this. Offline
+       nothing is live, so $rot is empty (hack/umbrella_spec.py's probe defines it so). hack/validate-messaging-rotation.py
+       renders this span with the lookups stood in. */ -}}
+{{- if $rot.pass }}
+{{- $rotAuth := dict $c.name (dict "username" $rot.username "passwordFrom" (dict "secret" $rot.activeRoot)) }}
+{{- $ov = mergeOverwrite (deepCopy $ov) (dict "endpoints" (dict "oslo_messaging" (dict "auth" $rotAuth "operator" (dict "users" $rot.users "activeSuffix" $rot.activeSuffix)))) }}
+{{- end }}
+{{- /* end of the rotation span */ -}}
 {{- /* TWO PHASES: a live component's NEW values are written only at the new apiVersion, and only
        once its CompositionDefinition serves it (status.apiVersion at the current version, Ready
        status True). Until then the object is not changed at all: its live spec is re-emitted at the
@@ -217,9 +385,7 @@
 
        If the object is gone by the time its spec is read (deleted between osh.exists and here),
        there is no live spec to keep and the computed values are emitted, as before this block. */ -}}
-{{- $hold := include "osh.holdValues" (list (include "osh.version" (list $)) $emitVer $approved $exists (include "osh.definitionApiVersion" (list $cd)) (include "osh.definitionReady" (list $cd))) }}
 {{- if eq $hold "true" }}
-{{- $live := include "osh.liveState" (list $ $c.kind $c.name $emitVer $crds) }}
 {{- if $live }}
 {{- $state := $live | fromJson }}
 {{- $ov = $state.spec | default dict }}
@@ -284,6 +450,23 @@ spec: {}
 {{- else }}
 {{- $pending = append $pending $c.name }}
 {{- end }}
+{{- end }}
+{{- end }}
+{{- /* What the deregistration state machine (#444) is waiting on: one entry per not-selected component still REMOVING
+       -- its Composition or a Service its chart renders still exists. Absent when nothing is waiting. A component that
+       runs on its own outside the umbrella stays listed here, by design: it is never deregistered. */ -}}
+{{- if $dr.removing }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openstack-deregistration-pending
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    krateo.io/deregistration-pending: "true"
+data:
+{{- range $n, $what := $dr.removing }}
+  {{ $n }}: {{ printf "not deregistered while %s exists (removal in progress, or it runs outside the umbrella)" (join ", " $what) | quote }}
 {{- end }}
 {{- end }}
 {{- if $pending }}

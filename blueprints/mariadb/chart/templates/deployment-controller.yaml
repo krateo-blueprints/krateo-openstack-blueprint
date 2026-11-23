@@ -76,7 +76,8 @@ spec:
 {{ tuple $envAll "mariadb" "controller" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
       annotations:
 {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
-        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
+        # #445: only the key this Deployment mounts, so a server script change does not roll the controller either.
+        configmap-bin-hash: {{ tuple (list "mariadb_controller.py") . | include "mariadb.bin_hash" }}
     spec:
       serviceAccountName: {{ $serviceAccountName }}
 {{ dict "envAll" $envAll "application" "controller" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}

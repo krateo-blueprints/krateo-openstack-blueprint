@@ -1,0 +1,12 @@
+# nova-compute's liveness and startup probes check the process only, so a RabbitMQ outage no longer restarts the whole
+# compute fleet; readiness keeps the RPC check. The rendered liveness command is run against a stand-in nova-compute
+# and a decoy, which needs psutil (#146), installed against the images' upper-constraints and checked (the nova
+# image ships psutil 7.2.2; this pinned 7.0.0 until 2026-11-18).
+name: "No probe that restarts nova-compute depends on RabbitMQ"
+job: capability-roles
+order: 142
+setup: |
+  pip install -c "$(python3 hack/constraints.py url)" psutil
+run: |
+  python3 hack/constraints.py check psutil
+  python3 hack/validate-nova-compute-liveness.py .

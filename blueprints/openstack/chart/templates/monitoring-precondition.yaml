@@ -1,0 +1,24 @@
+{{- /* Monitoring precondition (#312). monitoring.enabled true renders alert-provider Alert and Metric CRs
+       (observability.krateo.io/v1alpha1) through the openstack-monitoring component. On a cluster that does not serve
+       those CRDs the component's release would fail to apply them, on the component and not here, after the
+       credential root and mariadb's exporter user were already created. So the umbrella REFUSES instead, with the
+       reason on its own status, like the ESO and node-label preconditions.
+
+       Named GETs of the two CRDs, nothing listed: the full CRD list is fetched once, in compositions.yaml, for the cost
+       recorded on osh.crdExists. core-provider's own CRD is the witness of a live cluster, as in credentials.yaml.
+       Where it is absent too, the render is offline (helm template, the gates): nothing can be checked, and the objects
+       are rendered so the gates see them. hack/validate-openstack-monitoring.py stubs these reads (live, CRDs served or
+       not) and asserts the refusal and its absence.
+
+       Renders nothing. Monitoring off (monitoring.enabled unset or false) reads nothing. */ -}}
+{{- if include "osh.monitoringOn" (list $) }}
+{{- if lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "compositiondefinitions.core.krateo.io" }}
+{{- $absent := list }}
+{{- range $crd := list "alerts.observability.krateo.io" "metrics.observability.krateo.io" }}
+{{- if not (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" $crd) }}{{- $absent = append $absent $crd }}{{- end }}
+{{- end }}
+{{- if $absent }}
+{{- fail (printf "\n\nmonitoring.enabled is true, but this cluster does not serve %s.\n\nopenstack-monitoring delivers its alerts as alert-provider Alert and Metric CRs (observability.krateo.io/v1alpha1). Install alert-provider (the Krateo installer's portal feature ships it, with its CRDs), or set monitoring.enabled: false. README: \"Monitoring\".\n" (join ", " $absent)) }}
+{{- end }}
+{{- end }}
+{{- end }}

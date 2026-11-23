@@ -32,6 +32,7 @@ charts:
 - nova
 - octavia
 - openstack
+- openstack-monitoring
 - openvswitch
 - placement
 - powerdns
@@ -52,6 +53,7 @@ images:
   registry: docker.io
   repository: bitnami/kubectl
   pinned_digest: sha256:bedd34c910e2a5ce9836813d16444af449d7fe07a29136d59f34e861e8e660c5
+  tag_form: digest
   used_by:
   - chart: libvirt
     rendered: declared-only
@@ -69,6 +71,7 @@ images:
   registry: docker.io
   repository: library/docker
   tag: 17.07.0
+  tag_form: version
   used_by:
   - chart: aodh
     rendered: declared-only
@@ -173,6 +176,7 @@ images:
   registry: docker.io
   repository: library/redis
   tag: 7.2.17
+  tag_form: version
   used_by:
   - chart: redis
     rendered: defaults
@@ -194,6 +198,7 @@ images:
   registry: docker.io
   repository: library/nginx
   tag: 1.13.3
+  tag_form: version
   used_by:
   - chart: ironic
     rendered: defaults
@@ -206,10 +211,32 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:788fa27763db6d69ad3444e8ba72f947df9e7e163bad7c1f5614f8fd27a311c3
+- image: docker.io/otel/opentelemetry-collector-k8s:0.165.0
+  registry: docker.io
+  repository: otel/opentelemetry-collector-k8s
+  tag: 0.165.0
+  tag_form: version
+  used_by:
+  - chart: openstack-monitoring
+    rendered: defaults
+    keys:
+    - otel_collector
+  registry_facts:
+    observed: '2026-11-18'
+    anonymous_pull: true
+    media_type: application/vnd.docker.distribution.manifest.list.v2+json
+    platforms:
+    - linux/amd64
+    - linux/arm64
+    - linux/ppc64le
+    - linux/riscv64
+    - linux/s390x
+    digest: sha256:ce55d0a38923c83120e4ba613fbdf446786652d2ce9f29d1cd7879e5d869829f
 - image: docker.io/powerdns/pdns-auth-49:4.9.18
   registry: docker.io
   repository: powerdns/pdns-auth-49
   tag: 4.9.18
+  tag_form: version
   used_by:
   - chart: powerdns
     rendered: defaults
@@ -227,6 +254,7 @@ images:
   registry: docker.io
   repository: prom/mysqld-exporter
   tag: v0.12.1
+  tag_form: version
   used_by:
   - chart: mariadb
     rendered: declared-only
@@ -239,10 +267,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:9fe9938c4ac9216cc24005144338f14fac4f604f139b481cc541bead008db3c1
-- image: docker.io/rabbitmq:3.13-management
+- image: docker.io/rabbitmq:3.13.7-management
   registry: docker.io
   repository: library/rabbitmq
-  tag: 3.13-management
+  tag: 3.13.7-management
+  tag_form: version
   used_by:
   - chart: aodh
     rendered: defaults
@@ -348,6 +377,7 @@ images:
   registry: docker.io
   repository: xrally/xrally-openstack
   tag: 2.0.0
+  tag_form: version
   used_by:
   - chart: blazar
     rendered: every-manifest-on
@@ -408,10 +438,30 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:32e9ee3edd2900b10efed209f8f9443ab2a6774fe2515c3ada8c269e946ff05d
+- image: ghcr.io/openstack-exporter/openstack-exporter:2.0.0-alpha
+  registry: ghcr.io
+  repository: openstack-exporter/openstack-exporter
+  tag: 2.0.0-alpha
+  tag_form: version
+  used_by:
+  - chart: openstack-monitoring
+    rendered: defaults
+    keys:
+    - openstack_exporter
+  registry_facts:
+    observed: '2026-11-18'
+    anonymous_pull: true
+    media_type: application/vnd.oci.image.index.v1+json
+    platforms:
+    - linux/amd64
+    - linux/arm64
+    - linux/s390x
+    digest: sha256:2a864f41db28a1656a5034e8a17831fb37986e8856fd3f5361586a05f928950a
 - image: ghcr.io/vexxhost/netoffload:v1.0.1
   registry: ghcr.io
   repository: vexxhost/netoffload
   tag: v1.0.1
+  tag_form: version
   used_by:
   - chart: neutron
     rendered: declared-only
@@ -424,10 +474,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:60f092e5d5f156c2f933c199ea72274f80eb758d3e0dc2f2b1be62174c3f7183
-- image: quay.io/airshipit/aodh:2026.1-ubuntu_noble
+- image: quay.io/airshipit/aodh:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/aodh
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: aodh
     rendered: defaults
@@ -445,10 +496,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:65010049f89295ad6591fef96e763587b8b0edb0343a37c6862be53567ffe37e
-- image: quay.io/airshipit/barbican:2026.1-ubuntu_noble
+- image: quay.io/airshipit/barbican:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/barbican
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: barbican
     rendered: defaults
@@ -462,10 +514,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:acdc92fbe1779d4bcc7a70af4d0523c9e9ea010b1764d1fcb6289791da1ded6b
-- image: quay.io/airshipit/blazar:2026.1-ubuntu_noble
+- image: quay.io/airshipit/blazar:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/blazar
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: blazar
     rendered: defaults
@@ -480,10 +533,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:6e52e06b024f0fad6bfedcde1b68442747ff30f7d70c16b20a7676be3070b381
-- image: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble
+- image: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/ceilometer
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: ceilometer
     rendered: defaults
@@ -504,6 +558,7 @@ images:
   registry: quay.io
   repository: airshipit/ceph-config-helper
   tag: ubuntu_jammy_20.2.1-1-20260407
+  tag_form: dated
   used_by:
   - chart: gnocchi
     rendered: declared-only
@@ -524,6 +579,7 @@ images:
   registry: quay.io
   repository: airshipit/ceph-config-helper
   tag: ubuntu_jammy_20.2.4-1-20260828
+  tag_form: dated
   used_by:
   - chart: cinder
     rendered: defaults
@@ -547,10 +603,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:94296fae5de981a844da637564fa51faf9b5251995c88daebbfe5e3a8b5e0dab
-- image: quay.io/airshipit/cinder:2026.1-ubuntu_noble
+- image: quay.io/airshipit/cinder:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/cinder
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: cinder
     rendered: defaults
@@ -569,10 +626,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:1278765c9c2c0657ad455a327e9f497b340f68e68faeb98a456e1b45e804a23e
-- image: quay.io/airshipit/cloudkitty:2026.1-ubuntu_noble
+- image: quay.io/airshipit/cloudkitty:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/cloudkitty
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: cloudkitty
     rendered: defaults
@@ -588,10 +646,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:ce58964da4c84dee71c0a6bf227671e4fc255ca70876da19e369c25de55a1bf9
-- image: quay.io/airshipit/cyborg:2026.1-ubuntu_noble
+- image: quay.io/airshipit/cyborg:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/cyborg
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: cyborg
     rendered: defaults
@@ -607,10 +666,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:bd9515348ec7cc246dbe881716f558aad75cb805502b79a26089d531f301c0f7
-- image: quay.io/airshipit/designate:2026.1-ubuntu_noble
+- image: quay.io/airshipit/designate:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/designate
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: designate
     rendered: defaults
@@ -634,6 +694,7 @@ images:
   registry: quay.io
   repository: airshipit/docker
   tag: 27.5.0
+  tag_form: version
   used_by:
   - chart: gnocchi
     rendered: declared-only
@@ -674,10 +735,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:f3b98017d28ac50cdac5cbfe6a29613509131f87a92f577d1c0c9c073fcdc424
-- image: quay.io/airshipit/freezer-api:2026.1-ubuntu_noble
+- image: quay.io/airshipit/freezer-api:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/freezer-api
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: freezer
     rendered: defaults
@@ -691,10 +753,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:db92f505cf3ae89cd3be8c6129af7de771d013c3f1c333953875347299bda1f8
-- image: quay.io/airshipit/glance:2026.1-ubuntu_noble
+- image: quay.io/airshipit/glance:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/glance
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: glance
     rendered: defaults
@@ -709,10 +772,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:d956b532b3ee4c9efc06eeb76289e6991479877ba2db4f1a29808a084661fe24
-- image: quay.io/airshipit/heat:2026.1-ubuntu_noble
+- image: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/heat
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: heat
     rendered: defaults
@@ -756,10 +820,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:8cd21c5956c8a862cc47fd443ec4b1a219af044ca634ca395e0bd04da3a27113
-- image: quay.io/airshipit/horizon:2026.1-ubuntu_noble
+- image: quay.io/airshipit/horizon:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/horizon
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: horizon
     rendered: defaults
@@ -773,10 +838,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:ca02701fb78a1130ba6ad85f1577a1dbba4087c2a8bc7e54ad31a27e30cf9235
-- image: quay.io/airshipit/ironic:2026.1-ubuntu_noble
+- image: quay.io/airshipit/ironic:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/ironic
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: ironic
     rendered: defaults
@@ -793,10 +859,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:fda7a02a9faeaaecb0b7045bad0781be59e8a8cb6b33372a959a720a1a06a3ed
-- image: quay.io/airshipit/keystone:2026.1-ubuntu_noble
+- image: quay.io/airshipit/keystone:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/keystone
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: keystone
     rendered: defaults
@@ -819,6 +886,7 @@ images:
   registry: quay.io
   repository: airshipit/kubernetes-entrypoint
   tag: 4fbcf7ce324dc66e78480f73035e31434cfea1e8-ubuntu_focal
+  tag_form: commit
   used_by:
   - chart: ironic
     rendered: defaults
@@ -835,6 +903,7 @@ images:
   registry: quay.io
   repository: airshipit/kubernetes-entrypoint
   tag: c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
+  tag_form: commit
   used_by:
   - chart: aodh
     rendered: defaults
@@ -929,6 +998,10 @@ images:
     keys:
     - dep_check
   - chart: octavia
+    rendered: defaults
+    keys:
+    - dep_check
+  - chart: openstack-monitoring
     rendered: defaults
     keys:
     - dep_check
@@ -983,10 +1056,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:8bb1ee400c0cb6f7ca09a1db6561caab1b287554783123d756af24c15d380411
-- image: quay.io/airshipit/libvirt:2026.1-ubuntu_noble
+- image: quay.io/airshipit/libvirt:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/libvirt
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: libvirt
     rendered: defaults
@@ -999,10 +1073,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:41e81f3c7b5067bd293c23b1bfaadc8fd976f945ff60f79c113ee1edcb4bbfc6
-- image: quay.io/airshipit/magnum:2026.1-ubuntu_noble
+- image: quay.io/airshipit/magnum:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/magnum
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: magnum
     rendered: defaults
@@ -1017,10 +1092,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:4db248eb619dbc593041f5a1806c8da602e9cf89e601783e8e7de3a17777f224
-- image: quay.io/airshipit/manila:2026.1-ubuntu_noble
+- image: quay.io/airshipit/manila:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/manila
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: manila
     rendered: defaults
@@ -1042,6 +1118,7 @@ images:
   registry: quay.io
   repository: airshipit/mariadb
   tag: 11.4.8-noble
+  tag_form: version
   used_by:
   - chart: mariadb
     rendered: declared-only
@@ -1058,6 +1135,7 @@ images:
   registry: quay.io
   repository: airshipit/mariadb
   tag: ubuntu_noble-20261030
+  tag_form: dated
   used_by:
   - chart: mariadb
     rendered: defaults
@@ -1076,10 +1154,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:44713efda5abc99ac4ffdd1e4b5fe1f95b096f8d0a21abe439cb12b501045a48
-- image: quay.io/airshipit/masakari-monitors:2026.1-ubuntu_noble
+- image: quay.io/airshipit/masakari-monitors:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/masakari-monitors
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: masakari
     rendered: every-manifest-on
@@ -1095,10 +1174,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:e4131f9655cb5064c6d0f4813cd0e75bd285ca47237fdc069e2c5ff5e2318c6b
-- image: quay.io/airshipit/masakari:2026.1-ubuntu_noble
+- image: quay.io/airshipit/masakari:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/masakari
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: masakari
     rendered: defaults
@@ -1117,6 +1197,7 @@ images:
   registry: quay.io
   repository: airshipit/memcached
   tag: 1.6.32
+  tag_form: version
   used_by:
   - chart: memcached
     rendered: defaults
@@ -1129,10 +1210,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:387fd8d91c7e41eb2178715942dd6fd7974b8258b854972ebcdfeef637235a59
-- image: quay.io/airshipit/mistral:2026.1-ubuntu_noble
+- image: quay.io/airshipit/mistral:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/mistral
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: mistral
     rendered: defaults
@@ -1149,10 +1231,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:774b0831a6053960ecf2c8e287e2d4b77a910f390ad910a5ca9a33d5a412c6c0
-- image: quay.io/airshipit/neutron:2026.1-ubuntu_noble
+- image: quay.io/airshipit/neutron:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/neutron
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: neutron
     rendered: defaults
@@ -1183,10 +1266,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:cbf1c92c7152c1da2495b81574faf3417e801781d55605850bb1e5731e4a8844
-- image: quay.io/airshipit/nova:2026.1-ubuntu_noble
+- image: quay.io/airshipit/nova:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/nova
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: nova
     rendered: defaults
@@ -1212,10 +1296,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:6f775fd8c6ac0daeca8419f994e90a06d1f90c5847f20d450263af888d926bf2
-- image: quay.io/airshipit/octavia:2026.1-ubuntu_noble
+- image: quay.io/airshipit/octavia:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/octavia
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: octavia
     rendered: defaults
@@ -1233,10 +1318,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:4575f7bfcb0cc602d0760bf46e9e5b01bd9ed8541e7b012075d308b3d2a983a6
-- image: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
+- image: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/openstack-client
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: aodh
     rendered: defaults
@@ -1371,9 +1457,9 @@ images:
     - ks_service
     - ks_user
   - chart: mariadb
-    rendered: every-manifest-on
+    rendered: defaults
     keys:
-    - ks_user
+    - hook_cleanup
     - prometheus_mysql_exporter_helm_tests
   - chart: masakari
     rendered: defaults
@@ -1422,6 +1508,10 @@ images:
     - ks_user
     - octavia_health_manager_init
     - octavia_worker_init
+  - chart: openstack-monitoring
+    rendered: defaults
+    keys:
+    - ks_user
   - chart: placement
     rendered: defaults
     keys:
@@ -1483,6 +1573,7 @@ images:
   registry: quay.io
   repository: airshipit/openvswitch
   tag: ubuntu_jammy-20261018
+  tag_form: dated
   used_by:
   - chart: octavia
     rendered: defaults
@@ -1499,6 +1590,7 @@ images:
   registry: quay.io
   repository: airshipit/openvswitch
   tag: ubuntu_noble-20261030
+  tag_form: dated
   used_by:
   - chart: openvswitch
     rendered: defaults
@@ -1516,6 +1608,7 @@ images:
   registry: quay.io
   repository: airshipit/osh-selenium
   tag: ubuntu_noble-20261030
+  tag_form: dated
   used_by:
   - chart: horizon
     rendered: every-manifest-on
@@ -1528,10 +1621,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:4e46a4d18359c941b89783a8dd6a8325091a7e0eff2fda0cbc6ba86e3f7d0df7
-- image: quay.io/airshipit/placement:2026.1-ubuntu_noble
+- image: quay.io/airshipit/placement:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/placement
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: placement
     rendered: defaults
@@ -1549,6 +1643,7 @@ images:
   registry: quay.io
   repository: airshipit/porthole-mysqlclient-utility
   tag: d51f180252a26421dbb2904e1533a38866fd0d74-ubuntu_jammy
+  tag_form: commit
   used_by:
   - chart: mariadb
     rendered: every-manifest-on
@@ -1565,6 +1660,7 @@ images:
   registry: quay.io
   repository: airshipit/rabbitmq
   tag: 3.10.18
+  tag_form: version
   used_by:
   - chart: rabbitmq
     rendered: defaults
@@ -1581,6 +1677,7 @@ images:
   registry: quay.io
   repository: airshipit/rabbitmq
   tag: 3.10.18-management
+  tag_form: version
   used_by:
   - chart: rabbitmq
     rendered: defaults
@@ -1593,10 +1690,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:fad0e93362eba8b3d7c8978ff3c4ab2c1c94ef6b635e59b11d1de78d71138203
-- image: quay.io/airshipit/skyline:2026.1-ubuntu_noble
+- image: quay.io/airshipit/skyline:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/skyline
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: skyline
     rendered: defaults
@@ -1611,10 +1709,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:30ed3acb80727b675103a41abed32b81e10232bc57361f6945747c593741f0f9
-- image: quay.io/airshipit/swift:2026.1-ubuntu_noble
+- image: quay.io/airshipit/swift:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/swift
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: swift
     rendered: defaults
@@ -1635,10 +1734,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:7e3c317861ad56b50efcfd085289abc3c3498cd75da2f20cdf8fa6d2337bf1c0
-- image: quay.io/airshipit/tacker:2026.1-ubuntu_noble
+- image: quay.io/airshipit/tacker:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/tacker
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: tacker
     rendered: defaults
@@ -1653,17 +1753,17 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:e5e90875cdd2c7c2283aa4c554ba7e1da4ad6e0fd00932aa7d4c45c9e5a83412
-- image: quay.io/airshipit/trove:2026.1-ubuntu_noble
+- image: quay.io/airshipit/trove:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/trove
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: trove
     rendered: defaults
     keys:
     - trove_api
     - trove_conductor
-    - trove_db_purge
     - trove_db_sync
     - trove_taskmanager
   registry_facts:
@@ -1673,10 +1773,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:49d17ba90cc84d73050832e2dafa56aa4f5de6f143ab64df128c0177980b4909
-- image: quay.io/airshipit/watcher:2026.1-ubuntu_noble
+- image: quay.io/airshipit/watcher:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/watcher
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: watcher
     rendered: defaults
@@ -1692,10 +1793,11 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:9ae51daec57cf3a158fa5cd68f169df3ac9bea0e3afc12be0f09e21802f29e36
-- image: quay.io/airshipit/zaqar:2026.1-ubuntu_noble
+- image: quay.io/airshipit/zaqar:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/zaqar
-  tag: 2026.1-ubuntu_noble
+  tag: 2026.1-ubuntu_noble-20261117
+  tag_form: dated
   used_by:
   - chart: zaqar
     rendered: defaults
@@ -1713,6 +1815,7 @@ images:
   registry: quay.io
   repository: openstack.kolla/gnocchi-api
   tag: 2026.1-ubuntu-noble
+  tag_form: series
   used_by:
   - chart: gnocchi
     rendered: defaults
@@ -1721,6 +1824,9 @@ images:
     - db_init_indexer
     - db_sync
     - gnocchi_api
+  pin_waiver:
+    issue: 334
+    expires: '2027-01-31'
   registry_facts:
     observed: '2026-11-17'
     anonymous_pull: true
@@ -1732,11 +1838,15 @@ images:
   registry: quay.io
   repository: openstack.kolla/gnocchi-base
   tag: 2026.1-ubuntu-noble
+  tag_form: series
   used_by:
   - chart: gnocchi
     rendered: defaults
     keys:
     - gnocchi_resources_cleaner
+  pin_waiver:
+    issue: 334
+    expires: '2027-01-31'
   registry_facts:
     observed: '2026-11-17'
     anonymous_pull: true
@@ -1748,11 +1858,15 @@ images:
   registry: quay.io
   repository: openstack.kolla/gnocchi-metricd
   tag: 2026.1-ubuntu-noble
+  tag_form: series
   used_by:
   - chart: gnocchi
     rendered: defaults
     keys:
     - gnocchi_metricd
+  pin_waiver:
+    issue: 334
+    expires: '2027-01-31'
   registry_facts:
     observed: '2026-11-17'
     anonymous_pull: true
@@ -1764,11 +1878,15 @@ images:
   registry: quay.io
   repository: openstack.kolla/gnocchi-statsd
   tag: 2026.1-ubuntu-noble
+  tag_form: series
   used_by:
   - chart: gnocchi
     rendered: defaults
     keys:
     - gnocchi_statsd
+  pin_waiver:
+    issue: 334
+    expires: '2027-01-31'
   registry_facts:
     observed: '2026-11-17'
     anonymous_pull: true
@@ -1776,3 +1894,25 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:8d5c3b677c2a56373563c5debe4d162411127d3af715e60b9b971b5ad016f668
+- image: quay.io/prometheus/mysqld-exporter:v0.21.0
+  registry: quay.io
+  repository: prometheus/mysqld-exporter
+  tag: v0.21.0
+  tag_form: version
+  used_by:
+  - chart: openstack-monitoring
+    rendered: defaults
+    keys:
+    - mysqld_exporter
+  registry_facts:
+    observed: '2026-11-17'
+    anonymous_pull: true
+    media_type: application/vnd.docker.distribution.manifest.list.v2+json
+    platforms:
+    - linux/amd64
+    - linux/arm/v7
+    - linux/arm64
+    - linux/ppc64le
+    - linux/riscv64
+    - linux/s390x
+    digest: sha256:afad0c59a154fea24ca5ea0e6f95f2b0b168601b111266963dc8a347715b5318

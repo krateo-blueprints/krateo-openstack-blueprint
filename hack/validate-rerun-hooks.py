@@ -123,7 +123,7 @@ def main():
             span = comp[start:end + len("{{- end }}")]
             open(os.path.join(u, "templates", "zz-gate-rerun-probe.yaml"), "w").write(
                 '{{- $sel := splitList " " (include "osh.selected" (list $)) }}\n'
-                '{{- range $c := .Values.components }}\n' + span + '\n'
+                '{{- $dr := include "osh.deregistration" (list $ (splitList " " (include "osh.selected" (list $))) (list)) | fromYaml }}\n{{- range $c := .Values.components }}\n' + span + '\n'
                 '# RRSPEC {{ $c.name }} {{ $ov | toJson }}\n{{- end }}\n')
             specs = {}
             for key, vals in (("without", {}), ("with", {"rerunHooks": {PROBE_COMPONENT: TOKEN}})):

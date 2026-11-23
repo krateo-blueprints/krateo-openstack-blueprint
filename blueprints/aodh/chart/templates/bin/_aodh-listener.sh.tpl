@@ -19,5 +19,4 @@ limitations under the License.
 set -ex
 
 exec aodh-listener \
-     --config-file=/etc/aodh/aodh.conf \
-     --config-dir=/etc/aodh/aodh.conf.d
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "aodh.config_args.listener" . | fromYamlArray) "format" "shell" "indent" 5) }}

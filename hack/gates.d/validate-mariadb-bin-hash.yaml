@@ -1,0 +1,7 @@
+# The server StatefulSet hashed the whole mariadb-bin, so a change to a script only the controller runs restarted the
+# one-replica database (#445, measured on the 0.3.71 -> 0.3.74 upgrade). Each workload hashes only the keys it mounts.
+name: "A mariadb workload rolls exactly when a script it mounts changes"
+job: job-hooks
+order: 71
+run: |
+  python3 hack/validate-mariadb-bin-hash.py .

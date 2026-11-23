@@ -1,0 +1,9 @@
+# H2 (2026-11-18): the operator-mode RabbitmqCluster held an override PodSpec without `containers`, which its CRD
+# requires, so the API server refused it on GKE while every offline gate was green. This has a real API server, serving
+# the operators' own CRDs from rabbitmq-operator-blueprint at the pinned commit (hack/operator-crds.yaml), admit every
+# rabbitmq.com object the messaging gates render, and shows per kind that a broken one is refused.
+name: "Every rendered rabbitmq.com object is admitted by an API server serving the operators' CRDs"
+job: operator-admission
+order: 10
+run: |
+  python3 hack/validate-operator-admission.py .

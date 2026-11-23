@@ -228,7 +228,10 @@ step "the marker survived"
 echo "  OK   marker read from $STS-0 on its claim"
 
 step "prepare again has nothing to do"
-migrate prepare --apply | grep -q "nothing to migrate" || fail "a second prepare did not recognise the migrated StatefulSet"
+# Captured, then matched: under pipefail, `producer | grep -q` fails when grep exits on its match before the
+# producer has written the rest (SIGPIPE, rc 141), so a found line can read as a missing one (nova-kog #183).
+out=$(migrate prepare --apply) || fail "a second prepare failed"
+grep -q "nothing to migrate" <<<"$out" || fail "a second prepare did not recognise the migrated StatefulSet"
 
 step "an emptied node path is refused"
 h uninstall "$COMPONENT" --wait >/dev/null

@@ -40,16 +40,16 @@ labels:
 
 images:
   tags:
-    rabbit_init: docker.io/rabbitmq:3.13-management
-    ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble
-    ceilometer_central: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble
+    rabbit_init: docker.io/rabbitmq:3.13.7-management
+    ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
+    ceilometer_central: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble-20261117
     # helm-toolkit's job_db_sync takes images.tags.<service>_db_sync. Without this key the
     # ceilometer-db-sync Job rendered with no image, the API server refused it, and every
     # ceilometer pod waited on a Job that never existed (#179).
-    ceilometer_db_sync: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble
-    ceilometer_compute: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble
-    ceilometer_ipmi: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble
-    ceilometer_notification: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble
+    ceilometer_db_sync: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble-20261117
+    ceilometer_compute: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble-20261117
+    ceilometer_ipmi: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble-20261117
+    ceilometer_notification: quay.io/airshipit/ceilometer:2026.1-ubuntu_noble-20261117
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: "IfNotPresent"
@@ -684,11 +684,14 @@ conf:
           fields: payload.observer.id
         observer_typeURI:
           fields: payload.observer.typeURI
+  # Krateo blueprint divergence (#294): publish only to gnocchi. Upstream also listed notifier://, which sends each event
+  # back onto ceilometer's own vhost as topic `event` (queue event.sample), and nothing in this blueprint consumes it
+  # (its consumers, the collector and panko, are retired): the queue grew without bound (GKE 2026-11-17, 954 -> 1062
+  # messages in 10 minutes). hack/validate-ceilometer-publishers.py requires every publisher to have a consumer.
   event_pipeline:
     sinks:
       - name: event_sink
         publishers:
-          - notifier://
           - gnocchi://
     sources:
       - events:
@@ -1233,11 +1236,12 @@ conf:
         interval: 600
         meters:
           - "*"
+  # Krateo blueprint divergence (#294): publish only to gnocchi, as event_pipeline above. notifier:// sent every sample
+  # to topic `metering` on ceilometer's vhost (queue metering.sample), which nothing consumes.
   pipeline:
     sinks:
       - name: meter_sink
         publishers:
-          - notifier://
           - gnocchi://
     sources:
       - meters:

@@ -41,6 +41,17 @@ elif [ "x$STORAGE_BACKEND" == "xswift" ]; then
   curl --fail -i -X POST "${OS_SWIFT_SCOPED_ENDPOINT}" \
     -H "X-Auth-Token: ${OS_TOKEN}" \
     -H "X-Account-Meta-Temp-URL-Key: ${SWIFT_TMPURL_KEY}"
+{{- if eq (include "helm-toolkit.utils.ceph_managed" .) "true" }}
+elif [ "x$STORAGE_BACKEND" == "xrbd" ]; then
+  # Krateo (#308): ceph-managed. The pool and client.${RBD_POOL_USER} are made on Ceph's side (a Rook CephBlockPool and
+  # CephClient, or the Ceph admin), so nothing is created here and no client.admin key is present. With the user's own
+  # key, check that the pool exists and the user can use it.
+  if ! rbd --id "${RBD_POOL_USER}" --pool "${RBD_POOL_NAME}" ls > /dev/null; then
+    echo "client.${RBD_POOL_USER} cannot list pool ${RBD_POOL_NAME}: create the pool, and give the user" \
+      "'profile rbd pool=${RBD_POOL_NAME}', on Ceph's side (a CephBlockPool and CephClient, or the Ceph admin) (#308)"
+    exit 1
+  fi
+{{- else }}
 elif [ "x$STORAGE_BACKEND" == "xrbd" ]; then
   ceph -s
   function ensure_pool () {
@@ -80,6 +91,7 @@ data:
   key: "${ENCODED_KEYRING}"
 EOF
   kubectl apply --namespace "${NAMESPACE}" -f "${SECRET}"
+{{- end }}
 elif [ "x${STORAGE_BACKEND}" == "xradosgw" ]; then
   radosgw-admin user stats --uid="${RADOSGW_USERNAME}" || \
     radosgw-admin user create \

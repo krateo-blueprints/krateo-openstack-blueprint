@@ -8,3 +8,11 @@ job: capability-roles
 order: 410
 run: |
   python3 hack/validate-pod-references.py .
+  # Planted case: ceilometer's delivered renders skipped must fail the gate, naming it (its completeness check).
+  out=$(GATE_PLANT_DROP_DELIVERED=ceilometer python3 hack/validate-pod-references.py . ceilometer 2>&1) && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || ! printf '%s\n' "$out" | grep -F -- "as the umbrella delivers it for ['ceilometer']" >/dev/null; then
+    printf '%s\n' "$out" | tail -5
+    echo "FAIL: with ceilometer's delivered renders dropped the gate must fail naming ceilometer (rc=$rc)"
+    exit 1
+  fi
+  echo "OK: the planted case fails as it must (ceilometer's delivered renders dropped)"

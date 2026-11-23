@@ -7,7 +7,7 @@
     "profile": {
       "type": "string",
       "title": "Profile",
-      "description": "identity = MariaDB+Memcached+Keystone+Glance+Horizon; full = the whole catalogue, including cinder, ironic, octavia and swift, which need infrastructure you must provide yourself (a Ceph cluster, a PXE interface, an lb-mgmt-net with a port per host, an RWX StorageClass) and otherwise sit in Init forever; full-strict = everything except those four, i.e. only what can start on a cluster as it comes. See hack/provisioning-preconditions.yaml.",
+      "description": "identity = MariaDB+Memcached+Keystone+Glance+Horizon; full = the whole catalogue, including cinder, ironic, octavia and swift, which need infrastructure you must provide yourself (a block-storage backend, a PXE interface, an lb-mgmt-net with a port per host, an RWX StorageClass): ironic, octavia and swift otherwise sit in Init forever, and cinder refuses to render while storage.backend is none; full-strict = everything except the components whose components[].requires this install does not provide, i.e. only what can start on the cluster as described (cinder joins it when storage.backend is not none). See hack/provisioning-preconditions.yaml.",
       "enum": [
         "identity",
         "full",
@@ -265,6 +265,11 @@
         "swift": {
           "type": "object",
           "description": "Overrides for the swift Composition (chart CHART_VERSION), deep-merged into its spec. Passed through untyped here; the swift Composition CRD validates them against blueprints/swift/chart/values.schema.json.",
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "openstack-monitoring": {
+          "type": "object",
+          "description": "Overrides for the openstack-monitoring Composition (chart CHART_VERSION), deep-merged into its spec. Passed through untyped here; the openstack-monitoring Composition CRD validates them against blueprints/openstack-monitoring/chart/values.schema.json.",
           "x-kubernetes-preserve-unknown-fields": true
         }
       }
@@ -938,6 +943,162 @@
           "type": "string",
           "minLength": 1,
           "description": "Token for swift: any change re-runs swift's hooks."
+        },
+        "openstack-monitoring": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token for openstack-monitoring: any change re-runs openstack-monitoring's hooks."
+        }
+      }
+    },
+    "monitoring": {
+      "type": "object",
+      "title": "Monitoring",
+      "description": "The openstack-monitoring component (#312): openstack-exporter, a standalone mysqld-exporter and RabbitMQ's /metrics/detailed, scraped by an OpenTelemetry collector that forwards OTLP to the Krateo observability stack, and alert-provider Alert CRs in the release namespace. Off (unset or false), the render is byte-identical to a release without it. README: \"Monitoring\".",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "title": "Enabled",
+          "description": "Explicit opt-in. true: on (refused where alert-provider's observability.krateo.io/v1alpha1 Alert and Metric CRDs are not served). Unset (null) or false: off."
+        },
+        "otlpEndpoint": {
+          "type": "string",
+          "title": "OTLP/HTTP endpoint",
+          "pattern": "^https?://",
+          "default": "http://otel-collector-daemonset-local.krateo-system.svc:4318",
+          "description": "Where the collector exports metrics. The default is the Krateo node agent's node-local Service, which drops traffic from a node with no agent."
+        }
+      }
+    },
+    "publicEndpoints": {
+      "type": "object",
+      "title": "Public endpoints",
+      "description": "The OpenStack APIs, Horizon and the noVNC console over HTTPS from outside the cluster, through one Gateway API Gateway with an HTTPRoute per public endpoint of a selected component, a cert-manager Certificate and an ingress NetworkPolicy for the namespace (#311). Each component's public catalog endpoint becomes https://<service>.<baseDomain>; Horizon becomes ClusterIP with Secure cookies. Needs a Gateway API implementation and cert-manager (Krateo: features.ingress); refused on a live cluster without their CRDs. Off (the default) changes nothing. README: \"Public endpoints\".",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Render the Gateway, routes, Certificate and NetworkPolicy, and move every selected component's public endpoint to its hostname."
+        },
+        "baseDomain": {
+          "type": "string",
+          "default": "",
+          "description": "Every public hostname is <service>.<baseDomain>, e.g. keystone.cloud.example.com. Required when enabled.",
+          "pattern": "^$|^([a-z0-9]([-a-z0-9]*[a-z0-9])?\\.)+[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "gatewayClassName": {
+          "type": "string",
+          "default": "agentgateway",
+          "minLength": 1,
+          "description": "The GatewayClass of the Gateway API implementation (agentgateway is what Krateo's features.ingress installs)."
+        },
+        "gateway": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "default": "openstack-gateway",
+              "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+              "maxLength": 48,
+              "description": "The Gateway's name; its certificate Secret is <name>-tls and each route <name>-<service>."
+            },
+            "addresses": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Reserved IP addresses for the Gateway, so a rebuild keeps its DNS records valid. Empty: the implementation assigns one."
+            }
+          }
+        },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "issuerRef": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "group": {
+                  "type": "string",
+                  "default": "cert-manager.io"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "ClusterIssuer",
+                    "Issuer"
+                  ],
+                  "default": "ClusterIssuer"
+                },
+                "name": {
+                  "type": "string",
+                  "default": "",
+                  "description": "The cert-manager issuer of the Gateway's certificate, e.g. krateo-selfsigned-ca. Required when enabled."
+                }
+              }
+            }
+          }
+        },
+        "hsts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxAge": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 31536000,
+              "description": "Strict-Transport-Security max-age (seconds) on every HTTPS response."
+            }
+          }
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Deny ingress to the namespace by default; allow the namespace itself, the nodes, the Gateway and allowNamespaces."
+            },
+            "nodeCIDRs": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "The CIDRs of the nodes' own addresses. Required with networkPolicy.enabled: the hostNetwork data-plane pods reach RabbitMQ and the APIs from them."
+            },
+            "allowNamespaces": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Namespaces whose pods may reach this namespace (e.g. the OpenStack KOG operators'). Empty: none."
+            }
+          }
+        },
+        "proxyNamespace": {
+          "type": "string",
+          "default": "",
+          "description": "Where the implementation runs the Gateway's proxy pods (selected by gateway.networking.k8s.io/gateway-name). Empty: the install namespace."
         }
       }
     },
@@ -959,6 +1120,24 @@
         }
       }
     },
+    "network": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "Network",
+      "description": "underlayMTU: the MTU of the node NICs that carry neutron's VXLAN tunnels (default 1500). neutron gets it as global_physnet_mtu and ML2 path_mtu, so a VXLAN network advertises underlayMTU - 50 to its guests, and the OVS agent's init refuses to start on a node whose tunnel NIC's MTU is below it. Set it to the nodes' MTU when that is below 1500. README \"neutron's underlay MTU\" (#433).",
+      "additionalProperties": false,
+      "properties": {
+        "underlayMTU": {
+          "type": "integer",
+          "minimum": 1280,
+          "maximum": 9216,
+          "default": 1500,
+          "description": "Underlay (node NIC) MTU for neutron's tunnels: 1280-9216, default 1500 (#433)."
+        }
+      }
+    },
     "kogCredentials": {
       "type": [
         "object",
@@ -970,6 +1149,320 @@
       "properties": {
         "enabled": {
           "type": "boolean"
+        }
+      }
+    },
+    "storage": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "Storage backend",
+      "description": "The backend that provides block storage, the `block-storage` capability cinder requires (#196, #308). Profile full-strict selects cinder only when storage.backend is not none, and the umbrella passes the value to each as its krateo.storageBackend (a componentValues override of that key is refused). With none, a cinder selected anyway (profile full, or enabled) refuses to render, naming this value. With a ceph backend the install consumes Ceph through copies of the keys Ceph mints (storage.ceph), never client.admin. See hack/provisioning-preconditions.yaml.",
+      "additionalProperties": false,
+      "properties": {
+        "ceph": {
+          "type": "object",
+          "title": "Ceph consumer",
+          "description": "How the install consumes Ceph when storage.backend is ceph-rook or ceph-external (#308): each client key and the monitor addresses are copied by External Secrets Operator from where Ceph keeps them, and the charts project the copies. No client.admin key is read anywhere.",
+          "additionalProperties": false,
+          "properties": {
+            "sourceNamespace": {
+              "type": "string",
+              "description": "Where the client-key and mon_host Secrets live; empty: this release's namespace. For ceph-rook, the CephCluster's namespace (its owner grants the copy store read access)."
+            },
+            "clients": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The Ceph user each consumer authenticates as (client.<name>); for ceph-rook, the CephClient name.",
+              "properties": {
+                "cinder": {
+                  "type": "string",
+                  "description": "cinder-volume's user, also libvirt's for attached volumes.",
+                  "minLength": 1
+                },
+                "glance": {
+                  "type": "string",
+                  "description": "glance-api's user.",
+                  "minLength": 1
+                }
+              }
+            },
+            "rook": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Where Rook keeps the keys and monitors (ceph-rook).",
+              "properties": {
+                "clientSecretPrefix": {
+                  "type": "string",
+                  "description": "A CephClient's Secret is <prefix><name>.",
+                  "minLength": 1
+                },
+                "clientKey": {
+                  "type": "string",
+                  "description": "The key holding a CephClient's key.",
+                  "minLength": 1
+                },
+                "monHostSecret": {
+                  "type": "string",
+                  "description": "The Secret holding mon_host.",
+                  "minLength": 1
+                },
+                "monHostKey": {
+                  "type": "string",
+                  "description": "Its key.",
+                  "minLength": 1
+                }
+              }
+            },
+            "keys": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The operator-named Secrets (ceph-external); each secret is required with ceph-external.",
+              "properties": {
+                "cinder": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "client.<clients.cinder>'s key.",
+                  "properties": {
+                    "secret": {
+                      "type": "string",
+                      "description": "The Secret's name (in sourceNamespace)."
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "The key in that Secret.",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "glance": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "client.<clients.glance>'s key.",
+                  "properties": {
+                    "secret": {
+                      "type": "string",
+                      "description": "The Secret's name (in sourceNamespace)."
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "The key in that Secret.",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "monHost": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "The monitor addresses, as ceph.conf's mon_host.",
+                  "properties": {
+                    "secret": {
+                      "type": "string",
+                      "description": "The Secret's name (in sourceNamespace)."
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "The key in that Secret.",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            },
+            "pools": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The RBD pools, created where the users are (a CephBlockPool, or the Ceph admin).",
+              "properties": {
+                "volumes": {
+                  "type": "string",
+                  "description": "cinder's volumes.",
+                  "minLength": 1
+                },
+                "images": {
+                  "type": "string",
+                  "description": "glance's images (glanceStore rbd).",
+                  "minLength": 1
+                }
+              }
+            },
+            "libvirtSecretUUID": {
+              "type": "string",
+              "description": "The libvirt secret every hypervisor defines for cinder's user, passed to cinder, libvirt and nova.",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "glanceStore": {
+              "type": "string",
+              "description": "pvc keeps images on glance's volume; rbd stores them in the images pool.",
+              "enum": [
+                "pvc",
+                "rbd"
+              ]
+            },
+            "glanceImagesMigrated": {
+              "type": "boolean",
+              "description": "With glanceStore rbd on an install whose images are on the glance-images claim, glance refuses until this is true: copy the images to the rbd store first, or confirm there is none to keep."
+            }
+          }
+        },
+        "backend": {
+          "type": "string",
+          "title": "Block-storage backend",
+          "description": "none = no backend (the default): profile full-strict leaves cinder out, and a cinder selected anyway refuses to render, naming this value; ceph-rook = Ceph run by Rook, whose CephClients mint the client keys (#308); storage.ceph says where; ceph-external = an existing Ceph whose admin creates the users and places their keys (#308); storage.ceph.keys names each Secret.",
+          "enum": [
+            "none",
+            "ceph-rook",
+            "ceph-external"
+          ],
+          "default": "none"
+        }
+      }
+    },
+    "ha": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "High availability",
+      "description": "Opt-in (#309). enabled runs memcached as 3 replicas behind a headless Service, with every component listing each replica in its memcache server list, and refuses the render while fewer than 3 nodes carry openstack-control-plane=enabled (when the orchestrator can read nodes). Off changes nothing. README \"High availability\".",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "messaging": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "Messaging backend",
+      "description": "backend: chart (the rabbitmq chart's StatefulSet, the default) or operator (a RabbitmqCluster from krateo-blueprints/rabbitmq-operator-blueprint, fresh installs only, with quorum queues for every client). #309.",
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": [
+            "chart",
+            "operator"
+          ]
+        }
+      }
+    },
+    "rotate": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "Rotate a RabbitMQ service user (messaging.backend operator)",
+      "description": "A token per rotating credential (an unknown id is rejected). Setting rotate.oslo-messaging-<service> to a new token rotates that service's RabbitMQ user: a new root, a second user, the service switched to it, the old one deleted once every reader rolled. Once set, keep it set to its last token: removing it is refused. Refused with messaging.backend chart. README: \"Rotating a RabbitMQ service user\" (#309).",
+      "additionalProperties": false,
+      "properties": {
+        "oslo-messaging-aodh": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-barbican": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-blazar": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-ceilometer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-cinder": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-cloudkitty": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-cyborg": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-designate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-heat": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-ironic": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-magnum": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-manila": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-masakari": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-mistral": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-neutron": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-nova": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-octavia": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-tacker": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-trove": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oslo-messaging-watcher": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "credentialDrift": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "title": "Acknowledge a reported credential drift",
+      "description": "acknowledge.<root Secret>: the sha256 shown in ConfigMap openstack-credential-drift-<root Secret>. Accepted only when it equals the root's current data. README: \"Editing or deleting a root Secret\" (#309).",
+      "additionalProperties": false,
+      "properties": {
+        "acknowledge": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "propertyNames": {
+            "pattern": "^openstack-credential-[a-z0-9-]+$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
         }
       }
     }

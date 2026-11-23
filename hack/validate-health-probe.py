@@ -10,7 +10,9 @@ So this renders every chart that ships worker-health-probe.py, requires every re
 byte-identical (they come from one helm-toolkit define, and a chart-local edit would fork it),
 writes that text out, and runs hack/tests/health_probe against it: oslo.messaging's real RPC
 server and dispatcher on the in-process driver, the remote error as it crosses RabbitMQ, and the
-/proc reading against real processes and sockets.
+/proc reading against real processes and sockets -- including processes started through oslo.service's
+threading and eventlet backends and cotyledon, whose cmdline setproctitle rewrites into a title as in the
+2026.1 images (test_titled_processes.py; native Linux only, and it fails rather than skips elsewhere).
 
 Fails when no chart renders the script, when the tests cannot import oslo.messaging, and when any
 test is skipped or none ran: a probe test that did not run is not a pass.
@@ -41,6 +43,16 @@ if shutil.which("helm") is None:
     sys.exit(2)
 
 
+# What the umbrella delivers for a chart's storage (#308): cinder's default refuses, so a chart render carries
+# hack/gate_values.py's arguments (nothing for every other chart).
+import importlib.util as _gv_util
+import os as _gv_os
+_gv_spec = _gv_util.spec_from_file_location(
+    "gate_values", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "gate_values.py"))
+gate_values = _gv_util.module_from_spec(_gv_spec)
+_gv_spec.loader.exec_module(gate_values)
+
+
 def render(chart, tmp):
     w = os.path.join(tmp, chart)
     shutil.copytree(os.path.join(BP, chart, "chart"), w)
@@ -49,7 +61,7 @@ def render(chart, tmp):
     open(cy, "w").write(txt.replace("CHART_VERSION", "0.0.0-gate"))
     os.makedirs(os.path.join(w, "charts"), exist_ok=True)
     shutil.copytree(TOOLKIT, os.path.join(w, "charts", "helm-toolkit"))
-    r = subprocess.run(["helm", "template", chart + "-gate", w, "--namespace", "openstack"],
+    r = subprocess.run(["helm", "template", chart + "-gate", w, "--namespace", "openstack", *gate_values.helm_args(w)],
                        capture_output=True, text=True)
     if r.returncode:
         return None, r.stderr.strip()[-300:]

@@ -29,6 +29,13 @@ limitations under the License.
 {{- $tlsPath := index . "tlsPath" | default "/etc/rabbitmq/certs" -}}
 {{- $tlsSecret := index . "tlsSecret" | default "" -}}
 
+{{- /* Krateo (#309 H2b): with the RabbitMQ cluster-operator (endpoints.oslo_messaging.operator.cluster, set by the
+       umbrella's messaging.backend operator), the user, vhost, permissions and policies are messaging-topology-operator
+       custom resources instead of this Job: helm-toolkit.manifests.rabbitmq_topology. Pods that waited on this Job wait
+       on those resources instead (helm-toolkit.utils.dependency_jobs_filter). */}}
+{{- if (($envAll.Values.endpoints.oslo_messaging | default dict).operator | default dict).cluster }}
+{{ include "helm-toolkit.manifests.rabbitmq_topology" (dict "envAll" $envAll "serviceName" $serviceName "serviceUser" $serviceUser) }}
+{{- else }}
 {{- $serviceAccountName := printf "%s-%s" $serviceUserPretty "rabbit-init" }}
 {{ tuple $envAll "rabbit_init" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
@@ -101,8 +108,23 @@ spec:
                 name: {{ index $envAll.Values.secrets.oslo_messaging $serviceName }}
                 key: RABBITMQ_CONNECTION
 {{- if $envAll.Values.conf.rabbitmq }}
+{{- /* Krateo (#309 H2b): with quorum queues (endpoints.oslo_messaging.quorum_queues, set by the umbrella's
+       messaging.backend operator), every policy definition loses its ha-* keys. Classic queue mirroring is gone in
+       RabbitMQ 4.x, which refuses a policy that names it, so the import would fail; quorum queues replicate by
+       themselves. Everything else in the policy (message-ttl, ...) is kept. Off, the configuration passes unchanged. */}}
+{{- $aux := $envAll.Values.conf.rabbitmq }}
+{{- if ($envAll.Values.endpoints.oslo_messaging | default dict).quorum_queues }}
+{{- $aux = deepCopy $envAll.Values.conf.rabbitmq }}
+{{- $policies := list }}
+{{- range $p := ($aux.policies | default list) }}
+{{- $def := dict }}
+{{- range $k, $v := ($p.definition | default dict) }}{{- if not (hasPrefix "ha-" $k) }}{{- $_ := set $def $k $v }}{{- end }}{{- end }}
+{{- $policies = append $policies (set (deepCopy $p) "definition" $def) }}
+{{- end }}
+{{- if $aux.policies }}{{- $_ := set $aux "policies" $policies }}{{- end }}
+{{- end }}
           - name: RABBITMQ_AUXILIARY_CONFIGURATION
-            value: {{ toJson $envAll.Values.conf.rabbitmq | quote }}
+            value: {{ toJson $aux | quote }}
 {{- end }}
 {{- if and $envAll.Values.manifests.certificates (ne $tlsSecret "") }}
           - name: RABBITMQ_X509
@@ -125,5 +147,6 @@ spec:
 {{- end }}
 {{- if $envAll.Values.manifests.certificates }}
 {{- dict "enabled" $envAll.Values.manifests.certificates "name" $tlsSecret | include "helm-toolkit.snippets.tls_volume" | indent 8 }}
+{{- end }}
 {{- end }}
 {{- end -}}

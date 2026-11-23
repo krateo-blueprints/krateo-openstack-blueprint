@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# This repository's release preflight (krateo-blueprints/charts PUBLISHING.md rule 12). It runs from
+# krateo-blueprints/charts release-preflight.yaml, which release-tag.yaml's package-and-push job
+# `needs:`. It gets the tag's commit, read-only contents and no secrets, and the version as $1. A
+# non-zero exit means nothing is stamped, pushed, indexed or released.
+#
+# The one release-time precondition release-tag.yaml did not enforce: the tagged commit is one whose
+# PRE-RELEASE was published from main, at this same version. The flow (docs/release.md) is to merge
+# to main, publish X.Y.Z-main.g<sha7> with prerelease.yaml, run the GKE pair on it, and then tag
+# X.Y.Z on THAT commit. Nothing checked the last step, and a tag can also land on a commit that is
+# not on main at all: lint runs on every pull request, so a branch commit passes
+# hack/require-lint-passed.sh too.
+#
+# What this proves, and what it does not. It proves openstack X.Y.Z-main.g<sha7 of HEAD> is in GHCR.
+# prerelease.yaml publishes that name only for a commit that is on origin/main (hack/release-version.sh
+# derive measures it) and that passed lint. So the tag is on main, on a commit that went through the
+# channel at this version. It does NOT prove the GKE pair passed: no machine record of that exists. The
+# GKE result is still a person's call before tagging. This check makes skipping the channel impossible.
+#
+# The other preconditions are already enforced elsewhere, so they are not repeated here:
+#   - the tag is plain X.Y.Z: release-tag.yaml's first step, and hack/release-version.sh in each script;
+#   - the commit passed lint, including the examples-apiVersion and first-release gates:
+#     hack/require-lint-passed.sh;
+#   - each CompositionDefinition and example is stamped, and the CD is inside its chart at the chart's
+#     version: hack/publish-charts.sh, hack/stage-release-assets.sh and the publisher's content gate;
+#   - the README pin: NOT a precondition. The README is pinned AFTER the tag (docs/release.md, step 6).
+#
+# A pre-release pruned before its commit was tagged (prune-prereleases.yaml keeps the newest 5) is
+# refused here as missing. To fix it, run prerelease.yaml on the same commit again, which republishes
+# the same version, and then re-run the release.
+#
+# Usage: hack/release-preflight X.Y.Z
+set -euo pipefail
+
+version="${1:-}"
+here="$(cd "$(dirname "$0")" && pwd)"
+"$here/release-version.sh" check release "$version"
+
+sha="$(git rev-parse HEAD)"
+pre="${version}-main.g${sha:0:7}"
+owner="${GITHUB_REPOSITORY_OWNER:-krateo-blueprints}"
+owner="$(tr '[:upper:]' '[:lower:]' <<< "$owner")"
+repo="${owner}/charts/openstack"
+
+# Anonymous, the way a cluster pulls it: the packages are public. A failure to ask is a refusal,
+# never a pass. The manifest needs the OCI Accept header, because without it GHCR answers 404 for
+# every Helm chart (see hack/publish-charts.sh).
+token="$(curl -fsSL --retry 3 "https://ghcr.io/token?scope=repository:${repo}:pull" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')" || {
+  echo "::error::could not get an anonymous GHCR token for ${repo}; refusing rather than releasing unchecked"
+  exit 1
+}
+code="$(curl -s --retry 3 -o /dev/null -w '%{http_code}' -I \
+  -H "Authorization: Bearer ${token}" -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+  "https://ghcr.io/v2/${repo}/manifests/${pre}")" || code="unreachable"
+case "$code" in
+  200)
+    echo "pre-release ${pre} of ${sha} is in GHCR: this commit went through the pre-release channel at ${version}"
+    ;;
+  404)
+    echo "::error::no pre-release ${pre} in GHCR. Tag ${version} only on a main commit whose pre-release"
+    echo "::error::was published and installed on GKE (docs/release.md). If it was pruned, run prerelease.yaml"
+    echo "::error::on ${sha} again, then re-run this release."
+    exit 1
+    ;;
+  *)
+    echo "::error::GHCR answered '${code}' for ${repo}:${pre}; refusing rather than releasing unchecked"
+    exit 1
+    ;;
+esac

@@ -237,7 +237,12 @@ kubectl create namespace openstack-system
 #     plane resizing), core-provider up to 2.13.107 can leave it deployed with its install hooks never
 #     run and its pods waiting forever. Recovery: delete that component's Composition, and the umbrella
 #     re-creates it (core-provider#563; 2.13.108 marks it Ready=False/HooksMayNotHaveRun, #297).
-# cinder is not in full-strict because its only backend needs Ceph (#196). NOT verified at this
+#   - cinder needs a block-storage backend: a Ceph cluster, through storage.backend ceph-rook or
+#     ceph-external ("Storage: consuming a Ceph cluster" below; the Ceph path is not yet verified on a
+#     live cluster, #308). With the default none, full-strict leaves it out, and selected anyway
+#     (profile: full, or enabled:) its Composition reports "cinder needs a volume backend, and
+#     storage.backend is none (#196)" instead of waiting in Init (see the full-strict section).
+# NOT verified at this
 # version: the 36-component profile: full, kind, a VNC console in a browser, and the
 # per-component path further down.
 
@@ -304,23 +309,57 @@ kubectl apply -f "$OS"
 `profile: identity` brings up MariaDB+Memcached+Keystone+Glance+Horizon; `profile: full`
 brings up **all 36 components** (needs a large amd64 cluster — see `quickstart-gke.md`).
 
-#### `profile: full-strict` — full, minus the four that need provisioning you must do yourself
+#### `profile: full-strict` — full, minus what needs provisioning you must do yourself
+
+> **cinder now refuses to render without a block-storage backend (#196).** The Openstack
+> Composition has a `storage.backend` (default `none`), and the umbrella passes it to cinder.
+> With `none`, `full-strict` leaves cinder out, and a cinder selected anyway — `profile: full`, or
+> `enabled:` — does not install: its Composition reports *cinder needs a volume backend, and
+> storage.backend is none (#196)* instead of `cinder-volume` sitting in `Init` on `ceph-etc`.
+> `full` itself is unchanged and still selects cinder, so a `full` install shows that one
+> component failed rather than stuck. With a Ceph backend, `ceph-rook` or `ceph-external`, cinder
+> installs (see "Storage: consuming a Ceph cluster"). Installs that provisioned Ceph by hand for the
+> old `rbd1` precondition lose that path on purpose: it handed OpenStack the Ceph `client.admin`
+> key, which #308 rules out. `componentValues.cinder.krateo.storageBackend` is refused:
+> `storage.backend` is the one place that says which backend the install has. A standalone
+> `Cinder` Composition must choose its own `krateo.storageBackend` (see "Upgrading: a standalone
+> Cinder Composition must choose its storage backend").
+
+> **manila now needs a share backend, and `full-strict` leaves it out (#426).** Upstream's
+> default share backend, `generic`, never started here: its service-instance helper runs `ip`,
+> which no airshipit manila image ships (measured on the images 0.3.23, 0.3.73 and 0.3.74 ran),
+> and it needs Cinder volumes on Nova service instances. Until 0.3.74 nothing probed
+> `manila-share`, so it reported `Ready` while its service thread had died at start; 0.3.74's
+> readiness probe reports it truthfully, so an install that selects manila never reaches `Ready`.
+> manila's umbrella entry now requires `shared-filesystem`, which nothing provides yet (CephFS
+> comes with #308), so `full-strict` leaves it out. A manila selected anyway — `profile: full`,
+> or `enabled:` — does not install: its Composition reports *manila needs a share backend, and
+> none is configured (#426)*. To run manila with a backend of your own, set
+> `componentValues.manila.krateo.shareBackend: unmanaged` and configure the backend under
+> `componentValues.manila.conf.manila`; the generic driver is refused there too.
+
+> **Upgrading an existing `full-strict` install to 0.3.74 or later uninstalls its `manila`
+> Composition.** That manila never served a share (see the notice above).
 
 > **Upgrading an existing `full-strict` install to 0.3.43 or later uninstalls its `cinder`
 > Composition.** From 0.3.43 `cinder` is one of the components `full-strict` leaves out, because
 > its only shipped volume backend is Ceph and nothing provides a Ceph cluster (#196). On a
 > default install that cinder never worked: `cinder-volume` never started, and from 0.3.41 its
 > `storage-init` hook held the release in `pending-install`. Measured on #179 and on a cold
-> install (#204). If you have provisioned Ceph and use cinder, switch to `profile: full`, or
-> keep `full-strict` and add `cinder` to `enabled:`, **before** you upgrade.
+> install (#204). Up to the #196 fix, an install that had provisioned Ceph could keep cinder with
+> `profile: full` or `enabled:`; that path is now closed (see the notice above).
 
-Four components — `cinder`, `ironic`, `octavia` and `swift` — each wait on infrastructure that no
-Kubernetes cluster provides and that this blueprint does not create. They are in `profile: full`,
-and they stay there. `profile: full-strict` is the same set **minus those four**:
+Five components — `cinder`, `ironic`, `manila`, `octavia` and `swift` — each require infrastructure
+that no Kubernetes cluster provides and that this blueprint does not create, listed as a capability
+under `components[].requires` in the umbrella (`block-storage`, `pxe-interface`,
+`shared-filesystem`, `lb-mgmt-net`, `rwx-storage-class`). They are in `profile: full`, and they
+stay there. `profile: full-strict` is the same set **minus each one whose capability the install
+does not provide**. Only `block-storage` can be provided today, by `storage.backend`; with the
+default `none` that is all five:
 
 ```yaml
 spec:
-  profile: full-strict   # 32 components, none of which needs provisioning you must do yourself
+  profile: full-strict   # 31 components, none of which needs provisioning you must do yourself
 ```
 
 It also needs one node label fewer — three rather than four, since octavia is the only consumer
@@ -328,8 +367,9 @@ of `openstack-network-node` (see the labelling block above).
 
 | component | needs | symptom when it is absent |
 |---|---|---|
-| `cinder` | a Ceph cluster, plus the ConfigMap `ceph-etc` and the keyring Secrets `pvc-ceph-client-key` and `cinder-volume-rbd-keyring` in `openstack`, for the default `rbd1` backend | `cinder-storage-init` and `cinder-volume` stay in `Init` on `FailedMount` for `ceph-etc`; `cinder-api` and `cinder-scheduler` wait on `cinder-volume` |
+| `cinder` | `block-storage`: a `storage.backend` other than `none` — a Ceph cluster, consumed as "Storage: consuming a Ceph cluster" describes | its Composition reports the render error *cinder needs a volume backend, and storage.backend is none (#196)*. Before the fix: `cinder-storage-init` and `cinder-volume` stayed in `Init` on `FailedMount` for `ceph-etc` |
 | `ironic` | an interface named `ironic-pxe` on each conductor node — the bare-metal provisioning NIC | `ironic-conductor-init` exits 1 with `Could not find IP for pxe to bind to`; the pod sits in `Init:CrashLoopBackOff` |
+| `manila` | `shared-filesystem`: a share backend that runs on the airshipit image. None is provided yet (CephFS comes with #308); `componentValues.manila.krateo.shareBackend: unmanaged` with your own backend under `conf.manila` | its Composition reports the render error *manila needs a share backend, and none is configured (#426)*. Before the fix: `manila-share` stayed `Running` with its service thread dead on `FileNotFoundError: 'ip'`, and from 0.3.74 its probe reported *no ESTABLISHED connection to RabbitMQ* |
 | `octavia` | `lb-mgmt-net` plus a Neutron port per node, named `octavia-{worker,health-manager}-port-<hostname>` | the `get-port` init containers log `No Port found for octavia-worker-port-…` and never finish |
 | `swift` | a StorageClass offering `ReadWriteMany` (upstream uses an `nfs-provisioner` default this repo does not ship) | `swift-ring-builder` and `swift-storage` stay `Pending`, `swift-proxy` stays in `Init` |
 
@@ -354,10 +394,13 @@ injected and `designate-manage pool update` died on `` Field `host' cannot be No
 was to deploy the thing it needs rather than to document the need, and `full-strict` went up by
 two — designate back in, and powerdns itself.
 
-`hack/provisioning-preconditions.yaml` carries each one with a command you can run to check it,
-and `hack/validate-provisioning-preconditions.py` asserts **both** halves by rendering the chart:
-every flagged component is still selected by `full`, none is selected by `full-strict`, and each
-declares what it needs, its symptom and that check. Neither profile can drift from the other
+`hack/provisioning-preconditions.yaml` carries each one with its capability and a command you can
+run to check it, and `hack/validate-provisioning-preconditions.py` asserts **both** halves by
+rendering the chart: every such component is still selected by `full`, none is selected by
+`full-strict` with `storage.backend: none`, and each declares what it needs, its symptom and that
+check. As a positive control it renders `full-strict` with every other backend too, which must add
+cinder and nothing else. `hack/validate-storage-backend.py` asserts the value reaches cinder alone
+and that cinder refuses without a backend. Neither profile can drift from the other
 silently, and a precondition cannot describe a component that no profile distinguishes.
 
 To take just one of them on top of `full-strict` — say you have the RWX StorageClass but no PXE
@@ -367,6 +410,11 @@ NIC — name it in `enabled:`, which overrides `profile` and resolves its depend
 enabled:
   - swift
 ```
+
+#### Monitoring: recommended when alert-provider is installed
+
+Add `monitoring.enabled: true` to the `Openstack` spec above. It is off unless you ask, and the umbrella refuses it on
+a cluster without alert-provider's CRDs. See "Monitoring" below.
 
 #### The install unlocks over several reconciles, and that is normal
 
@@ -416,6 +464,107 @@ kubectl apply -f "$EX"
 ```
 
 Full install paths and how to access OpenStack/Horizon: [docs/usage.md](docs/usage.md).
+
+## Storage: consuming a Ceph cluster
+
+cinder's volumes — and, if you choose, glance's images — live in Ceph (#308). The blueprint consumes **any** Ceph
+the same way and never holds the Ceph `client.admin` key: the cluster's side creates the users, their caps and the
+pools, and mints the keys; the umbrella **copies** each key and the monitor addresses into its namespace with
+External Secrets Operator, and the charts project the copies. Nothing here depends on a cloud provider.
+
+```yaml
+spec:
+  profile: full-strict          # now includes cinder
+  storage:
+    backend: ceph-rook          # or ceph-external
+    ceph:
+      sourceNamespace: rook-ceph
+      glanceStore: rbd          # optional: images in Ceph too (default pvc)
+```
+
+**What must exist on Ceph's side** (with Rook: a `CephBlockPool` per pool and a `CephClient` per user; otherwise the
+Ceph admin), with the names in `storage.ceph` (defaults shown):
+
+- pools `cinder.volumes` (and `glance.images` for `glanceStore: rbd`);
+- `client.cinder` with `mon 'profile rbd'`, `osd 'profile rbd pool=cinder.volumes, profile rbd-read-only pool=glance.images'`;
+- `client.glance` with `mon 'profile rbd'`, `osd 'profile rbd pool=glance.images'` (only for `glanceStore: rbd`).
+
+These are the caps the Ceph documentation gives for OpenStack (docs.ceph.com, "Block Devices and OpenStack"). The
+blueprint checks, with each user's own key, that its pool exists and the user can use it: `cinder-storage-init`
+fails with `client.cinder cannot list pool cinder.volumes` when either is missing.
+
+**Where the keys come from:**
+
+- `ceph-rook`: Rook keeps a CephClient's key in Secret `rook-ceph-client-<name>` (key `userKey`) and the monitors in
+  `rook-ceph-config` (key `mon_host`), in the CephCluster's namespace (`storage.ceph.rook` if yours differ).
+- `ceph-external`: the Ceph admin places each user's key and `mon_host` in Secrets and names them under
+  `storage.ceph.keys.{cinder,glance,monHost}` (each `secret` and `key`); the umbrella refuses an empty one.
+
+**The read grant.** The copies are read by the ServiceAccount `openstack-credentials-ceph-reader` in the Openstack
+namespace. If the source Secrets are in that namespace, the umbrella grants it itself. If they are in another (Rook's),
+that namespace's owner grants exactly those Secrets — for example:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openstack-ceph-reader
+  namespace: rook-ceph
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    resourceNames:
+      - rook-ceph-client-cinder
+      - rook-ceph-client-glance
+      - rook-ceph-config
+    verbs:
+      - get
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - selfsubjectrulesreviews
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openstack-ceph-reader
+  namespace: rook-ceph
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: openstack-ceph-reader
+subjects:
+  - kind: ServiceAccount
+    name: openstack-credentials-ceph-reader
+    namespace: openstack
+```
+
+Without it, External Secrets Operator reports the copy store `openstack-credentials-ceph` not Ready, and the Openstack
+Composition **refuses to render**, naming the namespace, the ServiceAccount and the exact Secrets to grant. A Ceph
+consumer (cinder, libvirt, glance with `rbd`) is **created only once the copies of the keys it reads report Ready**:
+until then it is listed in `openstack-install-pending`, like a dependency that is not Ready yet, and never starts on
+a key nothing has copied. Check with
+`kubectl get secretstore openstack-credentials-ceph` and
+`kubectl get externalsecret openstack-credential-ceph-client-cinder openstack-credential-ceph-mon-host`.
+
+**Rotation.** A key Ceph's side rotates (Rook's cephx rotation, or the Ceph admin) reaches the copies within 5 minutes,
+then the projections. Each reader — `cinder-volume`, `glance-api`, `libvirt` — carries a checksum of the key it
+mounts, so the next reconcile restarts it. A cephx user holds one key at a time, so a rotation interrupts that user
+until its readers restart; libvirt defines its secret at start. What a running VM's open connection to an attached
+volume does across a rotation is not measured yet (#308, live test L4): rotate in a maintenance window.
+
+**Not covered yet:** nova's ephemeral disks stay on the hypervisor (Ceph-backed ephemeral disks are a later phase of
+#308); and this path has been rendered and gated, not yet run on a live cluster.
+
+**Moving an existing glance to `rbd`.** glance stops mounting its `glance-images` claim, so every image stored there
+would become unreadable. While the claim exists, glance refuses to render until you set
+`storage.ceph.glanceImagesMigrated: true`: first copy each image into the rbd store (with both stores enabled,
+`glance image-import <id> --import-method copy-image --stores rbd`), or confirm there is nothing to keep. The claim
+itself is kept (`keep_pvc`) until you delete it.
 
 ## swift needs a ReadWriteMany StorageClass
 
@@ -722,6 +871,184 @@ so it re-renders them unchanged apart from adding `keep`, and step 1 then takes 
 The ownership decision is in `templates/_capabilities.tpl`. `hack/validate-capability-roles.py`
 checks it against owned, foreign, absent and partly taken-over objects, and checks that the
 umbrella renders none of them on its own.
+
+## Public endpoints: the APIs and Horizon over HTTPS (#311)
+
+Off by default. Without it, OpenStack is reachable from inside the cluster, plus Horizon on NodePort 31000 over plain
+HTTP; the public catalog URLs point at Services nothing serves. With `publicEndpoints.enabled`, the orchestrator renders
+one Gateway API `Gateway` and an `HTTPRoute` per public endpoint of every selected component, and moves each public
+catalog URL to `https://<service>.<baseDomain>`:
+
+```yaml
+spec:
+  publicEndpoints:
+    enabled: true
+    baseDomain: cloud.example.com          # keystone.cloud.example.com, nova.cloud.example.com, ...
+    tls:
+      issuerRef:
+        name: krateo-selfsigned-ca         # any cert-manager ClusterIssuer (or kind: Issuer)
+    networkPolicy:
+      nodeCIDRs:
+        - 192.168.10.0/24                  # your nodes' address range (example)
+      allowNamespaces:
+        - krateo-system                    # e.g. where the OpenStack KOG operators run
+```
+
+**Prerequisites:** a Gateway API implementation (the CRDs plus a controller for `gatewayClassName`, default
+`agentgateway`) and cert-manager. Krateo's installer brings both with `features.ingress`. On a live cluster the
+orchestrator refuses to render, with the reason on its status, while the Gateway API or cert-manager CRDs are absent.
+Then point DNS for the hostnames, or a wildcard `*.<baseDomain>`, at the Gateway's address
+(`kubectl -n openstack get gateway openstack-gateway`). Krateo's `features.externalDns` does that from the HTTPRoutes.
+Set `gateway.addresses` to a reserved IP so a rebuild keeps the records valid.
+
+Nothing here is specific to a cloud. The class, the issuer, the domain and the node CIDRs are all inputs, and the
+chart renders no load-balancer annotations and assumes no DNS provider. How the Gateway gets an external address
+(a cloud load balancer, MetalLB, or something else) is up to the Gateway API implementation.
+
+**What it renders and changes:**
+
+- **The Gateway** `openstack-gateway`: an HTTPS listener on 443 with the Certificate `openstack-gateway-tls`, and an
+  HTTP listener on 80 that only redirects to HTTPS.
+- **The Certificate:** issued by `tls.issuerRef` for every routed hostname. A private CA (such as Krateo's
+  `krateo-selfsigned-ca`) needs clients to trust it: `export OS_CACERT=ca.crt`, or `openstack --os-cacert ca.crt`. An
+  ACME issuer must be able to validate every hostname. DNS-01 works; an HTTP-01 solver attached to a different Gateway
+  cannot.
+- **One HTTPRoute per public endpoint:** every catalog service a selected chart registers, plus Horizon and the noVNC
+  console proxy. Each route sends to that component's ClusterIP Service. Every response carries
+  `Strict-Transport-Security: max-age=31536000`. Every request gets `X-Forwarded-Proto: https`, overwriting what the
+  client sent, so the services' proxy-header parsing cannot be lied to.
+- **Never routed:** nova-metadata, RabbitMQ (and its management UI), MariaDB, memcached.
+- **Each component's public endpoint** (`endpoints.<type>.host_fqdn_override.public`, scheme `https`, port 443) moves to
+  its hostname. Its `[oslo_middleware] enable_proxy_headers_parsing` is set, so version-discovery links say `https`.
+  Its own Ingress objects are switched off: they were inert, because no controller serves their class. nova's noVNC
+  base URL and glance's CORS origin follow too.
+- **Horizon:** its Service becomes `ClusterIP`, so **NodePort 31000 goes away**. Its cookies become `Secure`, it
+  trusts `X-Forwarded-Proto`, and it accepts CSRF only from `https://horizon.<baseDomain>`.
+- **An ingress NetworkPolicy for the install namespace.** It denies everything by default, then allows:
+  - this namespace;
+  - `nodeCIDRs`. These are required: neutron's agents, nova-compute, libvirt and openvswitch run on the host network,
+    so their traffic arrives from node addresses;
+  - the Gateway's proxy pods, to the routed backends' ports;
+  - the internet, to the proxy pods only;
+  - `allowNamespaces`.
+
+  Nothing else crosses into the namespace. That includes the OpenStack KOG operators, unless you list their
+  namespace. Set `networkPolicy.enabled: false` to leave policy to yourself.
+
+  The policies select every pod that lacks the label `krateo.io/networkpolicy-exempt`. A pod given that label is
+  selected by none of them and is left unrestricted: an explicit, visible opt-out.
+
+**Turning it on for an existing install** changes the values of every component it touches once, so each runs a helm
+upgrade. The ks-endpoints hooks then re-register the public catalog URLs. Anyone using `:31000` must move to
+`https://horizon.<baseDomain>`.
+
+**Not verified on a cluster yet.** `hack/validate-public-endpoints.py` checks the rendered objects and every
+component chart rendered with the values the orchestrator gives it. A release run still has to show:
+
+1. From a machine outside the cluster, `openstack --os-cacert ca.crt --os-auth-url https://keystone.<baseDomain>/v3
+   --os-interface public token issue` succeeds, and `catalog list` shows only `https://...<baseDomain>` public URLs.
+2. One call per routed service also succeeds through its public URL.
+3. `curl -sI https://horizon.<baseDomain>/` shows `Strict-Transport-Security`, `http://` answers 301, and a browser
+   login works with `Secure` cookies.
+4. The NetworkPolicy is enforced. A pod in another namespace connecting to `memcached:11211`, `mariadb:3306`,
+   `rabbitmq:5672` or `keystone-api:5000` **must be refused**. If it connects, the cluster's network plugin is not
+   enforcing NetworkPolicy, and the run fails rather than passes.
+5. A server still boots and gets its address, which shows the node allowance kept the host-network agents working.
+6. The Gateway answers a hostname it does not route, and an internal name such as `keystone-api.openstack.svc`,
+   with 404.
+
+Two consequences to know:
+
+- **In-cluster clients that use the public interface now reach the external hostname, so they need cluster DNS to
+  resolve it and must trust the CA.** heat's own heat client (`clients_heat`, publicURL, as upstream) and castellan's
+  `barbican_endpoint_type` (upstream default `public`, used by nova and cinder for encrypted volumes) are two such
+  clients. Before this they reached a Service with no pods.
+- **Not routed in this release:** Skyline, and nova's spice and serial consoles.
+
+## Editing or deleting a root Secret
+
+Each generated credential's root is an External Secrets Operator `ExternalSecret` (`refreshPolicy: CreatedOnce`,
+`creationPolicy: Owner`) writing the Secret `openstack-credential-<id>`. What touching that Secret does, from ESO
+v2.14.0's source (`pkg/controllers/externalsecret/externalsecret_controller.go:370`, `isSecretValid`):
+
+- **Editing its data regenerates it.** ESO skips a refresh only while the Secret's data still matches its data-hash
+  annotation. An edit breaks that, and ESO writes a **fresh random value**, neither the one you wrote nor the old one.
+  The services keep the value they were given until their own copies refresh, so an edit is an uncoordinated
+  rotation, not a way to set a password.
+- **Deleting it** does the same: ESO recreates it with a new value.
+- **The blueprint detects both and reports them.** It latches a sha256 of each generated root (ConfigMap
+  `openstack-credential-generations`). A root whose data changes is listed on the Openstack resource's
+  `status.credentialDrift` by its Secret's name, and a ConfigMap `openstack-credential-drift-<Secret>` shows why and the
+  root's current sha256. **No live credential follows it:** every projection of a generated root refreshes only when it
+  itself changes (`refreshPolicy: OnChange`), so the services and their backends keep the previous value.
+- **To accept the new value** (when you know the edit was deliberate and will set it in the backend yourself), set the
+  sha256 the report shows. It re-baselines only if that is still the root's current data:
+
+```yaml
+credentialDrift:
+  acknowledge:
+    openstack-credential-oslo-db-keystone: "<sha256 from ConfigMap openstack-credential-drift-openstack-credential-oslo-db-keystone>"
+```
+
+### Which credentials rotate
+
+Only the RabbitMQ service users, with `messaging.backend: operator` (#309): `rotate.oslo-messaging-<service>` for each
+messaging component whose rabbit-init runs (the schema rejects any other id, and the umbrella refuses `rotate` with the
+chart-mode broker, where nothing would rotate). Every other credential rotates only through a release that introduces a
+new root, as the "Upgrading to …" sections below describe.
+
+- **A rotation is a new root, never a changed one.** `rotate.oslo-messaging-heat: "<token>"` makes the umbrella mint
+  `openstack-credential-oslo-messaging-heat-g<first 8 hex of sha256(token)>`, once, stamped with the root it replaces.
+  Use the current time as the token.
+- **Keep the token set to its last value afterwards.** Removing it is refused (it would re-activate the old root), and
+  so is a token whose generation already existed. Rotate again with a new token.
+- **The active generation** is the root the component's Composition references:
+  `kubectl -n openstack get heat heat -o jsonpath='{.spec.endpoints.oslo_messaging.auth.heat.passwordFrom.secret}'`.
+
+### Rotating a RabbitMQ service user
+
+One step: set `rotate.oslo-messaging-<service>` to a new token (the current time) and apply. The umbrella does the rest
+over the next reconciles, deriving each step from what exists in the cluster (#309 C2):
+
+1. **Minting.** The new root, and the umbrella's projection of it,
+   `<service>-rabbitmq-topology-user-g<8 hex>` (username `<service>-g<8 hex>`). Once that Secret exists, the service's
+   release renders a second RabbitMQ user, `<service>-rabbitmq-user-g<8 hex>`, with its own Permission on the same vhost,
+   so no queue moves. Both users work.
+2. **Switch.** Once the new User is Ready, the service's Composition names the new root and username. Every pod of the
+   service rolls: each pod template carries `krateo.io/messaging-generation: -g<8 hex>`, because nothing else in a pod
+   template changes when only a Secret that External Secrets projects changes. Pods restarting meanwhile wait on the
+   active generation's User.
+3. **Draining.** The previous user stays until every reader has moved:
+   - every Deployment, StatefulSet, DaemonSet and CronJob of the release carries the new generation, and has rolled out
+     as `kubectl rollout status` judges it (kubectl v1.36.4). A StatefulSet partition counts as not rolled while any pod
+     is below it;
+   - no Job or CronJob Job is still running;
+   - the service's release for the switched spec has been applied, **hooks included**: its Composition's
+     `status.observedGeneration` has caught up. core-provider's controller writes it only after the helm upgrade,
+     which runs and waits for the hooks, has succeeded. A Composition marked `krateo.io/hooks-unverified` waits until
+     you have checked its hooks and removed the mark;
+   - the service's projections of the new root (`<service>-rabbitmq-user`, `<service>-transport`) have synced, so every
+     pod started from then on reads the new credential.
+4. **Retired.** The previous user leaves the release. Its User is deleted, and the topology operator deletes the
+   RabbitMQ user.
+
+While a rotation is in progress, `status.credentialRotation` lists its id. ConfigMap
+`openstack-credential-rotation-<id>` shows the phase (`minting` or `draining`) and what it waits on:
+
+```
+kubectl -n openstack get configmap openstack-credential-rotation-oslo-messaging-heat -o jsonpath='{.data.blockers}'
+```
+
+**Some waits need you; nothing is forced.**
+- A StatefulSet or DaemonSet with `updateStrategy: OnDelete`, or a bare Pod, never moves by itself. Delete its pods, one
+  at a time.
+- A partition above 0 keeps its pods on the previous user. Set the partition to 0.
+- A workload the umbrella cannot read is kept as a blocker, never assumed rolled.
+- A CronJob whose Jobs are always running holds the previous user for as long as they run.
+
+A second token set while the previous rotation still drains waits for it: never more than two users at a time. Edit or
+delete neither root during a rotation: an edit of a generation root is reported like any other
+(`status.credentialDrift`).
 
 ## Upgrading an existing install
 
@@ -1058,7 +1385,7 @@ pod runs the new configuration, nothing logs in with the old password. It happen
 to its root, and not again: the generated value is stable afterwards. MariaDB has no failed-login lockout (an access
 denied does not count toward `max_connect_errors`), so no account is locked by it. Anything outside the
 blueprint that logs in as a service's MariaDB user with the old password is refused from then on. It must
-read the new value from the matching root Secret. Never delete those Secrets.
+read the new value from the matching root Secret. Never delete or edit those Secrets: either regenerates the value ("Editing or deleting a root Secret").
 
 ### Upgrading to 0.3.69 or later: each service's RabbitMQ password rotates
 
@@ -1097,7 +1424,7 @@ The rotation window has the same shape as 0.3.68's MariaDB one. rabbit-init is a
 with the new password is refused until its chart's rabbit-init has run, and retries. RabbitMQ authenticates only when
 a connection opens, so a pod still running with the old password keeps its open connections; a reconnect with the old
 password is refused until the pod is replaced. RabbitMQ has no failed-login lockout. Anything outside the blueprint that
-logs in as a service's RabbitMQ user must read the new value from the matching root Secret. Never delete those Secrets.
+logs in as a service's RabbitMQ user must read the new value from the matching root Secret. Never delete or edit those Secrets: either regenerates the value ("Editing or deleting a root Secret").
 
 ceilometer's notification agent now consumes only the vhosts that exist (#285). It had a fixed list of seven
 (ceilometer, cinder, glance, nova, keystone, neutron, heat), and oslo.messaging retries a missing vhost forever: on a
@@ -1160,6 +1487,85 @@ Then set `componentValues.glance.volume.size`, for example `10Gi`.
 | live 2Gi, `size: 10Gi` | 10Gi |
 | live 20Gi, `size: 10Gi` | 20Gi |
 | a size that isn't a quantity | refused |
+
+### Upgrading to 0.3.74 or later: MariaDB and RabbitMQ restart once
+
+The first upgrade to 0.3.74 restarts the MariaDB server and the RabbitMQ server once each, on every install. Each runs
+one replica, so expect a short outage of what needs them. Measured on GKE upgrading 0.3.71 (r074): the RabbitMQ pod
+was down for about 40 s (terminating to Ready, 18:33:24-18:34:01Z) and the MariaDB pod for about 70 s
+(18:34:27-18:35:34Z); Keystone's token API failed for about 2 minutes around the MariaDB restart. The upgrade's own
+Keystone-user Jobs retry until it is back. Nothing has to be done afterwards.
+
+Why each pod template changes (a field-by-field render diff of 0.3.71 against this release):
+- **MariaDB server:**
+  - its dbadmin, sst and dbaudit credential ExternalSecrets changed from an hourly refresh to
+    `refreshPolicy: OnChange` (#422), and the pod template carries a hash of each of those manifests;
+  - `configmap-bin-hash` changed. It was the hash of the whole `mariadb-bin` ConfigMap, which also holds scripts the
+    server never runs, and 0.3.74 changed one of them, the controller's `mariadb_controller.py` (#335). Since #445 the
+    server hashes only the keys it mounts (`start.py`, `stop.sh`, `health.sh`), so later changes to the controller's,
+    the test pod's or the Jobs' scripts no longer restart the database; the new value is itself part of this one
+    restart. `hack/validate-mariadb-bin-hash.py` checks it.
+- **RabbitMQ server:** the hashes of its admin and Erlang-cookie ExternalSecrets changed (#422, as above), and its
+  `rabbitmq-password` init container's image moved to the dated tag `2026.1-ubuntu_noble-20261117` (#343).
+- **Plan for it:** upgrade when a few minutes without the database and the message queue are acceptable.
+
+### Upgrading: a component that leaves the selection is removed from Keystone
+
+When a component leaves the selection, the umbrella removes what it registered:
+- **When it applies:** an upgrade that drops it (0.3.74's full-strict drops manila), or your own change of `profile` or
+  `enabled`.
+- **Why it's needed:** `helm uninstall` of the removed component runs its OLD chart's hooks, which never did this. Its
+  catalog entries outlived it and pointed at a deleted Service. On the 0.3.71 -> 0.3.74 upgrade, that kept Skyline,
+  and with it the umbrella, from ever going Ready (#444).
+- **How it works:** on every reconcile the umbrella looks up, by name, the component's Composition and every Service its
+  chart renders.
+  - While any of them exists, the component is still being removed. Nothing is deregistered, and the ConfigMap
+    `openstack-deregistration-pending` names what is still there.
+  - Once none exists, the component is handed to keystone as `krateo.deregister`. That changes keystone's values, so
+    keystone is upgraded, and its hook Job `keystone-deregister` deletes the component's Keystone services, with their
+    endpoints, and its leftover hook Jobs and their pods.
+  - Nothing is remembered between reconciles, so the order in which the removal and keystone's upgrade happen doesn't
+    matter, and deleting what is already gone is a no-op.
+  - Selecting a component takes it back out of `krateo.deregister`. So any change of the selection, including
+    `monitoring.enabled`, upgrades keystone once and runs its hooks again. Its pods don't restart: `krateo.deregister`
+    reaches only the hook Job.
+- **What is deleted:**
+  - only a service whose type AND name are what the component registers. The list is derived from the charts' own
+    ks-service Jobs;
+  - never a type a selected component registers. A service you created by hand with the same type and another name is
+    kept, and the Job's log names it;
+  - only hook Jobs labelled with the component's `application` name.
+- **A component you run on its own is left alone:** if you run, say, Manila's standalone Composition next to the
+  umbrella with manila not selected, its `manila-api` Service exists, so it stays listed in
+  `openstack-deregistration-pending` and its catalog entries are never deleted.
+- **Nothing to do on upgrade:** the first upgrade to this release removes what earlier removals left.
+- **A pinned keystone gets nothing:** a keystone Composition whose migration is not approved (`Paused`, or `Manual`
+  without the annotation, above) is read through its origin schema. It never receives `krateo.deregister`, so nothing
+  is deregistered. Approve its migration, or delete the service by hand: `openstack service delete <id>`.
+
+**Skyline no longer depends on every catalog endpoint resolving.** Its nginx used to refuse to start when any catalog
+host did not resolve. Now each endpoint location resolves per request through the cluster DNS, so a dead endpoint
+answers that location with 502 and the dashboard still serves. Upstream divergence `skyline-444`;
+`hack/validate-skyline-nginx.py` runs `nginx -t` on upstream's own template before and after.
+
+### Upgrading: a standalone Cinder Composition must choose its storage backend
+
+From #308 step 4, cinder's chart default for `krateo.storageBackend` is `none`, which refuses to render, instead of
+`unmanaged`, upstream's `rbd1` wiring (#196).
+
+- **Through the Openstack Composition: nothing to do.** The umbrella always passes `storage.backend` (`none` by
+  default) and refuses a `componentValues` override, so cinder never renders at its chart default.
+- **A standalone `Cinder` Composition** (created from the Cinder CompositionDefinition, without the umbrella) whose
+  spec does not set `krateo.storageBackend` refuses at its next render after the upgrade, naming the key. Its render
+  fails before any helm upgrade, so the release stays at its previous revision until the spec chooses. Set it
+  **before** upgrading:
+  - `krateo.storageBackend: unmanaged` keeps upstream's wiring exactly: you provide the ConfigMap `ceph-etc` and the
+    Secrets `pvc-ceph-client-key` (which holds Ceph's `client.admin`) and `cinder-volume-rbd-keyring`;
+  - or `krateo.storageBackend: ceph-external` with `krateo.ceph.keyringFrom` and `krateo.ceph.monHostFrom`, each a
+    reference (`store`, `secret`, `key`) to a Secret holding the cinder user's key and the monitors' `mon_host`.
+
+Before this change, such a Composition with no `krateo.storageBackend` rendered upstream's wiring silently, which works
+only when those three objects exist; otherwise cinder-volume waited in `Init` forever.
 
 ### Components follow the umbrella's version
 
@@ -1239,6 +1645,17 @@ Two costs, both measured:
 
 On a cluster still on 0.3.40 or earlier, a hook Job of the same name replaces the plain Job on
 the first upgrade. Nothing has to be deleted by hand.
+
+Helm never deletes hook resources when it uninstalls a release, and a completed hook Job can't
+delete itself (`hook-succeeded`), because kubernetes-entrypoint waits on dependency Jobs by name
+for as long as the component is installed. So each chart also renders `<component>-hook-cleanup`,
+a `pre-delete` hook that runs last at uninstall and deletes that release's install/upgrade hook
+Jobs and their pods (#206). It runs in an image the chart's own Jobs already use, with a Role
+limited to listing and deleting Jobs in the namespace. It always exits 0, so a failed cleanup
+leaves the Jobs behind rather than blocking the uninstall. Jobs left by uninstalls before this
+version stay: `kubectl -n <ns> delete jobs -l release_group=<release>` removes them.
+`hack/validate-hook-cleanup.py` checks every chart that renders a hook Job, and runs the cleanup
+against a stand-in API.
 
 ### Horizon sessions move to the database: every Horizon user is logged out once
 
@@ -1391,6 +1808,90 @@ kubectl -n openstack get compositiondefinitions \
   -o custom-columns='NAME:.metadata.name,API:.status.apiVersion,READY:.status.conditions[?(@.type=="Ready")].status'
 ```
 
+### neutron finds its tunnel interface by itself
+
+neutron's `network.interface.tunnel`, the host NIC that carries VXLAN tunnel traffic, defaults to empty. The OVS
+agent's init then uses the interface of the default route, which works on any node. Set it only when tunnel traffic
+must leave through another NIC.
+
+**Existing installs keep `ens4`.** The field used to default to `ens4`, a GCE NIC name. That old schema default was
+written into each stored neutron object (#179), and upgrading doesn't remove it.
+- On GCE, `ens4` is the right NIC, so nothing changes.
+- On any other node, the OVS agent's init stops with `Var LOCAL_IP is empty`. Clear the field, or set the node's NIC:
+
+  ```yaml
+  componentValues:
+    neutron:
+      network:
+        interface:
+          tunnel: ""        # or the NIC, e.g. eth0
+  ```
+
+### neutron's underlay MTU
+
+neutron's VXLAN networks ride on the node NICs that carry the tunnel traffic, the underlay. Each VXLAN packet carries
+50 bytes of overhead, so neutron gives a VXLAN network an MTU of the underlay's MTU minus 50, and tells its guests so
+through DHCP. It learns the underlay's MTU from `network.underlayMTU`, default 1500, which reaches neutron as
+`global_physnet_mtu` and ML2 `path_mtu`.
+
+**Set it when your nodes' MTU is below 1500**, to that MTU:
+
+```yaml
+network:
+  underlayMTU: 1460
+```
+
+- **Why:** on 1460-MTU nodes, with the default 1500, neutron advertised 1450 while only 1410 fit through the tunnel.
+  Small packets and SSH worked, and full-size frames were dropped. dp303 run 4 measured this with a full-size
+  don't-fragment ping (#433).
+- **The refusal:** the OVS agent's init reads the tunnel NIC's MTU, the NIC it already finds from the route (above). It
+  refuses to start when that MTU is below the value neutron uses for tunnels. Its message names the value to set. A NIC
+  whose MTU cannot be read is refused too.
+- **Examples, not requirements:** the GKE nodes dp303 ran on had NIC MTU 1460 (measured 2026-11-21), so `underlayMTU:
+  1460` there. Check your VPC's MTU. Jumbo-frame underlays can raise it, up to 9216.
+- **An explicit `componentValues.neutron` entry wins** (`conf.neutron.DEFAULT.global_physnet_mtu`,
+  `conf.plugins.ml2_conf.ml2.path_mtu`). A standalone Neutron Composition sets those two directly. The refusal compares
+  `path_mtu`, else `global_physnet_mtu`, else 1500.
+- **Existing networks keep their MTU:** neutron fixes a network's MTU when it creates the network. After raising or lowering
+  `underlayMTU`, change older VXLAN networks with `openstack network set --mtu <underlayMTU - 50> <network>`. Their guests
+  pick the new value up when their DHCP lease renews.
+
+`hack/validate-underlay-mtu.py` checks all of this and runs the refusal.
+
+**Upgrading to the release that adds it:**
+- **If your nodes' MTU is below 1500, set neutron's MTU through `componentValues` BEFORE you upgrade, on the release
+  you are running.** `network.underlayMTU` cannot be set before the upgrade: releases before this one have no `network`
+  field, so the API server drops it, the upgrade writes the default 1500, and the OVS agent refuses to start on the
+  first node it reaches. That node's DHCP, L3, metadata and nova-compute agents then stay down until the value is set
+  (measured on GKE, 1460-MTU nodes, upgrading 0.3.71: r074 run 2). Earlier releases do accept neutron's own settings
+  under `componentValues.neutron`, and this release lets them win over `network.underlayMTU`, so set both to your nodes'
+  MTU in the Openstack spec first:
+
+  ```yaml
+  componentValues:
+    neutron:
+      conf:
+        neutron:
+          DEFAULT:
+            global_physnet_mtu: 1460
+        plugins:
+          ml2_conf:
+            ml2:
+              path_mtu: 1460
+  ```
+
+  Wait for neutron to be Ready on the release you are running (it restarts once for this setting), then upgrade: the
+  OVS agent reads 1460 and starts. Afterwards you may move the value to `network.underlayMTU: 1460` and remove the
+  `componentValues.neutron` entry; neutron receives the same spec either way, so that does not restart it.
+  `hack/validate-underlay-mtu.py` part 5 checks this block: 0.3.71's schema keeps it and has no `network`; this release
+  renders 1460 into neutron and its refusal check; and the spec is the same after the move.
+- **neutron rolls once, on every install, even at 1500.** The first upgrade to this release adds `global_physnet_mtu`
+  to `neutron.conf` and `path_mtu` to `ml2_conf.ini`; before it, neither line was rendered. Each neutron workload carries
+  a hash of its configuration, so neutron-server, the RPC server and the OVS, L3, DHCP and metadata agents restart once.
+- **A brief neutron API gap is expected.** neutron-server runs one replica by default, and its rollout allows one
+  unavailable (#286), so the network API is briefly unavailable while it restarts. That is the rollout, not a fault.
+  Later upgrades that leave `underlayMTU` unchanged do not roll neutron for it.
+
 ### Running guests on KVM
 
 By default (`compute.virtType: qemu`) nova runs guests in QEMU software emulation. That works on any node, slowly.
@@ -1490,8 +1991,84 @@ How the token and the endpoints are written:
   backs off after a rejection.
 
 **Install oasgen-provider 0.80.0 from OCI**, with its chart and CRDs in step, once per cluster, before the KOGs. Some KOG
-READMEs show an unpinned install from `charts.krateo.io`, which serves 0.10.0; don't use it. nova-kog's owner measured
-all 6 nova Kinds reconciling on 0.80.0.
+READMEs show an unpinned install from `charts.krateo.io`, which serves 0.10.0; don't use it. The evidence for 0.80.0:
+- 2026-11-17, nova-kog's owner: all 6 nova Kinds of that time had their RestDefinitions Ready and Synced on 0.80.0. This
+  was a local kind cluster against an unreachable endpoint, so nothing was created. It is recorded in nova-kog's
+  [docs/configuration.md](https://github.com/krateo-blueprints/openstack-nova-operator-kog/blob/main/docs/configuration.md),
+  in the oasgen-provider version table.
+- 2026-11-21, this repo's data-plane test, on GKE with blueprint 0.3.74-main.gc16973f: the four KOGs' 14 RestDefinitions
+  were Ready, and a nova `Instance` was created, went `ACTIVE` on KVM and was deleted, against a real Nova.
+- 2026-11-21, nova-kog's owner: 0.80.0 grants the controllers read access to their API-key Secret.
+
+0.80.0 lacks the fix for a 401 during create (oasgen-provider PR #793, first released in 0.82.0); without it, a create
+refused with 401 can strand the resource. So mint the KOG credentials shortly before creating resources. Before you choose any other version, check oasgen-provider's own
+[retracted-versions.yaml](https://github.com/krateo-platformops/oasgen-provider/blob/main/retracted-versions.yaml). On
+2026-11-21 it lists 0.53.0, 0.54.0, 0.66.0, 0.69.0, 0.70.0, 0.77.0, 0.83.0, 0.85.0 and 0.85.1.
+
+### High availability
+
+High availability for the stateful core is opt-in and arrives phase by phase (#309). Today:
+
+```yaml
+ha:
+  enabled: true
+```
+
+- **memcached:** 3 replicas behind a headless Service, as the StatefulSet `memcached-ha`. Every component that builds
+  a memcache server list names each replica, so every client hashes a key to the same replica. Without `ha`, memcached
+  is one ClusterIP with ClientIP affinity: each client sticks to one replica, so several replicas would hold
+  disagreeing caches (keystone's token-validation and revocation caches among them). That is why more than one
+  memcached replica without `ha` is refused. Switching `ha` on starts the cache empty; nothing else is lost.
+- **The node refusal:** with `ha`, the render is refused while fewer than 3 nodes carry
+  `openstack-control-plane=enabled`. The replicas use required anti-affinity, one per node, so on fewer nodes the rest
+  would stay Pending. The check needs the node-read grant (`node-reader-rbac.yaml`); without it, the ConfigMap
+  `<release>-node-label-preconditions` says the nodes were not measured.
+- **Off changes nothing:** every chart renders as it always has.
+
+**RabbitMQ's host count has one source,** with or without `ha`: `componentValues.rabbitmq.pod.replicas.server`. Above
+1, every component that lists RabbitMQ hosts gets the count, so its transport URL (and ceilometer's notification URLs)
+lists every node. A component whose `componentValues` set a different count is refused. watcher names the headless
+Service, whose DNS answers every ready node, so it needs nothing passed.
+
+RabbitMQ and MariaDB move to their operators in later phases (#309). `hack/validate-ha-propagation.py` checks all of
+the above against the rendered charts.
+
+**RabbitMQ on its operator (`messaging.backend: operator`, #309 H2b), for fresh installs:**
+
+```yaml
+messaging:
+  backend: operator
+```
+
+- **The broker:** a RabbitmqCluster `openstack-mq`, run by the RabbitMQ cluster-operator, which
+  [krateo-blueprints/rabbitmq-operator-blueprint](https://github.com/krateo-blueprints/rabbitmq-operator-blueprint)
+  installs. That blueprint needs cert-manager.
+- **No release yet:** neither that blueprint nor this mode has a release until the H2 live tests have run.
+- **Image:** pinned to `rabbitmq:4.3.4-management`, never the operator's default.
+- **Administrator:** comes from the install's generated root.
+- **Clients:** every component lists the cluster's pods and runs quorum queues, which RabbitMQ 4.x needs.
+- **Users and vhosts:** instead of a rabbit-init Job, each component's RabbitMQ user, vhost, permissions and policies
+  are messaging-topology-operator resources, fed by the same generated root. The vhosts are retained on deletion, and
+  the policies drop the `ha-*` keys 4.x refuses. Every pod that waited on the Job waits on those resources being
+  Ready.
+- **Each user's password Secret is the umbrella's, and comes first.** The topology operator refuses a User whose Secret
+  does not exist yet, and ESO writes a Secret seconds to a minute after its ExternalSecret (measured 3-85 s on GKE,
+  H2 run 4). So the umbrella writes `<component>-rabbitmq-topology-user` (username and password from the component's
+  root, labelled `rabbitmq.com/topology-operator: "true"`), and creates the component only once that Secret exists,
+  labelled; until then the component is listed in `openstack-install-pending`. Its chart imports the name and renders no
+  projection of its own. Run 4, before this, measured every messaging component's first install refused 1-2 times and
+  retried for up to 198 s.
+- **A component installed on its own, without the umbrella,** is passed no name: its chart writes the projection
+  itself in the same release, and its first User create is refused until ESO has written the Secret, then admitted on
+  core-provider's next retry.
+- **Refusals, on the Composition's status:** the rabbitmq component refuses a cluster without the operator's CRD,
+  and an install that already runs the chart-mode broker; moving one over is a separate migration (H2c).
+- **Off (`chart`, the default):** nothing changes.
+- **Gate:** `hack/validate-messaging-operator.py` checks all of the above.
+
+**nova-compute's liveness checks the process only (#146).** Upstream's liveness and startup probes ping nova-compute
+over RPC, so a RabbitMQ outage restarted every hypervisor's agent at once and repaired nothing. Readiness keeps the RPC
+check, so the outage still shows as NotReady. `hack/validate-nova-compute-liveness.py` runs the rendered probe.
 
 ### A component reads Ready=False/HooksMayNotHaveRun
 
@@ -1599,6 +2176,71 @@ orchestrator also carries a `serviceContract` v1 stanza. Usage and health are em
 The whole surface is documented in [docs/configuration.md](docs/configuration.md), and the
 CRD/schema in [docs/api.md](docs/api.md).
 
+### Monitoring
+
+`spec.monitoring` adds the **openstack-monitoring** component (#312), which sends the install's metrics and alerts to
+the Krateo observability stack. It is explicit opt-in: only `enabled: true` turns it on. Unset (the default) is off,
+exactly like `false`.
+
+**Recommended when alert-provider is installed** (the Krateo installer's portal feature ships it):
+
+```yaml
+spec:
+  monitoring:
+    enabled: true
+    otlpEndpoint: http://otel-collector-daemonset-local.krateo-system.svc:4318   # the default; any OTLP/HTTP endpoint
+```
+
+With `enabled: true` on a cluster that does not serve alert-provider's `Alert` and `Metric` CRDs, the umbrella refuses
+to render and says why on its status, naming alert-provider. Its CRs would otherwise fail to apply.
+
+- **What it scrapes.** One OpenTelemetry collector Deployment scrapes three sources and forwards them as OTLP to
+  `otlpEndpoint`:
+  - **openstack-exporter 2.0.0-alpha** reports per-service API availability (`openstack_<service>_up`) and nova and neutron
+    agent liveness. It logs in as its own Keystone user, `openstack-exporter`, whose password is a generated root,
+    `openstack-credential-identity-user-openstack-exporter`. Nova, Neutron and Placement show their services and
+    agents only to an admin, so this user has the admin role on the `service` project, like every service user.
+  - **A standalone mysqld-exporter v0.21.0** logs in to the `mariadb` Service as MariaDB's `exporter` user (the
+    `openstack-credential-oslo-db-exporter` root). The mariadb chart's sidecar exporter is not used: its 2019 image
+    gates the database pod's readiness, and switching it on restarts the only database replica.
+    - The mariadb chart creates the user for any host (`krateo.exporterUser`, set by this value).
+    - The grants are PROCESS, BINLOG MONITOR and SLAVE MONITOR, with at most 3 connections. It does not get `SELECT ON *.*`,
+      so it cannot read the OpenStack databases.
+    - Turning it on adds a Job to mariadb and does not change its StatefulSet.
+  - **RabbitMQ's `/metrics/detailed`** gives per-queue depth and consumers on every server pod. The `rabbitmq_prometheus` plugin
+    serving it is already enabled. It is scraped only when rabbitmq is selected.
+- **Why a plain Deployment.** The collector is a Deployment, not an `OpenTelemetryCollector` CR: the Krateo
+  observability stack runs no OpenTelemetry Operator (checked in krateo-platformops/installer on 2026-11-18). Its own
+  collectors are deployed from the upstream opentelemetry-collector Helm chart. If the installer adds the operator, the
+  collector should become a CR.
+- **Cloud-agnostic.** Nothing in the defaults is cloud-specific. The endpoint is an input, and the credentials come from
+  the install's generated roots through ESO.
+- **The alerts.** These are alert-provider `Alert` CRs in the release namespace, the only namespace the install writes
+  to. alert-provider reconciles Alerts in every namespace. They are defined in one file,
+  `blueprints/openstack-monitoring/chart/files/alerts.yaml`:
+  - an API down for Keystone, Glance, Nova, Neutron, Cinder or Placement;
+  - a Nova service or Neutron agent down;
+  - MariaDB unreachable;
+  - a RabbitMQ queue that is not drained.
+  - Only the alerts for selected components are rendered: an absent service's metric reads 0 and would fire forever.
+  - Each alert links a runbook in [docs/runbooks/](docs/runbooks/openstack-api-down.md).
+  - Every scrape job has a companion alert, `openstack-scrape-down-<job>`. HyperDX reads a window with no data as 0,
+    so without the companion a dead scrape would silence the alerts that fire on high values.
+  - These are metric alerts, so a firing notifies and shows on the portal's alerts page. It opens no Incident:
+    alert-provider opens Incidents only for counted log records, and only in its home namespace. Putting them in
+    `krateo-system` would gain nothing.
+- **Off, nothing changes.** Unset or `false`, the render is byte-identical to a release without this value: no
+  component, no definition, no credential root. `enabled: [openstack-monitoring]` is refused, because this value is the
+  one switch.
+- **Not measured yet, as of 2026-11-18.** No cluster has run this component. Phase 2 measures the rest:
+  - the metric names, which are cited against each exporter's source at the pinned tag rather than scraped;
+  - the default endpoint drops traffic from a node with no Krateo node agent (a tainted node, for instance);
+  - how HyperDX evaluates the gauges and the grouping.
+
+  `hack/validate-openstack-monitoring.py` is the gate.
+- **Never delete** `openstack-credential-identity-user-openstack-exporter`. Like every root, it holds the only copy of
+  the password, and it is kept when monitoring is switched off.
+
 ## Examples
 
 - [examples/identity-profile/](examples/identity-profile/README.md) — one `Openstack`
@@ -1648,8 +2290,9 @@ GHCR on a semver tag (`git tag 0.1.0 && git push origin 0.1.0` →
 `hack/gates.d` (each states the defect it was written for), the umbrella `componentValues` schema-in-sync check
 (`hack/gen-componentvalues-schema.py`), the service-contract SSO deep-link resolution, the
 removed-values refusal, and the shared `lint-docs` documentation-standard job. A change adds a
-`docs/log.d` file and, for a new gate, a `hack/gates.d` file; `docs/log.md` and the check steps
-of `lint.yaml` are never edited by hand. See [docs/release.md](docs/release.md).
+`docs/log.d` file and, for a new gate, a `hack/gates.d` file. A pull request never touches
+`docs/log.md`, which a bot renders on main after each merge, and never adds a check step to
+`lint.yaml` by hand. See [docs/release.md](docs/release.md).
 
 ## License
 

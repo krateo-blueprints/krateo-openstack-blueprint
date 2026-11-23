@@ -461,14 +461,19 @@ true
 krateo.io/composition-version
 {{- end -}}
 
-{{/* The live state of <kind>/<name>, read at <ver>, as JSON {"spec": ..., "version": ...}: its spec,
-     and the version its osh.compositionVersionLabel says it was last written through ("" when the
-     label is absent). "" when no such object exists.
+{{/* The live state of <kind>/<name>, read at <ver>, as JSON {"spec": ..., "version": ..., "managed": ...,
+     "generation": ..., "observedGeneration": ..., "hooksUnverified": ...}: its spec, the version its
+     osh.compositionVersionLabel says it was last written through ("" when the label is absent), and
+     what a RabbitMQ user rotation needs (#309 C2): its status.managed, metadata.generation,
+     status.observedGeneration and whether krateo.io/hooks-unverified is set. "" when no such object
+     exists.
 
-     One named GET of the one object, made ONLY while osh.holdValues holds: compositions.yaml calls
-     it inside that branch, so a steady-state render pays nothing for it, and an upgrade pays one GET
-     per held component for the passes until its definition is Ready on the new version. Both
-     answers come from this one GET; the label is not read anywhere else. It is a third GET of an
+     One named GET of the one object, made ONLY while osh.holdValues holds or the component has a
+     rotate.<id> token (#309 C): compositions.yaml calls it once, under that condition, and hands the
+     result to both, so a steady-state render pays nothing for it, an upgrade pays one GET per held
+     component for the passes until its definition is Ready on the new version, and a rotated
+     component one GET per render (never two, holding or not). Every answer comes from this one GET;
+     the label is not read anywhere else. It is a third GET of an
      object osh.exists and osh.originVersion already read, for the reason osh.originVersion gives
      for being the second: hoisting one shared read into compositions.yaml would make this
      component's existence test different code from every dependency's.
@@ -487,7 +492,7 @@ krateo.io/composition-version
 {{- $o := lookup (include "osh.apiVersionAt" (list $ver)) $kind $top.Release.Namespace $name -}}
 {{- if $o -}}
 {{- $labels := (($o.metadata).labels) | default dict -}}
-{{- dict "spec" (($o.spec) | default dict) "version" ((index $labels (include "osh.compositionVersionLabel" $top)) | default "") | toJson -}}
+{{- dict "spec" (($o.spec) | default dict) "version" ((index $labels (include "osh.compositionVersionLabel" $top)) | default "") "managed" ((($o.status) | default dict).managed | default list) "generation" (($o.metadata).generation | default 0) "observedGeneration" ((($o.status) | default dict).observedGeneration | default 0) "hooksUnverified" (hasKey ((($o.metadata).annotations) | default dict) "krateo.io/hooks-unverified") | toJson -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -794,16 +799,304 @@ true
 {{- $out | uniq | join " " -}}
 {{- end -}}
 
+{{/* The infrastructure capabilities this install provides, space-joined, for components[].requires.
+     block-storage is provided by storage.backend when it is not none (#196, #308). Nothing in the
+     umbrella provides the others components list (pxe-interface, lb-mgmt-net, rwx-storage-class):
+     they exist only as preconditions an operator meets by hand (#163), so profile full-strict never
+     selects their components and `enabled:` is how to take one. hack/validate-provisioning-preconditions.py
+     asserts every capability a component requires is declared in hack/provisioning-preconditions.yaml. */}}
+{{- define "osh.providedCapabilities" -}}
+{{- $top := index . 0 -}}
+{{- $out := list -}}
+{{- if ne (include "osh.storageBackend" (list $top)) "none" -}}{{- $out = append $out "block-storage" -}}{{- end -}}
+{{- $out | join " " -}}
+{{- end -}}
+
+{{/* "true" when storage.backend is a Ceph backend (ceph-rook, ceph-external): the `source: provided` credential items
+     are copied and passed, and the charts consume Ceph through them (#308). */}}
+{{- define "osh.cephActive" -}}
+{{- $top := index . 0 -}}
+{{- if hasPrefix "ceph-" (include "osh.storageBackend" (list $top)) -}}true{{- end -}}
+{{- end -}}
+
+{{/* The namespace the provided items are copied from: storage.ceph.sourceNamespace, or this release's. */}}
+{{- define "osh.cephSourceNamespace" -}}
+{{- $top := index . 0 -}}
+{{- ((($top.Values.storage | default dict).ceph | default dict).sourceNamespace | default $top.Release.Namespace) -}}
+{{- end -}}
+
+{{/* (list $ $item): where a `source: provided` item is copied from, as JSON {"secret", "key"}. ceph-rook follows Rook's
+     conventions (storage.ceph.rook: a CephClient's Secret and key, the monitors' Secret and key); ceph-external reads the
+     operator-named storage.ceph.keys.<ceph>, and refuses an empty secret rather than copy from nothing. */}}
+{{- define "osh.cephSource" -}}
+{{- $top := index . 0 -}}{{- $i := index . 1 -}}
+{{- $ceph := (($top.Values.storage | default dict).ceph | default dict) -}}
+{{- $backend := include "osh.storageBackend" (list $top) -}}
+{{- if eq $backend "ceph-rook" -}}
+  {{- $rook := $ceph.rook | default dict -}}
+  {{- if eq $i.ceph "monHost" -}}
+    {{- dict "secret" $rook.monHostSecret "key" $rook.monHostKey | toJson -}}
+  {{- else -}}
+    {{- $client := index ($ceph.clients | default dict) $i.ceph -}}
+    {{- if not $client -}}{{- fail (printf "\n\nstorage.ceph.clients.%s is empty: credential %s copies that Ceph user's key.\n" $i.ceph $i.id) -}}{{- end -}}
+    {{- dict "secret" (printf "%s%s" $rook.clientSecretPrefix $client) "key" $rook.clientKey | toJson -}}
+  {{- end -}}
+{{- else if eq $backend "ceph-external" -}}
+  {{- $k := index ($ceph.keys | default dict) $i.ceph | default dict -}}
+  {{- if or (not $k.secret) (not $k.key) -}}
+    {{- fail (printf "\n\nstorage.backend is ceph-external and storage.ceph.keys.%s.secret (or .key) is empty.\n\nWith ceph-external the Ceph admin creates the users and places their keys and the monitor addresses in Secrets; name each one under storage.ceph.keys (in storage.ceph.sourceNamespace) so credential %s can be copied from it (#308).\n" $i.ceph $i.id) -}}
+  {{- end -}}
+  {{- dict "secret" $k.secret "key" $k.key | toJson -}}
+{{- else -}}
+  {{- fail (printf "osh.cephSource called with storage.backend %s, which is not a ceph backend" $backend) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* (list $ $c): "true" when component $c consumes Ceph in this install (#308): storage.backend is a ceph backend and
+     $c's components[].ceph role applies -- `volumes` (cinder, libvirt) always, `images` (glance) when
+     storage.ceph.glanceStore is rbd. Only then does it receive its provided items and its storage values. */}}
+{{- define "osh.cephConsumes" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- if eq (include "osh.cephActive" (list $top)) "true" -}}
+{{- if eq ($c.ceph | default "") "volumes" -}}true
+{{- else if and (eq ($c.ceph | default "") "images") (eq ((($top.Values.storage | default dict).ceph | default dict).glanceStore | default "pvc") "rbd") -}}true
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* (list $ $c): the values the umbrella sets on component $c for the install's Ceph, as YAML, or nothing (#308). One
+     source -- storage.ceph -- for every value the charts must agree on: the pools, the users, the libvirt secret UUID.
+     cinder: its rbd1 backend; glance: the rbd store; libvirt: the secret it defines; nova: the UUID and user its
+     [libvirt] section names (nova consumes no key in this release). Merged over componentValues, which may not set any
+     of them (osh.requireStorageNotOverridden); hack/validate-ceph-consumer.py (check 29) renders the four charts. */}}
+{{- define "osh.storageValues" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- $ceph := (($top.Values.storage | default dict).ceph | default dict) -}}
+{{- $out := dict -}}
+{{- if eq (include "osh.cephActive" (list $top)) "true" -}}
+  {{- $uuid := $ceph.libvirtSecretUUID -}}{{- $cinderUser := $ceph.clients.cinder -}}
+  {{- if eq $c.name "cinder" -}}
+    {{- $_ := set $out "conf" (dict "backends" (dict "rbd1" (dict "rbd_pool" $ceph.pools.volumes "rbd_user" $cinderUser "rbd_secret_uuid" $uuid))) -}}
+  {{- else if eq $c.name "libvirt" -}}
+    {{- $_ := set $out "conf" (dict "ceph" (dict "enabled" true "cinder" (dict "user" $cinderUser "secret_uuid" $uuid))) -}}
+  {{- else if eq $c.name "nova" -}}
+    {{- $_ := set $out "conf" (dict "ceph" (dict "cinder" (dict "user" $cinderUser "secret_uuid" $uuid)) "nova" (dict "libvirt" (dict "rbd_user" $cinderUser "rbd_secret_uuid" $uuid))) -}}
+  {{- else if and (eq $c.name "glance") (eq (include "osh.cephConsumes" (list $top $c)) "true") -}}
+    {{- $rbd := dict "rbd_store_pool" $ceph.pools.images "rbd_store_user" $ceph.clients.glance -}}
+    {{- $_ := set $out "storage" "rbd" -}}
+    {{- $_ := set $out "krateo" (dict "imagesMigratedFromPvc" ($ceph.glanceImagesMigrated | default false)) -}}
+    {{- $_ := set $out "conf" (dict "glance" (dict "rbd" $rbd "glance_store" (deepCopy $rbd) "DEFAULT" (dict "show_image_direct_url" true))) -}}
+  {{- end -}}
+{{- end -}}
+{{- if $out -}}{{- toYaml $out -}}{{- end -}}
+{{- end -}}
+
+{{/* (dict "node" <map> "prefix" <path>): every leaf path of a nested map, one per line. */}}
+{{- define "osh.leafPaths" -}}
+{{- $prefix := .prefix -}}
+{{- range $k, $v := .node -}}
+{{- $p := ternary $k (printf "%s.%s" $prefix $k) (eq $prefix "") -}}
+{{- if kindIs "map" $v -}}{{- include "osh.leafPaths" (dict "node" $v "prefix" $p) -}}{{- else -}}{{- $p }}
+{{ end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* (list $ <name>): the ExternalSecret <name> in this namespace, as JSON ("{}" when absent). One named GET; the umbrella
+     renders these objects (the generation roots), so its render identity may read them. A rotation also reads the
+     component's own projections through osh.lookupNamed (osh.generationRolled). */}}
+{{- define "osh.lookupExternalSecret" -}}
+{{- $top := index . 0 -}}
+{{- lookup "external-secrets.io/v1" "ExternalSecret" $top.Release.Namespace (index . 1) | default dict | toJson -}}
+{{- end -}}
+
+{{/* (list $): the copy store <credentials.store>-ceph, as JSON ("{}" when absent). One named GET. */}}
+{{- define "osh.lookupCephStore" -}}
+{{- $top := index . 0 -}}
+{{- lookup "external-secrets.io/v1" "SecretStore" $top.Release.Namespace (printf "%s-ceph" $top.Values.credentials.store) | default dict | toJson -}}
+{{- end -}}
+
+{{/* (obj): "True", "False" or "" -- the status of obj's Ready condition, judged on type and status only. */}}
+{{- define "osh.readyStatus" -}}
+{{- $out := "" -}}
+{{- range $c := ((. | default dict).status | default dict).conditions | default list -}}
+{{- if eq ($c.type | default "") "Ready" -}}{{- $out = toString $c.status -}}{{- end -}}
+{{- end -}}
+{{- $out -}}
+{{- end -}}
+
+{{/* (list $ $c): "true" when component $c may be CREATED as far as Ceph is concerned (#308): it consumes no Ceph here,
+     or every provided root it lists reports Ready=True -- the copy of the key Ceph minted exists. Until then the
+     component is held, exactly like a dependency that is not Ready yet: listed in openstack-install-pending, never
+     created on a key nothing has copied, so no post-install hook of it can time out on a missing grant or Secret. Only
+     creation: compositions.yaml keeps an existing component (`or $exists`), since a component that stops rendering is
+     uninstalled (#68). hack/validate-ceph-consumer.py (check 30) renders it with stand-in ExternalSecrets. */}}
+{{- define "osh.cephRootsReady" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- $ready := true -}}
+{{- if eq (include "osh.cephConsumes" (list $top $c)) "true" -}}
+{{- range $id := ($c.credentials | default list) -}}
+{{- range $i := ($top.Values.credentials.items | default list) -}}
+{{- if and (eq $i.id $id) (eq ($i.source | default "") "provided") -}}
+{{- if ne (include "osh.readyStatus" (include "osh.lookupExternalSecret" (list $top $i.secret) | fromJson)) "True" -}}{{- $ready = false -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $ready -}}
+{{- end -}}
+
+{{/* (list $): with a ceph backend, refuse the render while the copy store reports Ready=False (#308). External Secrets
+     Operator validates a kubernetes-provider store by asking, in storage.ceph.sourceNamespace, whether its ServiceAccount
+     may read Secrets there (that is why its Role carries selfsubjectrulesreviews), so Ready=False is ESO's measurement
+     that the read grant is missing or wrong -- typically the Role that namespace's owner must create. Refused with the
+     exact grant, on the Composition's status, rather than holding cinder with no reason given. A store not yet
+     validated (no condition) only holds the consumers (osh.cephRootsReady). Check 30 renders both. */}}
+{{- define "osh.requireCephReadGrant" -}}
+{{- $top := index . 0 -}}
+{{- if eq (include "osh.cephActive" (list $top)) "true" -}}
+{{- $store := include "osh.lookupCephStore" (list $top) | fromJson -}}
+{{- if eq (include "osh.readyStatus" $store) "False" -}}
+{{- $msg := "" -}}
+{{- range $c := ($store.status | default dict).conditions | default list -}}{{- if eq ($c.type | default "") "Ready" -}}{{- $msg = $c.message | default "" -}}{{- end -}}{{- end -}}
+{{- $ns := include "osh.cephSourceNamespace" (list $top) -}}
+{{- $sa := printf "%s-ceph-reader" $top.Values.credentials.store -}}
+{{- $names := list -}}
+{{- range $i := ($top.Values.credentials.items | default list) -}}{{- if eq ($i.source | default "") "provided" -}}{{- $names = append $names (include "osh.cephSource" (list $top $i) | fromJson).secret -}}{{- end -}}{{- end -}}
+{{- fail (printf "\n\nThe Ceph copy store %s-ceph cannot read the key Secrets in namespace %s (#308). External Secrets Operator reports: %s\n\nGrant the ServiceAccount %s/%s get on exactly %s there, and create on selfsubjectrulesreviews -- the Role and RoleBinding in the README's \"Storage: consuming a Ceph cluster\". Until then no Ceph consumer (cinder, libvirt, glance with rbd) is created.\n" $top.Values.credentials.store $ns $msg $top.Release.Namespace $sa (join ", " ($names | uniq))) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* storage.backend, `none` when unset. */}}
+{{- /* osh.deregistration (list $ <selected names>) (#444): the deregistration state machine, as YAML.
+
+       When a component leaves the selection -- a release that drops it (0.3.74 drops manila, #429) or a user who
+       deselects it -- its release is uninstalled by its OWN deployed chart, whose hooks may predate any cleanup. Its
+       Keystone services and endpoints then stay in the catalog, pointing at Services that no longer exist, and Skyline's
+       nginx refused to start on them (upgrade test r074). So the umbrella decides when keystone deregisters them, and
+       it decides from what exists, re-read on every reconcile -- never from remembered state, the same discipline as
+       osh.messagingRotation.
+
+       Per component NOT in the selection (one that renders no Service is judged by its Composition alone):
+         removing  its umbrella Composition still exists, or any Service its chart renders (osh.componentServices)
+                   still exists by name. Nothing is deregistered yet. This is also the permanent state of a component
+                   someone runs on its own outside the umbrella (a standalone Manila keeps its manila-api Service), so a
+                   working service is never deregistered.
+         gone      none of them exists. Its services (minus any type a selected component registers) and its name are
+                   handed to keystone as krateo.deregister. That changes keystone's values, so CDC upgrades keystone,
+                   and keystone's post-upgrade hook deletes the services with their endpoints, and the component's
+                   leftover hook Jobs. Deleting what is already gone is a no-op, so `gone` is safe on every render.
+
+       (list $ $sel $crds): $crds is the cluster's CRD list compositions.yaml reads once per render; a helper never lists
+       a whole resource itself (hack/validate-origin-version-pin.py part 4: helpers run per component). Every read here
+       is one named GET (osh.lookupNamed, osh.compositionPresent): chart-inspector derives the release's RBAC from them.
+       Returns {services: [{component, type, name}], components: [name], removing: {name: [what still
+       exists]}}. hack/validate-deregistration.py renders every state from stand-ins. */ -}}
+{{- define "osh.deregistration" -}}
+{{- $top := index . 0 -}}
+{{- $sel := index . 1 -}}
+{{- $crds := index . 2 -}}
+{{- $reg := include "osh.keystoneRegistrations" $top | fromYaml -}}
+{{- $svc := include "osh.componentServices" $top | fromYaml -}}
+{{- $keep := dict -}}
+{{- range $n := $sel }}{{- range $r := (index $reg $n | default list) }}{{- $_ := set $keep $r.type true }}{{- end }}{{- end -}}
+{{- $services := list -}}
+{{- $components := list -}}
+{{- $removing := dict -}}
+{{- range $c := $top.Values.components }}
+{{- if not (has $c.name $sel) }}
+{{- $regs := index $reg $c.name | default list -}}
+{{- $names := index $svc $c.name | default list -}}
+{{- $present := list -}}
+{{- if eq (include "osh.compositionPresent" (list $top $c $crds)) "true" }}
+{{- $present = append $present (printf "%s/%s" $c.kind $c.name) -}}
+{{- end }}
+{{- range $s := $names }}
+{{- if (include "osh.lookupNamed" (list $top "v1" "Service" $s) | fromJson).metadata }}
+{{- $present = append $present (printf "Service/%s" $s) -}}
+{{- end }}
+{{- end }}
+{{- if $present }}
+{{- $_ := set $removing $c.name $present -}}
+{{- else }}
+{{- $components = append $components $c.name -}}
+{{- range $r := $regs }}
+{{- if not (hasKey $keep $r.type) }}
+{{- $services = append $services (dict "component" $c.name "type" $r.type "name" $r.name) -}}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end -}}
+{{- dict "services" $services "components" $components "removing" $removing | toYaml -}}
+{{- end -}}
+
+{{- /* osh.compositionPresent (list $ $c <CRD list>): "true" while component $c's umbrella Composition exists, at any
+       served version (osh.exists). Its own define so hack/validate-deregistration.py can stand it in. */ -}}
+{{- define "osh.compositionPresent" -}}
+{{- include "osh.exists" (list (index . 0) (index . 1).kind (index . 1).name (index . 2)) -}}
+{{- end -}}
+
+{{- define "osh.storageBackend" -}}
+{{- $top := index . 0 -}}
+{{- (($top.Values.storage | default dict).backend | default "none") -}}
+{{- end -}}
+
+{{/* The umbrella's storage.backend is the one statement of which block-storage backend the install has: it is what
+     full-strict selects cinder by, and what cinder renders by. A componentValues.<component>.krateo.storageBackend would
+     let the two disagree (full-strict leaving cinder out while cinder renders a backend, or the reverse), so it is
+     refused, for every component that requires block-storage. hack/validate-storage-backend.py renders the refusal. */}}
+{{- define "osh.requireStorageNotOverridden" -}}
+{{- $top := index . 0 -}}
+{{- range $c := $top.Values.components -}}
+  {{- $cv := (index ($top.Values.componentValues | default dict) $c.name) | default dict -}}
+  {{- if has "block-storage" ($c.requires | default list) -}}
+    {{- if hasKey ($cv.krateo | default dict) "storageBackend" -}}
+      {{- fail (printf "\n\ncomponentValues.%s.krateo.storageBackend is set. Set storage.backend instead: it is the one value that says which block-storage backend this install has, and both profile full-strict and %s read it (#196). The umbrella passes it to %s as krateo.storageBackend.\n" $c.name $c.name $c.name) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- /* #308: the Ceph values come from storage.ceph alone, so the charts cannot disagree on a pool, a user or the
+         libvirt secret UUID; and Ceph is reached only through the copies of the keys it mints, so a component is not
+         wired to Ceph by hand (that path needs client.admin): componentValues may set none of the paths
+         osh.storageValues sets, nor the references (krateo.ceph), nor glance's storage rbd/radosgw, nor
+         conf.ceph.enabled on libvirt or nova. */ -}}
+  {{- $paths := list "krateo.ceph" -}}
+  {{- with include "osh.storageValues" (list $top $c) -}}{{- $paths = concat $paths (splitList "\n" (include "osh.leafPaths" (dict "node" (fromYaml .) "prefix" "")) | compact) -}}{{- end -}}
+  {{- if has $c.name (list "libvirt" "nova") -}}{{- $paths = append $paths "conf.ceph.enabled" -}}{{- end -}}
+  {{- range $path := $paths -}}
+    {{- $v := $cv -}}{{- $found := true -}}
+    {{- range $p := splitList "." $path -}}
+      {{- if and $found (kindIs "map" $v) (hasKey $v $p) -}}{{- $v = index $v $p -}}{{- else -}}{{- $found = false -}}{{- end -}}
+    {{- end -}}
+    {{- if and $found (or (ne $path "conf.ceph.enabled") $v) -}}
+      {{- fail (printf "\n\ncomponentValues.%s.%s is set. The umbrella sets it from storage.ceph (#308): one value for every chart that must agree on it, and Ceph reached only through the copies of the keys it mints, never through client.admin. Set storage.backend and storage.ceph instead.\n" $c.name $path) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if and (eq $c.name "glance") (has ($cv.storage | default "") (list "rbd" "radosgw")) -}}
+    {{- fail (printf "\n\ncomponentValues.glance.storage is %s. Glance stores images in Ceph only through storage.ceph.glanceStore rbd with a ceph storage.backend (#308): upstream's %s path reaches Ceph with client.admin.\n" $cv.storage $cv.storage) -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{/* The set of component names to deploy, space-joined. If `enabled` is non-empty it
      is an explicit selection expanded to its transitive dependency closure (so
      `enabled: [heat]` pulls in keystone, rabbitmq, mariadb, memcached). Otherwise it
-     falls back to the `profile`: identity tier always, plus compute when profile=full. */}}
+     falls back to the `profile`: identity tier always, plus compute when profile=full,
+     plus compute minus unmet components[].requires when profile=full-strict. */}}
 {{- define "osh.selected" -}}
 {{- $top := index . 0 -}}
 {{- $comps := $top.Values.components -}}
 {{- $enabled := $top.Values.enabled | default list -}}
 {{- $sel := dict -}}
 {{- if gt (len $enabled) 0 -}}
+  {{- /* A `monitoring: true` component (openstack-monitoring, #312) has one switch, the `monitoring` value: listed here
+         it would be selected while `monitoring.enabled: false` says it is not, or skip the credential root and the
+         mariadb user that the value brings with it. Refused, naming the value. */ -}}
+  {{- range $c := $comps -}}
+    {{- if and $c.monitoring (has $c.name $enabled) -}}
+      {{- fail (printf "enabled lists %s, which is selected by the `monitoring` value alone: set monitoring.enabled: true instead (README \"Monitoring\")" $c.name) -}}
+    {{- end -}}
+  {{- end -}}
   {{- range $e := $enabled -}}{{- $_ := set $sel $e true -}}{{- end -}}
   {{/* expand deps; iterate past the max graph depth so the closure is complete */}}
   {{- range $i := until 8 -}}
@@ -816,12 +1109,14 @@ true
 {{- else -}}
   {{/* A PROFILE PROMISES ONLY WHAT CAN WORK ON THE CLUSTER YOU HAVE.
 
-       `requiresProvisioning` components are excluded from every profile, including `full`.
-       They are not unsupported and nothing about them is removed -- they are selectable, and
-       fully gated, through `enabled:`. What they are not is DEFAULT, because each of them waits
-       on infrastructure that no Kubernetes cluster provides and that this blueprint does not
-       create: an interface named ironic-pxe, a Neutron port per host on octavia's management
-       network, a ReadWriteMany StorageClass for swift.
+       A component whose `requires` names a capability this install does not provide
+       (osh.providedCapabilities) is excluded from `full-strict`. It is not unsupported and nothing
+       about it is removed -- it is selectable, and fully gated, through `enabled:`, and `full`
+       still selects it. What it is not is DEFAULT, because it waits on infrastructure that no
+       Kubernetes cluster provides and that this blueprint does not create: an interface named
+       ironic-pxe, a Neutron port per host on octavia's management network, a ReadWriteMany
+       StorageClass for swift. cinder's block-storage is the one capability the umbrella can be
+       told it has, by storage.backend (#196); then full-strict selects cinder.
 
        Measured on a 4-node GKE install of profile=full: six pods at 14 restarts in Init plus
        four Pending, none of which could EVER become Ready, and `Init:` is the state a pod
@@ -829,27 +1124,60 @@ true
        nothing. A profile that installs components which cannot start is a promise that cannot
        be kept, and the cost of keeping it is paid by whoever next reads that census.
 
-       hack/validate-provisioning-preconditions.py asserts the flag and the declared
-       precondition agree in BOTH directions, so a flagged component must say what it needs and
-       a declared precondition must belong to a flagged component. Issue #163. */}}
+       hack/validate-provisioning-preconditions.py asserts `requires` and the declared
+       precondition agree in BOTH directions, so a component that requires something must say
+       what it needs and a declared precondition must belong to a component that requires it, and
+       it renders this selection with storage.backend none AND with a backend, so the capability
+       is shown to be read and not merely declared. Issues #163, #196. */}}
+  {{- $provided := splitList " " (include "osh.providedCapabilities" (list $top)) | compact -}}
   {{- range $c := $comps -}}
-    {{/* `full` is unchanged and still selects every component, including the three that need
-         infrastructure an operator must provide. `full-strict` selects everything EXCEPT those,
-         so it is the profile that promises only what can start on a cluster as it comes.
+    {{- $unmet := false -}}
+    {{- range $r := ($c.requires | default list) -}}
+      {{- if not (has $r $provided) -}}{{- $unmet = true -}}{{- end -}}
+    {{- end -}}
+    {{/* `full` is unchanged and still selects every component, including the four that need
+         infrastructure an operator must provide. `full-strict` selects everything EXCEPT those
+         whose requirement the install does not provide, so it is the profile that promises only
+         what can start on the cluster as described.
 
          Opt-in rather than a change to `full`, deliberately: a profile silently selecting three
          fewer components than it did yesterday is a surprise delivered through a patch release,
          and on 0.3.x the version number cannot signal it. `full-strict` is discoverable, says
          what it means, and leaves anyone who HAS provisioned a PXE interface, an lb-mgmt-net or
          an RWX StorageClass exactly where they were. */}}
-    {{- if or (eq $top.Values.profile "full")
-              (and (eq $top.Values.profile "full-strict") (not $c.requiresProvisioning))
-              (eq $c.tier "identity") -}}
+    {{- if and (not $c.monitoring)
+               (or (eq $top.Values.profile "full")
+                   (and (eq $top.Values.profile "full-strict") (not $unmet))
+                   (eq $c.tier "identity")) -}}
       {{- $_ := set $sel $c.name true -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
+{{- /* Monitoring (#312): the `monitoring: true` components join the selection exactly when osh.monitoringOn says so,
+       with their dependency closure. Off, nothing here runs and the selection is what it was before #312. */ -}}
+{{- if include "osh.monitoringOn" (list $top) -}}
+  {{- range $c := $comps -}}
+    {{- if $c.monitoring -}}{{- $_ := set $sel $c.name true -}}{{- end -}}
+  {{- end -}}
+  {{- range $i := until 8 -}}
+    {{- range $c := $comps -}}
+      {{- if hasKey $sel $c.name -}}
+        {{- range $d := ($c.deps | default list) -}}{{- $_ := set $sel $d true -}}{{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
 {{- keys $sel | sortAlpha | join " " -}}
+{{- end -}}
+
+{{/* osh.monitoringOn (list $): "true" when the openstack-monitoring component is on (#312). Explicit opt-in (Diego,
+     2026-11-18): only monitoring.enabled true turns it on; unset (null) is off, exactly like false. Nothing about the
+     cluster switches it on. templates/monitoring-precondition.yaml refuses `true` where alert-provider's CRDs are not
+     served. */}}
+{{- define "osh.monitoringOn" -}}
+{{- $top := index . 0 -}}
+{{- $m := $top.Values.monitoring | default dict -}}
+{{- if and (kindIs "bool" $m.enabled) $m.enabled }}true{{ end -}}
 {{- end -}}
 
 {{/* The name of the ClusterRole and ClusterRoleBinding that let this release read the cluster's
@@ -1134,6 +1462,9 @@ krateo-openstack-node-reader
 {{- if $item.retired -}}
 {{- fail (printf "component %s lists credential %q, which is retired: no chart reads it any more" $c.name $id) -}}
 {{- end -}}
+{{- /* A `source: provided` item (#308) has a root only while storage.backend is a ceph backend: otherwise there is
+       nothing to copy, and the component gets no reference, exactly as before the item existed. */ -}}
+{{- if or (ne ($item.source | default "") "provided") (eq (include "osh.cephConsumes" (list $top $c)) "true") -}}
 {{- $ref := dict "store" $creds.store "secret" $item.secret "key" $item.key -}}
 {{- if $item.publicKey -}}{{- $_ := set $ref "publicKey" $item.publicKey -}}{{- end -}}
 {{- $path := $item.path -}}
@@ -1153,7 +1484,517 @@ krateo-openstack-node-reader
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- end -}}
 {{- toYaml $out -}}
+{{- end -}}
+
+{{- /* osh.runsRabbitInit (list $ $c): "true" when component $c's rabbit-init runs -- in chart mode its Job, with
+       messaging.backend operator its topology resources: the Job is on (its componentValues manifests.job_rabbit_init when
+       set, else its chart default, components[].rabbitmqInit, true unless false) and so is the Secret it reads
+       (manifests.secret_rabbitmq, else rabbitmqSecret: keystone ships it off). The one rule osh.notificationVhostSources
+       and osh.messagingProjection both read. */ -}}
+{{- define "osh.runsRabbitInit" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- $cv := index ($top.Values.componentValues | default dict) $c.name | default dict -}}
+{{- $man := $cv.manifests | default dict -}}
+{{- $init := ne (toString $c.rabbitmqInit) "false" -}}
+{{- if hasKey $man "job_rabbit_init" -}}{{- $init = eq (toString (index $man "job_rabbit_init")) "true" -}}{{- end -}}
+{{- $secret := ne (toString $c.rabbitmqSecret) "false" -}}
+{{- if hasKey $man "secret_rabbitmq" -}}{{- $secret = eq (toString (index $man "secret_rabbitmq")) "true" -}}{{- end -}}
+{{- if and $init $secret -}}true{{- end -}}
+{{- end -}}
+
+{{- /* osh.messagingProjection (list $ $c): with messaging.backend operator, the RabbitMQ user projection the UMBRELLA
+       writes for component $c (#309 H2 run 4, option 4), as JSON {secret, username, store, root, key}; "{}" when $c has
+       none (another backend, not in haTopology.messagingQuorum, or its rabbit-init does not run).
+       Why the umbrella: the topology operator's User webhook refuses a User whose import Secret does not exist yet
+       (v1.20.5 label_validation.go), and a component's chart submits its ExternalSecret and its User in one helm
+       transaction while ESO writes the Secret afterwards (3-85 s measured). Run 4 measured every messaging component
+       refused 1-2 times and converging on CDC's retry after up to 198 s. Rendered here, the projection exists before the
+       component is created (osh.messagingProjectionReady gates creation on it), so its User is admitted at once.
+       The username is the chart's auth.<component>.username: componentValues' when set, else the component name, which
+       every messaging chart's default equals (hack/validate-messaging-topology.py checks both). The root is the
+       component's oslo-messaging-<component> credential item, read through credentials.store as every reference is. */ -}}
+{{- define "osh.messagingProjection" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- $out := dict -}}
+{{- $topo := $top.Values.haTopology | default dict -}}
+{{- if and (eq (include "osh.messagingBackend" $top) "operator") (has $c.name ($topo.messagingQuorum | default list)) (eq (include "osh.runsRabbitInit" (list $top $c)) "true") -}}
+{{- $creds := $top.Values.credentials | default dict -}}
+{{- $id := printf "oslo-messaging-%s" $c.name -}}
+{{- $item := dict -}}
+{{- range $i := ($creds.items | default list) -}}{{- if eq $i.id $id -}}{{- $item = $i -}}{{- end -}}{{- end -}}
+{{- if not $item.secret -}}
+{{- fail (printf "\n\n%s runs rabbit-init with messaging.backend operator, but credentials.items has no %s: its RabbitMQ user projection would have no root (#228, #309).\n" $c.name $id) -}}
+{{- end -}}
+{{- $cv := index ($top.Values.componentValues | default dict) $c.name | default dict -}}
+{{- $user := ((((($cv.endpoints | default dict).oslo_messaging | default dict).auth | default dict) | dig $c.name "username" "") | toString) | default $c.name -}}
+{{- $_ := set $out "secret" (printf "%s-rabbitmq-topology-user" ($c.name | replace "_" "-")) -}}
+{{- $_ := set $out "username" $user -}}
+{{- $_ := set $out "store" $creds.store -}}
+{{- $_ := set $out "root" $item.secret -}}
+{{- $_ := set $out "key" $item.key -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{- /* osh.messagingProjectionES (list $ $c $p suffix root): the umbrella's RabbitMQ user projection of component $c
+       (osh.messagingProjection is $p) for one generation (#309 C2): named <projection><suffix>, user <username><suffix>,
+       read from <root>. Generation 0 (suffix "", the base root) is templates/messaging-projections.yaml; the others are
+       rendered with the rotation that needs them (compositions.yaml). One template, so they cannot differ. */ -}}
+{{- define "osh.messagingProjectionES" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}{{- $p := index . 2 -}}{{- $sfx := toString (index . 3) -}}{{- $root := index . 4 }}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ printf "%s%s" $p.secret $sfx }}
+  namespace: {{ $top.Release.Namespace }}
+  labels:
+    krateo.io/messaging-projection: {{ $c.name }}
+  annotations:
+    # Deleted by helm WITH the release, after its pre-delete hooks (#254).
+    krateo.io/teardown: with-release
+spec:
+  # OnChange (#309 C): refreshed only when this ExternalSecret itself changes (a new root, a new
+  # template), never on a timer, so a root edited by hand (which ESO regenerates) reaches no live
+  # credential until a rotation; the umbrella reports the edit (status.credentialDrift).
+  refreshPolicy: OnChange
+  secretStoreRef:
+    kind: SecretStore
+    name: {{ $p.store | quote }}
+  target:
+    name: {{ printf "%s%s" $p.secret $sfx }}
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      engineVersion: v2
+      metadata:
+        labels:
+          # The topology operator reads only Secrets with this label (v1.20.5 cmd/main.go:281-283), and its User webhook
+          # refuses an import Secret without it (internal/webhook/v1beta1/label_validation.go). #404.
+          rabbitmq.com/topology-operator: "true"
+      data:
+        username: {{ printf "%s%s" $p.username $sfx | quote }}
+        password: {{ "{{ .password }}" | quote }}
+  data:
+    - secretKey: password
+      remoteRef:
+        key: {{ $root | quote }}
+        property: {{ $p.key | quote }}
+{{- end -}}
+
+{{- /* osh.lookupSecret (list $ name): the Secret <name> in the release namespace, as JSON ("{}" when absent). One named
+       GET, so a gate can stand it in: helm template's lookup returns nothing, and an offline render therefore emits no
+       component that waits on one (hack/validate-messaging-operator.py part 5 renders this gate with a stand-in). */ -}}
+{{- define "osh.lookupSecret" -}}
+{{- $top := index . 0 -}}
+{{- lookup "v1" "Secret" $top.Release.Namespace (index . 1) | default dict | toJson -}}
+{{- end -}}
+
+{{- /* osh.messagingRotation (list $ $c $liveSpec [$liveStatus]): the rotation state of component $c's RabbitMQ user (#309 C,
+       Diego's (d): immutable roots per generation, dual users), derived from what exists, never from remembered state, as
+       JSON. "{}" when $c has no umbrella projection (osh.messagingProjection). $liveStatus is what osh.liveState read
+       besides the spec: status.managed (CDC builds it from the release manifest), metadata.generation,
+       status.observedGeneration and hooksUnverified.
+         base     its root, credentials.items oslo-messaging-<component>: generation 0, never modified;
+         target   base when rotate.<id> is unset, else <base>-g<first 8 hex of sha256(token)>, a NEW root ESO mints once;
+         active   the root the LIVE component Composition references now ($liveSpec's
+                  endpoints.oslo_messaging.auth.<component>.passwordFrom.secret), base for a component not created yet;
+         previous for a target other than base, the active root when the target was first rendered, stamped on the target
+                  root's ExternalSecret (krateo.io/previous-root) and read back by lookup: the ConfigMap
+                  openstack-credential-generations is not needed, so losing it loses nothing;
+         refuse   a message when the token cannot be honoured: the target root already exists with a previous-root other
+                  than the active one (the token names an old or retired generation), the token was removed after a
+                  rotation (target base, active a generation root), or componentValues sets the component's
+                  passwordFrom (the rotation would override it). Never silently re-activates an old root.
+       C2, the switch. A generation's suffix is "" for the base root and -g<8 hex> otherwise; its user is
+       <username><suffix>, its projection <projection><suffix>, its User <su>-rabbitmq-user<suffix>. One render at a time:
+         minting   target != active. The target root and its umbrella projection are rendered; once that projection's
+                   Secret exists, labelled for the topology operator, the target's User joins `users` (the component
+                   renders it next to the active one, on the same vhost); once that User is Ready, this render SWITCHES:
+                   the component's passwordFrom and username name the target, activeSuffix its suffix. A target waits
+                   while the active generation's own previous user is still draining (never three users);
+         draining  target == active, and the previous generation's User still exists: it stays in `users` until every
+                   reader has rolled onto the active generation (osh.generationRolled); `blockers` says what each waits on.
+                   Once rolled it leaves `users`, the component's release deletes its User, and the topology operator its
+                   RabbitMQ user;
+         steady    nothing to do.
+       `pass` is false until a first rotation: the component's spec does not change (hack/validate-messaging-rotation.py
+       renders all three phases from stand-ins, and that nothing changes without a token). */ -}}
+{{- define "osh.messagingRotation" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}{{- $live := index . 2 | default dict -}}
+{{- $liveStatus := dict -}}{{- if gt (len .) 3 -}}{{- $liveStatus = index . 3 | default dict -}}{{- end -}}
+{{- $p := include "osh.messagingProjection" (list $top $c) | fromJson -}}
+{{- $out := dict -}}
+{{- if $p.secret -}}
+{{- $id := printf "oslo-messaging-%s" $c.name -}}
+{{- $base := $p.root -}}
+{{- $tok := toString (index ($top.Values.rotate | default dict) $id | default "") -}}
+{{- $target := $base -}}
+{{- if $tok -}}{{- $target = printf "%s-g%s" $base (trunc 8 (sha256sum $tok)) -}}{{- end -}}
+{{- $active := (((((($live.endpoints | default dict).oslo_messaging | default dict).auth | default dict) | dig $c.name "passwordFrom" "secret" "") | toString) | default $base) -}}
+{{- $_ := set $out "base" $base -}}{{- $_ := set $out "target" $target -}}{{- $_ := set $out "active" $active -}}
+{{- $_ := set $out "token" $tok -}}{{- $_ := set $out "id" $id -}}
+{{- $es := include "osh.lookupExternalSecret" (list $top $target) | fromJson -}}
+{{- $stamp := toString ((($es.metadata | default dict).annotations | default dict) | dig "krateo.io/previous-root" "") -}}
+{{- $cvAuth := (((((index ($top.Values.componentValues | default dict) $c.name | default dict).endpoints | default dict).oslo_messaging | default dict).auth | default dict) | dig $c.name "passwordFrom" dict) -}}
+{{- if and $tok $cvAuth -}}
+{{- $_ := set $out "refuse" (printf "rotate.%s is set, but componentValues.%s.endpoints.oslo_messaging.auth.%s.passwordFrom is too: a rotation names the root itself. Remove the componentValues entry." $id $c.name $c.name) -}}
+{{- else if eq $target $active -}}
+{{- $_ := set $out "phase" "steady" -}}
+{{- if ne $target $base -}}{{- $_ := set $out "previous" $stamp -}}{{- end -}}
+{{- else if eq $target $base -}}
+{{- $_ := set $out "refuse" (printf "rotate.%s was removed while %s uses the generation root %s: removing a rotation token would re-activate the old root %s. Keep the token, or set a new one to rotate again." $id $c.name $active $base) -}}
+{{- else if and $es.metadata (ne $stamp $active) -}}
+{{- $_ := set $out "refuse" (printf "rotate.%s token %q maps to generation root %s, which already exists (previous root %s) while %s uses %s: the token names an old generation. Set a new token." $id $tok $target ($stamp | default "none") $c.name $active) -}}
+{{- else -}}
+{{- $_ := set $out "phase" "minting" -}}
+{{- $_ := set $out "previous" ($stamp | default $active) -}}
+{{- end -}}
+{{- if not $out.refuse -}}
+{{- $su := $c.name | replace "_" "-" -}}
+{{- $aSfx := include "osh.generationSuffix" (list $base $active) -}}
+{{- $users := list -}}{{- $roots := list -}}{{- $blockers := list -}}
+{{- /* The ACTIVE generation's own previous one (stamped on the active root): kept while its User exists and the
+       readers have not all rolled onto the active generation. */ -}}
+{{- $draining := false -}}
+{{- if ne $active $base -}}
+{{- $aes := include "osh.lookupExternalSecret" (list $top $active) | fromJson -}}
+{{- $prev := toString ((($aes.metadata | default dict).annotations | default dict) | dig "krateo.io/previous-root" "") -}}
+{{- if $prev -}}
+{{- $pSfx := include "osh.generationSuffix" (list $base $prev) -}}
+{{- $pu := include "osh.lookupNamed" (list $top "rabbitmq.com/v1beta1" "User" (printf "%s-rabbitmq-user%s" $su $pSfx)) | fromJson -}}
+{{- if and $pu.metadata (not $pu.metadata.deletionTimestamp) -}}
+{{- if ne $prev $base -}}{{- $roots = append $roots $prev -}}{{- end -}}
+{{- $r := include "osh.generationRolled" (list $top $c $aSfx $active $liveStatus) | fromJson -}}
+{{- if not $r.rolled -}}
+{{- $draining = true -}}
+{{- $users = append $users (dict "suffix" $pSfx "secret" (printf "%s%s" $p.secret $pSfx)) -}}
+{{- $blockers = concat $blockers (list (printf "the previous generation %s is kept until every reader has rolled onto %s:" $prev $active)) $r.blockers -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $users = append $users (dict "suffix" $aSfx "secret" (printf "%s%s" $p.secret $aSfx)) -}}
+{{- if ne $active $base -}}{{- $roots = append $roots $active -}}{{- end -}}
+{{- $final := $active -}}{{- $fSfx := $aSfx -}}
+{{- if ne $target $active -}}
+{{- $tSfx := include "osh.generationSuffix" (list $base $target) -}}
+{{- $roots = append $roots $target -}}
+{{- if $draining -}}
+{{- $blockers = append $blockers (printf "the new generation %s waits until the previous rotation has drained" $target) -}}
+{{- else -}}
+{{- $tp := include "osh.lookupSecret" (list $top (printf "%s%s" $p.secret $tSfx)) | fromJson -}}
+{{- if ne (toString ((($tp.metadata | default dict).labels | default dict) | dig "rabbitmq.com/topology-operator" "")) "true" -}}
+{{- $blockers = append $blockers (printf "waiting for External Secrets to write the projection %s%s from %s" $p.secret $tSfx $target) -}}
+{{- else -}}
+{{- $users = append $users (dict "suffix" $tSfx "secret" (printf "%s%s" $p.secret $tSfx)) -}}
+{{- $tu := include "osh.lookupNamed" (list $top "rabbitmq.com/v1beta1" "User" (printf "%s-rabbitmq-user%s" $su $tSfx)) | fromJson -}}
+{{- $ready := false -}}
+{{- range $cond := (($tu.status | default dict).conditions | default list) -}}
+{{- if and (eq (toString $cond.type) "Ready") (eq (toString $cond.status) "True") -}}{{- $ready = true -}}{{- end -}}
+{{- end -}}
+{{- if $ready -}}
+{{- $final = $target -}}{{- $fSfx = $tSfx -}}
+{{- $_ := set $out "switched" true -}}
+{{- $blockers = append $blockers (printf "switched to %s in this render; %s is kept until every reader has rolled" $target $active) -}}
+{{- else -}}
+{{- $blockers = append $blockers (printf "waiting for the User %s-rabbitmq-user%s to be Ready" $su $tSfx) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $phase := "steady" -}}
+{{- if $out.switched -}}{{- $phase = "draining" -}}
+{{- else if ne $target $active -}}{{- $phase = "minting" -}}
+{{- else if $draining -}}{{- $phase = "draining" -}}
+{{- end -}}
+{{- $_ := set $out "phase" $phase -}}
+{{- $_ := set $out "su" $su -}}
+{{- $_ := set $out "users" $users -}}
+{{- $_ := set $out "roots" $roots -}}
+{{- $_ := set $out "blockers" $blockers -}}
+{{- $_ := set $out "activeRoot" $final -}}
+{{- $_ := set $out "activeSuffix" $fSfx -}}
+{{- $_ := set $out "username" (printf "%s%s" $p.username $fSfx) -}}
+{{- $_ := set $out "pass" (or (ne $active $base) (ne $target $base)) -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{- /* osh.generationSuffix (list base root): "" for the base root (generation 0), else what the root's name adds to it
+       (-g<8 hex>). */ -}}
+{{- define "osh.generationSuffix" -}}
+{{- $base := index . 0 -}}{{- $root := index . 1 -}}
+{{- if ne $root $base -}}{{- trimPrefix $base $root -}}{{- end -}}
+{{- end -}}
+
+{{- /* osh.lookupNamed (list $ apiVersion kind name): the object <kind>/<name> in the release namespace, as JSON ("{}" when
+       absent). One named GET: chart-inspector's tracer records every named request of the dry-run render, lookups and
+       404s included (internal/tracer/tracer.go RoundTrip), and derives the release's RBAC from them. Never a list.
+       Stood in by hack/validate-messaging-rotation.py. */ -}}
+{{- define "osh.lookupNamed" -}}
+{{- $top := index . 0 -}}
+{{- lookup (index . 1) (index . 2) $top.Release.Namespace (index . 3) | default dict | toJson -}}
+{{- end -}}
+
+{{- /* osh.messagingReaders (list $c): the component chart's ExternalSecrets that project its RabbitMQ root, the
+       connection Secret (secrets.oslo_messaging) and the transport drop-in. hack/validate-messaging-rotation.py renders
+       all 20 messaging charts and fails unless this is exactly the set that reads the root. */ -}}
+{{- define "osh.messagingReaders" -}}
+{{- $n := (index . 0).name | replace "_" "-" -}}
+{{- list (printf "%s-rabbitmq-user" $n) (printf "%s-transport" $n) | toJson -}}
+{{- end -}}
+
+{{- /* osh.generationRolled (list $ $c $suffix $activeRoot $liveStatus): whether every reader of component $c's RabbitMQ
+       credential has moved to the generation <suffix>, as JSON {rolled, blockers}. Named lookups only; whatever cannot
+       be read, or cannot roll by itself, is kept and reported, never forced.
+
+       The release, hooks included: the component Composition's status.observedGeneration == metadata.generation and no
+       krateo.io/hooks-unverified. The composition-dynamic-controller core-provider 2.13.111 deploys
+       (krateo-platformops/core-provider tag 2.13.111, commit 7cd0848, go/composition-dynamic-controller) writes
+       observedGeneration only in setStatus (internal/composition/support.go:377, unstructured-runtime v1.27.1
+       statusprojection.go:177: = metadata.generation as read), which runs only after the reconcile succeeded: a failed
+       reconcile returns before it (composition.go Observe :700). That reconcile (plumbing v1.95.0 helm/v3/reconcile.go
+       steps 5-8) merge-applies the render, then, when anything changed, runs ONE real helm upgrade, which runs and waits
+       for the hooks. So a hook Job of the switching release, which may have started on the previous credential, has
+       ended. hooks-unverified (an interrupted operation recovered without its hooks, #563) is reported, not waited out.
+
+       Workloads, each object status.managed lists (built by CDC from the release manifest), by kubectl v1.36.4's rollout
+       status (staging/src/k8s.io/kubectl/pkg/polymorphichelpers/rollout_status.go) and one stricter rule:
+         every Deployment, StatefulSet, DaemonSet and CronJob carries the pod-template annotation
+           krateo.io/messaging-generation: <suffix> (helm-toolkit custom_pod_annotations): its pods are the new ones;
+         Deployment (:75-87): metadata.generation <= status.observedGeneration; not ProgressDeadlineExceeded;
+           updatedReplicas == spec.replicas; status.replicas == updatedReplicas; availableReplicas == updatedReplicas;
+         DaemonSet (:107-112): OnDelete refused (kubectl refuses it too: its pods keep the previous credential until
+           deleted, so it is reported with that action); observedGeneration; updatedNumberScheduled and numberAvailable
+           == desiredNumberScheduled;
+         StatefulSet (:130-146): OnDelete as DaemonSet; observedGeneration; readyReplicas == spec.replicas; a partition
+           counts as not rolled while any pod is below it (stricter than kubectl, which accepts the partition: those
+           pods hold the previous credential); updateRevision == currentRevision;
+         CronJob and Job: no Job running (status.active), since a Job keeps the credential it started with;
+         a bare Pod not Succeeded or Failed: never restarts, reported.
+       The component's projections of the active root (osh.messagingReaders) must read it and be synced at their own
+       generation (ESO v2.14.0: syncedResourceVersion is "<metadata.generation>-<HashMeta>"), so every pod started from
+       now on reads the new credential. */ -}}
+{{- define "osh.generationRolled" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}{{- $sfx := toString (index . 2) -}}{{- $root := index . 3 -}}{{- $ls := index . 4 | default dict -}}
+{{- $managed := $ls.managed | default list -}}
+{{- $blk := list -}}
+{{- if $ls.hooksUnverified -}}
+{{- $blk = append $blk "the component carries krateo.io/hooks-unverified: an interrupted helm operation was recovered without its hooks, so they may not have run; verify them and remove the annotation (README)" -}}
+{{- end -}}
+{{- if lt (int64 ($ls.observedGeneration | default 0)) (int64 ($ls.generation | default 0)) -}}
+{{- $blk = append $blk (printf "the component's release for its current spec (generation %d) has not been applied yet, hooks included (observed %d)" (int64 ($ls.generation | default 0)) (int64 ($ls.observedGeneration | default 0))) -}}
+{{- end -}}
+{{- $kinds := dict "deployments" "Deployment" "statefulsets" "StatefulSet" "daemonsets" "DaemonSet" "cronjobs" "CronJob" "jobs" "Job" "pods" "Pod" -}}
+{{- if not $managed -}}{{- $blk = append $blk "the component Composition lists no status.managed yet" -}}{{- end -}}
+{{- range $m := $managed -}}
+{{- $kind := index $kinds (toString $m.resource) | default "" -}}
+{{- if $kind -}}
+{{- $o := include "osh.lookupNamed" (list $top (toString $m.apiVersion) $kind (toString $m.name)) | fromJson -}}
+{{- $n := printf "%s/%s" $kind $m.name -}}
+{{- if not $o.metadata -}}
+{{- $blk = append $blk (printf "%s: cannot be read; kept until it can" $n) -}}
+{{- else -}}
+{{- $sp := $o.spec | default dict -}}{{- $st := $o.status | default dict -}}
+{{- $gen := int64 ($o.metadata.generation | default 0) -}}{{- $og := int64 ($st.observedGeneration | default 0) -}}
+{{- $tpl := $sp.template | default dict -}}
+{{- if eq $kind "CronJob" -}}{{- $tpl = ((($sp.jobTemplate | default dict).spec | default dict).template | default dict) -}}{{- end -}}
+{{- $want := 1 -}}{{- if hasKey $sp "replicas" -}}{{- $want = int64 $sp.replicas -}}{{- end -}}
+{{- $strategy := toString (((index $sp (ternary "updateStrategy" "strategy" (ne $kind "Deployment"))) | default dict).type | default "") -}}
+{{- if has $kind (list "Deployment" "StatefulSet" "DaemonSet" "CronJob") -}}
+{{- $ann := toString (index ((($tpl.metadata | default dict).annotations) | default dict) "krateo.io/messaging-generation" | default "") -}}
+{{- if ne $ann $sfx -}}
+{{- $blk = append $blk (printf "%s: its pod template is at generation %q, not %q: the release that switched it is not applied yet" $n $ann $sfx) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (has $kind (list "StatefulSet" "DaemonSet")) (eq $strategy "OnDelete") -}}
+{{- $blk = append $blk (printf "%s: updateStrategy OnDelete, so its pods keep the previous credential until deleted: delete them (kubectl -n %s delete pod -l <its selector>), one at a time" $n $top.Release.Namespace) -}}
+{{- else if and (has $kind (list "Deployment" "StatefulSet" "DaemonSet")) (gt $gen $og) -}}
+{{- $blk = append $blk (printf "%s: generation %d not observed yet (observed %d)" $n $gen $og) -}}
+{{- else if eq $kind "Deployment" -}}
+{{- range $cond := ($st.conditions | default list) -}}
+{{- if and (eq (toString $cond.type) "Progressing") (eq (toString $cond.reason) "ProgressDeadlineExceeded") -}}
+{{- $blk = append $blk (printf "%s: exceeded its progress deadline" $n) -}}
+{{- end -}}
+{{- end -}}
+{{- $upd := int64 ($st.updatedReplicas | default 0) -}}
+{{- if lt $upd $want -}}{{- $blk = append $blk (printf "%s: %d of %d pods updated" $n $upd $want) -}}
+{{- else if gt (int64 ($st.replicas | default 0)) $upd -}}{{- $blk = append $blk (printf "%s: %d old pods pending termination" $n (sub (int64 ($st.replicas | default 0)) $upd)) -}}
+{{- else if lt (int64 ($st.availableReplicas | default 0)) $upd -}}{{- $blk = append $blk (printf "%s: %d of %d updated pods available" $n (int64 ($st.availableReplicas | default 0)) $upd) -}}
+{{- end -}}
+{{- else if eq $kind "StatefulSet" -}}
+{{- $part := int64 (((($sp.updateStrategy | default dict).rollingUpdate | default dict).partition) | default 0) -}}
+{{- if lt (int64 ($st.readyReplicas | default 0)) $want -}}{{- $blk = append $blk (printf "%s: %d of %d pods ready" $n (int64 ($st.readyReplicas | default 0)) $want) -}}
+{{- else if and (gt $part 0) (lt (int64 ($st.updatedReplicas | default 0)) $want) -}}{{- $blk = append $blk (printf "%s: partition %d leaves %d pod(s) on the previous credential: set its partition to 0" $n $part (sub $want (int64 ($st.updatedReplicas | default 0)))) -}}
+{{- else if ne (toString ($st.updateRevision | default "")) (toString ($st.currentRevision | default "")) -}}{{- $blk = append $blk (printf "%s: update revision %s not current yet" $n ($st.updateRevision | default "")) -}}
+{{- end -}}
+{{- else if eq $kind "DaemonSet" -}}
+{{- $des := int64 ($st.desiredNumberScheduled | default 0) -}}
+{{- if lt (int64 ($st.updatedNumberScheduled | default 0)) $des -}}{{- $blk = append $blk (printf "%s: %d of %d pods updated" $n (int64 ($st.updatedNumberScheduled | default 0)) $des) -}}
+{{- else if lt (int64 ($st.numberAvailable | default 0)) $des -}}{{- $blk = append $blk (printf "%s: %d of %d updated pods available" $n (int64 ($st.numberAvailable | default 0)) $des) -}}
+{{- end -}}
+{{- else if eq $kind "CronJob" -}}
+{{- if ($st.active | default list) -}}{{- $blk = append $blk (printf "%s: %d Job(s) running, which keep the credential they started with" $n (len $st.active)) -}}{{- end -}}
+{{- else if eq $kind "Job" -}}
+{{- if gt (int64 ($st.active | default 0)) 0 -}}{{- $blk = append $blk (printf "%s: running, and keeps the credential it started with" $n) -}}{{- end -}}
+{{- else if eq $kind "Pod" -}}
+{{- if not (has (toString (($st.phase) | default "")) (list "Succeeded" "Failed")) -}}{{- $blk = append $blk (printf "%s: a bare Pod never restarts with the new credential: delete it" $n) -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- range $name := include "osh.messagingReaders" (list $c) | fromJsonArray -}}
+{{- $e := include "osh.lookupNamed" (list $top "external-secrets.io/v1" "ExternalSecret" $name) | fromJson -}}
+{{- if not $e.metadata -}}
+{{- $blk = append $blk (printf "ExternalSecret/%s: cannot be read; kept until it can" $name) -}}
+{{- else -}}
+{{- $reads := false -}}
+{{- range $d := (($e.spec | default dict).data | default list) -}}{{- if eq (toString (($d.remoteRef | default dict).key)) $root -}}{{- $reads = true -}}{{- end -}}{{- end -}}
+{{- $est := $e.status | default dict -}}
+{{- if not $reads -}}
+{{- $blk = append $blk (printf "ExternalSecret/%s: does not read %s yet" $name $root) -}}
+{{- else if not (hasPrefix (printf "%d-" (int64 ($e.metadata.generation | default 0))) (toString ($est.syncedResourceVersion | default ""))) -}}
+{{- $blk = append $blk (printf "ExternalSecret/%s: not synced at its generation %d yet" $name (int64 ($e.metadata.generation | default 0))) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- dict "rolled" (not $blk) "blockers" $blk | toJson -}}
+{{- end -}}
+
+{{- /* osh.generationRoot (list $ $rot): the ROOT of a rotation's target generation (#309 C), in the form of every generated
+       root (templates/credentials.yaml): an ExternalSecret writing <target> from the Password generator once
+       (refreshPolicy CreatedOnce), kept by helm and torn down with the release. Stamped with the active root at the time
+       it was first rendered (krateo.io/previous-root, read back by osh.messagingRotation, so the stamp never moves) and
+       the token that named it. Never modified afterwards: a new rotation is a new token, so a new root. */ -}}
+{{- define "osh.generationRoot" -}}
+{{- $top := index . 0 -}}{{- $rot := index . 1 -}}
+{{- $creds := $top.Values.credentials | default dict -}}
+{{- $key := "password" -}}
+{{- range $i := ($creds.items | default list) -}}{{- if eq $i.id $rot.id -}}{{- $key = $i.key -}}{{- end -}}{{- end }}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ $rot.target }}
+  namespace: {{ $top.Release.Namespace }}
+  labels:
+    krateo.io/credential: {{ $rot.id }}
+    krateo.io/credential-generation: {{ trimPrefix (printf "%s-" $rot.base) $rot.target | quote }}
+  annotations:
+    # Never deleted by an upgrade that stops rendering it, as every root (templates/credentials.yaml).
+    helm.sh/resource-policy: keep
+    krateo.io/teardown: with-release
+    krateo.io/previous-root: {{ $rot.previous | quote }}
+    krateo.io/rotation-token: {{ $rot.token | quote }}
+spec:
+  refreshPolicy: CreatedOnce
+  target:
+    name: {{ $rot.target }}
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      engineVersion: v2
+      data:
+        {{ $key }}: {{ "{{ .password }}" | quote }}
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: {{ $creds.generator }}
+{{- end -}}
+
+{{- /* osh.lookupConfigMap (list $ name): the ConfigMap <name> in the release namespace, as JSON ("{}" when absent). One
+       named GET, stood in by hack/validate-credential-drift.py. */ -}}
+{{- define "osh.lookupConfigMap" -}}
+{{- $top := index . 0 -}}
+{{- lookup "v1" "ConfigMap" $top.Release.Namespace (index . 1) | default dict | toJson -}}
+{{- end -}}
+
+{{- /* osh.generationRoots (list $): the generation roots (#309 C2) a render may read, as a JSON list of Secret names: for
+       each component with an umbrella RabbitMQ projection and a rotate.<id> token, the root that token names, and the
+       generation root stamped on it as its predecessor (krateo.io/previous-root, read back by lookup), which a draining
+       rotation still projects. Generation 0 is an item of credentials.items and is not listed. ONE list, read by the
+       drift latch (osh.credentialDrift) and by the SecretStore's read grant (templates/credentials.yaml): H2 run 5 found
+       the grant listing only the items, so the store got 403 on the new generation root and the rotation stopped in
+       minting (hack/validate-messaging-rotation.py now checks that the grant covers every root a projection reads). */ -}}
+{{- define "osh.generationRoots" -}}
+{{- $top := index . 0 -}}
+{{- $out := list -}}
+{{- range $c := ($top.Values.components | default list) -}}
+{{- $p := include "osh.messagingProjection" (list $top $c) | fromJson -}}
+{{- $tok := toString (index ($top.Values.rotate | default dict) (printf "oslo-messaging-%s" $c.name) | default "") -}}
+{{- if and $p.secret $tok -}}
+{{- $g := printf "%s-g%s" $p.root (trunc 8 (sha256sum $tok)) -}}
+{{- $out = append $out $g -}}
+{{- $es := include "osh.lookupExternalSecret" (list $top $g) | fromJson -}}
+{{- $pr := toString ((($es.metadata | default dict).annotations | default dict) | dig "krateo.io/previous-root" "") -}}
+{{- if and $pr (ne $pr $p.root) (not (has $pr $out)) -}}{{- $out = append $out $pr -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{- /* osh.credentialDrift (list $): the drift latch (#309 C), as JSON {state: {id: "<sha256>"}, drift: [{id, secret, sha}]}.
+       For each GENERATED credential item whose root Secret exists, its data's sha256 (sprig; ESO's own data-hash is
+       SHA3-224 of Go's %+v rendering, which a template cannot compute) is compared with the baseline latched in the
+       previous render's ConfigMap openstack-credential-generations, read back by lookup:
+         no baseline yet: the current sha becomes it;
+         equal: nothing to report;
+         different: the root was edited or regenerated by hand (ESO v2.14.0 regenerates a generated root the moment its
+           data-hash stops matching, externalsecret_controller.go:370). Reported, the baseline kept, unless
+           credentialDrift.acknowledge.<Secret> is exactly the current sha: then the current sha becomes the baseline.
+       A rotation never needs acknowledging: it mints a NEW root (osh.generationRoot), which is latched on its own. */ -}}
+{{- define "osh.credentialDrift" -}}
+{{- $top := index . 0 -}}
+{{- $prevCM := include "osh.lookupConfigMap" (list $top "openstack-credential-generations") | fromJson -}}
+{{- $prev := $prevCM.data | default dict -}}
+{{- $ack := (($top.Values.credentialDrift | default dict).acknowledge | default dict) -}}
+{{- $state := dict -}}{{- $drift := list -}}
+{{- /* The items' roots, and (#309 C2) each messaging generation root a rotation token names and the one its stamp says
+       preceded it, latched by Secret name: an edited generation root is reported the same way. */ -}}
+{{- $roots := list -}}
+{{- range $i := (($top.Values.credentials | default dict).items | default list) -}}
+{{- if ne ($i.source | default "") "provided" -}}{{- $roots = append $roots (dict "id" $i.id "secret" $i.secret) -}}{{- end -}}
+{{- end -}}
+{{- range $g := include "osh.generationRoots" (list $top) | fromJsonArray -}}
+{{- $roots = append $roots (dict "id" $g "secret" $g) -}}
+{{- end -}}
+{{- range $i := $roots -}}
+{{- $s := include "osh.lookupSecret" (list $top $i.secret) | fromJson -}}
+{{- if $s.data -}}
+{{- $sha := toJson $s.data | sha256sum -}}
+{{- $base := toString (index $prev $i.id | default "") -}}
+{{- if or (not $base) (eq $base $sha) (eq (toString (index $ack $i.secret | default "")) $sha) -}}
+{{- $_ := set $state $i.id $sha -}}
+{{- else -}}
+{{- $_ := set $state $i.id $base -}}
+{{- $drift = append $drift (dict "id" $i.id "secret" $i.secret "sha" $sha) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- dict "state" $state "drift" $drift | toJson -}}
+{{- end -}}
+
+{{- /* osh.messagingProjectionReady (list $ $c): "true" when component $c may be CREATED as far as its RabbitMQ user is
+       concerned: it has no umbrella projection, or that projection's Secret exists AND carries
+       rabbitmq.com/topology-operator=true (the label the User webhook requires, #404). Until then $c is held like a
+       dependency that is not Ready: listed in openstack-install-pending, never created against a Secret ESO has not
+       written, so its User is never refused. Only creation: compositions.yaml keeps an existing component (`or
+       $exists`), as for osh.cephRootsReady. */ -}}
+{{- define "osh.messagingProjectionReady" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- $p := include "osh.messagingProjection" (list $top $c) | fromJson -}}
+{{- $ready := true -}}
+{{- if $p.secret -}}
+{{- $s := include "osh.lookupSecret" (list $top $p.secret) | fromJson -}}
+{{- if ne (toString (((($s.metadata | default dict).labels) | default dict) | dig "rabbitmq.com/topology-operator" "")) "true" -}}{{- $ready = false -}}{{- end -}}
+{{- end -}}
+{{- $ready -}}
 {{- end -}}
 
 {{- /* osh.notificationVhostSources (list $ $sel): .Values.notificationVhosts.vhosts, in order, mapped to what the
@@ -1172,15 +2013,10 @@ krateo-openstack-node-reader
 {{- range $c := $top.Values.components -}}
 {{- if and $c.rabbitmqVhost (has $c.name $sel) -}}
 {{- $cv := index $cvs $c.name | default dict -}}
-{{- $man := $cv.manifests | default dict -}}
-{{- $init := ne (toString $c.rabbitmqInit) "false" -}}
-{{- if hasKey $man "job_rabbit_init" -}}{{- $init = eq (toString (index $man "job_rabbit_init")) "true" -}}{{- end -}}
-{{- $secret := ne (toString $c.rabbitmqSecret) "false" -}}
-{{- if hasKey $man "secret_rabbitmq" -}}{{- $secret = eq (toString (index $man "secret_rabbitmq")) "true" -}}{{- end -}}
 {{- $vhost := $c.rabbitmqVhost -}}
 {{- $path := ((($cv.endpoints | default dict).oslo_messaging | default dict).path) | default "" | toString -}}
 {{- if $path -}}{{- $vhost = trimPrefix "/" $path | default "/" -}}{{- end -}}
-{{- if and $init $secret -}}{{- $_ := set $created $c.rabbitmqVhost (dict "vhost" $vhost "component" $c.name "job" (printf "%s-rabbit-init" $c.name)) -}}{{- end -}}
+{{- if eq (include "osh.runsRabbitInit" (list $top $c)) "true" -}}{{- $_ := set $created $c.rabbitmqVhost (dict "vhost" $vhost "component" $c.name "job" (printf "%s-rabbit-init" $c.name)) -}}{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- $out := list -}}
@@ -1209,4 +2045,163 @@ krateo-openstack-node-reader
 {{- if ne $s.component $consumer -}}{{- $out = append $out $s.job -}}{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
+{{- end -}}
+
+{{- /* osh.mqReplicas ($): the RabbitMQ server replica count, from its ONE source: componentValues.rabbitmq.pod.replicas.server,
+       the rabbitmq chart's own value (default 1). Every transport URL lists this many hosts (osh.haValues). #309. */ -}}
+{{- define "osh.mqReplicas" -}}
+{{- $cv := (index ($.Values.componentValues | default dict) "rabbitmq") | default dict -}}
+{{- (((($cv.pod | default dict).replicas | default dict).server) | default 1) | int -}}
+{{- end -}}
+
+{{- /* osh.cacheReplicas ($): the memcached replica count. componentValues.memcached.pod.replicas.server when set, else
+       haTopology.cacheReplicas with ha.enabled, else 1. More than one replica without ha.enabled is refused: the chart's
+       one ClusterIP pins each client to one replica (ClientIP affinity), so the replicas would hold disagreeing caches and
+       no client would list them. #309. */ -}}
+{{- define "osh.cacheReplicas" -}}
+{{- $ha := ($.Values.ha | default dict).enabled -}}
+{{- $cv := (index ($.Values.componentValues | default dict) "memcached") | default dict -}}
+{{- $set := ((($cv.pod | default dict).replicas | default dict).server) -}}
+{{- $n := 1 -}}
+{{- if $set -}}{{- $n = int $set -}}{{- else if $ha -}}{{- $n = int ($.Values.haTopology.cacheReplicas | default 3) -}}{{- end -}}
+{{- if and (gt $n 1) (not $ha) -}}
+{{- fail (printf "componentValues.memcached.pod.replicas.server is %d while ha.enabled is false.\n\nWithout ha, memcached's one ClusterIP Service pins each client to a single replica (sessionAffinity ClientIP) and no component lists the replicas, so %d replicas would hold %d disagreeing caches: keystone's token-validation and revocation caches among them. Set ha.enabled: true (memcached then runs behind a headless Service and every component lists each replica), or leave the replica count at 1. #309." $n $n $n) -}}
+{{- end -}}
+{{- $n -}}
+{{- end -}}
+
+{{- /* osh.haValues (list $ $c): what high availability passes component $c (#309), as a YAML dict merged UNDER its
+       componentValues.
+         messaging: a component in haTopology.messaging gets endpoints.oslo_messaging.statefulset
+           {name: haTopology.messagingStatefulset, replicas: osh.mqReplicas} when the count is above 1, so its transport
+           URL lists every RabbitMQ node. At 1 nothing is passed: each chart's own default lists the one host.
+         cache: with ha.enabled, memcached gets 3 replicas (osh.cacheReplicas) and manifests.service_discovery (a headless
+           Service and the StatefulSet haTopology.cacheStatefulset), and a component in haTopology.cache gets
+           endpoints.oslo_cache {hosts.default: haTopology.cacheDiscovery, statefulset: {name, replicas}}, so its memcache
+           server list names every replica.
+       Refused, because the merge would otherwise let it win silently: a component whose componentValues set
+       endpoints.oslo_messaging.statefulset or endpoints.oslo_cache.statefulset to a replica count other than the one
+       source. hack/validate-ha-propagation.py renders this span for every component. */ -}}
+{{- define "osh.haValues" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- $topo := $top.Values.haTopology | default dict -}}
+{{- $ha := ($top.Values.ha | default dict).enabled -}}
+{{- $cv := (index ($top.Values.componentValues | default dict) $c.name) | default dict -}}
+{{- $ep := $cv.endpoints | default dict -}}
+{{- $out := dict -}}
+{{- $mq := include "osh.mqReplicas" $top | int -}}
+{{- /* With messaging.backend operator the RabbitMQ host list is osh.messagingOperatorValues', not this. */ -}}
+{{- if and (has $c.name ($topo.messaging | default list)) (ne (include "osh.messagingBackend" $top) "operator") -}}
+{{- with (($ep.oslo_messaging | default dict).statefulset) -}}
+{{- if ne (int (.replicas | default 0)) $mq -}}
+{{- fail (printf "componentValues.%s.endpoints.oslo_messaging.statefulset.replicas is %v, but RabbitMQ runs %d server replica(s) (componentValues.rabbitmq.pod.replicas.server, the one source).\n\nA transport URL that lists fewer hosts than the cluster has cannot fail over to the nodes it omits. Remove the override: the umbrella passes the count to every component that builds a transport URL. #309." $c.name .replicas $mq) -}}
+{{- end -}}
+{{- end -}}
+{{- if gt $mq 1 -}}
+{{- $_ := set $out "endpoints" (dict "oslo_messaging" (dict "statefulset" (dict "name" $topo.messagingStatefulset "replicas" $mq))) -}}
+{{- end -}}
+{{- end -}}
+{{- $cache := include "osh.cacheReplicas" $top | int -}}
+{{- if has $c.name ($topo.cache | default list) -}}
+{{- with (($ep.oslo_cache | default dict).statefulset) -}}
+{{- if or (not $ha) (ne (int (.replicas | default 0)) $cache) -}}
+{{- $want := "no list, because ha.enabled is false" -}}
+{{- if $ha -}}{{- $want = printf "%d replica(s), with ha.enabled" $cache -}}{{- end -}}
+{{- fail (printf "componentValues.%s.endpoints.oslo_cache.statefulset is set (replicas %v), but memcached's replica list is the umbrella's: %s.\n\nThe list names pods through memcached's headless Service, which exists only with ha.enabled, and it must name every replica so that every client hashes a key to the same one. Remove the override. #309." $c.name .replicas $want) -}}
+{{- end -}}
+{{- end -}}
+{{- if $ha -}}
+{{- $eps := $out.endpoints | default dict -}}
+{{- $_ := set $eps "oslo_cache" (dict "hosts" (dict "default" $topo.cacheDiscovery) "statefulset" (dict "name" $topo.cacheStatefulset "replicas" $cache)) -}}
+{{- $_ := set $out "endpoints" $eps -}}
+{{- end -}}
+{{- end -}}
+{{- if and $ha (eq $c.name "memcached") -}}
+{{- $_ := set $out "pod" (dict "replicas" (dict "server" $cache)) -}}
+{{- $_ := set $out "manifests" (dict "service_discovery" true) -}}
+{{- end -}}
+{{- if $out -}}{{- toYaml $out -}}{{- end -}}
+{{- end -}}
+
+{{- /* osh.requireHaNodes (list $ $nodes): with ha.enabled, refuse to render while fewer than haTopology.minNodes of the
+       nodes this release can see carry haTopology.nodeLabel. 3 replicas with required anti-affinity schedule one per
+       node: on 2 nodes the third stays Pending forever, and a quorum system on 2 nodes tolerates no node loss.
+       Like osh.requireNodeLabels, EMPTY <nodes> is not measured (helm template, or no node-read grant) and is not
+       refused; templates/node-preconditions-state.yaml records which. A pure function of its arguments, so
+       hack/validate-ha-propagation.py calls it with synthetic node lists. #309. */ -}}
+{{- define "osh.requireHaNodes" -}}
+{{- $top := index . 0 -}}{{- $nodes := index . 1 | default list -}}
+{{- if and (($top.Values.ha | default dict).enabled) (gt (len $nodes) 0) -}}
+{{- $topo := $top.Values.haTopology | default dict -}}
+{{- $key := $topo.nodeLabel.key -}}{{- $value := $topo.nodeLabel.value | toString -}}
+{{- $min := int ($topo.minNodes | default 3) -}}
+{{- $carry := 0 -}}
+{{- range $n := $nodes -}}
+{{- if eq (index (($n.metadata).labels | default dict) $key | toString) $value -}}{{- $carry = add1 $carry -}}{{- end -}}
+{{- end -}}
+{{- if lt $carry $min -}}
+{{- fail (printf "\n\nha.enabled needs %d nodes carrying %s=%s; %d of the %d node(s) this release can see carry it.\n\nWith ha, memcached runs %d replicas with required anti-affinity, one per node, so on fewer nodes the rest stay Pending forever; and a quorum system on 2 nodes survives no node loss. Label more nodes:\n\n    kubectl label --overwrite node <node> %s=%s\n\nor set ha.enabled: false. #309, README \"High availability\".\n" $min $key $value $carry (len $nodes) $min $key $value) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* osh.messagingBackend ($): messaging.backend, "chart" unless set. #309 H2b. */ -}}
+{{- define "osh.messagingBackend" -}}
+{{- ($.Values.messaging | default dict).backend | default "chart" -}}
+{{- end -}}
+
+{{- /* osh.messagingOperatorValues (list $ $c): what messaging.backend operator passes component $c (#309 H2b), as a YAML
+       dict merged UNDER its componentValues. Nothing in chart mode.
+         rabbitmq: operator {enabled, name}, so it renders the RabbitmqCluster haTopology.messagingOperator.name.
+         a component in haTopology.messaging (it holds endpoints.oslo_messaging.statefulset): hosts.default
+           <name>-nodes and statefulset {name: <name>-server, replicas: osh.mqReplicas}, always, because the chart's
+           own default names the chart-mode broker.
+         a component in haTopology.messagingByService: hosts.default <name>-nodes.
+         a component in haTopology.messagingQuorum: endpoints.oslo_messaging.quorum_queues (its rabbit-init drops ha-*
+           policy keys) and conf.<component>.oslo_messaging_rabbit = haTopology.messagingQuorumConf.
+       Refused: a component whose componentValues set conf.<component>.oslo_messaging_rabbit.rabbit_ha_queues true,
+       which oslo.messaging rejects together with rabbit_quorum_queue, and a statefulset override (the count is the
+       one source's). hack/validate-messaging-operator.py renders this span for every component. */ -}}
+{{- define "osh.messagingOperatorValues" -}}
+{{- $top := index . 0 -}}{{- $c := index . 1 -}}
+{{- if eq (include "osh.messagingBackend" $top) "operator" -}}
+{{- $topo := $top.Values.haTopology | default dict -}}
+{{- $name := $topo.messagingOperator.name -}}
+{{- $cv := (index ($top.Values.componentValues | default dict) $c.name) | default dict -}}
+{{- $mq := include "osh.mqReplicas" $top | int -}}
+{{- $out := dict -}}
+{{- $om := dict -}}
+{{- if eq $c.name "rabbitmq" -}}
+{{- $_ := set $out "operator" (dict "enabled" true "name" $name) -}}
+{{- end -}}
+{{- if has $c.name ($topo.messaging | default list) -}}
+{{- with ((($cv.endpoints | default dict).oslo_messaging | default dict).statefulset) -}}
+{{- fail (printf "componentValues.%s.endpoints.oslo_messaging.statefulset is set, but with messaging.backend operator the RabbitMQ host list is the umbrella's: %s-server-0..%d behind %s-nodes (componentValues.rabbitmq.pod.replicas.server, the one source). Remove the override. #309." $c.name $name (sub $mq 1) $name) -}}
+{{- end -}}
+{{- $_ := set $om "hosts" (dict "default" (printf "%s-nodes" $name)) -}}
+{{- $_ := set $om "statefulset" (dict "name" (printf "%s-server" $name) "replicas" $mq) -}}
+{{- end -}}
+{{- if has $c.name ($topo.messagingByService | default list) -}}
+{{- $_ := set $om "hosts" (dict "default" (printf "%s-nodes" $name)) -}}
+{{- end -}}
+{{- if has $c.name ($topo.messagingQuorum | default list) -}}
+{{- $own := ((index (($cv.conf | default dict)) $c.name | default dict).oslo_messaging_rabbit | default dict) -}}
+{{- if eq (toString $own.rabbit_ha_queues) "true" -}}
+{{- fail (printf "componentValues.%s.conf.%s.oslo_messaging_rabbit.rabbit_ha_queues is true, but messaging.backend operator runs quorum queues: oslo.messaging raises RuntimeError when both are enabled, and RabbitMQ 4.x has no queue mirroring. Remove it. #309." $c.name $c.name) -}}
+{{- end -}}
+{{- $_ := set $om "quorum_queues" true -}}
+{{- /* Its rabbit-init becomes messaging-topology-operator resources on this cluster
+       (helm-toolkit.manifests.rabbitmq_topology), and its pods wait on them. */ -}}
+{{- $_ := set $om "operator" (dict "cluster" $name) -}}
+{{- /* Its user projection is the umbrella's (osh.messagingProjection): the chart imports this name and renders none. */ -}}
+{{- with (include "osh.messagingProjection" (list $top $c) | fromJson).secret -}}{{- $_ := set $om.operator "userSecret" . -}}{{- end -}}
+{{- /* Its service user (#309 C2): its entrypoint waits name ITS User and Permission (of the active generation), and only
+       the vhost and the administrator's permission of any other service's rabbit-init it waits on, whose generation it
+       cannot know (helm-toolkit.utils.rabbitmq_topology_waits). */ -}}
+{{- $_ := set $om.operator "serviceUser" ($c.name | replace "_" "-") -}}
+{{- $_ := set $out "conf" (dict $c.name (dict "oslo_messaging_rabbit" (deepCopy $topo.messagingQuorumConf))) -}}
+{{- end -}}
+{{- if $om -}}{{- $_ := set $out "endpoints" (dict "oslo_messaging" $om) -}}{{- end -}}
+{{- if $out -}}{{- toYaml $out -}}{{- end -}}
+{{- end -}}
 {{- end -}}

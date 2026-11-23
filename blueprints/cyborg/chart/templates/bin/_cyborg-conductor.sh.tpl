@@ -17,5 +17,5 @@ limitations under the License.
 set -x
 
 exec cyborg-conductor \
-      --config-file /etc/cyborg/cyborg.conf $([ -d /etc/cyborg/cyborg.conf.d ] && echo --config-dir /etc/cyborg/cyborg.conf.d) \
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "cyborg.config_args.conductor" . | fromYamlArray) "format" "shell" "indent" 6 "continued" true) }}
       --log-config-append  /etc/cyborg/logging.conf

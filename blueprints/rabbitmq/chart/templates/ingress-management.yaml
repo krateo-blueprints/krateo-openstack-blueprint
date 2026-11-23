@@ -18,7 +18,7 @@ limitations under the License.
 {{- $_ := set . "deployment_name" .Release.Name }}
 {{- end }}
 
-{{- if and .Values.manifests.ingress_management .Values.network.management.ingress.public }}
+{{- if and (and .Values.manifests.ingress_management .Values.network.management.ingress.public) (include "rabbitmq.chart_mode" .) }}
 {{- $envAll := . }}
 {{- if empty $envAll.Values.endpoints.oslo_messaging.hosts.public }}
 {{- $service_public_name := .deployment_name | trunc 12 }}

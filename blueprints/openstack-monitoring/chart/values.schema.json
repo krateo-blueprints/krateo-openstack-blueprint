@@ -1,0 +1,184 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "type": "object",
+  "title": "OpenStack monitoring",
+  "description": "Metrics and alerts for an OpenStack install (issue #312): openstack-exporter, a standalone mysqld-exporter and RabbitMQ's /metrics/detailed, scraped by an OpenTelemetry collector that forwards OTLP to the Krateo observability stack, and alert-provider Alert CRs rendered from the chart's files/alerts.yaml. Normally set by the Openstack umbrella's `monitoring` value; only the fields here are settable on a Composition.",
+  "properties": {
+    "openstack": {
+      "type": "object",
+      "title": "OpenStack install",
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "type": "array",
+          "title": "Selected components",
+          "description": "The components this install runs. An alert whose component is absent is not rendered, and openstack-exporter does not scrape absent services. The umbrella sets it to its selection.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "collector": {
+      "type": "object",
+      "title": "Collector",
+      "additionalProperties": false,
+      "properties": {
+        "otlpEndpoint": {
+          "type": "string",
+          "title": "OTLP/HTTP endpoint",
+          "pattern": "^https?://",
+          "description": "Where the collector exports metrics. The default is the Krateo node agent's node-local Service, which drops traffic from a node with no agent."
+        },
+        "scrapeInterval": {
+          "type": "string",
+          "title": "Scrape interval",
+          "pattern": "^[0-9]+(s|m)$"
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 0,
+          "title": "Replicas"
+        }
+      }
+    },
+    "openstack_exporter": {
+      "type": "object",
+      "title": "openstack-exporter",
+      "description": "Deep-merged into the chart's `openstack_exporter` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "mysqld_exporter": {
+      "type": "object",
+      "title": "mysqld-exporter",
+      "description": "Deep-merged into the chart's `mysqld_exporter` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "rabbitmq": {
+      "type": "object",
+      "title": "RabbitMQ scrape",
+      "description": "Deep-merged into the chart's `rabbitmq` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "alerts": {
+      "type": "object",
+      "title": "Alerts",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Render the Metric and Alert CRs",
+          "description": "Render the Metric and Alert CRs in the release namespace. false only for a standalone install without alert-provider's CRDs."
+        },
+        "runbookBase": {
+          "type": "string",
+          "title": "Runbook link base",
+          "pattern": "^https://"
+        }
+      }
+    },
+    "images": {
+      "type": "object",
+      "title": "Images",
+      "properties": {
+        "pull_policy": {
+          "type": "string",
+          "title": "Image pull policy",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ],
+          "default": "IfNotPresent"
+        }
+      },
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "labels": {
+      "type": "object",
+      "title": "labels",
+      "description": "Deep-merged into the chart's `labels` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "dependencies": {
+      "type": "object",
+      "title": "dependencies",
+      "description": "Deep-merged into the chart's `dependencies` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "endpoints": {
+      "type": "object",
+      "title": "endpoints",
+      "description": "Deep-merged into the chart's `endpoints` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "identity": {
+      "type": "object",
+      "title": "identity",
+      "description": "Deep-merged into the chart's `identity` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "secrets": {
+      "type": "object",
+      "title": "secrets",
+      "description": "Deep-merged into the chart's `secrets` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "manifests": {
+      "type": "object",
+      "title": "Manifest switches",
+      "description": "Deep-merged into the chart's manifests values. Declared fields are typed; any other key below this one passes through untyped (x-kubernetes-preserve-unknown-fields).",
+      "x-kubernetes-preserve-unknown-fields": true,
+      "properties": {
+        "configmap_bin": {
+          "type": "boolean"
+        },
+        "configmap_collector": {
+          "type": "boolean"
+        },
+        "deployment_collector": {
+          "type": "boolean"
+        },
+        "deployment_mysqld_exporter": {
+          "type": "boolean"
+        },
+        "deployment_openstack_exporter": {
+          "type": "boolean"
+        },
+        "job_ks_user": {
+          "type": "boolean"
+        },
+        "observability": {
+          "type": "boolean"
+        },
+        "secret_keystone": {
+          "type": "boolean"
+        },
+        "service_mysqld_exporter": {
+          "type": "boolean"
+        },
+        "service_openstack_exporter": {
+          "type": "boolean"
+        }
+      }
+    },
+    "pod": {
+      "type": "object",
+      "title": "pod",
+      "description": "Deep-merged into the chart's `pod` values.",
+      "x-kubernetes-preserve-unknown-fields": true
+    },
+    "krateo": {
+      "type": "object",
+      "title": "Krateo blueprint controls",
+      "description": "Controls that belong to the blueprint, not to OpenStack-Helm (#297).",
+      "additionalProperties": false,
+      "properties": {
+        "rerunHooksToken": {
+          "type": "string",
+          "description": "Rendered nowhere. The umbrella sets it from rerunHooks.<component>; changing it makes core-provider run a helm upgrade, which re-runs every hook (#297)."
+        }
+      }
+    }
+  }
+}

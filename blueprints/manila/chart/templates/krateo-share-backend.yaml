@@ -1,0 +1,42 @@
+{{/*
+Krateo blueprint addition (#426): manila refuses to render without a share backend, and refuses the generic driver.
+
+Upstream's default backend is `generic` (GenericShareDriver, driver_handles_share_servers = true). Its service-instance
+network helper runs `ip` in init_host, and no airshipit manila image ships iproute2: measured in the images 0.3.23,
+0.3.73 and 0.3.74 run, with a positive control (#426). manila-share's service thread dies at start, the process stays
+alive, and before 0.3.74 nothing probed it, so it reported Ready while serving nothing. The generic driver also serves
+shares from Cinder volumes on Nova service instances, which an install without block storage cannot give it.
+
+So, as cinder does for its volume backend (#196): the umbrella's manila entry requires `shared-filesystem`, which nothing
+provides yet (the real backend, CephFS, comes with #308), so profile full-strict leaves manila out; and this chart's own
+default is `none`, which refuses, naming what to do. A standalone Manila Composition (or profile full, or `enabled:`) may
+set krateo.shareBackend: unmanaged and configure its own backends under conf.manila; every backend in
+enabled_share_backends is then read, and one whose share_driver is the generic driver is refused, because on these images
+it cannot start. hack/validate-share-backend.py renders each case.
+*/}}
+{{- $backend := .Values.krateo.shareBackend | default "none" -}}
+{{- if eq $backend "none" -}}
+{{- fail "\n\nmanila needs a share backend, and none is configured (#426).\n\nmanila's upstream default backend, generic, cannot start on these images: its service-instance helper runs `ip`, which no airshipit manila image ships, and it needs Cinder volumes on Nova service instances. On the Openstack Composition, leave manila out -- profile full-strict selects it only when the install provides shared-filesystem, which comes with CephFS (#308).\n\nOn a standalone Manila Composition this value is krateo.shareBackend, and it has no default: set krateo.shareBackend: unmanaged and configure your own backends under conf.manila (enabled_share_backends and a section per backend). The generic driver is refused there too.\n" -}}
+{{- else if eq $backend "unmanaged" -}}
+{{- $conf := .Values.conf.manila | default dict -}}
+{{- $names := splitList "," ((($conf.DEFAULT | default dict).enabled_share_backends | default "") | toString) -}}
+{{- $named := 0 -}}
+{{- range $n := $names -}}
+{{- $n = trim $n -}}
+{{- if $n -}}
+{{- $named = add1 $named -}}
+{{- $sec := index $conf $n | default dict -}}
+{{- if not $sec.share_driver -}}
+{{- fail (printf "\n\nkrateo.shareBackend unmanaged: enabled_share_backends names %q, and conf.manila.%s has no share_driver (#426). Configure each backend you enable.\n" $n $n) -}}
+{{- end -}}
+{{- if contains "GenericShareDriver" ($sec.share_driver | toString) -}}
+{{- fail (printf "\n\nkrateo.shareBackend unmanaged: backend %q is the generic driver (%s), which cannot start on these images (#426): its service-instance helper runs `ip`, which no airshipit manila image ships. Configure another share backend.\n" $n $sec.share_driver) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $named 0 -}}
+{{- fail "\n\nkrateo.shareBackend unmanaged: conf.manila.DEFAULT.enabled_share_backends is empty, so manila-share would have nothing to serve (#426).\n" -}}
+{{- end -}}
+{{- else -}}
+{{- fail (printf "\n\nkrateo.shareBackend %q is not a value this chart knows: none or unmanaged (#426).\n" $backend) -}}
+{{- end -}}

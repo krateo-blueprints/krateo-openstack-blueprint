@@ -1,0 +1,8 @@
+# messaging.backend operator (#309 H2b): a RabbitmqCluster with the administrator from the generated root, its pods in
+# every client's host list, quorum queues for every client (RabbitMQ 4.x refuses the classic transient queues and ha-*
+# policies), refusals on a cluster without the operator and on an existing chart-mode broker, and chart mode unchanged.
+name: "The RabbitMQ cluster-operator mode reaches every client, and chart mode changes nothing"
+job: capability-roles
+order: 149
+run: |
+  python3 hack/validate-messaging-operator.py .

@@ -16,4 +16,4 @@ limitations under the License.
 
 set -ex
 exec watcher-decision-engine \
-      --config-file /etc/watcher/watcher.conf $([ -d /etc/watcher/watcher.conf.d ] && echo --config-dir /etc/watcher/watcher.conf.d)
+{{ include "helm-toolkit.snippets.oslo_config_args" (dict "args" (include "watcher.config_args.decision_engine" . | fromYamlArray) "format" "shell" "indent" 6) }}

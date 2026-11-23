@@ -1,0 +1,10 @@
+{{/*
+Krateo blueprint addition (#206): at uninstall, delete this release's completed install/upgrade hook Jobs (the
+openstack-monitoring-ks-user Job), which Helm never deletes (helm-toolkit.manifests.job_hook_cleanup). Its image is one
+this chart's own Jobs already run, for python.
+*/}}
+{{- $job := dict "envAll" . "serviceName" "openstack-monitoring" "image" .Values.images.tags.ks_user -}}
+{{- if (index .Values.pod.tolerations "openstack-monitoring").enabled -}}
+{{- $_ := set $job "tolerationsEnabled" true -}}
+{{- end -}}
+{{ $job | include "helm-toolkit.manifests.job_hook_cleanup" }}

@@ -24,7 +24,7 @@ The gate has two halves, because one cannot do the job.
 HALF A -- the UDP_ONLY registry, below. Whether a daemon is UDP-only is a property of the
 application's source code, not of anything in the chart, so no rule over the chart can derive it.
 The registry is where that evidence lives: each entry names the image it was measured in and the
-source lines that settle it, the same way hack/upstream-divergences.yaml holds the reasoning for a
+source lines that settle it, the same way hack/upstream-divergences.d holds the reasoning for a
 divergence. For each entry this asserts the ServicePort is UDP, the container's port is UDP, the
 two actually resolve to each other, the Service selects the workload, no TCP port is advertised on
 the same number, and no probe on that container tries to connect to it -- a tcpSocket or httpGet
@@ -110,6 +110,16 @@ UDP_ONLY = (
 findings = []
 
 
+# What the umbrella delivers for a chart's storage (#308): cinder's default refuses, so a chart render carries
+# hack/gate_values.py's arguments (nothing for every other chart).
+import importlib.util as _gv_util
+import os as _gv_os
+_gv_spec = _gv_util.spec_from_file_location(
+    "gate_values", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "gate_values.py"))
+gate_values = _gv_util.module_from_spec(_gv_spec)
+_gv_spec.loader.exec_module(gate_values)
+
+
 def fail(msg):
     findings.append(msg)
 
@@ -144,7 +154,7 @@ def render(chart):
             out = subprocess.run(
                 # Without --kube-version a kubeVersion-constrained chart renders nothing, and a
                 # gate that accepts an empty render accepts anything.
-                ["helm", "template", "gate", str(work), "--kube-version", "1.36.0"],
+                ["helm", "template", "gate", str(work), "--kube-version", "1.36.0", *gate_values.helm_args(work)],
                 capture_output=True, text=True,
             )
         except FileNotFoundError:

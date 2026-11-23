@@ -1,0 +1,16 @@
+component: nova
+issue: 196
+reason: >-
+  Upstream's nova-compute DaemonSet reads `.Values.conf.ceph.secret_uuid`, which its values
+  never define (the UUID lives at conf.ceph.cinder.secret_uuid, as in the libvirt chart), so
+  LIBVIRT_CEPH_SECRET_UUID renders with no value whenever conf.ceph.enabled is true.
+assertions:
+  - file: templates/daemonset-compute.yaml
+    absent: .Values.conf.ceph.secret_uuid
+    why: >-
+      The undefined path. Restoring it renders LIBVIRT_CEPH_SECRET_UUID with no value on both the
+      ceph-keyring-placement init container and nova-compute. hack/validate-storage-backend.py
+      renders nova with a sentinel UUID and fails if any LIBVIRT_CEPH_SECRET_UUID differs.
+  - file: templates/daemonset-compute.yaml
+    present: .Values.conf.ceph.cinder.secret_uuid
+    why: The path the chart's values define, and the one libvirt reads for the same UUID.
