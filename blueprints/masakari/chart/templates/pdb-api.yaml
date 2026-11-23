@@ -13,15 +13,17 @@ limitations under the License.
 */}}
 
 {{- if .Values.manifests.pdb_api }}
+{{- /* Was templates/pbd-api.yaml, selecting component masakari_api while the API pods carry component api, so it
+       selected nothing (found by hack/validate-api-availability.py, #286). */ -}}
 {{- $envAll := . }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: cloudkitty-api
+  name: masakari-api
 spec:
-  minAvailable: {{ .Values.pod.lifecycle.disruption_budget.cloudkitty_api.min_available }}
+  minAvailable: {{ tuple .Values.pod.lifecycle.disruption_budget.masakari_api.min_available .Values.pod.replicas.masakari_api | include "helm-toolkit.utils.pdb_min_available" }}
   selector:
     matchLabels:
-{{ tuple $envAll "cloudkitty" "cloudkitty_api" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
+{{ tuple $envAll "masakari" "api" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
 {{- end }}

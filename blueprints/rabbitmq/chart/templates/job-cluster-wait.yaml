@@ -58,6 +58,7 @@ spec:
 {{ tuple $envAll "cluster_wait" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
         - name: rabbitmq-cookie
 {{ tuple $envAll "scripted_test" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.jobs.cluster_wait | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "cluster_wait" "container" "rabbitmq_cookie" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
             - /tmp/rabbitmq-cookie.sh
@@ -77,6 +78,7 @@ spec:
       containers:
         - name: rabbitmq-rabbitmq-cluster-wait
 {{ tuple $envAll "scripted_test" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.jobs.cluster_wait | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "cluster_wait" "container" "rabbitmq_cluster_wait" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           env:
 {{ include "rabbitmq.admin_connection_env" $envAll | indent 12 }}

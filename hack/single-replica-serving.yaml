@@ -1,0 +1,29 @@
+# Serving Deployments that hack/validate-api-availability.py lets run one replica, and why.
+#
+# A Deployment that a Service selects must run >= 2 replicas and roll with maxUnavailable 0 (#286). The only entries
+# here are of two kinds:
+#   - a second replica would be a second, independent copy of the data: the Service would spread clients over two
+#     stores that do not replicate to each other;
+#   - the Service is a metrics scrape target, not an API anyone calls: a second replica would poll its source twice and
+#     publish every series twice (Diego, 2026-11-23).
+# Each entry names its chart, its rendered Deployment name, the reason, and the issue that owns it. The gate fails on an
+# entry that no longer names a single-replica serving Deployment, so a stale one cannot linger.
+redis:
+  redis:
+    reason: >-
+      redis is one in-memory store, with no replication configured: it holds zaqar's messages and gnocchi's metric
+      storage. Two replicas behind the redis Service would be two unrelated stores, and a surge pod would serve an
+      empty one during every rollout.
+    issue: 309
+openstack-monitoring:
+  openstack-exporter:
+    reason: >-
+      A scrape target: only the chart's own OpenTelemetry collector reads its Service. A second replica would poll every
+      OpenStack API twice and publish every series twice, which the alerts would count twice. A rollout costs a short
+      scrape gap, and no OpenStack API call.
+    issue: 312
+  openstack-mysqld-exporter:
+    reason: >-
+      A scrape target, as openstack-exporter: a second replica would query MariaDB's status twice and publish every
+      series twice. A rollout costs a short scrape gap, and no database query of a service.
+    issue: 312

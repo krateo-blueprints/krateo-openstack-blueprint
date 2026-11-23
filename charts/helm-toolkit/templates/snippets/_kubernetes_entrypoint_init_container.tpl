@@ -168,6 +168,12 @@ Values:
 - name: init
 {{ tuple $envAll "dep_check" | include "helm-toolkit.snippets.image" | indent 2 }}
 {{- dict "envAll" $patchedEnvAll "application" "kubernetes_entrypoint" "container" "kubernetes_entrypoint" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 2 }}
+{{- /* Sized like every other container (#283): a pod whose init container requests nothing is refused by a
+       ResourceQuota on cpu or memory. Each chart sets pod.resources.kubernetes_entrypoint; a chart that does not
+       renders `resources: null`, which hack/validate-pod-resources.py fails. */}}
+{{- if $envAll.Values.pod.resources.enabled }}
+{{ tuple $envAll $envAll.Values.pod.resources.kubernetes_entrypoint | include "helm-toolkit.snippets.kubernetes_resources" | indent 2 }}
+{{- end }}
   env:
     - name: POD_NAME
       valueFrom:

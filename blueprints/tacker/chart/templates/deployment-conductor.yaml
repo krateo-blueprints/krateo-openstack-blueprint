@@ -28,6 +28,7 @@ spec:
     matchLabels:
 {{ tuple $envAll "tacker" "conductor" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
   replicas: {{ .Values.pod.replicas.conductor }}
+{{ tuple $envAll | include "helm-toolkit.snippets.kubernetes_upgrades_deployment" | indent 2 }}
   template:
     metadata:
       labels:
@@ -70,6 +71,7 @@ spec:
 {{ dict "envAll" $envAll "component" "conductor" "container" "default" "args" (list "--process" "tacker-conductor" "--exchange" "tacker" "--rpc-topic" "TACKER_CONDUCTOR") "config" (include "tacker.config_args.conductor" $envAll | fromYamlArray) | include "helm-toolkit.snippets.worker_readiness_probe" | indent 10 }}
           image: {{ .Values.images.tags.tacker_conductor }}
           imagePullPolicy: {{ .Values.images.pull_policy }}
+{{ tuple $envAll $envAll.Values.pod.resources.conductor | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
           command:
             - /bin/bash
             - -c

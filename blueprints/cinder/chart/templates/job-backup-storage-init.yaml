@@ -77,6 +77,7 @@ spec:
         {{- if (contains "cinder.backup.drivers.ceph" .Values.conf.cinder.DEFAULT.backup_driver) }}
         - name: ceph-keyring-placement
 {{ tuple $envAll "cinder_backup_storage_init" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.jobs.backup_storage_init | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "storage_init" "container" "ceph_keyring_placement" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
             - /tmp/ceph-admin-keyring.sh

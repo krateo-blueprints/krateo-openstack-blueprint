@@ -80,6 +80,7 @@ spec:
       containers:
         - name: {{.Release.Name}}-mariadb-cluster-wait
 {{ tuple $envAll "mariadb_scripted_test" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll $envAll.Values.pod.resources.jobs.cluster_wait | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
 {{ dict "envAll" $envAll "application" "cluster_wait" "container" "mariadb_cluster_wait" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           env:
             - name: MARIADB_HOST

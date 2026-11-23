@@ -1,0 +1,11 @@
+# A rollout, a drain or a lost node never takes an API down (#286). Every Deployment a Service selects renders
+# >= 2 replicas and rolls with maxUnavailable 0. A Deployment on a ReadWriteOnce claim runs one pod that never
+# surges. Every multi-replica workload has a PodDisruptionBudget that keeps a pod and still allows a drain, also with
+# every replica key at 1, and spreads over hosts and zones. No budget is empty, selects nothing or is duplicated. The
+# schema's replica defaults equal the chart's. Features behind a switch: hack/feature-renders.yaml. Exceptions:
+# hack/single-replica-serving.yaml.
+name: "APIs stay up through a rollout or a drain"
+job: capability-roles
+order: 457
+run: |
+  python3 hack/validate-api-availability.py .

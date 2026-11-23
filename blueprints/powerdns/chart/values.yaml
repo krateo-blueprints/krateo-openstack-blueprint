@@ -178,6 +178,10 @@ pod:
           allowPrivilegeEscalation: false
   affinity:
     anti:
+      # Spread over zones too, when nodes carry this label (helm-toolkit, #286).
+      zone:
+        topologyKey: topology.kubernetes.io/zone
+        weight: 5
       type:
         default: preferredDuringSchedulingIgnoredDuringExecution
       topologyKey:
@@ -185,15 +189,18 @@ pod:
       weight:
         default: 10
   replicas:
-    powerdns: 1
+    powerdns: 2
   lifecycle:
+    disruption_budget:
+      powerdns:
+        min_available: 1
     upgrades:
       deployments:
         revision_history: 3
         pod_replacement_strategy: RollingUpdate
         rolling_update:
-          max_unavailable: 1
-          max_surge: 3
+          max_unavailable: 0
+          max_surge: 1
     termination_grace_period:
       powerdns:
         timeout: 30
@@ -212,37 +219,52 @@ pod:
             initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 10
+  # Sized (#283): every container requests cpu and memory and has a memory limit, so no pod is BestEffort, a
+  # ResourceQuota admits it, and capacity is visible to the scheduler. No CPU limit by default: throttling an API worker
+  # shows up as latency and probe timeouts. The figures are OpenStack-Helm's own per-container ones unless named below;
+  # no per-container usage has been measured yet (README, "Cluster size"). Override any of them, or set enabled: false,
+  # with componentValues.powerdns.pod.resources.
+  # kubernetes_entrypoint sizes the dependency-wait init container every pod runs (helm-toolkit).
   resources:
-    enabled: false
+    enabled: true
     powerdns:
       requests:
         memory: 128Mi
         cpu: 100m
       limits:
         memory: 1024Mi
-        cpu: 2000m
     jobs:
+      # The pre-delete Job that deletes this release's hook Jobs at uninstall (helm-toolkit, #206).
+      hook_cleanup:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 1024Mi
       db_init:
         requests:
           memory: 128Mi
           cpu: 100m
         limits:
           memory: 1024Mi
-          cpu: 2000m
       db_sync:
         requests:
           memory: 128Mi
           cpu: 100m
         limits:
           memory: 1024Mi
-          cpu: 2000m
       image_repo_sync:
         requests:
           memory: 128Mi
           cpu: 100m
         limits:
           memory: 1024Mi
-          cpu: 2000m
+    kubernetes_entrypoint:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
 
 dependencies:
   dynamic:
@@ -292,6 +314,7 @@ network_policy:
       - {}
 
 manifests:
+  pdb: true
   configmap_bin: true
   configmap_etc: true
   deployment: true

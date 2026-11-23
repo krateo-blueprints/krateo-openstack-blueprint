@@ -56,6 +56,7 @@ spec:
   containers:
     - name: rabbitmq-rabbitmq-test
 {{ tuple $envAll "scripted_test" | include "helm-toolkit.snippets.image" | indent 6 }}
+{{ tuple $envAll $envAll.Values.pod.resources.jobs.tests | include "helm-toolkit.snippets.kubernetes_resources" | indent 6 }}
 {{ dict "envAll" $envAll "application" "test" "container" "rabbitmq_test" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 6 }}
       env:
 {{ include "rabbitmq.admin_connection_env" $envAll | indent 8 }}

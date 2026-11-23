@@ -1,0 +1,9 @@
+# Every container is sized (#283): BestEffort pods are evicted first, invisible to the scheduler's capacity, and
+# refused by a ResourceQuota. Every container and init container of every workload requests cpu and memory and has a
+# memory limit, with no default CPU limit. That holds at defaults, with every workload manifest on, and with each
+# feature in hack/feature-renders.yaml.
+name: "Every container requests cpu and memory"
+job: capability-roles
+order: 458
+run: |
+  python3 hack/validate-pod-resources.py .
