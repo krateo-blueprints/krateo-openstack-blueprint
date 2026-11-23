@@ -46,7 +46,7 @@ digest); the digest each tag served when recorded is in `hack/images.yaml`, and 
 
 | Image | Pinned by | Publisher | Anonymous pull | Platforms | Charts |
 | --- | --- | --- | --- | --- | --- |
-| `docker.io/bitnami/kubectl@sha256:bedd34c910e2a5ce9836813d16444af449d7fe07a29136d59f34e861e8e660c5` | digest | Bitnami (Broadcom) | yes | linux/amd64, linux/arm64 | libvirt (x) |
+| `docker.io/bitnami/kubectl@sha256:ae71f848f057a71029d092e98548cabf7cd17b11da0adad0a8f4145a9c87c830` | digest | Bitnami (Broadcom) | yes | linux/amd64, linux/arm64 | libvirt (x) |
 | `docker.io/docker:17.07.0` | version | Docker Official Images | yes | linux/amd64 | aodh (x), barbican (x), blazar (x), ceilometer (x), cinder (x), cloudkitty (x), freezer (x), glance (x), heat (x), horizon (x), ironic (x), keystone (x), magnum (x), manila (x), mistral (x), neutron (x), nova (x), octavia (x), placement (x), swift (x), trove (x), watcher (x), zaqar (x) |
 | `docker.io/library/redis:7.2.17` | version | Docker Official Images | yes | linux/386, linux/amd64, linux/arm/v7, linux/arm64/v8, linux/ppc64le | redis (d) |
 | `docker.io/nginx:1.13.3` | version | Docker Official Images | yes | linux/amd64 | ironic (d) |

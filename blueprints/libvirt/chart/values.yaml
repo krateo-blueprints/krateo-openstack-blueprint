@@ -179,7 +179,7 @@ images:
     ceph_config_helper: quay.io/airshipit/ceph-config-helper:ubuntu_jammy_20.2.1-1-20260407
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
     image_repo_sync: quay.io/airshipit/docker:27.5.0
-    kubectl: docker.io/bitnami/kubectl@sha256:bedd34c910e2a5ce9836813d16444af449d7fe07a29136d59f34e861e8e660c5
+    kubectl: docker.io/bitnami/kubectl@sha256:ae71f848f057a71029d092e98548cabf7cd17b11da0adad0a8f4145a9c87c830
     libvirt: quay.io/airshipit/libvirt:2026.1-ubuntu_noble-20261117
 labels:
   agent:

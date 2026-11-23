@@ -49,10 +49,10 @@ charts_without_images:
 - openstack
 - openstack-capabilities
 images:
-- image: docker.io/bitnami/kubectl@sha256:bedd34c910e2a5ce9836813d16444af449d7fe07a29136d59f34e861e8e660c5
+- image: docker.io/bitnami/kubectl@sha256:ae71f848f057a71029d092e98548cabf7cd17b11da0adad0a8f4145a9c87c830
   registry: docker.io
   repository: bitnami/kubectl
-  pinned_digest: sha256:bedd34c910e2a5ce9836813d16444af449d7fe07a29136d59f34e861e8e660c5
+  pinned_digest: sha256:ae71f848f057a71029d092e98548cabf7cd17b11da0adad0a8f4145a9c87c830
   tag_form: digest
   used_by:
   - chart: libvirt
@@ -60,13 +60,13 @@ images:
     keys:
     - kubectl
   registry_facts:
-    observed: '2026-11-17'
+    observed: '2026-11-23'
     anonymous_pull: true
     media_type: application/vnd.docker.distribution.manifest.list.v2+json
     platforms:
     - linux/amd64
     - linux/arm64
-    digest: sha256:bedd34c910e2a5ce9836813d16444af449d7fe07a29136d59f34e861e8e660c5
+    digest: sha256:ae71f848f057a71029d092e98548cabf7cd17b11da0adad0a8f4145a9c87c830
 - image: docker.io/docker:17.07.0
   registry: docker.io
   repository: library/docker
