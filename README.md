@@ -2192,6 +2192,9 @@ that the cluster has room before you apply it:
 - **A stored replica default can hold a component at 1 replica.** If your `componentValues.<component>.pod.replicas`
   set some keys, the API server stored the schema's old default, 1, for that component's other replica keys when it
   created the Composition. They stay at 1 after the upgrade. Set them explicitly.
+- **An explicit `spec.enabled` that lists trove or octavia now selects nova and glance too** (and, for trove, neutron), with
+  what they need, such as libvirt and placement. Both services call them, and keep one Keystone session from their first
+  call on (#462). A `profile` install already had them.
 
 ## Configure
 

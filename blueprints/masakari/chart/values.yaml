@@ -655,6 +655,9 @@ conf:
       host_failure_recovery_threads: 1
       masakari_api_workers: 1
       graceful_shutdown_timeout: 5
+      # Its nova client uses the internal endpoint (#462). The service's own default is the public ones, which nothing serves
+      # while publicEndpoints is off, and which leave the cluster and come back in through the gateway while it is on.
+      nova_catalog_admin_info: compute:nova:internalURL
     keystone_authtoken:
       auth_type: password
       memcache_security_strategy: ENCRYPT

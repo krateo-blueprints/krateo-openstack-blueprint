@@ -448,6 +448,10 @@ conf:
       auth_type: password
       auth_version: v3
       memcache_security_strategy: ENCRYPT
+    # Its OpenStack actions use the internal endpoints (#462). mistral-extra's own default is the public ones, which nothing
+    # serves while publicEndpoints is off.
+    openstack_actions:
+      os_actions_endpoint_type: internal
     oslo_policy:
       policy_file: /etc/mistral/policy.yaml
     oslo_concurrency:

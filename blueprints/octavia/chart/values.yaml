@@ -280,7 +280,18 @@ conf:
       auth_version: v3
       memcache_security_strategy: ENCRYPT
       service_type: load-balancer
+    # Its clients use the internal endpoints (#462). The service's own default is the public ones, which nothing serves
+    # while publicEndpoints is off, and which leave the cluster and come back in through the gateway while it is on.
+    nova:
+      endpoint_type: internalURL
+    cinder:
+      endpoint_type: internalURL
+    glance:
+      endpoint_type: internalURL
+    neutron:
+      valid_interfaces: internal
     certificates:
+      endpoint_type: internalURL
       ca_private_key_passphrase: not-secure-passphrase
       ca_private_key: /etc/octavia/certs/private/server_ca.key.pem
       ca_certificate: /etc/octavia/certs/server_ca.cert.pem
