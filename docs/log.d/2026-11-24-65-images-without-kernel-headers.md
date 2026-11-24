@@ -11,6 +11,8 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
   list of Debian packages. `dpkg --purge` has no network and no resolver, and refuses while anything else depends on a listed
   package. The result must have upstream's Debian packages minus the list and the same Python packages, still import its
   service, and keep user, entrypoint and PATH.
+- **Gnocchi's four are built from our mirror:** quay no longer serves the recorded digests, because Kolla rebuilds its series
+  tags in place. `hack/image-mirror.yaml` holds the same digests.
 - **What goes:** `linux-libc-dev` and what depends on it, all compile-time (`libc6-dev`, the `-dev` packages, g++ in gnocchi's):
   8 packages of 211 in barbican, 17 of 290 in gnocchi's. The lists come from the scan's own package data.
 - **This change only builds them.** The charts move in the next one, and the dated exceptions go with it.

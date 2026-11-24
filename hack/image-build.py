@@ -66,8 +66,10 @@ def check_common(b, where, seen, run):
     return bad
 
 
-def check(builds, run):
-    """Failures for the --check rules. `run` maps every image the charts run to its recorded digest."""
+def check(builds, run, mirrors=None):
+    """Failures for the --check rules. `run` maps every image the charts run to its recorded digest; `mirrors` maps
+    (source, digest) to the repository hack/image-mirror.yaml copied it to."""
+    mirrors = mirrors or {}
     bad, seen = [], set()
     for i, b in enumerate(builds):
         b = b or {}
@@ -81,7 +83,8 @@ def check(builds, run):
         if minus:
             if not PINNED.match(str(b["from"])):
                 bad.append("%s: from is not pinned by digest: %s" % (where, b["from"]))
-            elif b["replaces"] in run and not (b["from"].split("@")[0] == b["replaces"].rsplit(":", 1)[0] and b["from"].split("@")[1] == run[b["replaces"]]):
+            elif b["replaces"] in run and (b["from"].split("@")[1] != run[b["replaces"]] or b["from"].split("@")[0] not in
+                                           (b["replaces"].rsplit(":", 1)[0], mirrors.get((b["replaces"], run[b["replaces"]])))):
                 bad.append("%s: from is %s, and the build hack/images.yaml recorded for %s is %s" % (where, b["from"], b["replaces"], run[b["replaces"]]))
             bad += ["%s: not a Debian package name: %s" % (where, x) for x in b["removes"] if not DEB.match(str(x))]
             if not str(b["python"]).startswith("/"):
@@ -344,6 +347,8 @@ def self_test():
         ("minus: from by tag", check([dict(mi, **{"from": "quay.io/x/a:1"})], run), 1),
         ("minus: from another build than the one scanned", check([dict(mi, **{"from": "quay.io/x/a@sha256:" + "8" * 64})], run), 1),
         ("minus: from another image", check([dict(mi, **{"from": "quay.io/x/b@sha256:" + "9" * 64})], run), 1),
+        ("minus: from our mirror of that build", check([dict(mi, **{"from": "ghcr.io/o/a@sha256:" + "9" * 64})], run, {(ok["replaces"], "sha256:" + "9" * 64): "ghcr.io/o/a"}), 0),
+        ("minus: from a mirror of another build", check([dict(mi, **{"from": "ghcr.io/o/a@sha256:" + "9" * 64})], run, {(ok["replaces"], "sha256:" + "8" * 64): "ghcr.io/o/a"}), 1),
         ("minus: a package line with a shell", check([dict(mi, removes=["x; rm -rf /"])], run), 1),
         ("minus: nothing to remove", check([dict(mi, removes=[])], run), 1),
         ("minus: built well", verify_minus(mi, mg, mu), 0),
@@ -385,7 +390,9 @@ def main():
     if not builds:
         print("FAILED MEASUREMENT: hack/image-build.yaml lists no build: remove it, its workflow and its gate instead")
         return 2
-    bad = check(builds, {e["image"]: (e.get("registry_facts") or {}).get("digest") for e in inv})
+    copies = (yaml.safe_load(open(os.path.join(root, "hack", "image-mirror.yaml"))) or {}).get("mirrors") or []
+    bad = check(builds, {e["image"]: (e.get("registry_facts") or {}).get("digest") for e in inv},
+                {(m["source"], m["digest"]): m["target"].rsplit(":", 1)[0] for m in copies})
     mode = "checked"
     if not bad and ("--build" in sys.argv or "--publish" in sys.argv):
         mode = "published or present" if "--publish" in sys.argv else "built and verified"

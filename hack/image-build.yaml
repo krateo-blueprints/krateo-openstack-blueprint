@@ -17,7 +17,8 @@
 #   issue          why it is built
 #
 # The other kind is upstream's own build minus Debian packages nothing in it runs (#454):
-#   from           that build, by the digest hack/images.yaml recorded (the one image-scan measured)
+#   from           that build, by the digest hack/images.yaml recorded (the one image-scan measured), where it is published
+#                  or, when the publisher keeps no history, in our mirror of it (hack/image-mirror.yaml)
 #   removes        the exact packages, given to `dpkg --purge`: it refuses if anything else depends on one of them
 #   python         the interpreter whose packages must not change
 #   provides       modules that must still import
@@ -83,7 +84,7 @@ builds:
     target: ghcr.io/krateo-blueprints/images/barbican:2026.1-ubuntu_noble-20261124
     issue: 454
   - name: gnocchi-api
-    from: quay.io/openstack.kolla/gnocchi-api@sha256:4399638c92d04162e81d6f358f934d79a3a5bd36f2425a836abb249f47e1694a
+    from: ghcr.io/krateo-blueprints/images/gnocchi-api@sha256:4399638c92d04162e81d6f358f934d79a3a5bd36f2425a836abb249f47e1694a
     removes:
       - build-essential
       - g++
@@ -109,7 +110,7 @@ builds:
     target: ghcr.io/krateo-blueprints/images/gnocchi-api:2026.1-ubuntu-noble-20261124
     issue: 454
   - name: gnocchi-base
-    from: quay.io/openstack.kolla/gnocchi-base@sha256:ea10f16838565b3183e66e275fd3307d0a5bd6758ccee59a3ef2fe1dbea01574
+    from: ghcr.io/krateo-blueprints/images/gnocchi-base@sha256:ea10f16838565b3183e66e275fd3307d0a5bd6758ccee59a3ef2fe1dbea01574
     removes:
       - build-essential
       - g++
@@ -135,7 +136,7 @@ builds:
     target: ghcr.io/krateo-blueprints/images/gnocchi-base:2026.1-ubuntu-noble-20261124
     issue: 454
   - name: gnocchi-metricd
-    from: quay.io/openstack.kolla/gnocchi-metricd@sha256:12c53f1ff522b581596297b5f39b1590f80a4886f621d4dbaac6b2c26a742040
+    from: ghcr.io/krateo-blueprints/images/gnocchi-metricd@sha256:12c53f1ff522b581596297b5f39b1590f80a4886f621d4dbaac6b2c26a742040
     removes:
       - build-essential
       - g++
@@ -161,7 +162,7 @@ builds:
     target: ghcr.io/krateo-blueprints/images/gnocchi-metricd:2026.1-ubuntu-noble-20261124
     issue: 454
   - name: gnocchi-statsd
-    from: quay.io/openstack.kolla/gnocchi-statsd@sha256:8d5c3b677c2a56373563c5debe4d162411127d3af715e60b9b971b5ad016f668
+    from: ghcr.io/krateo-blueprints/images/gnocchi-statsd@sha256:8d5c3b677c2a56373563c5debe4d162411127d3af715e60b9b971b5ad016f668
     removes:
       - build-essential
       - g++
