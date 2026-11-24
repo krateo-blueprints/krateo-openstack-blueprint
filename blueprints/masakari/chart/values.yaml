@@ -14,13 +14,13 @@
 images:
   tags:
     db_init: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
-    db_sync: quay.io/airshipit/masakari:2026.1-ubuntu_noble-20261117
+    db_sync: ghcr.io/krateo-blueprints/images/masakari:2026.1-ubuntu_noble-20261124
     db_drop: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
     ks_endpoints: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
     ks_service: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
     ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
-    masakari_api: quay.io/airshipit/masakari:2026.1-ubuntu_noble-20261117
-    masakari_engine: quay.io/airshipit/masakari:2026.1-ubuntu_noble-20261117
+    masakari_api: ghcr.io/krateo-blueprints/images/masakari:2026.1-ubuntu_noble-20261124
+    masakari_engine: ghcr.io/krateo-blueprints/images/masakari:2026.1-ubuntu_noble-20261124
     masakari_host_monitor: quay.io/airshipit/masakari-monitors:2026.1-ubuntu_noble-20261117
     masakari_process_monitor: quay.io/airshipit/masakari-monitors:2026.1-ubuntu_noble-20261117
     masakari_instance_monitor: quay.io/airshipit/masakari-monitors:2026.1-ubuntu_noble-20261117

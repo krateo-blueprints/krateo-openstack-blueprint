@@ -1,0 +1,5 @@
+name: "The image scan judges the packages a chart's configuration needs as specified"
+job: job-hooks
+order: 202
+run: |
+  python3 hack/check-image-packages.py --self-test
