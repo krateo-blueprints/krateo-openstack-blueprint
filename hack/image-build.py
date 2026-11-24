@@ -2,7 +2,7 @@
 """Build the images of hack/image-build.yaml from upstream's Dockerfiles or builds, and publish them (#463, #454).
 
     hack/image-build.py [repo-root] --check     offline: the list is well formed and names images the charts run (lint.yaml)
-    hack/image-build.py [repo-root] --build     build and verify every entry, publish nothing (image-build.yaml, pull requests)
+    hack/image-build.py [repo-root] --build     build and verify every entry not published yet, publish nothing (pull requests)
     hack/image-build.py [repo-root] --publish   the same, then push each target that does not exist yet (image-build.yaml, main)
     hack/image-build.py --self-test             the rules against built-in cases
 
@@ -25,7 +25,8 @@ the image it built:
   * User, Entrypoint, Cmd, WorkingDir and PATH are those of the image it replaces, and no Python package of that image is
     missing. Version differences are printed.
 
---publish never moves a tag: a target that already exists is left alone and must still pull anonymously.
+A published tag is never moved, so an entry whose target already pulls anonymously is neither rebuilt nor pushed, in both
+modes: a later commit upstream can't fail an image that is already out.
 """
 import importlib.util
 import json
@@ -272,11 +273,11 @@ def run_all(root, builds, publish):
         for b in builds:
             print("== %s -> %s" % (b["name"], b["target"]), flush=True)
             try:
+                dig, status = anon(root, b["target"])
+                if dig:
+                    print("present %s (%s)" % (b["target"], dig))    # a published tag is never moved, so never rebuilt
+                    continue
                 if publish:
-                    dig, status = anon(root, b["target"])
-                    if dig:
-                        print("present %s (%s)" % (b["target"], dig))
-                        continue
                     if status not in (401, 403, 404):
                         bad.append("%s: the registry answered HTTP %s, so whether it exists is unknown" % (b["target"], status))
                         continue
