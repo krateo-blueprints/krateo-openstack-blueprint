@@ -13,6 +13,17 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **The defect (#449, r074):** both one-replica servers' pod templates hashed their credential manifests whole. #422 changed only
+  the refresh policy of the ExternalSecrets, and the 0.3.71 to 0.3.74 upgrade restarted both: MariaDB down 70 s, RabbitMQ 40 s,
+  Keystone's tokens failing for 2 minutes.
+- **The fix:** `helm-toolkit.utils.secret_data_hash`. For a Secret it hashes name, type and data; for an ExternalSecret the Secret
+  it writes, where the values come from and how they are put together; for any other kind the whole object. mariadb's three
+  password hashes and its exporter's, and rabbitmq's admin and cookie hashes, use it.
+- **The guard:** `hack/validate-credential-hash.py` renders both charts as the umbrella delivers them. A changed refresh policy,
+  label, annotation and creation policy must leave the pod template identical; another ESO template, another key or another
+  root must change it; the old hash is planted on every run and must be caught. 13 comparisons.
+- **This release still restarts both servers once**, because the annotation values change. Not run on a cluster yet.
+
 - **The defect (#451):** with `publicEndpoints` off, none of the 22 public catalog endpoints was served on 0.3.74. 15 named a
   Service never created, 5 one that selects no pod, 2 a port the Service lacks. The admin URLs of keystone and cyborg (#326)
   had the same fault. An earlier check called 5 of them fine, because a Service of that name exists.

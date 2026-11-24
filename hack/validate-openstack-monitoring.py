@@ -712,9 +712,9 @@ def mutations(r):
                      "      - identity-user-keystone-test\n      - identity-user-openstack-exporter\n")),
         ("the exporter user's Secret lands in the StatefulSet's hashed file", part_readers,
          lambda: sub(P(r, "blueprints", "mariadb", "chart", "templates", "statefulset.yaml"),
-                     '        secrets-etc-exporter-hash: {{ tuple "exporter-secrets-etc.yaml" . | include "helm-toolkit.utils.hash" }}',
-                     '        secrets-etc-exporter-hash: {{ tuple "exporter-secrets-etc.yaml" . | include "helm-toolkit.utils.hash" }}\n'
-                     '        exporter-user-hash: {{ tuple "secret-exporter-user.yaml" . | include "helm-toolkit.utils.hash" }}')),
+                     '        secrets-etc-exporter-hash: {{ tuple "exporter-secrets-etc.yaml" . | include "helm-toolkit.utils.secret_data_hash" }}',
+                     '        secrets-etc-exporter-hash: {{ tuple "exporter-secrets-etc.yaml" . | include "helm-toolkit.utils.secret_data_hash" }}\n'
+                     '        exporter-user-hash: {{ tuple "secret-exporter-user.yaml" . | include "helm-toolkit.utils.secret_data_hash" }}')),
         ("the root renders with monitoring off", part_switch,
          lambda: sub(P(umb, "templates", "credentials.yaml"),
                      "{{- if and (not $i.source) (or (not $i.monitoring) $monitoring) }}", "{{- if not $i.source }}")),
