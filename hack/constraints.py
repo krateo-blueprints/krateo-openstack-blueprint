@@ -18,9 +18,11 @@ import re
 import subprocess
 import sys
 import tempfile
-import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import fetch  # noqa: E402
+
 PIN = os.path.join(HERE, "openstack-constraints.yaml")
 
 
@@ -45,8 +47,7 @@ def norm(name):
 
 
 def constraints():
-    with urllib.request.urlopen(url(), timeout=60) as r:
-        text = r.read().decode()
+    text = fetch.get(url()).decode()
     out = {}
     for line in text.splitlines():
         m = re.match(r"^([A-Za-z0-9_.-]+)===([^;\s]+)", line.strip())

@@ -53,7 +53,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fetch  # noqa: E402
 
 try:
     import yaml
@@ -94,7 +96,7 @@ def run(cmd, **kw):
 
 
 def fetch_pinned(url, sha):
-    body = urllib.request.urlopen(url, timeout=60).read()
+    body = fetch.get(url)
     got = hashlib.sha256(body).hexdigest()
     if got != sha:
         print("FAILED MEASUREMENT: %s has sha256 %s, pinned %s" % (url, got, sha))
@@ -108,7 +110,7 @@ def fetch_crds(pins):
     MANIFESTS.clear()
     for f in pins.get("files") or []:
         url = "https://raw.githubusercontent.com/%s/%s/%s" % (src["repository"], src["commit"], f["path"])
-        body = urllib.request.urlopen(url, timeout=60).read()
+        body = fetch.get(url)
         got = hashlib.sha256(body).hexdigest()
         if got != f["sha256"]:
             print("FAILED MEASUREMENT: %s at %s has sha256 %s, pinned %s" % (f["path"], src["commit"], got, f["sha256"]))
