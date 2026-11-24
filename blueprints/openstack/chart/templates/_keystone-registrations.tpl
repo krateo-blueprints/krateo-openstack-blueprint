@@ -117,7 +117,6 @@ designate:
 freezer:
 - freezer-api
 glance:
-- glance
 - glance-api
 gnocchi:
 - gnocchi-api
@@ -126,13 +125,10 @@ heat:
 - heat-api
 - heat-cfn
 horizon:
-- horizon
 - horizon-int
 ironic:
-- ironic
 - ironic-api
 keystone:
-- keystone
 - keystone-api
 libvirt: []
 magnum:
@@ -150,15 +146,11 @@ memcached:
 mistral:
 - mistral-api
 neutron:
-- neutron
 - neutron-server
 nova:
-- metadata
-- nova
 - nova-api
 - nova-metadata
 - nova-novncproxy
-- novncproxy
 octavia:
 - octavia-api
 openstack-monitoring:
@@ -166,7 +158,6 @@ openstack-monitoring:
 - openstack-mysqld-exporter
 openvswitch: []
 placement:
-- placement
 - placement-api
 powerdns:
 - powerdns
@@ -179,7 +170,6 @@ skyline:
 - skyline
 - skyline-api
 swift:
-- swift
 - swift-proxy
 tacker:
 - tacker-api

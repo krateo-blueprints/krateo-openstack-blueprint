@@ -13,5 +13,5 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
   nothing changes when it is on.
 - **Ingress objects off by default in the eight charts that still rendered them.** Their Services selected pods that don't exist.
 - **The guard:** `hack/validate-catalog-endpoints.py` renders every chart and follows each registered URL to a rendered Service, its
-  port, and a pod its selector and targetPort reach. 0 failures here, 32 on main at 4e06df70; 10 cases of the rule.
+  port, and a pod its selector and targetPort reach. 0 failures here, 32 on main at 70b42c8f without this change; 10 cases of the rule.
 - **Upgrades:** the endpoint hooks and keystone's bootstrap (2026.1) update an existing URL. Not run on a cluster yet.
