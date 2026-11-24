@@ -113,6 +113,10 @@ conf:
       lock_path: /var/lock
     oslo_policy:
       policy_file: /etc/magnum/policy.yaml
+    # Fixed, not one per node CPU, the service's own default: under a memory limit that default fits one node size only (#480).
+    # 16 workers took 312 MiB of the 1 GiB limit on a 16-CPU node; 2 take 135.
+    conductor:
+      workers: 2
     certificates:
       cert_manager_type: barbican
     # Its clients use the internal endpoints (#462). The service's own default is the public ones, which nothing serves

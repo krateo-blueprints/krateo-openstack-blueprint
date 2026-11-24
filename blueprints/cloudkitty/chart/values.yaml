@@ -622,6 +622,11 @@ conf:
       connection: ""
     oslo_concurrency:
       lock_path: /var/lock
+    # Fixed, not one per node CPU, the service's own default: under a memory limit that default fits one node size only (#480).
+    # 16 workers and 16 reprocessing workers were OOM-killed in 5 s at 1 GiB on a 16-CPU node; 1 and 1 take 232 MiB.
+    orchestrator:
+      max_workers: 1
+      max_workers_reprocessing: 1
     collect:
       collector: gnocchi
     collector_gnocchi:

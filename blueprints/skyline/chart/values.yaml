@@ -250,7 +250,7 @@ pod:
   # no per-container usage has been measured yet (README, "Cluster size"). Override any of them, or set enabled: false,
   # with componentValues.skyline.pod.resources.
   # kubernetes_entrypoint sizes the dependency-wait init container every pod runs (helm-toolkit).
-  # skyline: gunicorn starts (1 + host CPUs) // 2 workers, so 8 on a 16-core node.
+  # skyline: gunicorn's 2 workers (conf.gunicorn) take 332 MiB.
   resources:
     enabled: true
     skyline:
@@ -353,9 +353,9 @@ conf:
       interface_type: internal
       default_region: RegionOne
   gunicorn: |
-    import multiprocessing
     bind = "unix:/var/lib/skyline/skyline.sock"
-    workers = (1 + multiprocessing.cpu_count()) // 2
+    # Fixed, not from the node's CPUs (#480): 8 workers took 1152 MiB of the 2 GiB limit on a 16-CPU node; 2 take 332.
+    workers = 2
     worker_class = "uvicorn.workers.UvicornWorker"
     timeout = 300
     keepalive = 5

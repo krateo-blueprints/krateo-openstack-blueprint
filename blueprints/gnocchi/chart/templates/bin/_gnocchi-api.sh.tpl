@@ -35,6 +35,7 @@ function start () {
     --master \
     --processes {{ .Values.conf.gnocchi.api.workers | default 2 }} \
     --need-app \
+    --reload-on-rss {{ .Values.conf.api_worker_reload_on_rss_mb | int }} \
     --die-on-term \
     --honour-stdin
 }
