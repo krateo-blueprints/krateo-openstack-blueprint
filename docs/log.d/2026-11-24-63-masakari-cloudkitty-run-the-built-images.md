@@ -12,3 +12,6 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
 - **The guard:** `hack/check-image-packages.py` runs with the image scan, which now lists every package. A chart that sets
   `memcache_security_strategy: ENCRYPT` may not run an image that has keystonemiddleware without cryptography.
 - **Not run on a cluster yet:** the two images, and a token cached with ENCRYPT by them.
+- **Kernel-header findings:** this branch's first scan found 7 new CVEs in `linux-libc-dev` in barbican's and the four gnocchi
+  images (35 findings, no fix published), which this change doesn't touch. Diego's decision: rebuild those images without
+  the package (#454). Until then they get dated entries to 2026-12-23.
