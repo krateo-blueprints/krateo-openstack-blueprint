@@ -13,6 +13,43 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **Why (#457):** core-provider installs an interrupted first install again, so every post-install hook runs a second time over what
+  the first run left (core-provider#629; exercised on tacker and cyborg, r074g). Every upgrade runs them again too.
+- **`hack/validate-hooks-rerunnable.py`** judges the program of every container of the 178 install-hook Jobs of 37 charts:
+  - no `openstack create` without a lookup of that noun or `--or-show`, no delete without a written reason, no unknown verb;
+  - no SQL DROP, TRUNCATE or DELETE, and no CREATE without IF NOT EXISTS;
+  - no `rabbitmqctl add_user` or `add_vhost`, no untested Ceph create, no `rm -r` of anything but a temporary directory;
+  - the three Python programs are named, with how each survives a second run and the text that makes it so.
+- **What it found:** nothing to fix. Its first run flagged seven scripts that `openstack_count` (#295) already guards, or that only
+  mention SQL; each was read.
+- **Not judged:** migration programs, which every upgrade runs over an existing database.
+- **Known limit:** powerdns's schema has no transaction, so a db-sync pod killed in the moment it applies it leaves a partial schema,
+  which the script refuses by design rather than guess.
+
+- **The defect (#449, r074):** both one-replica servers' pod templates hashed their credential manifests whole. #422 changed only
+  the refresh policy of the ExternalSecrets, and the 0.3.71 to 0.3.74 upgrade restarted both: MariaDB down 70 s, RabbitMQ 40 s,
+  Keystone's tokens failing for 2 minutes.
+- **The fix:** `helm-toolkit.utils.secret_data_hash`. For a Secret it hashes name, type and data; for an ExternalSecret the Secret
+  it writes, where the values come from and how they are put together; for any other kind the whole object. mariadb's three
+  password hashes and its exporter's, and rabbitmq's admin and cookie hashes, use it.
+- **The guard:** `hack/validate-credential-hash.py` renders both charts as the umbrella delivers them. A changed refresh policy,
+  label, annotation and creation policy must leave the pod template identical; another ESO template, another key or another
+  root must change it; the old hash is planted on every run and must be caught. 13 comparisons.
+- **This release still restarts both servers once**, because the annotation values change. Not run on a cluster yet.
+
+- **The defect (#451):** with `publicEndpoints` off, none of the 22 public catalog endpoints was served on 0.3.74. 15 named a
+  Service never created, 5 one that selects no pod, 2 a port the Service lacks. The admin URLs of keystone and cyborg (#326)
+  had the same fault. An earlier check called 5 of them fine, because a Service of that name exists.
+- **Diego's decision (2026-11-23):** public falls back to internal.
+- **The fix is in one place:** helm-toolkit's `keystone_endpoint_uri_lookup` builds every catalog URL, and the URLs a chart
+  writes for another service. A `public` or `admin` endpoint without an address of its own is now built as `internal`. An
+  address is `host_fqdn_override` (a string, or a map with a host), an IP, or a map host. `publicEndpoints` sets the first, so
+  nothing changes when it is on.
+- **Ingress objects off by default in the eight charts that still rendered them.** Their Services selected pods that don't exist.
+- **The guard:** `hack/validate-catalog-endpoints.py` renders every chart and follows each registered URL to a rendered Service, its
+  port, and a pod its selector and targetPort reach. 0 failures here, 32 on main at 70b42c8f without this change; 10 cases of the rule.
+- **Upgrades:** the endpoint hooks and keystone's bootstrap (2026.1) update an existing URL. Not run on a cluster yet.
+
 - **barbican and gnocchi move to `ghcr.io/krateo-blueprints/images/`** (#454): upstream's builds minus compile-time Debian
   packages, published by the image-build run on 4e06df70.
 - **All 75 `linux-libc-dev` exceptions are gone.** The five PyJWT ones move with the images, same expiry: no Python package
