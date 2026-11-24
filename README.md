@@ -2186,6 +2186,8 @@ From 0.3.72:
 
 This upgrade adds pods and starts reserving capacity (#286, #283). See "Cluster size" above for the totals. Check
 that the cluster has room before you apply it:
+- **MariaDB and RabbitMQ restart once** as well. From 0.3.75 their pods hash only what decides a credential's data, so a later
+  release that changes other fields of a credential manifest no longer restarts them (#449).
 - **Every pod is replaced once**, because its resources change. Each API rolls with the new strategy straight away:
   its second replica, and then each replacement, starts before an old pod is deleted.
 - **A pod that does not fit stays Pending.** Before, every pod requested nothing, so a full cluster still accepted
