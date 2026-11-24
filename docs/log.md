@@ -13,6 +13,39 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **barbican and gnocchi move to `ghcr.io/krateo-blueprints/images/`** (#454): upstream's builds minus compile-time Debian
+  packages, published by the image-build run on 4e06df70.
+- **All 75 `linux-libc-dev` exceptions are gone.** The five PyJWT ones move with the images, same expiry: no Python package
+  changed.
+- **gnocchi is pinned for the first time (#334).** It ran Kolla's series tags, which are rebuilt in place; the 17 November build
+  we had recorded was no longer on quay. The chart now runs that build, from our mirror, under a dated tag, so the four pin
+  waivers go. This moves gnocchi back from whatever Kolla had rebuilt since to the recorded build.
+- **The mirror list is empty:** nothing it lists is run any more. Its tags stay published.
+- **Not run on a cluster yet.**
+
+- **The failure:** the merge queue dropped #471, which doesn't touch powerdns, because the server "did not pass readiness after
+  the outage with a NOTIFY queued". It had failed no earlier lint run among the last 60.
+- **The test's gap:** it started the server again only if it had exited before the database was back. A server that exits
+  in the seconds after that look (it exits when its communicator thread can't reach the database) failed the test at once,
+  because the wait gives up when the server is gone. The kubelet restarts it. The failed log doesn't record the server's state, so that this is what happened isn't proven.
+- **The change:** the 45 s wait restarts an exited server and counts it, and a failure now prints the restarts, the state and
+  the last log lines. The limit and what must pass are unchanged.
+
+- **The problem (#454):** barbican's image and the four Kolla gnocchi images carry `linux-libc-dev`. Every kernel CVE is a
+  finding in it with no fix published: 15 new CRITICAL findings on 2026-11-23, 35 on the 24th, each blocking image changes
+  and release tags. It is header files; nothing in the images runs it.
+- **Diego's decision:** remove the package instead of excepting it batch by batch.
+- **`hack/image-build.yaml` gains a second kind of image:** upstream's own build, at the digest the scan measured, minus an exact
+  list of Debian packages. `dpkg --purge` has no network and no resolver, and refuses while anything else depends on a listed
+  package. The result must have upstream's Debian packages minus the list and the same Python packages, still import its
+  service, and keep user, entrypoint and PATH.
+- **Gnocchi's four are built from our mirror:** quay no longer serves the recorded digests, because Kolla rebuilds its series
+  tags in place. `hack/image-mirror.yaml` holds the same digests.
+- **What goes:** `linux-libc-dev` and what depends on it, all compile-time (`libc6-dev`, the `-dev` packages, g++ in gnocchi's):
+  8 packages of 211 in barbican, 18 in each gnocchi image. The lists come from the scan's own package data, which misses a
+  dependency on a virtual package: dpkg refused gnocchi's first list, without `libpcre2-dev`.
+- **This change only builds them.** The charts move in the next one, and the dated exceptions go with it.
+
 - **The failure:** raw.githubusercontent.com answered 503 (`Backend.max_conn reached`) to a gate's only request in #458, #324
   and #469, on 2026-11-23 and 24. Each failed a capability-roles job that had nothing to do with the change.
 - **The fix:** `hack/fetch.py`, used by `hack/constraints.py` and `hack/validate-operator-admission.py`. 429, 5xx and network errors are
