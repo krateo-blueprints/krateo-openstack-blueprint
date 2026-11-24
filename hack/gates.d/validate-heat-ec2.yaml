@@ -1,0 +1,6 @@
+# heat checks a CloudFormation signature as its service user, at Keystone's address without its path (#481).
+name: "heat's CloudFormation API can check a signature"
+job: capability-roles
+order: 121
+run: |
+  python3 hack/validate-heat-ec2.py .
