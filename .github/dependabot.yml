@@ -7,3 +7,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # One pull request per source (PUBLISHING.md rule 9): one at a time, pins to the same repository drift apart, and
+    # validate-prerelease-channel.py refuses a publisher and a preflight at two versions.
+    groups:
+      krateo-charts:
+        patterns:
+          - "krateo-blueprints/charts*"
+      krateo-platformops:
+        patterns:
+          - "krateo-platformops/.github*"
