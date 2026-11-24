@@ -13,6 +13,40 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **The defect (#463, r074g, 0.3.74 on GKE, 2026-11-23):** masakari answers 500 to every request with a valid token and
+  cloudkitty closes the connection. Their charts set `memcache_security_strategy: ENCRYPT`; their images lack `cryptography`
+  (`CryptoUnavailableError`), in the pinned 20261117 builds and in 20261123's. With `MAC` instead, both answered 200, so the
+  missing package is the whole cause.
+- **Diego's decision:** build the two images here, from upstream's Dockerfiles, with their own `EXTRA_PYTHON_PACKAGES` argument
+  set to `keystonemiddleware[memcache_encryption]`. Encryption of the token cache stays on.
+- **`hack/image-build.yaml`** pins the Dockerfiles' commit, the two base images by digest and the source commits. The
+  Dockerfile clones a branch, so the build refuses to run when the branch has moved, and checks the commit the image
+  records.
+- **`.github/workflows/image-build.yaml`** builds and verifies on a pull request with no write permission, and publishes on main
+  only, to dated tags it never moves.
+- **This change only builds the images.** The charts move to them in the next one, once the tags exist and the scan has
+  seen them.
+
+- **The defect (#462, r074g, 0.3.74 on GKE, 2026-11-23):** trove answered 500 to every instance list, while its component read
+  Ready. Two causes, both measured:
+  - trove's clients default to `publicURL`, and nothing serves the public endpoints while `publicEndpoints` is off (#451);
+  - trove-api started 14 minutes before nova's endpoints were registered. Trove keeps one Keystone session for its process's
+    lifetime, so it kept a catalog without nova.
+- **The same default was in five more charts, read from their stable/2026.1 source.** A list request doesn't exercise any of
+  them, so none was seen failing: masakari's nova client, magnum's seven clients, designate's neutron client, octavia's,
+  and mistral's actions.
+- **The fix:**
+  - all six set the internal endpoints;
+  - left public on purpose: heat's `clients_heat`, magnum's `magnum_client` and trove's swift, whose URLs are handed to
+    instances outside the cluster;
+  - trove depends on glance, neutron and nova; octavia, whose clients are class attributes, also on glance and nova. So
+    `spec.enabled: [trove]` now selects nova and what nova needs.
+- **Verified:** trove's five options on the r074g cluster (through `componentValues`): 200 with the admin token, 401 without a
+  valid one. The other five charts are rendered, not run; octavia is not in full-strict.
+- **The guard:** `hack/validate-internal-clients.py` requires the 27 options in the rendered config, rejects any other client
+  rendered public without a reason, and checks the dependencies of the services with a long-lived session. The list of
+  options is explicit, because the defaults live in the images and no render shows them.
+
 - **2.13.128's automatic reinstall is exercised on our charts (r074g, released 0.3.74, full-strict, 3-node GKE, 2026-11-23).**
   - **The kills:** the tacker and cyborg composition controllers were force-deleted while an install hook Job was active,
     with the release at v1 `pending-install` and later hooks not created.
