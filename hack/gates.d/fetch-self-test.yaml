@@ -1,0 +1,7 @@
+# Every gate that downloads a pinned file goes through hack/fetch.py: a 503 is tried again, a 404 fails at once, and the last
+# error is never swallowed.
+name: "A gate's download is tried again when the server says not now"
+job: job-hooks
+order: 208
+run: |
+  python3 hack/fetch.py --self-test
