@@ -1,0 +1,8 @@
+# core-provider runs every install hook again when it retries an interrupted first install, and every upgrade does too (#457): no
+# create without a lookup, no drop, no destructive command without a written reason.
+name: "Every install hook can run again"
+job: job-hooks
+order: 211
+run: |
+  python3 hack/validate-hooks-rerunnable.py --self-test
+  python3 hack/validate-hooks-rerunnable.py .
