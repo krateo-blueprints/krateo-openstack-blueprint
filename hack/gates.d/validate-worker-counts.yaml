@@ -1,0 +1,8 @@
+# No container with a memory limit takes its number of processes from the node (#480): the options whose own default is the CPU count
+# are set, nothing rendered asks the machine, and gnocchi-api recycles its workers.
+name: "Process counts do not come from the node"
+job: capability-roles
+order: 119
+run: |
+  python3 hack/validate-worker-counts.py --self-test
+  python3 hack/validate-worker-counts.py .

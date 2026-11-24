@@ -352,6 +352,9 @@ conf:
       transport_url: null
     api:
       host: '0.0.0.0'
+      # Fixed, not one per node CPU, the service's own default: under a memory limit that default fits one node size only (#480).
+      # 16 workers took 713 MiB of the 1 GiB limit on a 16-CPU node; 2 take 123.
+      workers: 2
     database:
       max_retries: -1
       # -- Database connection URI. When empty the URI is auto-generated

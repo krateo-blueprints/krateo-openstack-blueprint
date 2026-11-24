@@ -491,6 +491,11 @@ pod:
         memory: 128Mi
 
 conf:
+  # uWSGI replaces a gnocchi-api worker, between two requests, once it holds this many MiB (#480). gnocchi 4.7.0 keeps about 0.47 MiB
+  # of every aggregates query with use_history, which is how cloudkitty asks: both replicas were OOM-killed at 1 GiB within a
+  # minute of its catch-up. With 200, two workers stayed under 570 MiB in total over 2,400 such queries, and none was lost.
+  # Upstream's "Clean excessive warnings logs" (5d3b5494, in no release) does not cure it: measured, the same growth.
+  api_worker_reload_on_rss_mb: 200
   apache: |
     Listen 0.0.0.0:{{ tuple "metric" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
 
