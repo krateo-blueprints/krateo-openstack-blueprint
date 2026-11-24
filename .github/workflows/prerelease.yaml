@@ -90,7 +90,7 @@ jobs:
       # so a pre-release is pushed the way the release on that commit will be.
       - name: Locate the shared chart push
         id: chart-push
-        uses: krateo-platformops/.github/.github/actions/chart-push@e1d3e99215e80ae56eca4a67e9e061b2c73168b8 # 1.0.0
+        uses: krateo-platformops/.github/.github/actions/chart-push@3ff640fd0dbef64c29b7a63a88b98da7f99e8052 # 1.0.1
 
       # The release's own script, with the pre-release channel: it refuses a version without the
       # pre-release shape before it stamps or pushes anything. The tarballs it keeps are not
