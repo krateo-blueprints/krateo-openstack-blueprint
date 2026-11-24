@@ -13,6 +13,14 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **The failure:** the merge queue dropped #471, which doesn't touch powerdns, because the server "did not pass readiness after
+  the outage with a NOTIFY queued". It had failed no earlier lint run among the last 60.
+- **The test's gap:** it started the server again only if it had exited before the database was back. A server that exits
+  in the seconds after that look (it exits when its communicator thread can't reach the database) failed the test at once,
+  because the wait gives up when the server is gone. The kubelet restarts it. The failed log doesn't record the server's state, so that this is what happened isn't proven.
+- **The change:** the 45 s wait restarts an exited server and counts it, and a failure now prints the restarts, the state and
+  the last log lines. The limit and what must pass are unchanged.
+
 - **The problem (#454):** barbican's image and the four Kolla gnocchi images carry `linux-libc-dev`. Every kernel CVE is a
   finding in it with no fix published: 15 new CRITICAL findings on 2026-11-23, 35 on the 24th, each blocking image changes
   and release tags. It is header files; nothing in the images runs it.

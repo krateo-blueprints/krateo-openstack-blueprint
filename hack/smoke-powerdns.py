@@ -304,11 +304,25 @@ def recover(after):
     sh("docker", "start", DB, check=True)
     if not wait_for_db():
         measurement_failed("MariaDB did not come back:\n" + db_logs())
-    if not running(SERVER):
-        sh("docker", "start", SERVER, check=True)
-    if not wait_until(lambda: probe(SERVER, server["readinessProbe"]), 45):
-        problems.append(f"the server did not pass readiness after {after}")
-        return
+    # The kubelet restarts a container whenever it exits, also in the seconds after the database is back: the server can be
+    # running at the first look and gone at the next, and nothing else here would start it again.
+    restarts = 0
+    deadline = time.time() + 45
+    while True:
+        if not running(SERVER):
+            restarts += 1
+            sh("docker", "start", SERVER, check=True)
+        elif probe(SERVER, server["readinessProbe"]):
+            break
+        if time.time() >= deadline:
+            out = sh("docker", "logs", "--tail", "6", SERVER)
+            problems.append(f"the server did not pass readiness within 45s after {after} ({restarts} restart(s); it is "
+                            f"{'running' if running(SERVER) else 'exited'}; its last lines:\n"
+                            + "\n".join("      " + x[:200] for x in (out.stdout + out.stderr).strip().splitlines()) + ")")
+            return
+        time.sleep(1)
+    if restarts:
+        print(f"  after {after}, the server was restarted {restarts} time(s) as the kubelet would, and passed readiness")
     answer = dns_query(ZONE, DNS_PORT)
     if answer.split()[:1] != ["0"] or answer.split()[1:2] in ([], ["0"]):
         problems.append(f"after {after}, {ZONE} did not answer: {answer!r}")
