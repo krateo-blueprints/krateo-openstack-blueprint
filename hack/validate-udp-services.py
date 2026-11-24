@@ -93,7 +93,7 @@ UDP_ONLY = (
         "kind": "DaemonSet",
         "workload": "gnocchi-statsd",
         "container": "gnocchi-statsd",
-        "image": "quay.io/openstack.kolla/gnocchi-statsd:2026.1-ubuntu-noble",
+        "image": "ghcr.io/krateo-blueprints/images/gnocchi-statsd:2026.1-ubuntu-noble-20261124",
         "evidence": (
             "gnocchi 4.7.0, gnocchi/statsd.py start():\n"
             "          loop = asyncio.get_event_loop()\n"

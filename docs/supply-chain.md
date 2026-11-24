@@ -80,8 +80,8 @@ merges.
   for a baseline CVE, and the allowlist lost no entries.** Its 167 entries were re-keyed to the new references; the
   fixes are tracked in #328 to #334.
 - **rabbitmq:** `docker.io/rabbitmq:3.13-management` became `3.13.7-management`, which serves the same digest.
-- **Kolla gnocchi:** the 4 images are waived until 2027-01-31 (#334). `hack/image-mirror.yaml` lists their recorded
-  digests for the mirror workflow. The chart moves to the mirror once it has run on main and the packages are public.
+- **Kolla gnocchi:** since 2026-11-24 the chart runs our builds of the 4 images: the recorded, mirrored digests minus
+  compile-time Debian packages (#454, `hack/image-build.yaml`). Their tags are dated, so the waivers are gone (#334).
 - **Overrides still work:** every image remains overridable per component through `componentValues` (`images.tags`),
   for clusters that pull from their own registry. The recorded digest says what to copy.
 
