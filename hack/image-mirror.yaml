@@ -13,20 +13,6 @@
 #
 # The registry is only where the bytes live: a user can still point any image at their own registry through the
 # component's componentValues (images.tags), and the digest recorded here tells them what to copy.
-mirrors:
-  - source: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
-    digest: sha256:4399638c92d04162e81d6f358f934d79a3a5bd36f2425a836abb249f47e1694a
-    target: ghcr.io/krateo-blueprints/images/gnocchi-api:2026.1-ubuntu-noble-20261117
-    issue: 334
-  - source: quay.io/openstack.kolla/gnocchi-base:2026.1-ubuntu-noble
-    digest: sha256:ea10f16838565b3183e66e275fd3307d0a5bd6758ccee59a3ef2fe1dbea01574
-    target: ghcr.io/krateo-blueprints/images/gnocchi-base:2026.1-ubuntu-noble-20261117
-    issue: 334
-  - source: quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble
-    digest: sha256:12c53f1ff522b581596297b5f39b1590f80a4886f621d4dbaac6b2c26a742040
-    target: ghcr.io/krateo-blueprints/images/gnocchi-metricd:2026.1-ubuntu-noble-20261117
-    issue: 334
-  - source: quay.io/openstack.kolla/gnocchi-statsd:2026.1-ubuntu-noble
-    digest: sha256:8d5c3b677c2a56373563c5debe4d162411127d3af715e60b9b971b5ad016f668
-    target: ghcr.io/krateo-blueprints/images/gnocchi-statsd:2026.1-ubuntu-noble-20261117
-    issue: 334
+# Empty since 2026-11-24: the four Kolla gnocchi images mirrored here were the base of the builds in hack/image-build.yaml
+# (#454), which the chart runs now. The mirrored tags stay published.
+mirrors: []

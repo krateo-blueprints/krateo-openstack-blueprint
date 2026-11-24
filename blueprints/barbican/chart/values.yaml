@@ -35,12 +35,12 @@ images:
     dep_check: quay.io/airshipit/kubernetes-entrypoint:c606628c7dc0fcc5654a87e5fe572ae0a456307a-ubuntu_noble
     scripted_test: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
     db_init: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
-    barbican_db_sync: quay.io/airshipit/barbican:2026.1-ubuntu_noble-20261117
+    barbican_db_sync: ghcr.io/krateo-blueprints/images/barbican:2026.1-ubuntu_noble-20261124
     db_drop: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
     ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
     ks_service: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
     ks_endpoints: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
-    barbican_api: quay.io/airshipit/barbican:2026.1-ubuntu_noble-20261117
+    barbican_api: ghcr.io/krateo-blueprints/images/barbican:2026.1-ubuntu_noble-20261124
     rabbit_init: docker.io/rabbitmq:3.13.7-management
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: "IfNotPresent"

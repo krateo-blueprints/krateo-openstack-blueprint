@@ -28,8 +28,8 @@ assertions:
       The unpullable v1-manifest images. preflight-refs' media-type check would also catch
       these, but only on its weekly network run; this catches them on every push.
   - file: values.yaml
-    present: openstack.kolla/gnocchi-api
-    why: The maintained replacement.
+    present: krateo-blueprints/images/gnocchi-api
+    why: The maintained replacement, Kolla's build minus compile-time Debian packages (#454).
   - file: values.yaml
     absent: "composite:gnocchi+auth"
     why: >-
