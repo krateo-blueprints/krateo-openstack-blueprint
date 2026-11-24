@@ -18,10 +18,10 @@ The pinning policy and the scan's allowlist are in [supply-chain.md](supply-chai
 ## Summary
 
 - **61 distinct images** across 39 published charts.
-- **By registry:** docker.io 9, ghcr.io 4, quay.io 48.
+- **By registry:** docker.io 9, ghcr.io 9, quay.io 43.
 - **Rendered at a chart's defaults:** 50. **Only with off-by-default manifests on:** 4. **Declared in `images.tags`, rendered by neither:** 7.
 - **Not pullable anonymously:** 0.
-- **Pinned by tag form:** dated 37, commit 3, version 16, digest 1. **Not pinned, waived:** 4.
+- **Pinned by tag form:** dated 41, commit 3, version 16, digest 1. **Not pinned, waived:** 0.
 - **Charts that run no image:** openstack, openstack-capabilities.
 
 "Pullable anonymously" was measured without credentials, as the kubelet pulls here: the manifest is served
@@ -55,12 +55,16 @@ digest); the digest each tag served when recorded is in `hack/images.yaml`, and 
 | `docker.io/prom/mysqld-exporter:v0.12.1` | version | Prometheus project | yes | linux/amd64 | mariadb (x) |
 | `docker.io/rabbitmq:3.13.7-management` | version | Docker Official Images | yes | linux/amd64, linux/arm/v7, linux/arm64/v8, linux/ppc64le, linux/riscv64, linux/s390x | aodh (d), barbican (d), blazar (d), ceilometer (d), cinder (d), cloudkitty (d), cyborg (d), designate (d), glance (m), heat (d), ironic (d), keystone (m), magnum (d), manila (d), masakari (d), mistral (d), neutron (d), nova (d), octavia (d), tacker (d), trove (d), watcher (d) |
 | `docker.io/xrally/xrally-openstack:2.0.0` | version | OpenStack Rally project | yes | linux/amd64 | blazar (m), cinder (m), freezer (x), glance (m), heat (m), keystone (m), mistral (m), neutron (m), nova (m), octavia (x), trove (m), watcher (m), zaqar (x) |
+| `ghcr.io/krateo-blueprints/images/barbican:2026.1-ubuntu_noble-20261124` | dated | this repository (.github/workflows/image-build.yaml) | yes | linux/amd64 | barbican (d) |
 | `ghcr.io/krateo-blueprints/images/cloudkitty:2026.1-ubuntu_noble-20261124` | dated | this repository (.github/workflows/image-build.yaml) | yes | linux/amd64 | cloudkitty (d) |
+| `ghcr.io/krateo-blueprints/images/gnocchi-api:2026.1-ubuntu-noble-20261124` | dated | this repository (.github/workflows/image-build.yaml) | yes | linux/amd64 | gnocchi (d) |
+| `ghcr.io/krateo-blueprints/images/gnocchi-base:2026.1-ubuntu-noble-20261124` | dated | this repository (.github/workflows/image-build.yaml) | yes | linux/amd64 | gnocchi (d) |
+| `ghcr.io/krateo-blueprints/images/gnocchi-metricd:2026.1-ubuntu-noble-20261124` | dated | this repository (.github/workflows/image-build.yaml) | yes | linux/amd64 | gnocchi (d) |
+| `ghcr.io/krateo-blueprints/images/gnocchi-statsd:2026.1-ubuntu-noble-20261124` | dated | this repository (.github/workflows/image-build.yaml) | yes | linux/amd64 | gnocchi (d) |
 | `ghcr.io/krateo-blueprints/images/masakari:2026.1-ubuntu_noble-20261124` | dated | this repository (.github/workflows/image-build.yaml) | yes | linux/amd64 | masakari (d) |
 | `ghcr.io/openstack-exporter/openstack-exporter:2.0.0-alpha` | version | openstack-exporter project | yes | linux/amd64, linux/arm64, linux/s390x | openstack-monitoring (d) |
 | `ghcr.io/vexxhost/netoffload:v1.0.1` | version | VEXXHOST | yes | linux/amd64 | neutron (x) |
 | `quay.io/airshipit/aodh:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | aodh (d) |
-| `quay.io/airshipit/barbican:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | barbican (d) |
 | `quay.io/airshipit/blazar:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | blazar (d) |
 | `quay.io/airshipit/ceilometer:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | ceilometer (d) |
 | `quay.io/airshipit/ceph-config-helper:ubuntu_jammy_20.2.1-1-20260407` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | gnocchi (x), libvirt (x) |
@@ -102,10 +106,6 @@ digest); the digest each tag served when recorded is in `hack/images.yaml`, and 
 | `quay.io/airshipit/trove:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | trove (d) |
 | `quay.io/airshipit/watcher:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | watcher (d) |
 | `quay.io/airshipit/zaqar:2026.1-ubuntu_noble-20261117` | dated | OpenStack-Helm (OpenInfra Airship) | yes | linux/amd64 | zaqar (d) |
-| `quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble` | **not pinned**: waived until 2027-01-31 (#334) | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
-| `quay.io/openstack.kolla/gnocchi-base:2026.1-ubuntu-noble` | **not pinned**: waived until 2027-01-31 (#334) | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
-| `quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble` | **not pinned**: waived until 2027-01-31 (#334) | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
-| `quay.io/openstack.kolla/gnocchi-statsd:2026.1-ubuntu-noble` | **not pinned**: waived until 2027-01-31 (#334) | OpenStack Kolla project | yes | linux/amd64 | gnocchi (d) |
 | `quay.io/prometheus/mysqld-exporter:v0.21.0` | version | Prometheus project | yes | linux/amd64, linux/arm/v7, linux/arm64, linux/ppc64le, linux/riscv64, linux/s390x | openstack-monitoring (d) |
 
 ## Publishers
@@ -118,9 +118,8 @@ digest); the digest each tag served when recorded is in `hack/images.yaml`, and 
 | `docker.io/powerdns/` | PowerDNS | github.com/PowerDNS/pdns |
 | `docker.io/prom/` | Prometheus project | github.com/prometheus/mysqld_exporter |
 | `docker.io/xrally/` | OpenStack Rally project | opendev.org/openstack/rally-openstack |
-| `ghcr.io/krateo-blueprints/images/` | this repository (.github/workflows/image-build.yaml) | opendev.org/openstack/openstack-helm-images' Dockerfiles at the commit hack/image-build.yaml pins, with one extra Python package (issue 463) |
+| `ghcr.io/krateo-blueprints/images/` | this repository (.github/workflows/image-build.yaml) | hack/image-build.yaml: opendev.org/openstack/openstack-helm-images' Dockerfiles at a pinned commit, with one extra Python package (masakari, cloudkitty, issue 463); OpenStack-Helm's barbican and Kolla's gnocchi builds (gnocchi only, replacing upstream's unpullable images, issues 115 and 117), minus compile-time Debian packages (issue 454) |
 | `ghcr.io/openstack-exporter/` | openstack-exporter project | github.com/openstack-exporter/openstack-exporter (openstack-monitoring, issue 312) |
 | `ghcr.io/vexxhost/` | VEXXHOST | github.com/vexxhost/netoffload |
 | `quay.io/airshipit/` | OpenStack-Helm (OpenInfra Airship) | opendev.org/openstack/loci (OpenStack service images), opendev.org/openstack/openstack-helm-images (infrastructure images), opendev.org/airship/kubernetes-entrypoint, opendev.org/airship/porthole |
-| `quay.io/openstack.kolla/` | OpenStack Kolla project | opendev.org/openstack/kolla (gnocchi only, replacing upstream's unpullable images, |
 | `quay.io/prometheus/` | Prometheus project | github.com/prometheus/mysqld_exporter (openstack-monitoring's standalone mysqld-exporter, issue 312) |

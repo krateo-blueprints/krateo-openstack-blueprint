@@ -16,9 +16,6 @@ sources:
   - prefix: quay.io/prometheus/
     publisher: Prometheus project
     source: github.com/prometheus/mysqld_exporter (openstack-monitoring's standalone mysqld-exporter, issue 312)
-  - prefix: quay.io/openstack.kolla/
-    publisher: OpenStack Kolla project
-    source: opendev.org/openstack/kolla (gnocchi only, replacing upstream's unpullable images, #115 and #117)
   - prefix: docker.io/library/
     publisher: Docker Official Images
     source: github.com/docker-library/official-images
@@ -40,8 +37,9 @@ sources:
   - prefix: ghcr.io/krateo-blueprints/images/
     publisher: this repository (.github/workflows/image-build.yaml)
     source: >-
-      opendev.org/openstack/openstack-helm-images' Dockerfiles at the commit hack/image-build.yaml pins, with one extra
-      Python package (issue 463)
+      hack/image-build.yaml: opendev.org/openstack/openstack-helm-images' Dockerfiles at a pinned commit, with one extra
+      Python package (masakari, cloudkitty, issue 463); OpenStack-Helm's barbican and Kolla's gnocchi builds (gnocchi only,
+      replacing upstream's unpullable images, issues 115 and 117), minus compile-time Debian packages (issue 454)
   - prefix: ghcr.io/openstack-exporter/
     publisher: openstack-exporter project
     source: github.com/openstack-exporter/openstack-exporter (openstack-monitoring, issue 312)

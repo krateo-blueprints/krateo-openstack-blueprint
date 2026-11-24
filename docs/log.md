@@ -13,6 +13,16 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **barbican and gnocchi move to `ghcr.io/krateo-blueprints/images/`** (#454): upstream's builds minus compile-time Debian
+  packages, published by the image-build run on 4e06df70.
+- **All 75 `linux-libc-dev` exceptions are gone.** The five PyJWT ones move with the images, same expiry: no Python package
+  changed.
+- **gnocchi is pinned for the first time (#334).** It ran Kolla's series tags, which are rebuilt in place; the 17 November build
+  we had recorded was no longer on quay. The chart now runs that build, from our mirror, under a dated tag, so the four pin
+  waivers go. This moves gnocchi back from whatever Kolla had rebuilt since to the recorded build.
+- **The mirror list is empty:** nothing it lists is run any more. Its tags stay published.
+- **Not run on a cluster yet.**
+
 - **The failure:** the merge queue dropped #471, which doesn't touch powerdns, because the server "did not pass readiness after
   the outage with a NOTIFY queued". It had failed no earlier lint run among the last 60.
 - **The test's gap:** it started the server again only if it had exited before the database was back. A server that exits

@@ -438,6 +438,24 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:32e9ee3edd2900b10efed209f8f9443ab2a6774fe2515c3ada8c269e946ff05d
+- image: ghcr.io/krateo-blueprints/images/barbican:2026.1-ubuntu_noble-20261124
+  registry: ghcr.io
+  repository: krateo-blueprints/images/barbican
+  tag: 2026.1-ubuntu_noble-20261124
+  tag_form: dated
+  used_by:
+  - chart: barbican
+    rendered: defaults
+    keys:
+    - barbican_api
+    - barbican_db_sync
+  registry_facts:
+    observed: '2026-11-24'
+    anonymous_pull: true
+    media_type: application/vnd.docker.distribution.manifest.v2+json
+    platforms:
+    - linux/amd64
+    digest: sha256:601224789dabd9d307ba90ea66b7de646de60138b98a85e06b302a6c3b49cb9c
 - image: ghcr.io/krateo-blueprints/images/cloudkitty:2026.1-ubuntu_noble-20261124
   registry: ghcr.io
   repository: krateo-blueprints/images/cloudkitty
@@ -458,6 +476,77 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:2aaf522e60db79d4fcd57cffcb94af15c162098824e81e9447a0302088d3d0c0
+- image: ghcr.io/krateo-blueprints/images/gnocchi-api:2026.1-ubuntu-noble-20261124
+  registry: ghcr.io
+  repository: krateo-blueprints/images/gnocchi-api
+  tag: 2026.1-ubuntu-noble-20261124
+  tag_form: dated
+  used_by:
+  - chart: gnocchi
+    rendered: defaults
+    keys:
+    - db_init
+    - db_init_indexer
+    - db_sync
+    - gnocchi_api
+  registry_facts:
+    observed: '2026-11-24'
+    anonymous_pull: true
+    media_type: application/vnd.docker.distribution.manifest.v2+json
+    platforms:
+    - linux/amd64
+    digest: sha256:a947fa494c3e8eb4a052d0f89a3d4dad2a1f138ef6fcab6ca9a217d926c963e9
+- image: ghcr.io/krateo-blueprints/images/gnocchi-base:2026.1-ubuntu-noble-20261124
+  registry: ghcr.io
+  repository: krateo-blueprints/images/gnocchi-base
+  tag: 2026.1-ubuntu-noble-20261124
+  tag_form: dated
+  used_by:
+  - chart: gnocchi
+    rendered: defaults
+    keys:
+    - gnocchi_resources_cleaner
+  registry_facts:
+    observed: '2026-11-24'
+    anonymous_pull: true
+    media_type: application/vnd.docker.distribution.manifest.v2+json
+    platforms:
+    - linux/amd64
+    digest: sha256:2ba58c8cdd38433a5931678e007d173fff02eb824d942a2d536dfc6b2e507822
+- image: ghcr.io/krateo-blueprints/images/gnocchi-metricd:2026.1-ubuntu-noble-20261124
+  registry: ghcr.io
+  repository: krateo-blueprints/images/gnocchi-metricd
+  tag: 2026.1-ubuntu-noble-20261124
+  tag_form: dated
+  used_by:
+  - chart: gnocchi
+    rendered: defaults
+    keys:
+    - gnocchi_metricd
+  registry_facts:
+    observed: '2026-11-24'
+    anonymous_pull: true
+    media_type: application/vnd.docker.distribution.manifest.v2+json
+    platforms:
+    - linux/amd64
+    digest: sha256:6b698e76d5f4652007948ba72cdda761713d7a4ba9279d51d3b1e18235d1c4aa
+- image: ghcr.io/krateo-blueprints/images/gnocchi-statsd:2026.1-ubuntu-noble-20261124
+  registry: ghcr.io
+  repository: krateo-blueprints/images/gnocchi-statsd
+  tag: 2026.1-ubuntu-noble-20261124
+  tag_form: dated
+  used_by:
+  - chart: gnocchi
+    rendered: defaults
+    keys:
+    - gnocchi_statsd
+  registry_facts:
+    observed: '2026-11-24'
+    anonymous_pull: true
+    media_type: application/vnd.docker.distribution.manifest.v2+json
+    platforms:
+    - linux/amd64
+    digest: sha256:8adb5cfc184e4e2a2d40d1cb3cd1b8619da53e40f8dd982a784f976e51b1621a
 - image: ghcr.io/krateo-blueprints/images/masakari:2026.1-ubuntu_noble-20261124
   registry: ghcr.io
   repository: krateo-blueprints/images/masakari
@@ -535,24 +624,6 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:65010049f89295ad6591fef96e763587b8b0edb0343a37c6862be53567ffe37e
-- image: quay.io/airshipit/barbican:2026.1-ubuntu_noble-20261117
-  registry: quay.io
-  repository: airshipit/barbican
-  tag: 2026.1-ubuntu_noble-20261117
-  tag_form: dated
-  used_by:
-  - chart: barbican
-    rendered: defaults
-    keys:
-    - barbican_api
-    - barbican_db_sync
-  registry_facts:
-    observed: '2026-11-17'
-    anonymous_pull: true
-    media_type: application/vnd.oci.image.index.v1+json
-    platforms:
-    - linux/amd64
-    digest: sha256:acdc92fbe1779d4bcc7a70af4d0523c9e9ea010b1764d1fcb6289791da1ded6b
 - image: quay.io/airshipit/blazar:2026.1-ubuntu_noble-20261117
   registry: quay.io
   repository: airshipit/blazar
@@ -1811,89 +1882,6 @@ images:
     platforms:
     - linux/amd64
     digest: sha256:3fa8ab78e0ef414ef971efd3ed7c828d4eee66c4c70f312f6fba68e516a8c00b
-- image: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
-  registry: quay.io
-  repository: openstack.kolla/gnocchi-api
-  tag: 2026.1-ubuntu-noble
-  tag_form: series
-  used_by:
-  - chart: gnocchi
-    rendered: defaults
-    keys:
-    - db_init
-    - db_init_indexer
-    - db_sync
-    - gnocchi_api
-  pin_waiver:
-    issue: 334
-    expires: '2027-01-31'
-  registry_facts:
-    observed: '2026-11-17'
-    anonymous_pull: true
-    media_type: application/vnd.oci.image.manifest.v1+json
-    platforms:
-    - linux/amd64
-    digest: sha256:4399638c92d04162e81d6f358f934d79a3a5bd36f2425a836abb249f47e1694a
-- image: quay.io/openstack.kolla/gnocchi-base:2026.1-ubuntu-noble
-  registry: quay.io
-  repository: openstack.kolla/gnocchi-base
-  tag: 2026.1-ubuntu-noble
-  tag_form: series
-  used_by:
-  - chart: gnocchi
-    rendered: defaults
-    keys:
-    - gnocchi_resources_cleaner
-  pin_waiver:
-    issue: 334
-    expires: '2027-01-31'
-  registry_facts:
-    observed: '2026-11-17'
-    anonymous_pull: true
-    media_type: application/vnd.oci.image.manifest.v1+json
-    platforms:
-    - linux/amd64
-    digest: sha256:ea10f16838565b3183e66e275fd3307d0a5bd6758ccee59a3ef2fe1dbea01574
-- image: quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble
-  registry: quay.io
-  repository: openstack.kolla/gnocchi-metricd
-  tag: 2026.1-ubuntu-noble
-  tag_form: series
-  used_by:
-  - chart: gnocchi
-    rendered: defaults
-    keys:
-    - gnocchi_metricd
-  pin_waiver:
-    issue: 334
-    expires: '2027-01-31'
-  registry_facts:
-    observed: '2026-11-17'
-    anonymous_pull: true
-    media_type: application/vnd.oci.image.manifest.v1+json
-    platforms:
-    - linux/amd64
-    digest: sha256:12c53f1ff522b581596297b5f39b1590f80a4886f621d4dbaac6b2c26a742040
-- image: quay.io/openstack.kolla/gnocchi-statsd:2026.1-ubuntu-noble
-  registry: quay.io
-  repository: openstack.kolla/gnocchi-statsd
-  tag: 2026.1-ubuntu-noble
-  tag_form: series
-  used_by:
-  - chart: gnocchi
-    rendered: defaults
-    keys:
-    - gnocchi_statsd
-  pin_waiver:
-    issue: 334
-    expires: '2027-01-31'
-  registry_facts:
-    observed: '2026-11-17'
-    anonymous_pull: true
-    media_type: application/vnd.oci.image.manifest.v1+json
-    platforms:
-    - linux/amd64
-    digest: sha256:8d5c3b677c2a56373563c5debe4d162411127d3af715e60b9b971b5ad016f668
 - image: quay.io/prometheus/mysqld-exporter:v0.21.0
   registry: quay.io
   repository: prometheus/mysqld-exporter

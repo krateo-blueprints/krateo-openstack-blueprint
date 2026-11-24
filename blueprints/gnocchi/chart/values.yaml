@@ -46,16 +46,16 @@ images:
     # here said "using non-kolla images until kolla supports postgres as an indexer"; that
     # is no longer true, the Kolla gnocchi-api image has psycopg2 installed (verified in
     # quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble).
-    db_init_indexer: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
-    db_init: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
-    db_sync: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
+    db_init_indexer: ghcr.io/krateo-blueprints/images/gnocchi-api:2026.1-ubuntu-noble-20261124
+    db_init: ghcr.io/krateo-blueprints/images/gnocchi-api:2026.1-ubuntu-noble-20261124
+    db_sync: ghcr.io/krateo-blueprints/images/gnocchi-api:2026.1-ubuntu-noble-20261124
     ks_user: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
     ks_service: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
     ks_endpoints: quay.io/airshipit/openstack-client:2026.1-ubuntu_noble-20261117
-    gnocchi_api: quay.io/openstack.kolla/gnocchi-api:2026.1-ubuntu-noble
-    gnocchi_statsd: quay.io/openstack.kolla/gnocchi-statsd:2026.1-ubuntu-noble
-    gnocchi_metricd: quay.io/openstack.kolla/gnocchi-metricd:2026.1-ubuntu-noble
-    gnocchi_resources_cleaner: quay.io/openstack.kolla/gnocchi-base:2026.1-ubuntu-noble
+    gnocchi_api: ghcr.io/krateo-blueprints/images/gnocchi-api:2026.1-ubuntu-noble-20261124
+    gnocchi_statsd: ghcr.io/krateo-blueprints/images/gnocchi-statsd:2026.1-ubuntu-noble-20261124
+    gnocchi_metricd: ghcr.io/krateo-blueprints/images/gnocchi-metricd:2026.1-ubuntu-noble-20261124
+    gnocchi_resources_cleaner: ghcr.io/krateo-blueprints/images/gnocchi-base:2026.1-ubuntu-noble-20261124
     image_repo_sync: quay.io/airshipit/docker:27.5.0
   pull_policy: "IfNotPresent"
   local_registry:
