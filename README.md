@@ -920,7 +920,8 @@ umbrella renders none of them on its own.
 ## Public endpoints: the APIs and Horizon over HTTPS (#311)
 
 Off by default. Without it, OpenStack is reachable from inside the cluster, plus Horizon on NodePort 31000 over plain
-HTTP; the public catalog URLs point at Services nothing serves. With `publicEndpoints.enabled`, the orchestrator renders
+HTTP; the public catalog URLs are the internal ones from 0.3.75 (#451), and up to 0.3.74 they point at Services nothing
+serves. With `publicEndpoints.enabled`, the orchestrator renders
 one Gateway API `Gateway` and an `HTTPRoute` per public endpoint of every selected component, and moves each public
 catalog URL to `https://<service>.<baseDomain>`:
 
@@ -2192,6 +2193,14 @@ that the cluster has room before you apply it:
 - **A stored replica default can hold a component at 1 replica.** If your `componentValues.<component>.pod.replicas`
   set some keys, the API server stored the schema's old default, 1, for that component's other replica keys when it
   created the Composition. They stay at 1 after the upgrade. Set them explicitly.
+- **With `publicEndpoints` off, the public and admin catalog URLs become the internal ones (#451, #326).** The endpoint
+  hooks rewrite them in place. Up to 0.3.74 they pointed at `http://<service>.openstack.svc.cluster.local`, port 80, which
+  nothing serves. An address you set yourself (`endpoints.<type>.host_fqdn_override.public`, or `hosts.public` as an IP or a
+  map) is kept.
+- **The charts' own Ingress objects and ingress Services are off by default** in glance, horizon, ironic, keystone, neutron,
+  nova, placement and swift, as they already were in the others (#451). Their Services selected `app: ingress-api`, and no
+  ingress controller is part of this blueprint. If you run one that uses them, set the component's `manifests.ingress_*` and
+  `manifests.service_ingress_*` back to true, and set `host_fqdn_override.public` so the catalog names it.
 - **An explicit `spec.enabled` that lists trove or octavia now selects nova and glance too** (and, for trove, neutron), with
   what they need, such as libvirt and placement. Both services call them, and keep one Keystone session from their first
   call on (#462). A `profile` install already had them.

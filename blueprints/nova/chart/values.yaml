@@ -2285,6 +2285,8 @@ labels:
     node_selector_key: openstack-control-plane
     node_selector_value: enabled
 manifests:
+  # The ingress objects are off (#451): no ingress controller is part of this blueprint, so their Services select no pod.
+  # publicEndpoints (Gateway API) is how the APIs are exposed. Switched on, they need host_fqdn_override.public as well.
   certificates: false
   compute_uuid_self_provisioning: true
   configmap_bin: true
@@ -2300,11 +2302,11 @@ manifests:
   deployment_scheduler: true
   deployment_serialproxy: true
   deployment_spiceproxy: true
-  ingress_metadata: true
-  ingress_novncproxy: true
-  ingress_osapi: true
-  ingress_serialproxy: true
-  ingress_spiceproxy: true
+  ingress_metadata: false
+  ingress_novncproxy: false
+  ingress_osapi: false
+  ingress_serialproxy: false
+  ingress_spiceproxy: false
   job_bootstrap: true
   job_cell_setup: true
   job_db_drop: false
@@ -2324,17 +2326,17 @@ manifests:
   secret_db: true
   secret_db_api: true
   secret_db_cell0: true
-  secret_ingress_tls: true
+  secret_ingress_tls: false
   secret_keystone: true
   secret_ks_etc: true
   secret_rabbitmq: true
   secret_registry: true
   secret_ssh: true
-  service_ingress_metadata: true
-  service_ingress_novncproxy: true
-  service_ingress_osapi: true
-  service_ingress_serialproxy: true
-  service_ingress_spiceproxy: true
+  service_ingress_metadata: false
+  service_ingress_novncproxy: false
+  service_ingress_osapi: false
+  service_ingress_serialproxy: false
+  service_ingress_spiceproxy: false
   service_metadata: true
   service_novncproxy: true
   service_osapi: true
