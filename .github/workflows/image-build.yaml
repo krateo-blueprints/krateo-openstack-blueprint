@@ -1,0 +1,70 @@
+# Builds the images hack/image-build.yaml lists, from upstream's Dockerfiles, and publishes them to
+# ghcr.io/krateo-blueprints/images under immutable, dated tags (#463).
+#
+# A pull request builds and verifies every entry and publishes nothing: its job holds no write permission. Only main (and a
+# run by hand on main) publishes, as for image-mirror.yaml. hack/image-build.py never moves an existing tag.
+name: image-build
+
+on:
+  pull_request:
+    paths:
+      - hack/image-build.yaml
+      - hack/image-build.py
+      - .github/workflows/image-build.yaml
+  push:
+    branches:
+      - main
+    paths:
+      - hack/image-build.yaml
+      - hack/image-build.py
+      - .github/workflows/image-build.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install PyYAML
+
+      - name: Build and verify each image, publishing nothing
+        run: python3 hack/image-build.py . --build
+
+  publish:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install PyYAML
+
+      - name: Log in to GHCR
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+
+      - name: Build, verify and publish each image that is not published yet
+        run: python3 hack/image-build.py . --publish

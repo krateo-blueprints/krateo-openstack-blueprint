@@ -1,0 +1,60 @@
+# Images built here, from upstream's own Dockerfiles, because the published ones cannot run what the charts ask of them
+# (#463). .github/workflows/image-build.yaml applies this list on main; hack/image-build.py checks and builds it.
+#
+# Not a fork: the Dockerfile is upstream's, at a pinned commit, and the only difference is its own EXTRA_PYTHON_PACKAGES
+# build argument. An entry goes away when upstream's image carries the package (hack/image-build.py --upstream says so).
+#
+#   name           the image's name
+#   dockerfiles    the repository with the Dockerfile, and the commit it is read at
+#   dockerfile     its path there
+#   base           each base-image build argument, pinned by digest
+#   source         the project's build arguments: its repository, the branch the Dockerfile clones, and the commit that
+#                  branch must be at. The build refuses to publish anything else.
+#   packages       the EXTRA_PYTHON_PACKAGES
+#   provides       modules the finished image must import, which upstream's image cannot
+#   replaces       the upstream image the charts run today
+#   target         where it is published: an immutable, dated tag, never moved
+#   issue          why it is built
+builds:
+  - name: masakari
+    dockerfiles:
+      repository: https://opendev.org/openstack/openstack-helm-images
+      commit: 1eb5ce15d6f3aac9760b043d6031191ba67904c5
+    dockerfile: masakari/Dockerfile
+    base:
+      BASE_VENV_BUILDER: quay.io/airshipit/venv_builder@sha256:8a11f6e16c5bd7fb447bb68f608a2ae99bb92e2dab6434d2cf5d63a8c10b71f6
+      BASE_RUNTIME: quay.io/airshipit/base@sha256:05bef36c1dfe35be8a51ffc0420775fb48dfed7efdc95422d7c10c90b1d3d7b6
+    source:
+      repository_arg: MASAKARI_REPO
+      repository: https://opendev.org/openstack/masakari
+      branch_arg: MASAKARI_REF
+      branch: stable/2026.1
+      commit: 4e6dd2e645d71439eb289a1523a5d04c402e90bb
+    packages:
+      - keystonemiddleware[memcache_encryption]
+    provides:
+      - cryptography
+    replaces: quay.io/airshipit/masakari:2026.1-ubuntu_noble-20261117
+    target: ghcr.io/krateo-blueprints/images/masakari:2026.1-ubuntu_noble-20261124
+    issue: 463
+  - name: cloudkitty
+    dockerfiles:
+      repository: https://opendev.org/openstack/openstack-helm-images
+      commit: 1eb5ce15d6f3aac9760b043d6031191ba67904c5
+    dockerfile: cloudkitty/Dockerfile
+    base:
+      BASE_VENV_BUILDER: quay.io/airshipit/venv_builder@sha256:8a11f6e16c5bd7fb447bb68f608a2ae99bb92e2dab6434d2cf5d63a8c10b71f6
+      BASE_RUNTIME: quay.io/airshipit/base@sha256:05bef36c1dfe35be8a51ffc0420775fb48dfed7efdc95422d7c10c90b1d3d7b6
+    source:
+      repository_arg: CLOUDKITTY_REPO
+      repository: https://opendev.org/openstack/cloudkitty
+      branch_arg: CLOUDKITTY_REF
+      branch: stable/2026.1
+      commit: 3e1102ead9551bbc8a68567fa19a6adc572b58ac
+    packages:
+      - keystonemiddleware[memcache_encryption]
+    provides:
+      - cryptography
+    replaces: quay.io/airshipit/cloudkitty:2026.1-ubuntu_noble-20261117
+    target: ghcr.io/krateo-blueprints/images/cloudkitty:2026.1-ubuntu_noble-20261124
+    issue: 463
