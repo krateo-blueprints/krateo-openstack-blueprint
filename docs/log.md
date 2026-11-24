@@ -13,6 +13,12 @@ Curated history; release notes live in GitHub Releases.
 
 ## 2026-11
 
+- **The charts 1.4.4 bump arrived as two pull requests and neither was right (#439, #441).** Each moved one of this repository's three
+  pins to `krateo-blueprints/charts`. #441 moved the publisher and left release-preflight at 1.4.3, which
+  `hack/validate-prerelease-channel.py` refuses.
+- **The fix:** `.github/dependabot.yml` groups the pins by source, as PUBLISHING.md rule 9 says: one pull request for
+  `krateo-blueprints/charts`, one for `krateo-platformops/.github`. Dependabot replaces #439 to #443 with those two.
+
 - **The defect (#481, GKE, 2026-11-24):** heat's CloudFormation API answered 403 to every signed request. Keystone's `/v3/ec2tokens`
   requires an authenticated caller now, and heat's `[ec2authtoken]` (heat 0242c28d) had no credentials. Anything that calls heat
   with EC2 credentials takes that path, wait conditions with a signed URL included (not exercised). The component read Ready.
