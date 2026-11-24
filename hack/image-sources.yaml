@@ -37,6 +37,11 @@ sources:
   - prefix: docker.io/xrally/
     publisher: OpenStack Rally project
     source: opendev.org/openstack/rally-openstack
+  - prefix: ghcr.io/krateo-blueprints/images/
+    publisher: this repository (.github/workflows/image-build.yaml)
+    source: >-
+      opendev.org/openstack/openstack-helm-images' Dockerfiles at the commit hack/image-build.yaml pins, with one extra
+      Python package (issue 463)
   - prefix: ghcr.io/openstack-exporter/
     publisher: openstack-exporter project
     source: github.com/openstack-exporter/openstack-exporter (openstack-monitoring, issue 312)

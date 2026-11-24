@@ -27,6 +27,7 @@ on:
       - hack/images.yaml
       - hack/image-cve-allowlist.yaml
       - hack/check-image-cves.py
+      - hack/check-image-packages.py
       - hack/gen-image-inventory.py
       - hack/image-pin-waivers.yaml
       - .github/workflows/image-scan.yaml
@@ -132,7 +133,7 @@ jobs:
             if "$RUNNER_TEMP/trivy-bin/trivy" image "$IMAGE" \
                 --cache-dir "$RUNNER_TEMP/trivy-cache" \
                 --image-src remote --platform linux/amd64 --scanners vuln \
-                --severity CRITICAL,HIGH --timeout 30m \
+                --severity CRITICAL,HIGH --list-all-pkgs --timeout 30m \
                 --format json --output "$RUNNER_TEMP/report/trivy.json" --exit-code 0; then
               break
             fi
@@ -187,3 +188,7 @@ jobs:
 
       - name: No CRITICAL vulnerability without an exception in date
         run: python3 hack/check-image-cves.py . reports
+
+      - name: Every image has the packages its chart's configuration needs
+        if: always()
+        run: python3 hack/check-image-packages.py . reports
