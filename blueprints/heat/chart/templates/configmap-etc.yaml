@@ -101,6 +101,10 @@ limitations under the License.
 {{- $_ := cat (tuple "cloudformation" "public" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup") "waitcondition" | replace " " "/" | set .Values.conf.heat.DEFAULT "heat_waitcondition_server_url" -}}
 {{- end -}}
 
+{{- /* heat appends /v3/ec2tokens itself, so this is Keystone's address without its path (#481). */ -}}
+{{- if empty .Values.conf.heat.ec2authtoken.endpoint_override -}}
+{{- $_ := tuple "identity" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" | trimSuffix .Values.endpoints.identity.path.default | set .Values.conf.heat.ec2authtoken "endpoint_override" -}}
+{{- end -}}
 {{- if empty .Values.conf.heat.clients_keystone.auth_uri -}}
 {{- $_ := tuple "identity" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" | trimSuffix .Values.endpoints.identity.path.default | set .Values.conf.heat.clients_keystone "auth_uri" -}}
 {{- end -}}

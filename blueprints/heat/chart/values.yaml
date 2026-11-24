@@ -367,6 +367,12 @@ conf:
       endpoint_type: internalURL
     clients_heat:
       endpoint_type: publicURL
+    # Keystone's /v3/ec2tokens, which checks the signature of a CloudFormation request, requires an authenticated caller (#481):
+    # without credentials here every signed request was refused with 403. They are the service user's, from keystone_authtoken.
+    # configmap-etc.yaml fills endpoint_override.
+    ec2authtoken:
+      auth_section: keystone_authtoken
+      valid_interfaces: internal
     clients_keystone:
       endpoint_type: internalURL
     oslo_messaging_notifications:
