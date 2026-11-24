@@ -14,5 +14,6 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
 - **Gnocchi's four are built from our mirror:** quay no longer serves the recorded digests, because Kolla rebuilds its series
   tags in place. `hack/image-mirror.yaml` holds the same digests.
 - **What goes:** `linux-libc-dev` and what depends on it, all compile-time (`libc6-dev`, the `-dev` packages, g++ in gnocchi's):
-  8 packages of 211 in barbican, 17 of 290 in gnocchi's. The lists come from the scan's own package data.
+  8 packages of 211 in barbican, 18 in each gnocchi image. The lists come from the scan's own package data, which misses a
+  dependency on a virtual package: dpkg refused gnocchi's first list, without `libpcre2-dev`.
 - **This change only builds them.** The charts move in the next one, and the dated exceptions go with it.

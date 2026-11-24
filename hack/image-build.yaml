@@ -95,6 +95,7 @@ builds:
       - libexpat1-dev
       - libicu-dev
       - libpython3-dev
+      - libpcre2-dev
       - libpython3.12-dev
       - libstdc++-13-dev
       - libxml2-dev
@@ -121,6 +122,7 @@ builds:
       - libexpat1-dev
       - libicu-dev
       - libpython3-dev
+      - libpcre2-dev
       - libpython3.12-dev
       - libstdc++-13-dev
       - libxml2-dev
@@ -147,6 +149,7 @@ builds:
       - libexpat1-dev
       - libicu-dev
       - libpython3-dev
+      - libpcre2-dev
       - libpython3.12-dev
       - libstdc++-13-dev
       - libxml2-dev
@@ -173,6 +176,7 @@ builds:
       - libexpat1-dev
       - libicu-dev
       - libpython3-dev
+      - libpcre2-dev
       - libpython3.12-dev
       - libstdc++-13-dev
       - libxml2-dev
