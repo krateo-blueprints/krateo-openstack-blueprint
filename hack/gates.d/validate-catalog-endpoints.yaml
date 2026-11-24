@@ -1,0 +1,8 @@
+# With publicEndpoints off, every URL a chart registers in the catalog is served (#451): its Service is rendered, has the port,
+# and its selector and targetPort reach a rendered pod. A check that a Service of that name exists passed 5 dead ones.
+name: "Every catalog URL is served"
+job: capability-roles
+order: 114
+run: |
+  python3 hack/validate-catalog-endpoints.py --self-test
+  python3 hack/validate-catalog-endpoints.py .

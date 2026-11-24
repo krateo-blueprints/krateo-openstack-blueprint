@@ -884,10 +884,12 @@ network_policy:
       - {}
 
 manifests:
+  # The ingress objects are off (#451): no ingress controller is part of this blueprint, so their Services select no pod.
+  # publicEndpoints (Gateway API) is how the APIs are exposed. Switched on, they need host_fqdn_override.public as well.
   configmap_bin: true
   configmap_etc: true
   deployment_api: true
-  ingress_api: true
+  ingress_api: false
   job_bootstrap: true
   job_db_drop: false
   job_db_init: true
@@ -905,7 +907,7 @@ manifests:
   secret_rabbitmq: true
   secret_registry: true
   service_api: true
-  service_ingress_api: true
+  service_ingress_api: false
   statefulset_conductor: true
 
 # Krateo blueprint addition (#297): controls that belong to the blueprint, not to OpenStack-Helm.

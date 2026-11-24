@@ -723,6 +723,8 @@ endpoints:
         default: 11211
 
 manifests:
+  # The ingress objects are off (#451): no ingress controller is part of this blueprint, so their Services select no pod.
+  # publicEndpoints (Gateway API) is how the APIs are exposed. Switched on, they need host_fqdn_override.public as well.
   configmap_bin: true
   configmap_etc: true
   deployment_proxy: true
@@ -736,8 +738,8 @@ manifests:
   pdb_proxy: true
   pdb_storage: true
   secret_keystone: true
-  ingress_proxy: true
-  service_ingress_proxy: true
+  ingress_proxy: false
+  service_ingress_proxy: false
   service_proxy: true
   network_policy: false
   pod_test: false
