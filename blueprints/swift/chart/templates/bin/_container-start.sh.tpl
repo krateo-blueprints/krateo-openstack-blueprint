@@ -12,7 +12,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- define "swift.bin.container_start" }}
+{{- define "swift.bin.container_start" -}}
 #!/bin/bash
 set -ex
 

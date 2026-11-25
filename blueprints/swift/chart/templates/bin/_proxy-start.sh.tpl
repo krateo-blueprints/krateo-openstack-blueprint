@@ -2,7 +2,7 @@
 Licensed under the Apache License, Version 2.0 (the "License");
 */}}
 
-{{- define "swift.bin.proxy_start" }}
+{{- define "swift.bin.proxy_start" -}}
 #!/bin/bash
 set -ex
 
