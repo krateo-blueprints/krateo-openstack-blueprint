@@ -2,7 +2,7 @@
 Licensed under the Apache License, Version 2.0 (the "License");
 */}}
 
-{{- define "swift.bin.ring_builder" }}
+{{- define "swift.bin.ring_builder" -}}
 #!/bin/bash
 set -ex
 

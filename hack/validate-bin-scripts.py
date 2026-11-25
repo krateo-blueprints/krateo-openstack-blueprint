@@ -8,8 +8,13 @@ is off by default while its script renders in designate-bin at defaults.
 Renders every blueprint chart at its defaults (helm-toolkit staged as the release does) and runs `bash -n` on:
   - every ConfigMap or Secret data key ending in .sh (the charts' -bin scripts);
   - every container's inline `bash -c` / `sh -c` script.
+And every .sh key starts with "#!" at its first byte (#490). gnocchi's resources-cleaner CronJob runs its script as the
+container's command, so the kernel executes it, and without that line the kernel refuses it ("exec format error"):
+the CronJob had never succeeded, and no run of ours had yet crossed its 00:00 schedule. A line after a blank one is
+the same to the kernel. bash -c and `bash x.sh` fall back to reading such a file as a script, which is why swift's and
+heat's ran; the rule is the script's, not its caller's.
 A chart that fails to render, or a run that checked no script, fails: an empty input is not a pass.
-usage: validate-bin-scripts.py <repo>
+usage: validate-bin-scripts.py <repo> | --self-test
 """
 import base64
 import glob
@@ -34,6 +39,24 @@ _gv_spec = _gv_util.spec_from_file_location(
     "gate_values", _gv_os.path.join(_gv_os.path.dirname(_gv_os.path.abspath(__file__)), "gate_values.py"))
 gate_values = _gv_util.module_from_spec(_gv_spec)
 _gv_spec.loader.exec_module(gate_values)
+
+
+def shebang_problem(text):
+    """None if the kernel can execute this file as a script: "#!" are its first two bytes."""
+    if text.startswith("#!"):
+        return None
+    first = text.lstrip().split("\n", 1)[0][:40]
+    return "its first line is %r: the kernel executes a script only when its first two bytes are #!" % first
+
+
+if "--self-test" in sys.argv:
+    cases = [("#!/bin/bash\nset -ex\n", False), ("#!/usr/bin/env bash\n", False), ("\n#!/bin/bash\nset -ex\n", True),
+             ("set -ex\nexit 0\n", True), ("# Licensed under the Apache License\n", True), ("", True), (" #!/bin/bash\n", True)]
+    wrong = [(t, want) for t, want in cases if (shebang_problem(t) is not None) != want]
+    for t, want in wrong:
+        print("WRONG: %r should %s" % (t, "be refused" if want else "pass"))
+    print("self-test: %d case(s), %d wrong" % (len(cases), len(wrong)))
+    sys.exit(1 if wrong else 0)
 
 
 def bash_n(text):
@@ -81,6 +104,9 @@ with tempfile.TemporaryDirectory() as tmp:
                         except Exception:
                             continue
                     checked += 1
+                    bad = shebang_problem(val)
+                    if bad:
+                        failures.append("%s: %s/%s key %s: %s" % (name, d["kind"], d["metadata"]["name"], key, bad))
                     rc, err = bash_n(val)
                     if rc:
                         failures.append("%s: %s/%s key %s does not parse: %s" % (name, d["kind"], d["metadata"]["name"], key, err))
@@ -101,4 +127,4 @@ for f in failures:
     print("FAIL: " + f)
 if failures:
     sys.exit(1)
-print("OK: %d shell script(s) across %d chart(s) parse (bash -n)" % (checked, charts))
+print("OK: %d shell script(s) across %d chart(s) parse (bash -n) and start with #!" % (checked, charts))

@@ -2,7 +2,7 @@
 Licensed under the Apache License, Version 2.0 (the "License");
 */}}
 
-{{- define "swift.bin.storage_init" }}
+{{- define "swift.bin.storage_init" -}}
 #!/bin/bash
 set -e
 

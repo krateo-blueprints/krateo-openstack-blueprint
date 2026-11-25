@@ -1,7 +1,9 @@
 # designate-sink.sh shipped without its `function start () {` line and swift's bootstrap.sh assigned an unquoted
 # URL containing parentheses: both off by default, both rendered, neither noticed. Every rendered script parses.
-name: "Every shell script a chart renders parses (bash -n)"
+# gnocchi's resources-cleaner script had no #! line, so its CronJob never succeeded (#490): every script starts with one.
+name: "Every shell script a chart renders parses (bash -n) and starts with #!"
 job: job-hooks
 order: 130
 run: |
+  python3 hack/validate-bin-scripts.py --self-test
   python3 hack/validate-bin-scripts.py .
