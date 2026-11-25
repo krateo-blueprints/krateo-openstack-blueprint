@@ -1607,7 +1607,10 @@ manifests:
   job_backup_storage_init: false
   job_bootstrap: true
   job_clean: false
-  job_create_internal_tenant: false
+  # On, as upstream ships it (#308 run A): cinder-volume's init-cinder-conf reads the internal_cinder project, which only
+  # this Job creates, in the first hook wave; cinder-bootstrap (-7) waits for cinder-volume. Off, they waited on each
+  # other and cinder never became Ready. hack/validate-cinder-internal-tenant.py.
+  job_create_internal_tenant: true
   job_db_init: true
   job_image_repo_sync: false
   job_rabbit_init: true

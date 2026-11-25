@@ -1,0 +1,8 @@
+# cinder-volume's init reads the internal_cinder project: the Job that creates it renders, before every hook that waits
+# for cinder-volume (#308 run A: off, they waited on each other).
+name: "cinder-volume can start: its internal tenant is created first"
+job: capability-roles
+order: 122
+run: |
+  python3 hack/validate-cinder-internal-tenant.py --self-test
+  python3 hack/validate-cinder-internal-tenant.py .
