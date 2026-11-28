@@ -43,7 +43,7 @@ images:
     ks_service: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
     ks_endpoints: quay.io/airshipit/heat:2026.1-ubuntu_noble-20261117
     image_repo_sync: docker.io/docker:17.07.0
-  pull_policy: IfNotPresent
+  pull_policy: Always
   local_registry:
     active: false
     exclude:
