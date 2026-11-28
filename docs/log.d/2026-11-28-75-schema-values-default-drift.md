@@ -13,3 +13,6 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
 - **What a plain `helm install` now renders differently:** keystone's `keystone.conf` gains an `[auto_provisioning]` section, and swift's
   `imagePullPolicy` is `IfNotPresent`, not `Always`. The umbrella and the capabilities chart render byte for byte as before.
 - **The capabilities chart's schema is regenerated** with `hack/gen-capabilities-chart.py`, not edited.
+- **The guard:** lint.yaml's `chart-defaults` job runs the `krateo-blueprints/charts` chart-defaults check (1.14.0) on every chart with a
+  `values.schema.json`, with `enforce: true`. The matrix is derived from the tree by `hack/chart-defaults-charts.py`; a chart with no schema
+  fails unless `hack/chart-defaults-exempt.yaml` lists it with a reason, so a new chart cannot skip the check unseen.

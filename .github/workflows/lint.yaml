@@ -295,6 +295,46 @@ jobs:
       - name: Gates (hack/gates.d, job capabilities-first-release)
         run: python3 hack/run-gates.py --job capabilities-first-release .
 
+  # krateo-blueprints/charts PUBLISHING.md rule 15: a chart's values.schema.json documents no default that values.yaml
+  # does not apply. core-provider generates a Composition's CRD from the schema, so a drifting default makes the chart
+  # install differently as a Composition and under helm. The reusable checks one chart; the matrix is every chart with a
+  # values.schema.json, derived from the tree, and hack/chart-defaults-exempt.yaml lists the rest.
+  chart-defaults-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python3 -m pip install pyyaml
+
+      # Checks: hack/gates.d/*.yaml with `job: chart-defaults-matrix`. Add a file there, never a step here.
+      - name: Gates (hack/gates.d, job chart-defaults-matrix)
+        run: python3 hack/run-gates.py --job chart-defaults-matrix .
+
+      - name: Derive the matrix
+        id: matrix
+        run: echo "matrix=$(python3 hack/chart-defaults-charts.py --matrix .)" >> "$GITHUB_OUTPUT"
+
+  chart-defaults:
+    needs: chart-defaults-matrix
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.chart-defaults-matrix.outputs.matrix) }}
+    uses: krateo-blueprints/charts/.github/workflows/chart-defaults.yaml@25359e55e5a4667afd3b74fd1d2a1e0037bfb77e # 1.14.0
+    with:
+      working-directory: ${{ matrix.dir }}
+      enforce: true
+
   image-tags:
     # Gating, and offline. A rebuildable tag -- `latest`, or any variant containing it --
     # resolves forever and may resolve to different bytes each time, so `preflight-refs`

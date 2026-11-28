@@ -1,0 +1,14 @@
+# Chart directories that are NOT installed as Krateo Compositions, so have no values.schema.json and are not run through
+# the chart-defaults check (krateo-blueprints/charts PUBLISHING.md rule 15; lint.yaml job chart-defaults).
+#
+# hack/chart-defaults-charts.py derives the check's matrix from the tree: every chart directory (one with a Chart.yaml)
+# that has a values.schema.json is checked. A chart directory with no values.schema.json fails unless it is listed here,
+# with why, so a new chart cannot skip the check unseen. An entry that no longer names a chart, or whose chart now has a
+# values.schema.json, fails too.
+#   path    the chart directory, relative to the repository root
+#   reason  why it is not a Composition
+exempt:
+  - path: charts/helm-toolkit
+    reason: A library chart the Composition charts depend on (file://). It is never installed on its own.
+  - path: distribution/identity-derive-poc
+    reason: A proof-of-concept chart, not published and not installed as a Composition.
