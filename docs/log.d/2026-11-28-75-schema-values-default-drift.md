@@ -16,3 +16,7 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
 - **The guard:** lint.yaml's `chart-defaults` job runs the `krateo-blueprints/charts` chart-defaults check (1.14.0) on every chart with a
   `values.schema.json`, with `enforce: true`. The matrix is derived from the tree by `hack/chart-defaults-charts.py`; a chart with no schema
   fails unless `hack/chart-defaults-exempt.yaml` lists it with a reason, so a new chart cannot skip the check unseen.
+- **The check binds the merge:** `chart-defaults-ok` needs the matrix job and every `chart-defaults` job, runs `if: always()` and fails
+  unless both results are `success`, so a failed, cancelled or skipped job fails it. `hack/merge-queue-ruleset.json` requires that one name;
+  `hack/validate-merge-queue-ruleset.py` checks the aggregate's `needs`, its `if` and its result comparison. The ruleset still has to be
+  applied to GitHub by an admin (docs/release.md).

@@ -85,6 +85,10 @@
           {
             "context": "pinned-uses / pinned-uses",
             "integration_id": 15368
+          },
+          {
+            "context": "chart-defaults-ok",
+            "integration_id": 15368
           }
         ]
       }
