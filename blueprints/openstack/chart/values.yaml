@@ -2498,6 +2498,8 @@ serviceContract:
   ticketing:
     category: openstack
     subcategory: provisioning
+    routing:
+      defaultPriority: normal
 
 # ---------------------------------------------------------------------------
 # contractEmitter was removed in 0.3.68. The CMP's single emitter of the

@@ -464,7 +464,7 @@
                     "high",
                     "urgent"
                   ],
-                  "description": "Absent means normal."
+                  "default": "normal"
                 }
               }
             }

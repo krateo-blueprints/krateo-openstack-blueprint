@@ -8,10 +8,10 @@ description: Log entry, rendered into docs/log.md by hack/render-log.py.
   `values.schema.json` found them in keystone, swift, the openstack umbrella and its generated capabilities chart.
 - **The fix keeps the Composition's value in each case.** keystone `conf.keystone.auto_provisioning.enabled`, swift `images.pull_policy`,
   and the umbrella's `enabled` and `tolerations` now carry the value the Composition already used, in values.yaml. For
-  `serviceContract.tagging.remediation` the schema default now matches values.yaml, and `serviceContract.ticketing.routing.defaultPriority`
-  has no schema default (its description says absent means normal), since values.yaml has no routing block.
+  `serviceContract.tagging.remediation` the schema default now matches values.yaml, and values.yaml gains
+  `serviceContract.ticketing.routing.defaultPriority: normal`, the schema's default and the shared service contract's.
 - **What a plain `helm install` now renders differently:** keystone's `keystone.conf` gains an `[auto_provisioning]` section, and swift's
-  `imagePullPolicy` is `IfNotPresent`, not `Always`. The umbrella and the capabilities chart render byte for byte as before.
+  `imagePullPolicy` is `IfNotPresent`, not `Always`. The umbrella's rendered descriptor gains `ticketing.routing.defaultPriority: normal`; the capabilities chart renders byte for byte as before.
 - **The capabilities chart's schema is regenerated** with `hack/gen-capabilities-chart.py`, not edited.
 - **The guard:** lint.yaml's `chart-defaults` job runs the `krateo-blueprints/charts` chart-defaults check (1.14.0) on every chart with a
   `values.schema.json`, with `enforce: true`. The matrix is derived from the tree by `hack/chart-defaults-charts.py`; a chart with no schema
