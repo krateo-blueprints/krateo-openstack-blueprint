@@ -419,7 +419,7 @@
             },
             "remediation": {
               "type": "boolean",
-              "default": false,
+              "default": true,
               "description": "Whether the adapter can patch tags on existing resources (used by governance remediation)."
             },
             "keyPattern": {
@@ -464,7 +464,7 @@
                     "high",
                     "urgent"
                   ],
-                  "default": "normal"
+                  "description": "Absent means normal."
                 }
               }
             }
