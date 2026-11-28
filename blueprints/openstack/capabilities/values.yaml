@@ -204,3 +204,5 @@ serviceContract:
   ticketing:
     category: openstack
     subcategory: provisioning
+    routing:
+      defaultPriority: normal

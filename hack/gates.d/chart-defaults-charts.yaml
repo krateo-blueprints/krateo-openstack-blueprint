@@ -1,0 +1,10 @@
+# lint.yaml's chart-defaults job runs krateo-blueprints/charts' reusable once per Composition chart, from a matrix that
+# the next step derives from the tree. This gate is what keeps that matrix honest: a chart with no values.schema.json
+# must be listed in hack/chart-defaults-exempt.yaml, so a new chart cannot skip the check silently. The self-test runs
+# the cases (new unlisted chart, stale entry, empty tree) the script must refuse.
+name: "Every chart is in the chart-defaults matrix or listed as exempt"
+job: chart-defaults-matrix
+order: 10
+run: |
+  python3 hack/chart-defaults-charts.py --self-test .
+  python3 hack/chart-defaults-charts.py .

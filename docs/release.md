@@ -311,7 +311,9 @@ as before.
    broke it (ALLGREEN grouping) and rebuilds the rest without it. The author doesn't update the
    branch by hand.
 
-The ruleset requires the 12 checks lint.yaml reports on a merge group, and no other.
+The ruleset requires the 15 checks lint.yaml reports on a merge group, and no other. `chart-defaults-ok` stands for the
+chart-defaults matrix: one job per chart, so their names are not listed; it is green only when the job deriving the matrix and
+every matrix job succeeded.
 `hack/validate-merge-queue-ruleset.py` fails when a lint job is renamed or added without the
 ruleset following it. The informational `lint` job isn't required. image-scan doesn't gate:
 it scans every image, not the changed ones, and gating merges on a newly published CVE would turn

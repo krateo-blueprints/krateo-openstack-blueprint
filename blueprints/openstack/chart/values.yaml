@@ -14,8 +14,8 @@ profile: identity
 
 # enabled: explicit component selection (overrides profile). Each name is expanded to
 # its transitive dependency closure, so selecting just `heat` also pulls in keystone,
-# rabbitmq, mariadb and memcached. Leave empty (null) to use `profile`.
-enabled:
+# rabbitmq, mariadb and memcached. Leave empty ([]) to use `profile`.
+enabled: []
 
 # storage (#196, #308): the backend that provides block storage, the `block-storage` capability a component lists
 # under components[].requires (cinder). `none`, the default, provides nothing: profile full-strict then leaves cinder
@@ -89,7 +89,7 @@ storage:
 #       operator: Equal
 #       value: my-namespace
 #       effect: NoSchedule
-tolerations:
+tolerations: []
 
 # rerunHooks (#297): a token per component name, e.g.
 #   rerunHooks:
@@ -2498,6 +2498,8 @@ serviceContract:
   ticketing:
     category: openstack
     subcategory: provisioning
+    routing:
+      defaultPriority: normal
 
 # ---------------------------------------------------------------------------
 # contractEmitter was removed in 0.3.68. The CMP's single emitter of the

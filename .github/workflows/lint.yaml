@@ -295,6 +295,66 @@ jobs:
       - name: Gates (hack/gates.d, job capabilities-first-release)
         run: python3 hack/run-gates.py --job capabilities-first-release .
 
+  # krateo-blueprints/charts PUBLISHING.md rule 15: a chart's values.schema.json documents no default that values.yaml
+  # does not apply. core-provider generates a Composition's CRD from the schema, so a drifting default makes the chart
+  # install differently as a Composition and under helm. The reusable checks one chart; the matrix is every chart with a
+  # values.schema.json, derived from the tree, and hack/chart-defaults-exempt.yaml lists the rest.
+  chart-defaults-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python3 -m pip install pyyaml
+
+      # Checks: hack/gates.d/*.yaml with `job: chart-defaults-matrix`. Add a file there, never a step here.
+      - name: Gates (hack/gates.d, job chart-defaults-matrix)
+        run: python3 hack/run-gates.py --job chart-defaults-matrix .
+
+      - name: Derive the matrix
+        id: matrix
+        run: echo "matrix=$(python3 hack/chart-defaults-charts.py --matrix .)" >> "$GITHUB_OUTPUT"
+
+  chart-defaults:
+    needs: chart-defaults-matrix
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.chart-defaults-matrix.outputs.matrix) }}
+    uses: krateo-blueprints/charts/.github/workflows/chart-defaults.yaml@25359e55e5a4667afd3b74fd1d2a1e0037bfb77e # 1.14.0
+    with:
+      working-directory: ${{ matrix.dir }}
+      enforce: true
+
+  # The one check the merge queue requires for chart-defaults (hack/merge-queue-ruleset.json). The matrix has one job per
+  # chart and its names change with the charts, so they cannot be listed; this job is green only when the job that
+  # derives the matrix and every job of the matrix succeeded. `if: always()` so it runs, and fails, when a needed job
+  # failed, was cancelled or was skipped: a skipped required check would otherwise pass the queue.
+  chart-defaults-ok:
+    needs:
+      - chart-defaults-matrix
+      - chart-defaults
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every chart-defaults job succeeded
+        env:
+          MATRIX_RESULT: ${{ needs.chart-defaults-matrix.result }}
+          CHECKS_RESULT: ${{ needs.chart-defaults.result }}
+        run: |
+          echo "chart-defaults-matrix: ${MATRIX_RESULT}"
+          echo "chart-defaults: ${CHECKS_RESULT}"
+          [ "${MATRIX_RESULT}" = success ] && [ "${CHECKS_RESULT}" = success ]
+
   image-tags:
     # Gating, and offline. A rebuildable tag -- `latest`, or any variant containing it --
     # resolves forever and may resolve to different bytes each time, so `preflight-refs`

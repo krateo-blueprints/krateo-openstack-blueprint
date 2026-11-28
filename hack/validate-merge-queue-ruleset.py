@@ -11,7 +11,9 @@ the workflow must trigger on merge_group. Checked:
   1. the ruleset targets refs/heads/main, has no bypass actor, a merge_queue rule (SQUASH, ALLGREEN, a group size and a
      check timeout) and a required_status_checks rule whose checks all come from GitHub Actions (integration 15368);
   2. lint.yaml triggers on merge_group (checks_requested);
-  3. the required contexts are exactly the check names lint.yaml's jobs report: a job's `name` or id, `id (value)` for
+  3. an aggregate job (AGGREGATES) needs exactly the jobs it stands for, runs `if: always()` and requires each one's
+     result to be `success`; those jobs are covered by it and not required one by one;
+  4. the required contexts are exactly the check names lint.yaml's jobs report: a job's `name` or id, `id (value)` for
      each value of a one-axis matrix, `id / <job>` for a job that calls a reusable workflow; minus the jobs listed in
      NOT_REQUIRED with the reason.
 
@@ -32,6 +34,12 @@ ACTIONS = 15368  # the GitHub Actions app, as every check on this repo's pull re
 NOT_REQUIRED = {
     "lint": "informational by design: it surfaces helm template and lint warnings and never fails",
 }
+# Jobs a required aggregate job stands for: the aggregate is required, the jobs it needs are not listed one by one (a matrix
+# job's check names change with the charts). Each aggregate must `needs` exactly these, run `if: always()`, and read each
+# needed job's result and require `success`, so a failed, cancelled or skipped job fails it.
+AGGREGATES = {
+    "chart-defaults-ok": ("chart-defaults-matrix", "chart-defaults"),
+}
 # A job that calls a reusable workflow reports `<caller id> / <inner job name>`; the inner name is the reusable's,
 # read from a pull request's checks (2026-11-18).
 REUSABLE_INNER = {
@@ -45,8 +53,34 @@ REUSABLE_INNER = {
 
 def expected(wf):
     out, problems = set(), []
-    for jid, job in (wf.get("jobs") or {}).items():
-        if jid in NOT_REQUIRED:
+    covered = {n for needs in AGGREGATES.values() for n in needs}
+    jobs = wf.get("jobs") or {}
+    for agg, needs in AGGREGATES.items():
+        job = jobs.get(agg)
+        if job is None:
+            problems.append("lint.yaml has no aggregate job %s" % agg)
+            continue
+        got = job.get("needs")
+        got = [got] if isinstance(got, str) else list(got or [])
+        if sorted(got) != sorted(needs):
+            problems.append("aggregate %s needs %s; it must need exactly %s" % (agg, sorted(got), sorted(needs)))
+        if str(job.get("if", "")).replace("${{", "").replace("}}", "").strip() != "always()":
+            problems.append("aggregate %s must run `if: always()`, or a failed needed job skips it and a skipped required "
+                            "check passes the queue" % agg)
+        text = "\n".join(str(s.get("run", "")) + " " + " ".join(str(x) for x in (s.get("env") or {}).values())
+                         for s in job.get("steps") or [])
+        for n in needs:
+            if "needs.%s.result" % n not in text:
+                problems.append("aggregate %s does not read needs.%s.result" % (agg, n))
+        runs = "\n".join(str(s.get("run", "")) for s in job.get("steps") or [])
+        if runs.count("= success") < len(needs):
+            problems.append("aggregate %s must compare each of its %d needed jobs' result with `= success` in its run "
+                            "script, found %d" % (agg, len(needs), runs.count("= success")))
+        stray = sorted(j for j in jobs if j.startswith(agg.rsplit("-ok", 1)[0]) and j != agg and j not in needs)
+        if stray:
+            problems.append("jobs %s share the prefix of aggregate %s but it does not need them" % (stray, agg))
+    for jid, job in jobs.items():
+        if jid in NOT_REQUIRED or jid in covered:
             continue
         if "uses" in job:
             if jid not in REUSABLE_INNER:

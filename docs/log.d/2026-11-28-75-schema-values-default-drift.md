@@ -1,0 +1,22 @@
+---
+type: Log
+title: schema defaults and values.yaml agree
+description: Log entry, rendered into docs/log.md by hack/render-log.py.
+---
+- **Eight schema defaults differed from values.yaml, or had no values.yaml key.** A Composition gets its defaults from the generated CRD, and
+  a plain `helm install` gets them from values.yaml, so one chart could install two ways. A survey of every chart with a
+  `values.schema.json` found them in keystone, swift, the openstack umbrella and its generated capabilities chart.
+- **The fix keeps the Composition's value in each case.** keystone `conf.keystone.auto_provisioning.enabled`, swift `images.pull_policy`,
+  and the umbrella's `enabled` and `tolerations` now carry the value the Composition already used, in values.yaml. For
+  `serviceContract.tagging.remediation` the schema default now matches values.yaml, and values.yaml gains
+  `serviceContract.ticketing.routing.defaultPriority: normal`, the schema's default and the shared service contract's.
+- **What a plain `helm install` now renders differently:** keystone's `keystone.conf` gains an `[auto_provisioning]` section, and swift's
+  `imagePullPolicy` is `IfNotPresent`, not `Always`. The umbrella's rendered descriptor gains `ticketing.routing.defaultPriority: normal`; the capabilities chart renders byte for byte as before.
+- **The capabilities chart's schema is regenerated** with `hack/gen-capabilities-chart.py`, not edited.
+- **The guard:** lint.yaml's `chart-defaults` job runs the `krateo-blueprints/charts` chart-defaults check (1.14.0) on every chart with a
+  `values.schema.json`, with `enforce: true`. The matrix is derived from the tree by `hack/chart-defaults-charts.py`; a chart with no schema
+  fails unless `hack/chart-defaults-exempt.yaml` lists it with a reason, so a new chart cannot skip the check unseen.
+- **The check binds the merge:** `chart-defaults-ok` needs the matrix job and every `chart-defaults` job, runs `if: always()` and fails
+  unless both results are `success`, so a failed, cancelled or skipped job fails it. `hack/merge-queue-ruleset.json` requires that one name;
+  `hack/validate-merge-queue-ruleset.py` checks the aggregate's `needs`, its `if` and its result comparison. The ruleset still has to be
+  applied to GitHub by an admin (docs/release.md).
